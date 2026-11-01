@@ -1,0 +1,68 @@
+schema_version: 1.0.0
+ticket_id: OMN-21731
+title: The standing closer arm enumerates the operator's open tickets that have a merged contract, so merged work older than 7 days is offered (AC1 to AC3)
+summary: Adds the ticket-contract arm to the evidence autoclose sweep node. It lists the key's own non-terminal Linear tickets, intersects them with the contracts/OMN-n.yaml files on the default branch of the clones the run holds, resolves each selected ticket's newest merged PR from those clones and offers a bounded rotating slice (contract_enumeration_max_candidates, default 10) through the unchanged per-ticket pipeline. A census that cannot be read fails the arm closed; a ticket the key does not own is never listed.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: The aged ticket is offered with the windows unchanged, each refusal, the width bound, the census query and its fail-closed paging, and the run budget.
+    command: uv run pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21723_contract_enumeration.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-contract-arm-offers-aged-ticket
+    description: A ticket open in Linear, owned by the key's user, with a contract on a clone default branch and a PR merged beyond the backfill window is offered by a standing run, its outcome carrying the contract arm.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21723_contract_enumeration.py -q --no-cov -k "beyond_the_backfill_window or default_request_arms"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-contract-arm-refusals
+    description: A ticket outside the census, on the fence, without a merged PR or inside the backfill window is not offered, an unreadable census fails the arm closed while the other arms run, the slice never exceeds the field, and a collaborator-scoped census query is asserted.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21723_contract_enumeration.py -q --no-cov -k "refuses or census or never_wider or width_of_zero or not_guessed"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-contract-arm-budget
+    description: The measured worst run plus both arms at their default widths stays under half the workflow job timeout.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21723_contract_enumeration.py -q --no-cov -k budget
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-contract-arm-deploy-probe
+    description: Hosted-runner deploy probe reads the sweep node contract and request model from GitHub at the checked-out commit and requires the arm's field, so a checkout without the arm fails it.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          model="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/models/model_evidence_autoclose_sweep_request.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'contract_enumeration_max_candidates' <<<"$model";
+          node_contract="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'contract_enumeration_max_candidates' <<<"$node_contract"
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-contract-enumeration
+    statement: The closer offers an open ticket whose merged work is older than its windows.
+    acceptance:
+      - id: AC1
+        statement: A ticket that is open in Linear, assigned to the key's user and has a contract on a clone default branch with a merged PR older than the backfill window is offered by a standing run with the windows unchanged, and its outcome carries arm contract.
+      - id: AC2
+        statement: A ticket that is Done, not assigned to the key's user, on the exclusion fence, or without a merged PR is not offered, an unreadable Linear census fails the arm closed while the other arms still run, and the slice width is the contract field and never more.
+      - id: AC3
+        statement: The run budget with the new arm at its default width, the backfill arm and the measured worst run stays under half the workflow job timeout.

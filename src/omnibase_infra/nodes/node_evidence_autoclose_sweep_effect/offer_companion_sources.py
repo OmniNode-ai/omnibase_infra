@@ -40,6 +40,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
+
 logger = logging.getLogger(__name__)
 
 WATCHER_STATE_RELATIVE: Final[str] = ".claude_scratch/pr-watcher/state.json"
@@ -115,7 +117,7 @@ def _candidate(
 ) -> dict[str, object]:
     candidate: dict[str, object] = {
         "number": number,
-        "html_url": f"https://github.com/{repo}/pull/{number}",
+        "html_url": load_third_party_endpoints().github_pull_url(repo, number),
         "title": title,
         "merged_at": merged_at,
         "updated_at": merged_at,
@@ -388,7 +390,7 @@ def find_product_contract(
                 "repo": repo,
                 "commit": sha,
                 "merged_at": merged_at,
-                "url": f"https://github.com/{repo}/blob/{sha}/{path}",
+                "url": load_third_party_endpoints().github_blob_url(repo, sha, path),
             }
         )
     if len(holders) > 1:
@@ -400,10 +402,42 @@ def find_product_contract(
     return (holders[0] if holders else None), ""
 
 
+def list_contract_tickets(
+    root: Path | None, excluded_repository: str, run_git: TypeRunGit
+) -> set[str]:
+    """Every ticket id with a ``contracts/<ticket>.yaml`` on a clone's default branch.
+
+    OMN-21731. The ticket-contract arm enumerates tickets, not merge windows.
+    Reads the same clones ``find_product_contract`` reads (every clone under
+    ``root`` except the change-control repository's own) with ``git ls-tree``
+    on the default branch, so no file content is fetched. A clone that git
+    cannot answer for contributes nothing; the caller's per-ticket resolution
+    still decides what each listed ticket's evidence is.
+    """
+    if root is None or not root.is_dir():
+        return set()
+    tickets: set[str] = set()
+    for clone in sorted(root.iterdir()):
+        if clone.name == excluded_repository or not (clone / ".git").exists():
+            continue
+        ref = _default_ref(clone, run_git)
+        if not ref:
+            continue
+        listing = run_git(clone, ("ls-tree", "--name-only", ref, "--", "contracts/"))
+        if listing is None:
+            continue
+        for line in listing.splitlines():
+            name = line.strip().removeprefix("contracts/").removesuffix(".yaml")
+            if line.strip().endswith(".yaml") and _TICKET.match(name):
+                tickets.add(name)
+    return tickets
+
+
 __all__ = [
     "TypeRunGateway",
     "TypeRunGit",
     "find_product_contract",
+    "list_contract_tickets",
     "merge_candidates",
     "read_clone_candidates",
     "read_gateway_candidates",

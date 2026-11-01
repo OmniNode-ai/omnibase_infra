@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Typed declaration for an optional host-directory bind mount."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 
@@ -18,7 +16,8 @@ class ModelOptionalDirectoryBindMount:
     function of this declaration and not of the machine that ran the render
     (OMN-17291).
 
-    The default is a DIRECTORY, never a file sentinel such as ``/dev/null``,
+    ``absent_source`` is that default, declared per mount in the service
+    manifest. It is a DIRECTORY, never a file sentinel such as ``/dev/null``,
     which is what stops Docker being asked to bind a file onto a directory
     target. A configured source is validated as an existing absolute directory
     at render time.
@@ -26,14 +25,14 @@ class ModelOptionalDirectoryBindMount:
 
     source_env: str
     container_path: str
+    absent_source: str
     read_only: bool = True
 
     def __post_init__(self) -> None:
-        if not self.source_env:
-            raise ValueError(
-                "optional directory bind mount source_env must not be empty"
-            )
-        if not self.container_path.startswith("/"):
-            raise ValueError(
-                "optional directory bind mount container_path must be absolute"
-            )
+        strs = (self.source_env, self.container_path, self.absent_source)
+        if not all(isinstance(v, str) for v in strs) or not isinstance(
+            self.read_only, bool
+        ):
+            raise ValueError("source_env, paths must be strings; read_only a bool")
+        if not self.source_env or not all(p.startswith("/") for p in strs[1:]):
+            raise ValueError("source_env is required; paths must be absolute")
