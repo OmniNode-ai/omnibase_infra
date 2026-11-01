@@ -43,13 +43,77 @@ def _compose_config(
     env_values: dict[str, str], *extra: str
 ) -> subprocess.CompletedProcess[str]:
     env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", ""), **env_values}
-    return subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE), "config", *extra],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            ["docker", "compose", "-f", str(COMPOSE), "config", *extra],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        pytest.fail(
+            "docker compose is required to render the factory floor deployment; "
+            "its absence is a failure, never a skip (OMN-21733 AC4)"
+        )
+
+
+# One nginx statement: its words, and its child statements when it opens a block.
+NginxStatement = tuple[list[str], "list[NginxStatement] | None"]
+NGINX_TOKEN = re.compile(r'"[^"]*"|\'[^\']*\'|#[^\n]*|[{};]|[^\s{};"\'#]+')
+
+
+def _parse_nginx(text: str) -> list[NginxStatement]:
+    """Parse nginx.conf into nested statements: comments dropped, quoted strings kept whole."""
+    tokens = [t for t in NGINX_TOKEN.findall(text) if not t.startswith("#")]
+    position = 0
+
+    def block() -> list[NginxStatement]:
+        nonlocal position
+        statements: list[NginxStatement] = []
+        words: list[str] = []
+        while position < len(tokens):
+            token = tokens[position]
+            position += 1
+            if token == ";":
+                statements.append((words, None))
+                words = []
+            elif token == "{":
+                statements.append((words, block()))
+                words = []
+            elif token == "}":
+                return statements
+            else:
+                words.append(token)
+        assert not words, f"unterminated nginx statement: {words}"
+        return statements
+
+    return block()
+
+
+def _children(statements: list[NginxStatement], name: str) -> list[NginxStatement]:
+    return [s for s in statements if s[0][0] == name]
+
+
+def _body(statement: NginxStatement) -> list[NginxStatement]:
+    assert statement[1] is not None
+    return statement[1]
+
+
+def _server() -> list[NginxStatement]:
+    top = _parse_nginx(NGINX.read_text(encoding="utf-8"))
+    (http,) = _children(top, "http")
+    (server,) = _children(_body(http), "server")
+    return _body(server)
+
+
+def _walk(statements: list[NginxStatement]) -> list[NginxStatement]:
+    found: list[NginxStatement] = []
+    for statement in statements:
+        found.append(statement)
+        if statement[1] is not None:
+            found.extend(_walk(statement[1]))
+    return found
 
 
 def test_published_port_names_the_bind_address_and_has_no_default() -> None:
@@ -105,30 +169,62 @@ def test_serve_directory_is_mounted_read_only_and_the_container_is_locked_down()
 
 
 def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
-    conf = NGINX.read_text(encoding="utf-8")
-    assert "listen 8080;" in conf
-    assert "gzip on;" in conf
-    assert "limit_except GET HEAD" in conf
-    assert 'Cache-Control "no-store"' in conf
-    assert "default-src 'self'" in conf
-    assert "connect-src 'self'" in conf
-    assert "form-action 'none'" in conf
-    assert "base-uri 'none'" in conf
-    assert "frame-ancestors 'none'" in conf
-    assert "object-src 'none'" in conf
-    assert "root /srv/site;" in conf
-    assert "try_files $uri $uri/index.html =404;" in conf
+    server = _server()
+    assert [s[0] for s in _children(server, "listen")] == [["listen", "8080"]]
+    assert [s[0] for s in _children(server, "root")] == [["root", "/srv/site"]]
+    headers = {s[0][1]: s[0][2:] for s in _children(server, "add_header")}
+    assert headers["Cache-Control"] == ['"no-store"', "always"]
+    assert headers["X-Content-Type-Options"] == ['"nosniff"', "always"]
+    policy = headers["Content-Security-Policy"]
+    assert policy[1] == "always"
+    directives = {
+        parts[0]: parts[1:]
+        for parts in (d.split() for d in policy[0].strip('"').split(";"))
+    }
+    assert directives["default-src"] == ["'self'"]
+    assert directives["connect-src"] == ["'self'"]
+    assert directives["form-action"] == ["'none'"]
+    assert directives["base-uri"] == ["'none'"]
+    assert directives["frame-ancestors"] == ["'none'"]
+    assert directives["object-src"] == ["'none'"]
+    top = _parse_nginx(NGINX.read_text(encoding="utf-8"))
+    (http,) = _children(top, "http")
+    assert ["gzip", "on"] in [s[0] for s in _body(http)]
+    (location,) = [s for s in _children(server, "location") if s[0][1:] == ["/"]]
+    (limit,) = _children(_body(location), "limit_except")
+    assert limit[0][1:] == ["GET", "HEAD"]
+    assert _body(limit) == [(["deny", "all"], None)]
+    assert [s[0] for s in _children(_body(location), "try_files")] == [
+        ["try_files", "$uri", "$uri/index.html", "=404"]
+    ]
 
 
-def test_nginx_locations_declare_no_add_header_and_healthz_needs_no_page() -> None:
-    conf = NGINX.read_text(encoding="utf-8")
-    blocks = re.findall(r"location [^{]*\{([^}]*)\}", conf)
-    assert len(blocks) == 3
-    assert all("add_header" not in block for block in blocks)
-    health = re.search(r"location = /healthz \{([^}]*)\}", conf)
-    assert health is not None
-    assert "return 200" in health.group(1)
-    assert "try_files" not in health.group(1)
+def test_nginx_locations_declare_no_add_header_at_any_depth() -> None:
+    server = _server()
+    locations = _children(server, "location")
+    assert [loc[0][1:] for loc in locations] == [
+        ["~", "/\\."],
+        ["=", "/healthz"],
+        ["/"],
+    ]
+    for location in locations:
+        names = [s[0][0] for s in _walk(_body(location))]
+        assert "add_header" not in names, location[0]
+    dotfiles, health, _ = locations
+    assert [s[0] for s in _body(dotfiles)] == [["return", "404"]]
+    health_names = [s[0][0] for s in _body(health)]
+    assert ["return", "200", '"ok\\n"'] in [s[0] for s in _body(health)]
+    assert "try_files" not in health_names
+
+
+def test_nginx_parser_sees_a_header_hidden_after_a_nested_block() -> None:
+    conf = (
+        "server { location / { limit_except GET { deny all; } "
+        'add_header X-Late "1"; } }'
+    )
+    (server,) = _children(_parse_nginx(conf), "server")
+    (location,) = _children(_body(server), "location")
+    assert "add_header" in [s[0][0] for s in _walk(_body(location))]
 
 
 @pytest.mark.parametrize("missing", REQUIRED)
@@ -138,7 +234,9 @@ def test_compose_refuses_to_render_when_a_required_value_is_missing(
     values = {k: v for k, v in RENDER_ENV.items() if k != missing}
     done = _compose_config(values)
     assert done.returncode != 0
-    assert missing in done.stderr
+    assert (
+        f"required variable {missing} is missing a value: set {missing}" in done.stderr
+    )
 
 
 def test_compose_renders_one_published_port_on_the_given_address() -> None:
