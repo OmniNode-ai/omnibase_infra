@@ -77,6 +77,17 @@ dod_evidence:
           docker exec omninode-runtime python -c "import inspect; from omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_contract_upsert import HandlerPostgresContractUpsert as U; from omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_read import HandlerRunContextRead as R; assert list(inspect.signature(U.handle).parameters) == ['self', 'request']; assert list(inspect.signature(R.handle).parameters) == ['self', 'request']"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn21697-deploy-hosted-request-readback
+    description: >-
+      Hosted-runner deploy artifact check: load the shipped node contracts and require each handler's typed request to match its input_model. For session state, require io_operations input_fields to match the request fields, then write a run document and read back its JSON and model through the real filesystem handlers. Runs without a runtime container or lab credentials and fails on the previous scalar handle API; it does not claim a deployed lane rollout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/nodes/test_typed_request_handlers_omn21536.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
   - id: dod-omn21697-ac2-contract-location
     description: >-
       The PR diff against origin/dev lists contracts/OMN-21697.yaml and does not list contracts/OMN-21536.yaml.

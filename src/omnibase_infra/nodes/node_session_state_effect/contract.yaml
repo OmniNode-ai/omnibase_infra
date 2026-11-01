@@ -62,6 +62,9 @@ capabilities:
   - name: "session.state.gc"
     description: "Garbage-collect stale run documents (4hr TTL)"
 # IO operations
+# input_fields lists the top-level fields of each routed request model.
+# session.run.write gets the filename identifier from context.run_id; callers
+# pass run_id at the top level only for session.run.read.
 io_operations:
   - operation: "session.index.read"
     description: "Read session.json and return ModelSessionIndex"
@@ -81,7 +84,7 @@ io_operations:
       - correlation_id: "UUID"
     idempotent: true
   - operation: "session.run.write"
-    description: "Atomic write runs/{run_id}.json (single writer, no lock)"
+    description: "Atomic write runs/{context.run_id}.json from request.context (single writer, no lock)"
     input_fields:
       - context: "ModelRunContext"
       - correlation_id: "UUID"

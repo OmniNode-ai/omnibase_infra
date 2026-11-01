@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import json
 from pathlib import Path
 from typing import get_type_hints
 from uuid import uuid4
@@ -109,6 +110,23 @@ def test_routed_handler_takes_its_contract_input_model(
     assert getattr(importlib.import_module(source_module), model_name) is model_cls
 
 
+def test_session_operation_fields_match_the_routed_request_models() -> None:
+    contract_path = (
+        Path(str(node_session_state_effect.__file__)).parent / "contract.yaml"
+    )
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    routes = {
+        entry["operation"]: entry["input_model"]
+        for entry in contract["handler_routing"]["handlers"]
+    }
+    for operation in contract["io_operations"]:
+        model = routes[operation["operation"]]
+        model_cls = getattr(importlib.import_module(model["module"]), model["name"])
+        fields = [name for field in operation["input_fields"] for name in field]
+        assert len(fields) == len(set(fields))
+        assert set(fields) == set(model_cls.model_fields), operation["operation"]
+
+
 @pytest.mark.asyncio
 async def test_session_state_round_trip_through_typed_requests(tmp_path: Path) -> None:
     correlation_id = uuid4()
@@ -124,6 +142,11 @@ async def test_session_state_round_trip_through_typed_requests(tmp_path: Path) -
     read_run, read_run_result = await HandlerRunContextRead(tmp_path).handle(
         ModelRunContextReadRequest(run_id=context.run_id, correlation_id=correlation_id)
     )
+    persisted_run = tmp_path / "runs" / f"{context.run_id}.json"
+    assert json.loads(persisted_run.read_text(encoding="utf-8")) == context.model_dump(
+        mode="json"
+    )
+    assert read_run == context
     read_index, read_index_result = await HandlerSessionIndexRead(tmp_path).handle(
         ModelSessionIndexReadRequest(correlation_id=correlation_id)
     )
