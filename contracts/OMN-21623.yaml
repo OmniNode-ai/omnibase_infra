@@ -26,11 +26,11 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn21623-ac41-no-dead-registry
-    description: The 24 node packages hold no registry directory. Fails at the merge base, where each held one.
+    description: The 24 node packages exist, hold no registry directory and have no remaining source importers of the deleted factories. Fails at the merge base, where each held one.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -k dead_registry_factory -q"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -k dead_registry_factory -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC41
@@ -39,17 +39,16 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -k 'planted or binding_site or builds_nothing_by_hand' -q"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -k 'planted or binding_site or builds_nothing_by_hand' -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC42
   - id: dod-omn21623-deploy-binding-site
     description: >-
-      Post-deploy probe: the runtime container builds a HandlerDb through the binding site. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+      Deploy probe for hosted CI: discover and wire the five real node contracts, then construct every routed DB-composing handler with a real ModelONEXContainer. Each must call the binding site once, retain that container and leave the database pool uninitialized. This exercises runtime wiring in process without a deployed container or database.
     source: manual
-    execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.handlers.container.container_handler_db import bind_handler_db'
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_handler_db_binding_omn21623.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: []
+    binds_ac: [AC42]

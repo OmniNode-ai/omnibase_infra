@@ -10,11 +10,13 @@ hold one.
 
 from __future__ import annotations
 
+import ast
+from importlib.util import resolve_name
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.validation.validator_contracts_and_di import (
     ValidatorContractsAndDi,
 )
@@ -65,33 +67,81 @@ _NODES_WITHOUT_REGISTRY_FACTORY: tuple[str, ...] = (
 
 
 def _rules_reported(path: Path) -> list[str]:
+    assert path.is_file(), f"validator input missing: {path}"
     result = ValidatorContractsAndDi().validate([path])
     return [issue.rule_name or "" for issue in result.issues]
 
 
-def test_the_check_reports_a_planted_construction(tmp_path: Path) -> None:
+@pytest.mark.parametrize("method", ["__init__", "handle"])
+def test_the_check_reports_a_planted_construction(tmp_path: Path, method: str) -> None:
     planted = tmp_path / "planted_module.py"
     planted.write_text(
-        "from somewhere import HandlerPlanted\n\nplanted = HandlerPlanted()\n",
+        "from omnibase_infra.handlers.handler_db import HandlerDb\n\n"
+        "class HandlerPlanted:\n"
+        f"    def {method}(self, container):\n"
+        "        self._db_handler = HandlerDb(container)\n",
         encoding="utf-8",
     )
     assert _RULE in _rules_reported(planted)
 
 
 def test_the_binding_site_builds_the_handler() -> None:
-    assert isinstance(bind_handler_db(MagicMock()), HandlerDb)
+    container = ModelONEXContainer()
+    handler = bind_handler_db(container)
+    assert isinstance(handler, HandlerDb)
+    assert handler._container is container
 
 
 def test_the_binding_site_is_not_reported() -> None:
     site = _SRC / "handlers" / "container" / "container_handler_db.py"
-    assert _RULE not in _rules_reported(site)
+    rules = _rules_reported(site)
+    assert _RULE not in rules
 
 
 @pytest.mark.parametrize("module", _DB_COMPOSING_HANDLERS)
 def test_db_composing_handler_builds_nothing_by_hand(module: str) -> None:
-    assert _RULE not in _rules_reported(_SRC / module)
+    path = _SRC / module
+    assert _RULE not in _rules_reported(path)
 
 
 @pytest.mark.parametrize("node", _NODES_WITHOUT_REGISTRY_FACTORY)
 def test_node_package_has_no_dead_registry_factory(node: str) -> None:
-    assert not (_SRC / "nodes" / node / "registry").exists()
+    package = _SRC / "nodes" / node
+    assert package.is_dir(), f"node package missing: {package}"
+    assert (package / "__init__.py").is_file()
+    assert not (package / "registry").exists()
+
+
+def test_dead_registry_factory_has_no_importers() -> None:
+    removed = tuple(
+        f"omnibase_infra.nodes.{node}.registry"
+        for node in _NODES_WITHOUT_REGISTRY_FACTORY
+    )
+    sources = list(_SRC.rglob("*.py"))
+    assert sources
+    stale: list[str] = []
+    for source in sources:
+        package = ".".join(source.relative_to(_SRC.parent).parts[:-1])
+        for statement in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if not isinstance(statement, (ast.Import, ast.ImportFrom)):
+                continue
+            names: list[str] = []
+            if isinstance(statement, ast.Import):
+                names = [alias.name for alias in statement.names]
+            elif isinstance(statement, ast.ImportFrom):
+                module = "." * statement.level + (statement.module or "")
+                if statement.level:
+                    module = resolve_name(module, package)
+                names = [
+                    module,
+                    *(f"{module}.{alias.name}" for alias in statement.names),
+                ]
+            for name in names:
+                if any(
+                    name == prefix or name.startswith(prefix + ".")
+                    for prefix in removed
+                ):
+                    stale.append(
+                        f"{source.relative_to(_SRC)}:{statement.lineno}: {name}"
+                    )
+    assert not stale, "\n".join(stale)

@@ -43,7 +43,7 @@ runtime_profiles:
   - effects
 # Description
 description: >
-  Capability-oriented effect node for validation event ledger write operations. Handles appending cross-repo validation events to the PostgreSQL validation_event_ledger with idempotent write support via unique constraint on (kafka_topic, kafka_partition, kafka_offset).
+  Capability-oriented effect node for validation event ledger write operations. Handles appending cross-repo validation events to the PostgreSQL validation_event_ledger with idempotent write support via unique constraint on (kafka_topic, kafka_partition, kafka_offset). HandlerDb construction is delegated to bind_handler_db in omnibase_infra.handlers.container.container_handler_db; the binding retains the runtime container and leaves database initialization lazy.
 
 # Strongly typed I/O models
 input_model:
