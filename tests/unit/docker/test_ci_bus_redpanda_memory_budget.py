@@ -33,13 +33,23 @@ RECOVERY_FLOOR_GIB = 4
 
 #: The broker's own flag line: ``- --memory ${CI_BUS_REDPANDA_MEMORY:-4G}``.
 _BROKER_FLAG = re.compile(
-    r"^\s*-\s+--memory\s+\$\{CI_BUS_REDPANDA_MEMORY:-(\d+)G\}\s*$", re.MULTILINE
+    r"^\s*-\s+--memory\s+\$\{CI_BUS_REDPANDA_MEMORY:-([^}\s]+)\}\s*$", re.MULTILINE
 )
 #: The partition-cap job's sizing input.
 _PROFILE = re.compile(
-    r"^\s*REDPANDA_PROFILE_MEMORY:\s+\$\{CI_BUS_REDPANDA_MEMORY:-(\d+)G\}\s*$",
+    r"^\s*REDPANDA_PROFILE_MEMORY:\s+\$\{CI_BUS_REDPANDA_MEMORY:-([^}\s]+)\}\s*$",
     re.MULTILINE,
 )
+
+
+_UNIT_GIB = {"K": 1 / 1024**2, "M": 1 / 1024, "G": 1.0, "T": 1024.0}
+
+
+def _gib(size: str) -> float:
+    """Convert a Seastar size such as ``4G``, ``4096M`` or ``4.5G`` to GiB."""
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)([KMGT])?", size)
+    assert match, f"unparseable Seastar memory size: {size!r}"
+    return float(match.group(1)) * _UNIT_GIB[match.group(2) or "G"]
 
 
 def _text() -> str:
@@ -52,7 +62,7 @@ def test_default_memory_budget_covers_recovery() -> None:
     assert len(matches) == 1, (
         "the dedicated CI broker must declare exactly one --memory dial"
     )
-    assert int(matches[0]) >= RECOVERY_FLOOR_GIB
+    assert _gib(matches[0]) >= RECOVERY_FLOOR_GIB
 
 
 def test_partition_cap_profile_follows_the_same_dial() -> None:
@@ -60,7 +70,7 @@ def test_partition_cap_profile_follows_the_same_dial() -> None:
     broker = _BROKER_FLAG.findall(_text())
     profile = _PROFILE.findall(_text())
     assert len(profile) == 1
-    assert profile == broker
+    assert [_gib(v) for v in profile] == [_gib(v) for v in broker]
 
 
 #: Longest retention (seconds) that keeps the per-run group pile bounded.
