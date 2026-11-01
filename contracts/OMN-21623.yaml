@@ -51,5 +51,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/test_network_binding_settings_wheel.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: docker run --rm -v ${OMNI_HOME}/omnibase_infra/src/omnibase_infra/models/network_binding:/nb:ro python:3.12-slim python -c "import pathlib; t = pathlib.Path('/nb/network_binding_settings.yaml').read_text(); [t.index(k + ':') for k in ('loopback_address', 'bind_all_address', 'local_host', 'postgres_port', 'tcp_port_min', 'tcp_port_max')]"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC31
