@@ -25,6 +25,9 @@ evidence_requirements:
   - kind: tests
     description: "Typed code, header correlation and replay eligibility."
     command: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov"
+  - kind: manual
+    description: "Hosted deploy-boundary readback drives the real consume boundary callback, the real dispatch engine and the DLQ replay predicate with an empty body, a non-JSON body, a JSON-array body and a refused record, without credentials or access to lane containers."
+    command: "deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov"
 dod_evidence:
   - id: dod-undecodable-code
     description: "Empty and non-JSON bodies terminalize with a typed failure_code."
@@ -47,3 +50,10 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov -k 'non_retryable_refusal_is_not_replayed or retryable_failure_is_still_replayed'"
+  - id: dod-deploy-boundary
+    description: "The consume boundary terminalizes an undecodable body with a typed code under the header correlation, and the replay predicate refuses a non-retryable refusal."
+    source: generated
+    binds_ac: [AC1, AC2, AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov"
