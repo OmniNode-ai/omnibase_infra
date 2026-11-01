@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -141,3 +143,116 @@ class TestSitesUseDeclaredTimeouts:
         self, site: str, value: object, field: str
     ) -> None:
         assert value == getattr(_TIMEOUTS, field), site
+
+
+class _Proc:
+    """Subprocess double whose ``communicate`` returns an empty diff."""
+
+    returncode = 0
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return b"", b""
+
+
+class _Metadata:
+    topics: dict[str, object] = {}
+
+
+@pytest.mark.unit
+class TestCallSitesPassDeclaredTimeouts:
+    """Sites that bind the value in the body, not in a signature default."""
+
+    @pytest.mark.asyncio
+    async def test_git_diff_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: list[float] = []
+
+        async def fake_exec(*_args: object, **_kwargs: object) -> _Proc:
+            return _Proc()
+
+        async def fake_wait_for(awaitable: Any, timeout: float) -> object:
+            seen.append(timeout)
+            return await awaitable
+
+        monkeypatch.setattr(
+            adapter_code_analysis_enrichment.asyncio,
+            "create_subprocess_exec",
+            fake_exec,
+        )
+        monkeypatch.setattr(
+            adapter_code_analysis_enrichment.asyncio, "wait_for", fake_wait_for
+        )
+        enrichment = adapter_code_analysis_enrichment.AdapterCodeAnalysisEnrichment
+        await enrichment._read_git_diff()
+        assert seen == [_TIMEOUTS.git_diff_seconds]
+
+    def test_coder_transport_ceiling(self) -> None:
+        adapter = adapter_code_analysis_enrichment.AdapterCodeAnalysisEnrichment(
+            base_url="http://localhost:1"
+        )
+        assert (
+            adapter._transport._max_timeout_seconds == _TIMEOUTS.llm_coder_max_seconds
+        )
+
+    @pytest.mark.parametrize(
+        "adapter_class",
+        [
+            adapter_code_review_analysis.AdapterCodeReviewAnalysis,
+            adapter_documentation_generation.AdapterDocumentationGeneration,
+            adapter_test_boilerplate_generation.AdapterTestBoilerplateGeneration,
+        ],
+    )
+    def test_long_form_transport_ceiling(self, adapter_class: Any) -> None:
+        adapter = adapter_class(base_url="http://localhost:1")
+        assert (
+            adapter._transport._max_timeout_seconds
+            == _TIMEOUTS.llm_long_form_max_seconds
+        )
+
+    @pytest.mark.asyncio
+    async def test_linear_circuit_reset(self) -> None:
+        tracker = _TRACKER(api_key="unit-test")
+        try:
+            assert (
+                tracker.circuit_breaker_reset_timeout
+                == _TIMEOUTS.linear_graphql_circuit_reset_seconds
+            )
+        finally:
+            await tracker.close()
+
+    def test_bus_audit_topic_discovery_and_offset_waits(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        discovery: list[float] = []
+        offsets: list[float] = []
+
+        class FakeAdmin:
+            def __init__(self, _config: object) -> None: ...
+
+            def list_topics(self, timeout: float) -> object:
+                discovery.append(timeout)
+                return _Metadata()
+
+        class _Partitions:
+            partitions = {0: object()}
+
+        class FakeConsumer:
+            def __init__(self, _config: object) -> None: ...
+
+            def get_watermark_offsets(
+                self, _partition: object, timeout: float
+            ) -> tuple[int, int]:
+                offsets.append(timeout)
+                return 0, 0
+
+            def close(self) -> None: ...
+
+        monkeypatch.setattr(bus_audit, "AdminClient", FakeAdmin)
+        monkeypatch.setattr(bus_audit, "Consumer", FakeConsumer)
+        config = bus_audit.AuditConfig(broker="broker")
+        metadata = _Metadata()
+        metadata.topics = {"t": _Partitions()}
+        bus_audit._collect_watermarks(config, {"t"}, cast("Any", metadata))
+        assert offsets == [_TIMEOUTS.audit_offsets_seconds]
+        with contextlib.suppress(Exception):
+            bus_audit.run_audit(config)  # later phases need a live broker
+        assert discovery == [_TIMEOUTS.audit_topic_discovery_seconds]
