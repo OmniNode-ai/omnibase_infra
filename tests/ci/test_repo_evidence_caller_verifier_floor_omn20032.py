@@ -28,12 +28,28 @@ _FLOOR_REUSABLE_SHA = RECEIPT_GATE_PIN_SHA
 # unbound), so the caller passes a dev-merge tag and no version number (OMN-21853).
 _VERIFIER_TAG_SHAPE = r"dev-(\d{14})-[0-9a-f]{12}"
 
-# The first omnimarket dev-merge tag whose history holds omnimarket#3511 (commit
-# e565ba5ba00c), omnimarket#3563 and omnimarket#3694, read from the omnimarket clone with
-# `git tag --contains`. Dev-merge tags embed their UTC creation time, so a tag created
-# before this one cannot descend from the floor commit. The reusable resolves the real
-# ancestry at run time; this holds the caller to the same floor before a push.
-_VERIFIER_TAG_FLOOR = "dev-20261016123308-0a385ce46cdf"
+# The first omnimarket dev-merge tag whose history holds each verifier capability this
+# caller depends on, read from the omnimarket clone with `git tag --contains <merge
+# commit>`. Dev-merge tags embed their UTC creation time, so a tag created before a
+# capability's first tag cannot descend from its merge commit. The reusable at the
+# pinned sha resolves the real ancestry from the floor commit at run time (it refuses
+# a moved tag, a tag off omnimarket dev, or one that does not descend from
+# e565ba5ba00c); this holds the caller to every capability's first tag before a push,
+# which a regex on the tag shape alone does not.
+_CAPABILITY_FIRST_TAG = {
+    # omnimarket#3511 (e565ba5ba00c): refuses a contract leaving a criterion unbound.
+    "unbound-criterion refusal": "dev-20261016123308-0a385ce46cdf",
+    # omnimarket#3563: the occ-difference classifier.
+    "occ-difference classifier": "dev-20261016123308-0a385ce46cdf",
+    # omnimarket#3694: admits tool.uv.override-dependencies as a dependency-pin-only change.
+    "override-dependency pin exemption": "dev-20261016123308-0a385ce46cdf",
+    # omnimarket#4683 (OMN-21676): the hosted dod-verify delegates the criteria
+    # comparison to the trusted pre-merge check. A verifier without it reads live
+    # Linear from a runner that holds no credential and ends every contract
+    # VERIFICATION_UNRESOLVED ticket_unavailable (omnimarket 0.4.320 and older).
+    "hosted criteria delegation": "dev-20261031203936-91354974f1e3",
+}
+_VERIFIER_TAG_FLOOR = max(_CAPABILITY_FIRST_TAG.values())
 
 
 def _tag_time(tag: str) -> int | None:
@@ -41,9 +57,9 @@ def _tag_time(tag: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _tag_is_at_or_above_floor(tag: str) -> bool:
+def _tag_is_at_or_above_floor(tag: str, floor_tag: str = _VERIFIER_TAG_FLOOR) -> bool:
     time = _tag_time(tag)
-    floor = _tag_time(_VERIFIER_TAG_FLOOR)
+    floor = _tag_time(floor_tag)
     assert floor is not None
     return time is not None and time >= floor
 
@@ -73,15 +89,16 @@ def test_required_checks_manifest_names_the_same_reusable_pin() -> None:
     ]
 
 
-def test_caller_verifier_version_is_at_or_above_the_floor() -> None:
-    """The caller's tag is no older than the first tag holding the floor commit (OMN-21853).
-
-    The caller passes an omnimarket dev-merge tag and no verifier-version, the
-    reusable's warned migration fallback; the reusable checks the real ancestry.
+def test_caller_tag_is_no_older_than_every_capability_first_tag() -> None:
+    """The caller's tag is a well-formed dev-merge tag created at or after the first
+    tag of every capability the caller depends on (OMN-21853), and no verifier-version
+    (the reusable's warned migration fallback) is passed.
     """
     with_block = _job()["with"]
     assert "verifier-version" not in with_block, sorted(with_block)
-    assert _tag_is_at_or_above_floor(with_block["verifier-tag"]), with_block
+    tag = with_block["verifier-tag"]
+    for capability, first_tag in _CAPABILITY_FIRST_TAG.items():
+        assert _tag_is_at_or_above_floor(tag, first_tag), (capability, tag, first_tag)
 
 
 @pytest.mark.parametrize(
@@ -89,7 +106,9 @@ def test_caller_verifier_version_is_at_or_above_the_floor() -> None:
     [
         ("dev-20261101000200-949993edf3b7", True),
         (_VERIFIER_TAG_FLOOR, True),
-        ("dev-20261016123307-0a385ce46cdf", False),
+        # Created one second before the criteria-delegation tag: lacks omnimarket#4683.
+        ("dev-20261031203935-91354974f1e3", False),
+        ("dev-20261016123308-0a385ce46cdf", False),
         ("dev-20261015000000-0a385ce46cdf", False),
         ("0.4.320", False),
         ("dev-20261101000200-949993edf3b", False),
@@ -97,7 +116,7 @@ def test_caller_verifier_version_is_at_or_above_the_floor() -> None:
         ("v20261101000200-949993edf3b7", False),
     ],
 )
-def test_floor_comparison_has_a_refusing_and_an_admitting_case(
+def test_tag_floor_comparison_refuses_a_tag_older_than_the_newest_capability(
     tag: str, expected: bool
 ) -> None:
     assert _tag_is_at_or_above_floor(tag) is expected

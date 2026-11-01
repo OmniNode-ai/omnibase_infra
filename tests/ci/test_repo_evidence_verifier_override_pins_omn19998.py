@@ -18,6 +18,17 @@ CALLER_PATH = REPO_ROOT / ".github" / "workflows" / "call-repo-evidence-gate.yml
 
 _VERIFIER_TAG_SHAPE = r"dev-\d{14}-[0-9a-f]{12}"
 
+# The first omnimarket dev-merge tag holding omnimarket#3694 (`git tag --contains`).
+# Tags embed their UTC creation time, so an older tag cannot admit override pins.
+_OVERRIDE_PIN_FIRST_TAG = "dev-20261016123308-0a385ce46cdf"
+
+
+def _admits_override_pins(tag: str) -> bool:
+    match = re.fullmatch(r"dev-(\d{14})-[0-9a-f]{12}", tag)
+    floor = re.fullmatch(r"dev-(\d{14})-[0-9a-f]{12}", _OVERRIDE_PIN_FIRST_TAG)
+    assert floor is not None
+    return match is not None and int(match.group(1)) >= int(floor.group(1))
+
 
 def test_core_pin_is_the_dev_tag_source_alone() -> None:
     uv = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
@@ -49,6 +60,14 @@ def test_caller_verifier_admits_override_dependency_pins() -> None:
     with_block = jobs["repo-evidence"].get("with")
     assert isinstance(with_block, dict), "repo-evidence job must carry a with: block"
     assert "verifier-version" not in with_block, f"with keys are {sorted(with_block)}"
-    assert re.fullmatch(_VERIFIER_TAG_SHAPE, str(with_block.get("verifier-tag"))), (
-        f"with keys are {sorted(with_block)}"
-    )
+    tag = str(with_block.get("verifier-tag"))
+    assert re.fullmatch(_VERIFIER_TAG_SHAPE, tag), f"with keys are {sorted(with_block)}"
+    assert _admits_override_pins(tag), tag
+
+
+def test_floor_refuses_the_tags_that_refused_the_core_bumps() -> None:
+    assert not _admits_override_pins("dev-20261016123307-0a385ce46cdf")
+    assert not _admits_override_pins("0.4.309")
+    assert not _admits_override_pins("not-a-tag")
+    assert _admits_override_pins("dev-20261016123308-0a385ce46cdf")
+    assert _admits_override_pins("dev-20261101000200-949993edf3b7")

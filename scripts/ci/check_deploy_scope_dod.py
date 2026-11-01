@@ -91,12 +91,10 @@ override args are supplied, which is how the unit test drives the pure core):
 from __future__ import annotations
 
 import argparse
-import fcntl
 import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
