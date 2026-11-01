@@ -37,7 +37,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute -q -o addopts=''
+        check_value: uv run pytest tests/unit/nodes/node_savings_estimation_compute/test_counterfactual_policy_contract_omn21623.py tests/unit/nodes/node_waste_detection_compute/test_premium_model_policy_contract_omn21623.py tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute -q -o addopts=''
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21623-model-name-ac2-injection-tests
     description: The adapters and the search client refuse to run without an injected model.
