@@ -732,6 +732,15 @@ requirements:
     acceptance:
       - id: AC17427546801
         statement: The base compose writer and rendered catalog each mount the socket directory declared in contracts/runtime/runtime_config.yaml with the UID and GID created by Dockerfile.runtime and used by entrypoint-runtime.sh, with mode 0770; unrelated main-runtime mounts do not determine the writer's mounts.
+  - id: req-omn17427-pool-stage0-tags
+    statement: The pool prover stages the current core, spi and omnimarket siblings and can prove an infra dev-merge tag with sibling dev tags.
+    acceptance:
+      - id: AC17427547801
+        statement: The clone phase stages core, spi and omnimarket without cloning compat, and the default build passes exactly those three sibling SHA pins to stage_workspace.sh.
+      - id: AC17427547802
+        statement: INFRA_DEV_TAG selects the infra clone tag; with no value the clone still selects dev.
+      - id: AC17427547803
+        statement: STAGE_DEV_TAGS=1 passes DEPLOY_REF=origin/dev and no explicit sibling SHA pins to stage_workspace.sh; an empty value retains the pinned build.
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -3346,3 +3355,35 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_first_party_tag_sources_omn17427.py tests/scripts/test_first_party_sources_omn17427.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427640001, AC17427640002]
+  - id: dod-omn17427-pool-current-siblings
+    description: Executes the unmodified pool clone and build phases against disposable local Git origins and the real workspace staging script. Reads the exact sibling set, immutable refs and staged content; a nonempty retired COMPAT_REF must be ignored.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac: [AC17427547801]
+  - id: dod-omn17427-pool-infra-dev-tag
+    description: Executes real local clones with and without INFRA_DEV_TAG and reads their HEAD commits. A missing infra tag must exit before cloning any sibling; explicit core and spi tags must be fetched and checked out.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q -k clone --no-cov
+        cwd: .
+    binds_ac: [AC17427547802]
+  - id: dod-omn17427-pool-sibling-dev-tags
+    description: Executes the real workspace staging script through the pool build with empty and enabled STAGE_DEV_TAGS. Reads intended refs, sibling dev-merge tags, staged bytes and SHAs, routing ladder and unchanged source clone heads.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q -k staging --no-cov
+        cwd: .
+    binds_ac: [AC17427547803]
+  - id: dod-omn17427-pool-stage0-hosted-deploy
+    description: Hosted-runner deploy check exercises unmodified pool clone selection and real workspace staging against disposable local Git origins without Docker, services, credentials or network access. Refuses the former compat clone and nonempty compat pin, ignored infra tag, or sibling SHA pins in dev-tag mode by reading staged content and provenance.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac: [AC17427547801, AC17427547802, AC17427547803]

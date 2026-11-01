@@ -184,6 +184,45 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
+  - id: dod-omn21288-t5-ac1-head-holds-dev-and-touched-tests-pass
+    description: >-
+      T5 AC1, the writers fold's head contains current origin/dev (git merge-base --is-ancestor origin/dev HEAD exits 0 at the pushed head) and every test file the PR touches passes: the writers fold, the stack-only check, the deploy handler's folded-service tests and the deploy agent's fold tests. The ancestor read and the /omni:lab-run receipt at the pushed head (host, sha, exit code) are in the PR's Lab comment; the hosted check below re-runs the focused files without a broker or a daemon.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn21288-t5-ac2-no-event-lost-across-the-swap
+    description: >-
+      T5 AC2, no event published during the swap is lost and each is projected once. The writer contracts declare the retired container's consumer under consumer_group_handover (omnimarket dev), and auto-wiring seeds the runtime's group from it (OMN-21753, merged to dev). The hosted check runs the in-process group-offset scenario; the Redpanda scenario, tests/integration/event_bus/test_consumer_group_handover_redpanda_omn21288.py, needs a broker and is run on a lab host, its receipt in the PR's Lab comment. The live row count on one projection is the post-merge dev proof through the deploy agent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn21288-t5-ac3-boot-guard-never-pairs-pre-fold-image-with-fold-overlay
+    description: >-
+      T5 AC3, the dev boot guard never restores a retained image under the overlay of another fold generation. A boot-good snapshot planted from before the fold makes prepare() refuse before any container is replaced, and a failed fold deploy refuses to restore the pre-fold image under the fold overlay (the incident records recovery_verified false); a snapshot of the same generation still restores, and the pre-fold overlay starts the five writers again (rollback by revision). The new file is scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py; two of its tests fail on the parent commit, where the guard records no fold generation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn21288-t5-ac4-ci-green-at-the-handoff-head
+    description: >-
+      T5 AC4, the PR's CI at its head shows no red and no pending required context before handoff. The evidence is the PR watcher's read for that head (python3 pr_state_local.py --pr omnibase_infra#5518, or onex scm pr-checks), recorded in the handoff; a draft is excluded from the watcher, so a stale read is reported as stale. The hosted check re-runs the tests of the guard this change touches.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
 context:
   remaining_after_this_change: "AC2 end state: eight dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test (effects, worker, projection-api, four consumers, the delegation writer); each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."

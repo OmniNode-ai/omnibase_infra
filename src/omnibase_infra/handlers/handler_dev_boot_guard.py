@@ -186,6 +186,30 @@ def _all_healthy(read_containers: Callable[[], list[ModelDevBootContainer]]) -> 
         return False
 
 
+def _folded_profiles(execution: ModuleType) -> tuple[str, ...]:
+    """The roles the dev overlay on disk folds into main (OMN-21288)."""
+    return tuple(sorted(execution.lane_folded_profiles(execution.EnumRuntimeLane.DEV)))
+
+
+def _refuse_cross_fold_pairing(point: ModelDevBootPoint, execution: ModuleType) -> None:
+    """An image is only ever restored under the overlay of its own fold generation.
+
+    A healthy family captured before the fold runs a main without the folded
+    writers' contracts; under the fold overlay their containers are retired
+    too, so nothing would project. Moving the image and the overlay together is
+    a rollback by revision, through a deploy of that git ref.
+    """
+    current = _folded_profiles(execution)
+    if tuple(sorted(point.folded_profiles)) != current:
+        raise DevBootFailedError(
+            f"retained revision {point.revision[:12]} ran with "
+            f"{len(point.folded_profiles)} folded profiles but the dev overlay "
+            f"folds {len(current)}: refusing to pair its image with this "
+            "overlay; roll back by revision (deploy the git ref whose overlay "
+            "matches)"
+        )
+
+
 class HandlerDevBootGuard:
     """Supervise only the selected DEV compose project under its caller's lock."""
 
@@ -410,6 +434,7 @@ class HandlerDevBootGuard:
             container_ids=tuple(sorted(c["Id"] for c in containers)),
             images=images,
             compose=compose,
+            folded_profiles=_folded_profiles(self.execution),
         )
         self.execution._atomic_write_private_json(
             self.snapshot_path, point.model_dump(mode="json")
@@ -429,11 +454,13 @@ class HandlerDevBootGuard:
         point = ModelDevBootPoint.model_validate_json(self.snapshot_path.read_text())
         if point.project != self.config.compose_project:
             raise DevBootFailedError("last healthy snapshot belongs to another project")
+        _refuse_cross_fold_pairing(point, self.execution)
         self.point = point
 
     def _restore(self) -> None:
         if self.point is None:
             raise DevBootFailedError("no last healthy dev revision")
+        _refuse_cross_fold_pairing(self.point, self.execution)
         for retained, image_id in self.point.images.items():
             self.execution._tag_image(image_id, retained)
         path = self.root / "recovery-compose.json"
