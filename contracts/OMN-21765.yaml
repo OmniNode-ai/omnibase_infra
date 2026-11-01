@@ -13,9 +13,9 @@ requirements:
       - id: AC1
         statement: "AC1: every ssh call of deploy-runners.sh that carries a registration token sends it on stdin, and the remote script text holds only the read of it -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q fails when a remote script interpolates the token or a base64 of it"
       - id: AC2
-        statement: "AC2: a regression test with a stub ssh that records its argv and stdin and then runs the remote script fails on the old command-string pattern and passes on the fix -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k old_command_string"
+        statement: "AC2: a regression test with a stub ssh that records its argv and stdin and then runs the remote script fails on the old command-string pattern and passes on the fix -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k 'no_remote_script or scanner_flags or ps_check_catches'"
       - id: AC3
-        statement: "AC3: a ps listing taken by the stub docker at the moment compose runs holds neither the token nor its base64, on the default deploy, the rolling recreate and the additive mode, and so is the config.sh call inside the container -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k 'keeps_the_token_out_of_argv or hands_config_sh'"
+        statement: "AC3: a ps listing taken by the stub docker at the moment compose runs holds neither the token nor its base64, on the default deploy, the rolling recreate and the additive mode, and so is the config.sh call inside the container -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k 'default_deploy_keeps or rolling_recreate_keeps or hands_config_sh'"
 evidence_requirements:
   - kind: tests
     description: "The ps listing and the recorded ssh argv hold no token on three of the four ssh sites run end to end, the fourth is scanned, and the detector has a positive control."
@@ -27,18 +27,18 @@ dod_evidence:
     binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider'
+        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k "default_deploy_keeps or rolling_recreate_keeps or no_remote_script or an_empty_stdin"'
   - id: dod-002
     description: "The detector catches the old command string, so a clean listing means something."
     source: generated
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k "old_command_string or flags_the_old_pattern"'
+        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k "no_remote_script or scanner_flags or ps_check_catches"'
   - id: dod-003
     description: "The ps listing at compose time is clean on the default deploy, the rolling recreate and the additive mode."
     source: generated
     binds_ac: [AC3]
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k "keeps_the_token_out_of_argv or hands_config_sh"'
+        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k "default_deploy_keeps or rolling_recreate_keeps or hands_config_sh"'
