@@ -13,10 +13,14 @@ from omnibase_infra.nodes.node_waste_detection_compute.models.model_waste_findin
     ModelWasteFinding,
     WasteSeverity,
 )
+from omnibase_infra.nodes.node_waste_detection_compute.models.model_waste_premium_model_policy import (
+    ModelWastePremiumModelPolicy,
+)
 
 __all__ = [
     "ModelWasteCall",
     "ModelWasteDetectionInput",
     "ModelWasteFinding",
+    "ModelWastePremiumModelPolicy",
     "WasteSeverity",
 ]
