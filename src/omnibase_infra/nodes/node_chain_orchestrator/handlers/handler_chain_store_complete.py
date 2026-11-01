@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
@@ -25,35 +26,39 @@ class HandlerChainStoreComplete:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    async def handle(self, request: ModelChainStoreResult) -> dict[str, str | bool]:
+    async def handle(
+        self,
+        store_result: ModelChainStoreResult,
+        correlation_id: UUID,
+    ) -> dict[str, str | bool]:
         """Process store result and prepare completion event.
 
         Args:
-            request: Result from chain store effect (carries the workflow
-                correlation ID).
+            store_result: Result from chain store effect.
+            correlation_id: Workflow correlation ID.
 
         Returns:
             Dict with completion status.
         """
-        if request.success:
+        if store_result.success:
             logger.info(
                 "Chain stored successfully: chain_id=%s (correlation_id=%s)",
-                request.chain_id,
-                request.correlation_id,
+                store_result.chain_id,
+                correlation_id,
             )
             return {
                 "status": "complete",
-                "chain_id": str(request.chain_id),
+                "chain_id": str(store_result.chain_id),
                 "success": True,
             }
 
         logger.warning(
             "Chain store failed: %s (correlation_id=%s)",
-            request.error_message,
-            request.correlation_id,
+            store_result.error_message,
+            correlation_id,
         )
         return {
             "status": "complete_without_store",
-            "error": request.error_message,
+            "error": store_result.error_message,
             "success": False,
         }

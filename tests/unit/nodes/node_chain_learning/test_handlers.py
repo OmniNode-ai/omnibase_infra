@@ -122,7 +122,7 @@ class TestHandlerChainStoreComplete:
             chain_id=uuid4(),
             success=True,
         )
-        result = await handler.handle(store_result)
+        result = await handler.handle(store_result, uuid4())
         assert result["status"] == "complete"
         assert result["success"] is True
 
@@ -135,7 +135,7 @@ class TestHandlerChainStoreComplete:
             success=False,
             error_message="connection refused",
         )
-        result = await handler.handle(store_result)
+        result = await handler.handle(store_result, uuid4())
         assert result["success"] is False
 
 
