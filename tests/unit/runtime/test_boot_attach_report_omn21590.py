@@ -28,7 +28,7 @@ from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 CONTRACTS = FIXTURES / "node_announce"
-GOLDEN = FIXTURES / "golden" / "boot_attach_report_full_load_omn21590.json"
+GOLDEN = FIXTURES / "golden" / "boot_attach_golden_full_load_omn21590.json"
 NAMES = ("node_attach_one_effect", "node_attach_two_effect", "node_attach_three_effect")
 
 
@@ -93,7 +93,7 @@ async def test_the_boot_attach_report_is_byte_identical_to_the_pre_change_report
 ):
     produced = await _manifest_and_report_json()
 
-    assert produced == GOLDEN.read_text(encoding="utf-8")
+    assert produced + "\n" == GOLDEN.read_text(encoding="utf-8")
 
 
 @pytest.mark.unit
@@ -116,4 +116,4 @@ async def test_planted_violation_a_changed_contract_changes_the_report(
 
     produced = await _manifest_and_report_json(root)
 
-    assert produced != GOLDEN.read_text(encoding="utf-8")
+    assert produced + "\n" != GOLDEN.read_text(encoding="utf-8")

@@ -1,0 +1,263 @@
+{
+  "manifest": {
+    "contracts": [
+      {
+        "compatibility_publish_topics": [],
+        "contract_content_hash": "121b3057b8dd956cc448c7d00e1dd956f61875fd406fa2984b1faece2322be75",
+        "contract_path": "<fixtures>/node_attach_one_effect/contract.yaml",
+        "contract_version": {
+          "major": 1,
+          "minor": 0,
+          "patch": 0
+        },
+        "db_io": null,
+        "description": "Fixture contract for the boot attach report (OMN-21590)",
+        "entry_point_name": "node_attach_one_effect",
+        "event_bus": {
+          "consumer_group": null,
+          "consumer_purpose": null,
+          "dlq_topics": [],
+          "plugin_managed": false,
+          "publish_topics": [
+            "onex.evt.platform.attach-one-done.v1"
+          ],
+          "subscribe_topics": [
+            "onex.cmd.platform.attach-one.v1"
+          ],
+          "tenant_scoped_ingress": false,
+          "terminal_event": null
+        },
+        "handler_routing": {
+          "handlers": [
+            {
+              "event_model": null,
+              "event_type": null,
+              "handler": {
+                "module": "omnibase_infra.handlers.handler_attach_fixture",
+                "name": "HandlerAttachFixture"
+              },
+              "message_category": null,
+              "operation": null,
+              "topic": null
+            }
+          ],
+          "routing_strategy": "payload_type_match"
+        },
+        "name": "node_attach_one_effect",
+        "node_type": "EFFECT_GENERIC",
+        "node_version": "1.0.0",
+        "package_name": "attach-fixture",
+        "package_version": "1.0.0",
+        "required_secrets": [],
+        "requires_cloud_gateway": false,
+        "runtime_lanes": null,
+        "runtime_profiles": [
+          "main"
+        ],
+        "terminal_event": null
+      },
+      {
+        "compatibility_publish_topics": [],
+        "contract_content_hash": "58438ba2f0c81eb0c15acd11c9964eefaeeff11387fa4c5afb0292ee4a91d7a2",
+        "contract_path": "<fixtures>/node_attach_two_effect/contract.yaml",
+        "contract_version": {
+          "major": 1,
+          "minor": 0,
+          "patch": 0
+        },
+        "db_io": null,
+        "description": "Fixture contract for the boot attach report (OMN-21590)",
+        "entry_point_name": "node_attach_two_effect",
+        "event_bus": {
+          "consumer_group": null,
+          "consumer_purpose": null,
+          "dlq_topics": [],
+          "plugin_managed": false,
+          "publish_topics": [
+            "onex.evt.platform.attach-two-done.v1"
+          ],
+          "subscribe_topics": [
+            "onex.cmd.platform.attach-two.v1"
+          ],
+          "tenant_scoped_ingress": false,
+          "terminal_event": null
+        },
+        "handler_routing": {
+          "handlers": [
+            {
+              "event_model": null,
+              "event_type": null,
+              "handler": {
+                "module": "omnibase_infra.handlers.handler_attach_fixture",
+                "name": "HandlerAttachFixture"
+              },
+              "message_category": null,
+              "operation": null,
+              "topic": null
+            }
+          ],
+          "routing_strategy": "payload_type_match"
+        },
+        "name": "node_attach_two_effect",
+        "node_type": "EFFECT_GENERIC",
+        "node_version": "1.0.0",
+        "package_name": "attach-fixture",
+        "package_version": "1.0.0",
+        "required_secrets": [],
+        "requires_cloud_gateway": false,
+        "runtime_lanes": null,
+        "runtime_profiles": [
+          "main"
+        ],
+        "terminal_event": null
+      },
+      {
+        "compatibility_publish_topics": [],
+        "contract_content_hash": "ef31b2058d1de82b337347fa7a4b406f9c8c191bb17549d09827c415ca25ea27",
+        "contract_path": "<fixtures>/node_attach_three_effect/contract.yaml",
+        "contract_version": {
+          "major": 1,
+          "minor": 0,
+          "patch": 0
+        },
+        "db_io": null,
+        "description": "Fixture contract for the boot attach report (OMN-21590)",
+        "entry_point_name": "node_attach_three_effect",
+        "event_bus": {
+          "consumer_group": null,
+          "consumer_purpose": null,
+          "dlq_topics": [],
+          "plugin_managed": false,
+          "publish_topics": [
+            "onex.evt.platform.attach-three-done.v1"
+          ],
+          "subscribe_topics": [
+            "onex.cmd.platform.attach-three.v1"
+          ],
+          "tenant_scoped_ingress": false,
+          "terminal_event": null
+        },
+        "handler_routing": {
+          "handlers": [
+            {
+              "event_model": null,
+              "event_type": null,
+              "handler": {
+                "module": "omnibase_infra.handlers.handler_attach_fixture",
+                "name": "HandlerAttachFixture"
+              },
+              "message_category": null,
+              "operation": null,
+              "topic": null
+            }
+          ],
+          "routing_strategy": "payload_type_match"
+        },
+        "name": "node_attach_three_effect",
+        "node_type": "EFFECT_GENERIC",
+        "node_version": "1.0.0",
+        "package_name": "attach-fixture",
+        "package_version": "1.0.0",
+        "required_secrets": [],
+        "requires_cloud_gateway": false,
+        "runtime_lanes": null,
+        "runtime_profiles": [
+          "main"
+        ],
+        "terminal_event": null
+      }
+    ],
+    "deployment_sha": {
+      "absent_reason": "manifest constructed without a build-identity binding",
+      "value": null
+    },
+    "errors": [],
+    "image_sha": {
+      "absent_reason": "manifest constructed without a build-identity binding",
+      "value": null
+    },
+    "runtime_profile": "",
+    "skips": []
+  },
+  "report": {
+    "duplicates": [],
+    "quarantined_handlers": [],
+    "results": [
+      {
+        "contract_name": "node_attach_one_effect",
+        "dispatchers_registered": [
+          "dispatcher.auto.node_attach_one_effect.HandlerAttachFixture"
+        ],
+        "nonwriting_handlers": [],
+        "outcome": "wired",
+        "package_name": "attach-fixture",
+        "quarantined_handlers": [],
+        "reason": "",
+        "routes_registered": [
+          "route.auto.node_attach_one_effect.HandlerAttachFixture.onex_cmd_platform_attach_one_v1"
+        ],
+        "skipped_handlers": [],
+        "topics_subscribed": [
+          "onex.cmd.platform.attach-one.v1"
+        ],
+        "wirings": [
+          {
+            "handler_name": "HandlerAttachFixture",
+            "resolution_outcome": "resolved_via_zero_arg",
+            "skipped_reason": ""
+          }
+        ]
+      },
+      {
+        "contract_name": "node_attach_two_effect",
+        "dispatchers_registered": [
+          "dispatcher.auto.node_attach_two_effect.HandlerAttachFixture"
+        ],
+        "nonwriting_handlers": [],
+        "outcome": "wired",
+        "package_name": "attach-fixture",
+        "quarantined_handlers": [],
+        "reason": "",
+        "routes_registered": [
+          "route.auto.node_attach_two_effect.HandlerAttachFixture.onex_cmd_platform_attach_two_v1"
+        ],
+        "skipped_handlers": [],
+        "topics_subscribed": [
+          "onex.cmd.platform.attach-two.v1"
+        ],
+        "wirings": [
+          {
+            "handler_name": "HandlerAttachFixture",
+            "resolution_outcome": "resolved_via_zero_arg",
+            "skipped_reason": ""
+          }
+        ]
+      },
+      {
+        "contract_name": "node_attach_three_effect",
+        "dispatchers_registered": [
+          "dispatcher.auto.node_attach_three_effect.HandlerAttachFixture"
+        ],
+        "nonwriting_handlers": [],
+        "outcome": "wired",
+        "package_name": "attach-fixture",
+        "quarantined_handlers": [],
+        "reason": "",
+        "routes_registered": [
+          "route.auto.node_attach_three_effect.HandlerAttachFixture.onex_cmd_platform_attach_three_v1"
+        ],
+        "skipped_handlers": [],
+        "topics_subscribed": [
+          "onex.cmd.platform.attach-three.v1"
+        ],
+        "wirings": [
+          {
+            "handler_name": "HandlerAttachFixture",
+            "resolution_outcome": "resolved_via_zero_arg",
+            "skipped_reason": ""
+          }
+        ]
+      }
+    ]
+  }
+}
