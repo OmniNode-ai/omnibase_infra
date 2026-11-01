@@ -8,7 +8,7 @@
 # CLI, the dev-lane handlers, the done-write receipt guard and the tool
 # execution adapter apply. Read by ModelOperationalTimeouts; the callers hold no
 # timeout literal. Every key is required: a block that omits one fails to load.
-# Keys ending _seconds are seconds; keys ending _ms are milliseconds.
+# Keys ending _seconds are seconds and accept fractional waits.
 timeouts:
   # Transition-notification outbox and projector shell.
   outbox_poll_interval_seconds: 1.0

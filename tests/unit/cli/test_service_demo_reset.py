@@ -43,6 +43,7 @@ from omnibase_infra.cli.service_demo_reset import (
     PRESERVED_RESOURCES,
     DemoResetEngine,
 )
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 
 pytestmark = [pytest.mark.unit]
 
@@ -812,6 +813,13 @@ class TestDemoResetEngineConsumerGroupsLive:
         ]
         assert any("analytics" in a.detail for a in preserved_actions)
 
+        mock_admin.list_consumer_groups.assert_called_once_with(
+            request_timeout=TIMEOUTS.kafka_admin_seconds
+        )
+        assert success_future.result.call_count == 2
+        for call in success_future.result.call_args_list:
+            assert call.kwargs["timeout"] == TIMEOUTS.kafka_admin_seconds
+
     @pytest.mark.asyncio
     async def test_partial_failure_on_group_deletion(self) -> None:
         """Partial failure during group deletion reports both success and error."""
@@ -1018,6 +1026,20 @@ class TestDemoResetEngineTopicPurgeLive:
         # Verify non-demo topic preserved
         preserved = [a for a in report.actions if a.action == EnumResetAction.PRESERVED]
         assert any("custom.business" in a.detail for a in preserved)
+
+        mock_admin.list_topics.assert_called_once_with(
+            timeout=TIMEOUTS.kafka_admin_seconds
+        )
+        assert mock_consumer.get_watermark_offsets.call_count == 2
+        for call in mock_consumer.get_watermark_offsets.call_args_list:
+            assert call.kwargs["timeout"] == TIMEOUTS.kafka_watermark_seconds
+        assert success_future.result.call_count == 2
+        for call in success_future.result.call_args_list:
+            assert call.kwargs["timeout"] == TIMEOUTS.kafka_admin_seconds
+        cleanup = mock_admin.delete_consumer_groups.return_value
+        cleanup.__getitem__.return_value.result.assert_called_once_with(
+            timeout=TIMEOUTS.kafka_admin_seconds
+        )
 
     @pytest.mark.asyncio
     async def test_partial_failure_on_topic_purge(self) -> None:

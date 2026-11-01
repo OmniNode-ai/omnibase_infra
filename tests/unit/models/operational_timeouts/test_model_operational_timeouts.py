@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -27,7 +29,10 @@ from omnibase_infra.models.operational_timeouts import (
     load_operational_timeouts,
     model_operational_timeouts,
 )
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime import freshness_monitor, projector_shell
+from omnibase_infra.runtime.models import ModelRuntimeSchedulerConfig
+from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
 from omnibase_infra.runtime.transition_notification_outbox import (
     TransitionNotificationOutbox,
 )
@@ -56,6 +61,21 @@ def _default(function: Callable[..., object], name: str) -> object:
 def test_loaded_timeouts_equal_the_declared_file() -> None:
     assert load_operational_timeouts() is TIMEOUTS
     assert ModelOperationalTimeouts.model_validate(_block()) == TIMEOUTS
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "kafka_admin_seconds",
+        "kafka_watermark_seconds",
+        "dev_lane_ledger_seconds",
+        "kill_wait_seconds",
+    ],
+)
+def test_seconds_fields_preserve_fractional_waits(key: str) -> None:
+    block = _block()
+    block[key] = 0.5
+    assert getattr(ModelOperationalTimeouts.model_validate(block), key) == 0.5
 
 
 @pytest.mark.parametrize("key", sorted(_block()))
@@ -170,3 +190,35 @@ def test_dev_lane_and_done_write_waits_are_the_declared_values() -> None:
         TIMEOUTS.done_write_verify_seconds
         == done_write_receipt_guard.DEFAULT_DOD_VERIFY_TIMEOUT_SECONDS
     )
+
+
+@pytest.mark.asyncio
+async def test_scheduler_stop_passes_the_declared_timeout_to_wait_for() -> None:
+    scheduler = RuntimeScheduler(
+        config=ModelRuntimeSchedulerConfig(persist_sequence_number=False),
+        event_bus=AsyncMock(spec=ProtocolEventBusLike),
+    )
+    await scheduler.start()
+    tick_task = scheduler._tick_task
+    with patch(
+        "omnibase_infra.runtime.runtime_scheduler.asyncio.wait_for",
+        wraps=asyncio.wait_for,
+    ) as wait_for:
+        await scheduler.stop()
+    wait_for.assert_any_call(tick_task, _block()["tick_stop_seconds"])
+    assert tick_task is not None and tick_task.done()
+
+
+@pytest.mark.asyncio
+async def test_reaper_passes_the_declared_timeout_and_reaps_the_child() -> None:
+    proc = MagicMock(spec=asyncio.subprocess.Process)
+    proc.returncode = None
+    proc.wait = AsyncMock(return_value=0)
+    with patch(
+        "omnibase_infra.handlers.done_write_receipt_guard.asyncio.wait_for",
+        wraps=asyncio.wait_for,
+    ) as wait_for:
+        await done_write_receipt_guard.reap_timed_out_process(proc)
+    proc.kill.assert_called_once_with()
+    proc.wait.assert_awaited_once_with()
+    assert wait_for.call_args.kwargs["timeout"] == _block()["kill_wait_seconds"]

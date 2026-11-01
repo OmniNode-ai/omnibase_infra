@@ -27,6 +27,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn21802-fractional-seconds-and-forwarding
+    description: Fractional Kafka, ledger and kill waits survive validation; scheduler shutdown, Kafka requests and futures, watermark queries and process reaping pass their declared timeout to the operation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/operational_timeouts/test_model_operational_timeouts.py tests/unit/cli/test_service_demo_reset.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
   - id: dod-omn21802-ac1-literal-timeout-clean
     description: The literal_timeout rule reports no finding over the twelve edited files and the settings model. Fails at the merge base, where the same run reports 27.
     source: manual
