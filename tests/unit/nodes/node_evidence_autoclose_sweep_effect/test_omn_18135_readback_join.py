@@ -272,7 +272,9 @@ def _request(**overrides: Any) -> ModelEvidenceAutocloseSweepRequest:
         "apply": False,
     }
     defaults.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**defaults)
+    return ModelEvidenceAutocloseSweepRequest(
+        **{"demotion_window_hours": 0, **defaults}
+    )
 
 
 def _seed_redraw(linear: _FakeLinear, checks: list[dict[str, Any]]) -> None:
