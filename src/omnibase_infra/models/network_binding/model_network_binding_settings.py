@@ -10,7 +10,8 @@ rather than falling back to a literal.
 from __future__ import annotations
 
 from functools import cache
-from pathlib import Path
+from importlib.resources import files
+from importlib.resources.abc import Traversable
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -18,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
-_SETTINGS_PATH = Path(__file__).resolve().parent / "network_binding_settings.yaml"
+_SETTINGS_FILE = "network_binding_settings.yaml"
 
 
 class ModelNetworkBindingSettings(BaseModel):
@@ -50,7 +51,7 @@ class ModelNetworkBindingSettings(BaseModel):
         return self
 
     @classmethod
-    def from_file(cls, settings_path: Path) -> ModelNetworkBindingSettings:
+    def from_file(cls, settings_path: Traversable) -> ModelNetworkBindingSettings:
         """Load the settings from the ``settings`` mapping of a YAML file.
 
         Raises:
@@ -73,8 +74,14 @@ class ModelNetworkBindingSettings(BaseModel):
 
 @cache
 def load_network_binding_settings() -> ModelNetworkBindingSettings:
-    """Return the network binding settings declared beside this model."""
-    return ModelNetworkBindingSettings.from_file(_SETTINGS_PATH)
+    """Return the network binding settings declared beside this model.
+
+    The file is read through the package resource API so a wheel imported from
+    a zip archive loads it the same way an extracted one does.
+    """
+    return ModelNetworkBindingSettings.from_file(
+        files("omnibase_infra.models.network_binding").joinpath(_SETTINGS_FILE)
+    )
 
 
 __all__: list[str] = ["ModelNetworkBindingSettings", "load_network_binding_settings"]

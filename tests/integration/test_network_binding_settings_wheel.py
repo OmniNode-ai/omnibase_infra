@@ -75,3 +75,51 @@ print("wheel-network-binding-readback: settings loaded; kernel imported; loopbac
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr
     assert "wheel-network-binding-readback:" in probe.stdout
+
+
+def test_zipped_wheel_loads_network_binding_settings(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    wheels = tmp_path / "wheels"
+    built = subprocess.run(
+        [sys.executable, "-m", "hatchling", "build", "-t", "wheel", "-d", str(wheels)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
+    wheel = next(wheels.glob("*.whl"))
+
+    # The wheel stays a zip archive on sys.path, so the settings file has no
+    # filesystem path; the loader must read it through the package resource API.
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from omnibase_infra.models.network_binding import (
+    load_network_binding_settings,
+    model_network_binding_settings,
+)
+
+assert Path(model_network_binding_settings.__file__).is_relative_to(sys.argv[1])
+settings = load_network_binding_settings()
+assert settings.tcp_port_min <= settings.tcp_port_max
+print("zip-network-binding-readback: settings loaded from the zipped wheel")
+""",
+            str(wheel),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+    assert "zip-network-binding-readback:" in probe.stdout
