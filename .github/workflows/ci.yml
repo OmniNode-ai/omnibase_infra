@@ -615,6 +615,38 @@ jobs:
         # this repository declares type scope.
         run: uv run mypy src/omnibase_infra scripts/deploy-agent/deploy_agent
 
+      # The jobs here install from uv.lock, so a dependency range that admits a
+      # newer major than the lock pins is never exercised by them. These steps
+      # build the pull request's own wheel, install it into a clean virtual
+      # environment WITHOUT the lock (mcp resolves to the highest version the
+      # declared range admits, as it does for a PyPI install) and build the
+      # streamable HTTP MCP application. On a commit that imports a module the
+      # resolved SDK no longer ships, the last step fails with ImportError.
+      - name: Build wheel for MCP resolution check
+        run: uv build --wheel --out-dir "$RUNNER_TEMP/dist"
+
+      - name: Install wheel into a clean environment without the lock
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/clean-venv"
+          uv pip install --python "$RUNNER_TEMP/clean-venv/bin/python" "$RUNNER_TEMP"/dist/*.whl
+          "$RUNNER_TEMP/clean-venv/bin/python" -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
+
+      - name: Create the MCP application from the installed wheel
+        # Run from outside the checkout so the installed wheel, not ./src, is imported.
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/clean-venv/bin/python" - <<'PY'
+          from omnibase_infra.handlers.mcp.transport_streamable_http import (
+              TransportMCPStreamableHttp,
+          )
+
+          app = TransportMCPStreamableHttp().create_app(
+              tools=[], tool_executor=lambda name, arguments: None
+          )
+          assert app is not None
+          print("create_app returned", type(app).__name__)
+          PY
+
   # ===========================================================================
   # Shape-gate detectors that run on every PR (OMN-20298). Each job below has
   # no `needs:` and no `if:`: a failing or skipped dependency can never stop a
