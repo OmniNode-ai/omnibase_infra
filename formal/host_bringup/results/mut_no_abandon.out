@@ -1,19 +1,19 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 102 and seed 146117512649316192 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /m/HostBringup.tla
-Parsing file /tmp/tlc-4979536591779084189/Naturals.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-4979536591779084189/FiniteSets.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-4979536591779084189/TLC.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-4979536591779084189/Sequences.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Running breadth-first search Model-Checking with fp 62 and seed 3321265409624389649 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/tmp4yvn3h5g/HostBringup.tla
+Parsing file /tmp/tlc-8554259651747471221/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-8554259651747471221/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-8554259651747471221/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-8554259651747471221/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module HostBringup
 Linting of module HostBringup
-Starting... (2026-11-01 15:20:45)
+Starting... (2026-11-01 19:00:24)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-01 15:20:45.
+Finished computing initial states: 1 distinct state generated at 2026-11-01 19:00:24.
 Error: Invariant AbandonedClosed is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -40,7 +40,7 @@ State 1: <Initial predicate>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 2: <Acquire(r1) line 233, col 3 to line 245, col 84 of module HostBringup>
+State 2: <Acquire(r1) line 240, col 3 to line 252, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -64,7 +64,7 @@ State 2: <Acquire(r1) line 233, col 3 to line 245, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 3: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
+State 3: <Tick line 201, col 3 to line 206, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -88,7 +88,7 @@ State 3: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 4: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
+State 4: <Tick line 201, col 3 to line 206, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -112,7 +112,7 @@ State 4: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 5: <Acquire(r2) line 233, col 3 to line 245, col 84 of module HostBringup>
+State 5: <Acquire(r2) line 240, col 3 to line 252, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -136,7 +136,7 @@ State 5: <Acquire(r2) line 233, col 3 to line 245, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 6: <EndAbandon(r2) line 286, col 3 to line 294, col 84 of module HostBringup>
+State 6: <EndAbandon(r2) line 293, col 3 to line 301, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -160,6 +160,6 @@ State 6: <EndAbandon(r2) line 286, col 3 to line 294, col 84 of module HostBring
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-588 states generated, 249 distinct states found, 113 states left on queue.
+575 states generated, 241 distinct states found, 107 states left on queue.
 The depth of the complete state graph search is 8.
-Finished in 00s at (2026-11-01 15:20:45)
+Finished in 01s at (2026-11-01 19:00:24)

@@ -1,19 +1,19 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 2 and seed 5410616275005283533 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /m/HostBringup.tla
-Parsing file /tmp/tlc-16333661399385754927/Naturals.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-16333661399385754927/FiniteSets.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-16333661399385754927/TLC.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-16333661399385754927/Sequences.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Running breadth-first search Model-Checking with fp 74 and seed -601576404374396009 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/tmpopj1761r/HostBringup.tla
+Parsing file /tmp/tlc-6253949689683866963/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-6253949689683866963/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-6253949689683866963/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-6253949689683866963/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module HostBringup
 Linting of module HostBringup
-Starting... (2026-11-01 15:21:05)
+Starting... (2026-11-01 19:00:31)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-01 15:21:05.
+Finished computing initial states: 1 distinct state generated at 2026-11-01 19:00:31.
 Error: Invariant AbandonedWitness is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -40,20 +40,20 @@ State 1: <Initial predicate>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 2: <Acquire(r1) line 233, col 3 to line 245, col 84 of module HostBringup>
+State 2: <Tick line 201, col 3 to line 206, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
-/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
-/\ now = 0
-/\ pc = (r1 :> "abandon" @@ r2 :> "new" @@ r3 :> "new")
+/\ fence = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 1
+/\ pc = (r1 :> "new" @@ r2 :> "new" @@ r3 :> "new")
 /\ lateLanded = FALSE
 /\ lock = none
 /\ staleRefused = FALSE
 /\ ext = {}
 /\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
-/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
-/\ rev = 1
+/\ lease = [fence |-> 0, holder |-> none, exp |-> 0, owed |-> {}]
+/\ rev = 0
 /\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
 /\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
 /\ abandonEmitted = FALSE
@@ -64,7 +64,7 @@ State 2: <Acquire(r1) line 233, col 3 to line 245, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 3: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
+State 3: <Acquire(r1) line 240, col 3 to line 252, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -76,7 +76,7 @@ State 3: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
 /\ staleRefused = FALSE
 /\ ext = {}
 /\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
-/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 3, owed |-> {}]
 /\ rev = 1
 /\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
 /\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
@@ -88,7 +88,7 @@ State 3: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 4: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
+State 4: <Tick line 201, col 3 to line 206, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -100,7 +100,7 @@ State 4: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
 /\ staleRefused = FALSE
 /\ ext = {}
 /\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
-/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 3, owed |-> {}]
 /\ rev = 1
 /\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
 /\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
@@ -112,19 +112,43 @@ State 4: <Tick line 194, col 3 to line 199, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 5: <Acquire(r2) line 233, col 3 to line 245, col 84 of module HostBringup>
+State 5: <Tick line 201, col 3 to line 206, col 84 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 3
+/\ pc = (r1 :> "abandon" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 3, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 6: <Acquire(r2) line 240, col 3 to line 252, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
 /\ fence = (r1 :> 1 @@ r2 :> 2 @@ r3 :> 0)
-/\ now = 2
+/\ now = 3
 /\ pc = (r1 :> "abandon" @@ r2 :> "abandon" @@ r3 :> "new")
 /\ lateLanded = FALSE
 /\ lock = none
 /\ staleRefused = FALSE
 /\ ext = {}
 /\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
-/\ lease = [fence |-> 2, holder |-> r2, exp |-> 4, owed |-> {r1}]
+/\ lease = [fence |-> 2, holder |-> r2, exp |-> 5, owed |-> {r1}]
 /\ rev = 2
 /\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
 /\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
@@ -136,19 +160,19 @@ State 5: <Acquire(r2) line 233, col 3 to line 245, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 6: <EmitAbandoned(r2,r1) line 274, col 3 to line 283, col 68 of module HostBringup>
+State 7: <EmitAbandoned(r2,r1) line 281, col 3 to line 290, col 68 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
 /\ fence = (r1 :> 1 @@ r2 :> 2 @@ r3 :> 0)
-/\ now = 2
+/\ now = 3
 /\ pc = (r1 :> "abandon" @@ r2 :> "abandon" @@ r3 :> "new")
 /\ lateLanded = FALSE
 /\ lock = none
 /\ staleRefused = FALSE
 /\ ext = {}
 /\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
-/\ lease = [fence |-> 2, holder |-> r2, exp |-> 4, owed |-> {}]
+/\ lease = [fence |-> 2, holder |-> r2, exp |-> 5, owed |-> {}]
 /\ rev = 2
 /\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
 /\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
@@ -160,6 +184,6 @@ State 6: <EmitAbandoned(r2,r1) line 274, col 3 to line 283, col 68 of module Hos
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-540 states generated, 244 distinct states found, 110 states left on queue.
-The depth of the complete state graph search is 8.
-Finished in 00s at (2026-11-01 15:21:05)
+636 states generated, 285 distinct states found, 123 states left on queue.
+The depth of the complete state graph search is 10.
+Finished in 01s at (2026-11-01 19:00:31)

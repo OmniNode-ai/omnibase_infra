@@ -42,9 +42,10 @@
 (*                                        owed), mut_release_before_terminal*)
 (*                                        (a run frees the lease, then      *)
 (*                                        emits its terminal)               *)
-(* NoLandAfterSuccessorVerify  invariant  mut_grace_le_timeout (the lease   *)
-(*                                        grace is not above the action     *)
-(*                                        timeout), mut_ext_no_renew (an    *)
+(* NoLandAfterSuccessorVerify  invariant  mut_grace_le_timeout (a lease     *)
+(*                                        expires the action timeout, not   *)
+(*                                        the grace, after a renewal),      *)
+(*                                        mut_ext_no_renew (an              *)
 (*                                        external action does not extend   *)
 (*                                        the lease when it starts)         *)
 (* StaleHolderRefused          invariant  mut_cmp_before_lock (the fence is *)
@@ -81,6 +82,12 @@ CONSTANTS Runs,           \* launchers: two operators and a lane
           MaxKills,       \* kills allowed in a behavior
           MaxRegress,     \* world regressions allowed in a behavior
           MUT             \* "none" or the name of the mutation
+
+ASSUME Grace > ActTimeout   \* the declared parameters: grace above the action timeout
+
+\* The ticks a grant or renewal extends the lease. mut_grace_le_timeout drops
+\* it to the action timeout, the case the ASSUME above rules out as a parameter.
+GraceEff == IF MUT = "grace_le_timeout" THEN ActTimeout ELSE Grace
 
 Targets == {"a", "b", "c"}
 Needs == [t \in Targets |->
@@ -237,7 +244,7 @@ Acquire(r) ==
          prior == IF lease.holder = None THEN {} ELSE {lease.holder}
          owed == IF MUT = "owed_not_chained" THEN prior ELSE lease.owed \cup prior
      IN /\ rev' = IF f > rev THEN f ELSE rev
-        /\ lease' = [holder |-> r, fence |-> f, exp |-> now + Grace, owed |-> owed]
+        /\ lease' = [holder |-> r, fence |-> f, exp |-> now + GraceEff, owed |-> owed]
         /\ fence' = [fence EXCEPT ![r] = f]
   /\ pc' = [pc EXCEPT ![r] = "abandon"]
   /\ UNCHANGED <<now, lock, world, ext, term, tgt, passRead, credit, waitRead,
@@ -248,7 +255,7 @@ Acquire(r) ==
 Renew(r) ==
   /\ pc[r] \in {"probe", "plan", "waiting", "waitpassed"}
   /\ Holds(r)
-  /\ lease' = [lease EXCEPT !.exp = IF now + Grace > @ THEN now + Grace ELSE @]
+  /\ lease' = [lease EXCEPT !.exp = IF now + GraceEff > @ THEN now + GraceEff ELSE @]
   /\ UNCHANGED <<now, rev, lock, world, ext, term, pc, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
                  hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
@@ -377,7 +384,7 @@ ExtStart(r) ==
   /\ pc[r] = "extstart"
   /\ IF Holds(r)
        THEN /\ lease' = IF MUT = "ext_no_renew" THEN lease
-                          ELSE [lease EXCEPT !.exp = IF now + Grace > @ THEN now + Grace ELSE @]
+                          ELSE [lease EXCEPT !.exp = IF now + GraceEff > @ THEN now + GraceEff ELSE @]
             /\ ext' = ext \cup {[run |-> r, t |-> tgt[r], fence |-> fence[r],
                                  deadline |-> now + ActTimeout]}
             /\ pc' = [pc EXCEPT ![r] = "extwait"]

@@ -1,19 +1,19 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 0 and seed 1165672386203400383 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /m/HostBringup.tla
-Parsing file /tmp/tlc-11033842003567156035/Naturals.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-11033842003567156035/FiniteSets.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-11033842003567156035/TLC.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-11033842003567156035/Sequences.tla (jar:file:/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Running breadth-first search Model-Checking with fp 91 and seed -8955341677392728766 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/tmpicjh_vo2/HostBringup.tla
+Parsing file /tmp/tlc-15287627789057328875/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-15287627789057328875/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-15287627789057328875/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-15287627789057328875/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module HostBringup
 Linting of module HostBringup
-Starting... (2026-11-01 15:20:52)
+Starting... (2026-11-01 19:00:27)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-01 15:20:53.
+Finished computing initial states: 1 distinct state generated at 2026-11-01 19:00:27.
 Error: Invariant AbandonedClosed is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -40,7 +40,7 @@ State 1: <Initial predicate>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 2: <PersonDone line 213, col 3 to line 217, col 84 of module HostBringup>
+State 2: <PersonDone line 220, col 3 to line 224, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -64,7 +64,7 @@ State 2: <PersonDone line 213, col 3 to line 217, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 3: <Acquire(r1) line 233, col 3 to line 245, col 84 of module HostBringup>
+State 3: <Acquire(r1) line 240, col 3 to line 252, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -88,7 +88,7 @@ State 3: <Acquire(r1) line 233, col 3 to line 245, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 4: <EndAbandon(r1) line 286, col 3 to line 294, col 84 of module HostBringup>
+State 4: <EndAbandon(r1) line 293, col 3 to line 301, col 84 of module HostBringup>
 /\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -112,7 +112,7 @@ State 4: <EndAbandon(r1) line 286, col 3 to line 294, col 84 of module HostBring
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 5: <Probe(r1) line 298, col 3 to line 307, col 84 of module HostBringup>
+State 5: <Probe(r1) line 305, col 3 to line 314, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -136,7 +136,7 @@ State 5: <Probe(r1) line 298, col 3 to line 307, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 6: <Plan(r1) line 319, col 3 to line 327, col 84 of module HostBringup>
+State 6: <Plan(r1) line 326, col 3 to line 334, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -160,7 +160,7 @@ State 6: <Plan(r1) line 319, col 3 to line 327, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 7: <TakeLock(r1) line 348, col 3 to line 354, col 84 of module HostBringup>
+State 7: <TakeLock(r1) line 355, col 3 to line 361, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -184,7 +184,7 @@ State 7: <TakeLock(r1) line 348, col 3 to line 354, col 84 of module HostBringup
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 8: <HostApply(r1) line 359, col 3 to line 373, col 86 of module HostBringup>
+State 8: <HostApply(r1) line 366, col 3 to line 380, col 86 of module HostBringup>
 /\ passRead = (r1 :> {"c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -208,7 +208,7 @@ State 8: <HostApply(r1) line 359, col 3 to line 373, col 86 of module HostBringu
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 9: <Probe(r1) line 298, col 3 to line 307, col 84 of module HostBringup>
+State 9: <Probe(r1) line 305, col 3 to line 314, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -232,7 +232,7 @@ State 9: <Probe(r1) line 298, col 3 to line 307, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 10: <Plan(r1) line 319, col 3 to line 327, col 84 of module HostBringup>
+State 10: <Plan(r1) line 326, col 3 to line 334, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -256,7 +256,7 @@ State 10: <Plan(r1) line 319, col 3 to line 327, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 11: <ExtStart(r1) line 377, col 3 to line 389, col 84 of module HostBringup>
+State 11: <ExtStart(r1) line 384, col 3 to line 396, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -280,7 +280,7 @@ State 11: <ExtStart(r1) line 377, col 3 to line 389, col 84 of module HostBringu
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 12: <Next line 480, col 6 to line 480, col 48 of module HostBringup>
+State 12: <Next line 487, col 6 to line 487, col 48 of module HostBringup>
 /\ passRead = (r1 :> {"a", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -304,7 +304,7 @@ State 12: <Next line 480, col 6 to line 480, col 48 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 13: <ExtDone(r1) line 412, col 3 to line 417, col 84 of module HostBringup>
+State 13: <ExtDone(r1) line 419, col 3 to line 424, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -328,7 +328,7 @@ State 13: <ExtDone(r1) line 412, col 3 to line 417, col 84 of module HostBringup
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 14: <Probe(r1) line 298, col 3 to line 307, col 84 of module HostBringup>
+State 14: <Probe(r1) line 305, col 3 to line 314, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "b", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -352,7 +352,7 @@ State 14: <Probe(r1) line 298, col 3 to line 307, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 15: <AllSatisfied(r1) line 330, col 3 to line 335, col 84 of module HostBringup>
+State 15: <AllSatisfied(r1) line 337, col 3 to line 342, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "b", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -376,7 +376,7 @@ State 15: <AllSatisfied(r1) line 330, col 3 to line 335, col 84 of module HostBr
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 16: <Fin1(r1) line 453, col 3 to line 462, col 84 of module HostBringup>
+State 16: <Fin1(r1) line 460, col 3 to line 469, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "b", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -400,7 +400,7 @@ State 16: <Fin1(r1) line 453, col 3 to line 462, col 84 of module HostBringup>
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 17: <Acquire(r2) line 233, col 3 to line 245, col 84 of module HostBringup>
+State 17: <Acquire(r2) line 240, col 3 to line 252, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "b", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -424,7 +424,7 @@ State 17: <Acquire(r2) line 233, col 3 to line 245, col 84 of module HostBringup
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-State 18: <EndAbandon(r2) line 286, col 3 to line 294, col 84 of module HostBringup>
+State 18: <EndAbandon(r2) line 293, col 3 to line 301, col 84 of module HostBringup>
 /\ passRead = (r1 :> {"a", "b", "c"} @@ r2 :> {} @@ r3 :> {})
 /\ hostStale = FALSE
 /\ killsLeft = 2
@@ -448,6 +448,6 @@ State 18: <EndAbandon(r2) line 286, col 3 to line 294, col 84 of module HostBrin
 /\ regressLeft = 1
 /\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
 
-86434 states generated, 26408 distinct states found, 7144 states left on queue.
-The depth of the complete state graph search is 19.
-Finished in 03s at (2026-11-01 15:20:55)
+83121 states generated, 25490 distinct states found, 6970 states left on queue.
+The depth of the complete state graph search is 20.
+Finished in 04s at (2026-11-01 19:00:30)
