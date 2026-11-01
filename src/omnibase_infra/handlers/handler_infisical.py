@@ -109,7 +109,7 @@ class HandlerInfisical(
         self._initialized: bool = False
         self._circuit_breaker_initialized: bool = False
         # Handler-owned cache and metrics, guarded by the handler's lock
-        self._cache = ModelSecretCache(max_size=self.MAX_CACHE_SIZE)
+        self._cache: ModelSecretCache = ModelSecretCache(max_size=self.MAX_CACHE_SIZE)
         self._cache_lock = threading.Lock()
 
     @property

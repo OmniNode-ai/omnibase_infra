@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Intent target base URIs (OMN-21792).
+#
+# The base of each reducer and projection intent target, following
+# {protocol}://{resource}/{identifier}. Read by ModelIntentTargetUris; code holds
+# no URI literal and appends only the identifier. Every key is required: a block
+# that omits one fails to load.
+intent_targets:
+  build_loop_runs: "postgres://build_loop_runs"
+  contracts: "postgres://contracts"
+  topics: "postgres://topics"
+  gateway_link_health: "postgres://gateway_link_health"
+  event_ledger: "postgres://event_ledger"
+  node_registrations: "postgres://node_registrations"
+  validation_event_ledger: "postgres://validation_event_ledger"

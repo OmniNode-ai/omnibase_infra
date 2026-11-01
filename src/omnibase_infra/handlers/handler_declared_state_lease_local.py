@@ -13,7 +13,7 @@ class HandlerDeclaredStateLeaseLocal:
     """Serialize rounds inside one process; a shared store binds the cross-process lease."""
 
     def __init__(self) -> None:
-        self._leases = ModelLeaseTable()
+        self._leases: ModelLeaseTable = ModelLeaseTable()
 
     @property
     def handler_type(self) -> EnumHandlerType:

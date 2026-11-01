@@ -155,7 +155,7 @@ class HandlerTopicCatalogPostgres:
         self._query_timeout_seconds = query_timeout_seconds
 
         # in-process cache: catalog_version (int) -> ModelTopicCatalogResponse
-        self._cache = ModelVersionKeyedCache[ModelTopicCatalogResponse]()
+        self._cache: ModelVersionKeyedCache[ModelTopicCatalogResponse] = ModelVersionKeyedCache()  # fmt: skip
 
         logger.info(
             "HandlerTopicCatalogPostgres initialised",

@@ -50,6 +50,16 @@ class DevBootRecoveryError(RuntimeError):
     """The candidate deploy failed, including when recovery succeeded."""
 
 
+class DevCompanionLaneFailedError(RuntimeError):
+    """A lane deployed beside the runtime failed (the gateway forwarder).
+
+    The companion lane carries no delegation or runtime traffic, so its failure
+    fails the job and is reported, but it is not by itself a reason to replace a
+    runtime that is up and healthy (OMN-21645). The guard still restores the
+    retained family when the runtime is unhealthy or absent.
+    """
+
+
 def _checked(
     argv: list[str],
     timeout: int = DOCKER_READ_SECONDS,
@@ -170,6 +180,13 @@ def _unchanged_and_healthy(
     )
 
 
+def _all_healthy(read_containers: Callable[[], list[ModelDevBootContainer]]) -> bool:
+    try:
+        return all(_healthy(c) for c in read_containers())
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return False
+
+
 class HandlerDevBootGuard:
     """Supervise only the selected DEV compose project under its caller's lock."""
 
@@ -194,7 +211,7 @@ class HandlerDevBootGuard:
         )
         self.root = state_dir / "dev-boot-guard" / self.config.compose_project
         self.snapshot_path = self.root / "last-healthy.json"
-        self.point = ModelValueHolder[ModelDevBootPoint]()
+        self.point: ModelValueHolder[ModelDevBootPoint] = ModelValueHolder()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -509,7 +526,32 @@ class HandlerDevBootGuard:
                 logger.exception("Cannot persist failed dev deploy before recovery")
             try:
                 unchanged = _unchanged_and_healthy(self.point.current, self._containers)
-                if not unchanged:
+                kept_revision: str | None = None
+                if (
+                    isinstance(exc, DevCompanionLaneFailedError)
+                    and not unchanged
+                    and _all_healthy(self._containers)
+                ):
+                    # OMN-21645: the companion lane failed after the new
+                    # runtime was replaced and verified. Rolling that healthy
+                    # family back recreates the runtime a second time and ends
+                    # every in-flight run with runtime_shutdown. A capture that
+                    # refuses leaves kept_revision unset, so the retained
+                    # family is restored as before.
+                    try:
+                        captured = self._capture()
+                        self.point.hold(captured)
+                        kept_revision = captured.revision
+                    except (
+                        OSError,
+                        ValueError,
+                        RuntimeError,
+                        subprocess.SubprocessError,
+                    ):
+                        kept_revision = None
+                if kept_revision is not None:
+                    incident["runtime_kept_revision"] = kept_revision
+                elif not unchanged:
                     self._restore()
                 incident["recovery_skipped_healthy"] = unchanged
                 incident["recovery_verified"] = True

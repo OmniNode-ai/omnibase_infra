@@ -234,7 +234,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-06-02"
-  updated: "2026-11-01"
+  updated: "2026-10-05"
   tags:
     - effect
     - dlq

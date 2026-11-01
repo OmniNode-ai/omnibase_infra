@@ -7,9 +7,12 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 2
-node_version: "1.0.2"
+  patch: 3
+node_version: "1.0.3"
 changelog:
+  - version: "1.0.3"
+    ticket: "OMN-21623"
+    change: "The localhost health-check probe URL is built by load_third_party_endpoints().loopback_url from the declared endpoints file instead of a literal — no behavior change."
   - version: "1.0.2"
     ticket: "OMN-15717"
     change: "Annotate the localhost health-check probe URL with a url-authority-ok marker (LOCAL topology probes a host-mapped Compose port on this deployment host) — no behavior change."

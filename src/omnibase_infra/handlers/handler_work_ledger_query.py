@@ -64,11 +64,9 @@ class HandlerWorkLedgerQuery:
     """
 
     def __init__(self, transport: ModelKafkaEventBusConfig) -> None:
-        self._transport = transport.model_copy(
-            update={"acks": EnumKafkaAcks.ALL, "enable_idempotence": False}
-        )
+        self._transport = transport
         self._contract = load_work_ledger_query_client_config()
-        self._client = ModelValueHolder[KafkaTransport]()
+        self._client: ModelValueHolder[KafkaTransport] = ModelValueHolder()
         self._session_open = False
         self._query_lock = asyncio.Lock()
 
@@ -142,17 +140,21 @@ class HandlerWorkLedgerQuery:
         async with asyncio.timeout(timeout_s):
             async with self._query_lock:
                 try:
-                    transport = self._client.current
-                    if transport is None:
+                    if (transport := self._client.current) is None:
                         transport = KafkaTransport(
-                            config=self._transport,
+                            config=self._transport.model_copy(
+                                update={
+                                    "acks": EnumKafkaAcks.ALL,
+                                    "enable_idempotence": False,
+                                }
+                            ),
                             group=self._contract.consumer_group_prefix + uuid4().hex,
                             topics=(completed,),
                             auto_offset_reset="latest",
                         )
-                        # Establish reply offsets before the first publish.
-                        await transport.start()
-                        self._client.hold(transport)
+                        # Establish reply offsets before the first publish. The
+                        # transport is held first so a failed start is closed below.
+                        await self._client.hold(transport).start()
                     await transport.send(
                         command,
                         key=str(correlation_id).encode("utf-8"),

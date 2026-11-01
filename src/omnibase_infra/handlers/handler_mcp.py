@@ -55,6 +55,7 @@ from omnibase_infra.handlers.models.mcp import (
     ModelMcpToolResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 from omnibase_infra.models.handlers.model_name_keyed_table import ModelNameKeyedTable
 from omnibase_infra.services.mcp import MCPServerLifecycle, ModelMCPServerConfig
 from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
@@ -192,7 +193,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         self._container = container
         self._config: ModelMcpHandlerConfig | None = None
         self._initialized: bool = False
-        self._tool_registry = ModelNameKeyedTable[ProtocolMCPToolDefinition]()
+        self._tool_registry: ModelNameKeyedTable[ProtocolMCPToolDefinition] = ModelNameKeyedTable()  # fmt: skip
 
         # MCP integration components (OMN-1281)
         self._mcp_registry: ServiceMCPToolRegistry | None = registry
@@ -384,18 +385,18 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
             # Try TCP connect
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(poll_interval)
-                # TCP PROTOCOL REQUIREMENT (NOT a config fallback):
-                # When a server binds to 0.0.0.0 (INADDR_ANY), it listens on all
-                # interfaces but you cannot connect() to 0.0.0.0 - it's not a
-                # routable address. TCP requires connecting to a specific interface.
-                # Using 127.0.0.1 (loopback) is the correct way to reach a local
-                # server that bound to 0.0.0.0. This is standard TCP/IP behavior,
-                # not an environment configuration fallback.
-                effective_host = "127.0.0.1" if host == "0.0.0.0" else host  # noqa: S104
-                result = sock.connect_ex((effective_host, port))
-                sock.close()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(poll_interval)
+                    # TCP PROTOCOL REQUIREMENT (NOT a config fallback):
+                    # When a server binds to the bind-all address (INADDR_ANY), it
+                    # listens on all interfaces but you cannot connect() to it - it's
+                    # not a routable address. TCP requires connecting to a specific
+                    # interface. Using the loopback address is the correct way to reach
+                    # a local server that bound to the bind-all address. This is
+                    # standard TCP/IP behavior, not an environment configuration
+                    # fallback.
+                    effective_host = load_endpoint_defaults().connect_address(host)
+                    result = sock.connect_ex((effective_host, port))
                 if result == 0:
                     return  # Server is ready
             except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience

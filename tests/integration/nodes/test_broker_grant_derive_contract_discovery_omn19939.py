@@ -139,6 +139,10 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
     scoped_result = handler_class().handle(input_class.model_validate(scoped_bindings))
     scoped_source = policy["principal_grants_from"][scoped_result.principal]
     (tmp_path / scoped_source).write_text(scoped_result.model_dump_json())
+    machine_source = policy["machine_grants_from"]
+    (tmp_path / machine_source).write_bytes(
+        (root / "deploy/lab" / machine_source).read_bytes()
+    )
     local_policy = tmp_path / policy_path.name
     local_policy.write_text(policy_path.read_text())
 
