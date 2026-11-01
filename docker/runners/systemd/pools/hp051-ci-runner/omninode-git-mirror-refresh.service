@@ -7,6 +7,8 @@ Description=OmniNode h051 runner pool git mirror refresh (OMN-17232)
 Documentation=https://github.com/OmniNode-ai/omnibase_infra/tree/dev/docker/runners/systemd/pools/hp051-ci-runner
 After=network-online.target
 Wants=network-online.target
+# Order startup after the mirror data volume is mounted, including the refresh writer.
+RequiresMountsFor=/data/scratch/git-mirror
 
 [Service]
 Type=oneshot

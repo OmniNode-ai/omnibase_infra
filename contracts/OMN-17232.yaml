@@ -206,12 +206,46 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_hp051_pool_omn17232.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-hp051-pool-deploy
-    description: The shipped deploy artifacts declare four runner containers in the omnirunners cgroup slice, the slice's memory cap, and the pool's git mirror daemon unit. The live-host readback runs on the host, not on the hosted runner.
+    description: Render the shipped compose artifact with Docker Compose and compare inherited labels, memory limits and cgroup settings with the YAML declaration. Parse both mirror units to require data-volume mount ordering and verify the daemon's read-only service flags. The command fails if Docker Compose is absent; it requires no running containers or private configuration.
     source: manual
     binds_ac: [AC10, AC11]
     checks:
       - check_type: command
-        check_value: "test \"$(grep -c 'container_name: hp051-ci-runner-' docker/docker-compose.runners-hp051-ci-runner.yml)\" = 4 && grep -q 'cgroup_parent: omnirunners.slice' docker/docker-compose.runners-hp051-ci-runner.yml && grep -q 'MemoryMax=' docker/runners/systemd/pools/hp051-ci-runner/omnirunners.slice && grep -q 'ExecStart=' docker/runners/systemd/pools/hp051-ci-runner/omninode-git-mirror-daemon.service"
+        check_value: |-
+          env PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY'
+          import json, os, pathlib, shlex, subprocess, yaml
+          compose = pathlib.Path("docker/docker-compose.runners-hp051-ci-runner.yml")
+          result = subprocess.run(
+              ["docker", "compose", "-f", str(compose), "config", "--no-interpolate", "--format", "json"],
+              env={**os.environ, "COMPOSE_PROJECT_NAME": "hp051-artifact-probe"},
+              capture_output=True, text=True, check=True, timeout=30,
+          )
+          rendered = json.loads(result.stdout)["services"]
+          declared = yaml.safe_load(compose.read_text())["services"]
+          assert set(rendered) == set(declared) == {f"hp051-ci-runner-{n}" for n in range(1, 5)}
+          def memory_bytes(value):
+              return value if isinstance(value, int) else int(value[:-1]) * 1024**3 if value[-1].lower() == "g" else int(value)
+          for name, service in rendered.items():
+              assert service["environment"] == declared[name]["environment"]
+              assert set(service["environment"]["RUNNER_LABELS"].split(",")) == {"self-hosted", "omnibase-ci-multiarch", "hp-canary", "linux", "x64", "arch-amd64"}
+              assert service["cgroup_parent"] == declared[name]["cgroup_parent"] == "omnirunners.slice"
+              assert memory_bytes(service["mem_limit"]) == memory_bytes(declared[name]["mem_limit"]) == 6 * 1024**3
+              assert memory_bytes(service["memswap_limit"]) == memory_bytes(declared[name]["memswap_limit"]) == 12 * 1024**3
+          pool = pathlib.Path("docker/runners/systemd/pools/hp051-ci-runner")
+          def directives(name):
+              return dict(line.split("=", 1) for line in (pool / name).read_text().replace("\\\n", " ").splitlines() if "=" in line and not line.lstrip().startswith(("#", "[")))
+          daemon = directives("omninode-git-mirror-daemon.service")
+          refresh = directives("omninode-git-mirror-refresh.service")
+          assert daemon["RequiresMountsFor"] == refresh["RequiresMountsFor"] == "/data/scratch/git-mirror"
+          command = shlex.split(daemon["ExecStart"])
+          assert command[0] == "/usr/lib/git-core/git-daemon"
+          assert "--base-path=/data/scratch/git-mirror" in command
+          assert "--listen=${OMNI_GIT_MIRROR_LISTEN}" in command
+          for service in ("receive-pack", "upload-archive"):
+              assert f"--disable={service}" in command and f"--forbid-override={service}" in command
+          assert directives("omnirunners.slice")["MemoryMax"] == "112G"
+          print("hp051 artifacts: four rendered runners, inherited settings, mount ordering, read-only mirror")
+          PY
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-hp051-labels-and-budget-ac10
     description: Parse the four services, assert the exact labels and runner group, confirm no workflow routes to the canary pin, and check numeric child and parent memory limits and class-specific fleet counts.

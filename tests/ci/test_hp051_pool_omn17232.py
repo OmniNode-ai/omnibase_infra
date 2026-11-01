@@ -16,7 +16,6 @@ import shutil
 import signal
 import socket
 import subprocess
-import sys
 import time
 from ipaddress import IPv4Address
 from pathlib import Path
@@ -226,6 +225,7 @@ def test_the_pool_has_its_own_git_mirror_on_the_data_volume() -> None:
     # Parsed, not grepped: the env file is required (no leading '-'), and ExecStart is a git daemon with the flags below.
     directives = _directives(daemon)
     assert directives["EnvironmentFile"] == "/etc/default/omninode-git-mirror"
+    assert directives["RequiresMountsFor"] == MIRROR_ROOT
     assert directives["ExecStart"].split()[0] == "/usr/lib/git-core/git-daemon"
     assert shlex.split(directives["ExecStart"]) == [
         "/usr/lib/git-core/git-daemon",
@@ -245,6 +245,7 @@ def test_the_pool_has_its_own_git_mirror_on_the_data_volume() -> None:
     ]
     refresh = MIRROR_REFRESH.read_text(encoding="utf-8")
     assert f"Environment=OMNI_GIT_MIRROR_ROOT={MIRROR_ROOT}" in refresh
+    assert _directives(refresh)["RequiresMountsFor"] == MIRROR_ROOT
     assert "Type=oneshot" in refresh
     # A failing refresh must surface as a failed unit; exit 1 is never declared a success.
     assert "SuccessExitStatus" not in _directives(refresh)
@@ -331,7 +332,7 @@ def test_daemon_preflight_refuses_unsafe_or_unassigned_listen_addresses(
     if address is not None:
         environment["OMNI_GIT_MIRROR_LISTEN"] = address
     result = subprocess.run(
-        [sys.executable, *command[1:]],
+        command,
         env=environment,
         capture_output=True,
         text=True,
@@ -346,7 +347,7 @@ def test_daemon_preflight_refuses_unsafe_or_unassigned_listen_addresses(
 def test_daemon_preflight_accepts_an_assigned_unicast_address() -> None:
     command = shlex.split(_values(MIRROR_DAEMON.read_text(), "ExecStartPre")[1])
     result = subprocess.run(
-        [sys.executable, *command[1:]],
+        command,
         env={
             **os.environ,
             "OMNI_GIT_MIRROR_LISTEN": "127.0.0.1",
@@ -379,7 +380,7 @@ def test_git_daemon_serves_reads_but_refuses_repository_write_and_archive_overri
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
-    arguments = shlex.split(_directives(MIRROR_DAEMON.read_text())["ExecStart"])[1:]
+    arguments = shlex.split(_directives(MIRROR_DAEMON.read_text())["ExecStart"])
     replacements = {
         f"--base-path={MIRROR_ROOT}": f"--base-path={tmp_path}",
         "--listen=${OMNI_GIT_MIRROR_LISTEN}": "--listen=127.0.0.1",
@@ -387,7 +388,7 @@ def test_git_daemon_serves_reads_but_refuses_repository_write_and_archive_overri
         MIRROR_ROOT: str(tmp_path),
     }
     process = subprocess.Popen(
-        ["git", "daemon", *(replacements.get(arg, arg) for arg in arguments)],
+        [replacements.get(arg, arg) for arg in arguments],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         env=scrub_git_location_env(os.environ),

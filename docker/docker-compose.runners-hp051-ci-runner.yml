@@ -12,7 +12,8 @@
 # pytest, mypy, lint, node scripts -- can land here. The opt-in is the guard: this CPU has no AVX2, and a job that imports
 # a wheel built for it died here with SIGILL (exit 132 on the `pedalboard` import in a private repository's unit tests, measured
 # 2026-10-29), so every such job stays on `[self-hosted, omnibase-ci]`. `hp-canary` stays as the pool's own pin label
-# (the relabel roll is additive); it is not a production label and no workflow names it.
+# (the relabel roll is additive); it is reserved for deliberate canary placement. The workflow test covers
+# this repository only; other repositories must choose arch-neutral jobs before targeting either pool label.
 #
 # SAME RUNNER, OTHER HOST. The anchors below are docker-compose.runners-omnipc2-ci-runner.yml's, with these changes,
 # each deliberate:

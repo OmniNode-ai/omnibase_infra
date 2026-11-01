@@ -13,6 +13,8 @@ Documentation=https://github.com/OmniNode-ai/omnibase_infra/tree/dev/docker/runn
 After=docker.service network-online.target
 Requires=docker.service
 Wants=network-online.target
+# Order startup after the mirror data volume is mounted, including the refresh writer.
+RequiresMountsFor=/data/scratch/git-mirror
 # The compose bridge can appear after boot. Keep retrying the preflight until it exists;
 # do not exhaust systemd's start limit before the first runner deployment creates it.
 StartLimitIntervalSec=0
