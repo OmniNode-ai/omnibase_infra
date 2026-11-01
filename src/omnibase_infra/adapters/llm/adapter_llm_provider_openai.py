@@ -185,7 +185,7 @@ class AdapterLlmProviderOpenai:
         >>> resolved_endpoint = "routing-authority-provided endpoint"
         >>> adapter = AdapterLlmProviderOpenai(
         ...     base_url=resolved_endpoint,
-        ...     default_model="qwen2.5-coder-14b",
+        ...     default_model=routed_model,
         ... )
         >>> response = await adapter.generate_async(request)
         >>> await adapter.close()
@@ -193,8 +193,8 @@ class AdapterLlmProviderOpenai:
 
     def __init__(
         self,
+        default_model: str,
         base_url: str | None = None,
-        default_model: str = "qwen2.5-coder-14b",
         api_key: str | None = None,
         provider_name: str = "openai-compatible",
         provider_type: str = "local",
@@ -204,9 +204,9 @@ class AdapterLlmProviderOpenai:
         """Initialize the OpenAI-compatible provider adapter.
 
         Args:
+            default_model: Model identifier from the model-routing policy.
             base_url: Base URL of the LLM endpoint. Defaults to the required
                 ``LLM_CODER_URL`` env var.
-            default_model: Default model identifier.
             api_key: Optional API key for Bearer token auth.
             provider_name: Provider identifier for logging/routing.
             provider_type: Deployment type: 'local', 'external_trusted', 'external'.
