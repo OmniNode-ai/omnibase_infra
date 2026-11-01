@@ -80,7 +80,7 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.protocols.protocol_registration_projection_pool import (
-        RegistrationProjectionPool,
+        ProtocolRegistrationProjectionPool,
     )
     from omnibase_infra.protocols.protocol_snapshot_publisher import (
         ProtocolSnapshotPublisher,
@@ -552,7 +552,7 @@ async def wire_registration_dispatchers(
 
 async def wire_registration_handlers(
     container: ModelONEXContainer,
-    pool: RegistrationProjectionPool,
+    pool: ProtocolRegistrationProjectionPool,
     liveness_interval_seconds: int | None = None,
     projector: ProjectorShell | None = None,
     snapshot_publisher: ProtocolSnapshotPublisher | None = None,
@@ -688,7 +688,7 @@ async def wire_registration_handlers(
             ),
             scope=EnumInjectionScope.GLOBAL,
             metadata={
-                "description": "Handler for NodeIntrospectionEvent",
+                "description": "Handler for NodeIntrospectionEvent (with topic store)",
                 "version": str(semver_default),
             },
         )

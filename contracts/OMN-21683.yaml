@@ -47,7 +47,7 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py tests/integration/runtime/test_registration_wiring_identity_omn21683.py -q -p no:cacheprovider --no-cov"
   - id: dod-004-deploy-artifact-readback
     description: >-
-      Hosted-runner deploy artifact probe reads the registration wiring source at the checked-out commit from GitHub and requires exactly one shared topic store and one introspection registration. It fails against the merge-base artifact, which creates the store and registers the introspection handler twice. Runtime behavior is exercised by test_registration_wiring_identity_omn21683.py on the lab.
+      Hosted-runner deploy artifact probe reads the registration wiring source from the local checked-out commit and requires exactly one shared topic store and one introspection construction. It also runs the real-container registration readback for both optional-projector paths, shared catalog topics and repeated heartbeat binding identity. The artifact assertion fails against the merge base, which constructs the store and introspection handler twice.
     source: manual
     binds_ac: [AC2, AC3]
     checks:
@@ -56,7 +56,7 @@ dod_evidence:
           set -eu;
           artifact="$(mktemp)";
           trap 'rm -f "$artifact"' EXIT;
-          curl --fail --silent --show-error --location "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/nodes/node_registration_orchestrator/wiring.py" --output "$artifact";
+          git show HEAD:src/omnibase_infra/nodes/node_registration_orchestrator/wiring.py > "$artifact";
           python3 - "$artifact" <<'PYPROBE'
           import ast
           import sys
@@ -69,3 +69,4 @@ dod_evidence:
               assert count == 1, (name, count)
           print("registration deploy artifact: one topic store and one introspection handler")
           PYPROBE
+          env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_registration_wiring_identity_omn21683.py -q -p no:cacheprovider --no-cov
