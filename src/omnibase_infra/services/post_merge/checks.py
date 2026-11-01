@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 from omnibase_infra.models.github.model_pr_merged_event import ModelPRMergedEvent
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.services.post_merge.enum_check_stage import EnumCheckStage
 from omnibase_infra.services.post_merge.enum_finding_severity import (
     EnumFindingSeverity,
@@ -94,7 +95,7 @@ async def _fetch_pr_diff(repo: str, pr_number: int, token: str) -> str:
     """Fetch the PR diff from GitHub API."""
     import httpx
 
-    url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
+    url = load_third_party_endpoints().github_pull_api_url(repo, pr_number)
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github.diff",
@@ -300,11 +301,9 @@ async def _run_check_topic_drift(
     github_token = os.environ.get("GITHUB_TOKEN", "")
 
     with tempfile.TemporaryDirectory(prefix="post-merge-sweep-") as tmpdir:
-        clone_url = f"https://github.com/{event.repo}.git"
-        if github_token:
-            clone_url = (
-                f"https://x-access-token:{github_token}@github.com/{event.repo}.git"
-            )
+        clone_url = load_third_party_endpoints().github_clone_url(
+            event.repo, github_token
+        )
 
         # Shallow clone at the merge SHA
         clone_proc = await asyncio.create_subprocess_exec(

@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Root-signed authority facts for one inert RSD lane overlay."""
 
-from __future__ import annotations
-
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.rsd import model_rsd_pinned_model_identity as pin
 from omnibase_infra.runtime.models.rsd_live_delegation_schema import (
     _RFC3339_UTC,
     CanonicalEd25519Signature,
@@ -32,10 +31,10 @@ class ModelRsdLiveDelegationAuthorityEnvelope(BaseModel):
     claim_binding_schema: Literal["rsd.delegation-claim-binding.v1"]
     route_ref: Literal["logical://delegation/qwen3.8-27b"]
     backend_id: Literal["local-coder"]
-    model_id: Literal["Qwen/Qwen3.8-27B"]
+    model_id: pin.ServedModelId
     attestor_key_id: CanonicalUuid4
     attestor_public_key_fingerprint_sha256: CanonicalSha256
-    observed_model_id: Literal["Qwen3.6-35B-A3B"]
+    observed_model_id: pin.ObservedModelId
     observed_model_attestation_sha256: CanonicalSha256
     issued_at: str = Field(pattern=_RFC3339_UTC)
     expires_at: str = Field(pattern=_RFC3339_UTC)
