@@ -13,22 +13,31 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
+_WHEEL_BUILD_TIMEOUT_SECONDS = 300
+_PROBE_TIMEOUT_SECONDS = 60
 
-def test_installed_wheel_loads_network_bindings_and_binds_loopback(
-    tmp_path: Path,
-) -> None:
+
+@pytest.fixture(scope="module")
+def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build the runtime wheel once for every test in this module."""
     root = Path(__file__).resolve().parents[2]
-    wheels = tmp_path / "wheels"
+    wheels = tmp_path_factory.mktemp("wheels")
     built = subprocess.run(
         [sys.executable, "-m", "hatchling", "build", "-t", "wheel", "-d", str(wheels)],
         cwd=root,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_WHEEL_BUILD_TIMEOUT_SECONDS,
         check=False,
     )
     assert built.returncode == 0, built.stdout + built.stderr
-    wheel = next(wheels.glob("*.whl"))
+    return next(wheels.glob("*.whl"))
+
+
+def test_installed_wheel_loads_network_bindings_and_binds_loopback(
+    tmp_path: Path, built_wheel: Path
+) -> None:
+    wheel = built_wheel
     installed = tmp_path / "installed"
     with zipfile.ZipFile(wheel) as archive:
         archive.extractall(installed)
@@ -70,26 +79,17 @@ print("wheel-network-binding-readback: settings loaded; kernel imported; loopbac
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_PROBE_TIMEOUT_SECONDS,
         check=False,
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr
     assert "wheel-network-binding-readback:" in probe.stdout
 
 
-def test_zipped_wheel_loads_network_binding_settings(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[2]
-    wheels = tmp_path / "wheels"
-    built = subprocess.run(
-        [sys.executable, "-m", "hatchling", "build", "-t", "wheel", "-d", str(wheels)],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert built.returncode == 0, built.stdout + built.stderr
-    wheel = next(wheels.glob("*.whl"))
+def test_zipped_wheel_loads_network_binding_settings(
+    tmp_path: Path, built_wheel: Path
+) -> None:
+    wheel = built_wheel
 
     # The wheel stays a zip archive on sys.path, so the settings file has no
     # filesystem path; the loader must read it through the package resource API.
@@ -118,7 +118,7 @@ print("zip-network-binding-readback: settings loaded from the zipped wheel")
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_PROBE_TIMEOUT_SECONDS,
         check=False,
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr

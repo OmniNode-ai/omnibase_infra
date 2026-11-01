@@ -38,5 +38,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_setup_preflight_effect.handlers.handler_preflight_check"
 capabilities:
   - "preflight.check"
+descriptor:
+  node_archetype: effect
 metadata:
   description: "Validates all prerequisites before platform provisioning including Docker/Compose/Python versions, POSTGRES_PASSWORD env var, Docker daemon, and port availability"

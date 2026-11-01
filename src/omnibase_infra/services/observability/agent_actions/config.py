@@ -64,7 +64,7 @@ class ConfigAgentActionsConsumer(ModelLoopbackHealthServerBinding, BaseSettings)
 
     # Topics to subscribe (7 observability topics)
     # NOTE: All omniclaude-produced topics use canonical ONEX names (OMN-2621, OMN-2902, OMN-2903).
-    # "onex.evt.omniclaude.agent-status.v1" renamed from "onex.evt.agent.status.v1" (OMN-2846).  # onex-topic-allow: pending contract auto-wiring
+    # The agent-status topic was renamed to its omniclaude-prefixed canonical name (OMN-2846).
     # Use platform_topic_suffixes constants for OMN-3343 topic literal enforcement.
     topics: list[str] = Field(
         default_factory=lambda: [

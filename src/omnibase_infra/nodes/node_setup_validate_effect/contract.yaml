@@ -46,5 +46,7 @@ handler_routing:
 capabilities:
   - "setup.validate.tcp"
   - "setup.validate.http"
+descriptor:
+  node_archetype: effect
 metadata:
   description: "Validates TCP/HTTP health for all LOCAL-mode services in the deployment topology after provisioning, using HTTP GET for health_check_path or TCP connect"
