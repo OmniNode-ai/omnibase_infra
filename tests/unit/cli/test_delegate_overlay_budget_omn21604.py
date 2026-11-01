@@ -23,6 +23,7 @@ import yaml
 from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import run_delegate
 from omnibase_infra.cli.protocol_execution_budget import ProtocolExecutionBudget
+from tests.fixtures.handler_correlated_noop import CEILING_ENV_VAR
 from tests.helpers.cli_registry_stand_in import (
     StandInExecutionBudget,
     StandInTaskClassAuthority,
@@ -92,13 +93,28 @@ def _run_and_capture_wait(
     monkeypatch: pytest.MonkeyPatch,
     overlay_root: Path | None,
 ) -> tuple[int, int, int | None]:
-    """Run the CLI once; return (exit code, terminal wait, requested seconds)."""
+    """Run the CLI once; return (exit code, terminal wait, requested seconds).
+
+    The terminal wait is not recorded on a completed run's receipt, so it is read
+    from the one call that sizes it, which delegates to the real function.
+    """
     contract_path = tmp_path / "contract.yaml"
     contract_path.write_text(_CORRELATED_NOOP_CONTRACT, encoding="utf-8")
     monkeypatch.setattr(
         cli_delegate, "_resolve_packaged_contract", lambda _name: contract_path
     )
     monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+    # The fixture handler validates the request against the ceiling it declares;
+    # it declares the one the authority answers, so an overlay-raised class is
+    # not refused downstream of the CLI.
+    monkeypatch.setenv(
+        CEILING_ENV_VAR,
+        str(
+            _authority_through_overlay(overlay_root)
+            .execution_budget(_TASK_CLASS)
+            .task_class_timeout_ceiling_seconds
+        ),
+    )
     monkeypatch.delenv("OMNI_HOME", raising=False)
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
     use_stand_in_registry(monkeypatch, _authority_through_overlay(overlay_root))
@@ -145,16 +161,21 @@ def test_overlay_ceiling_of_600_lets_a_300_second_request_wait_300_plus_margin(
     assert _REQUESTED_SECONDS - 5 <= requested <= _REQUESTED_SECONDS
     assert requested > 240, "not clamped to the contract's 240 s ceiling"
     assert wait == requested + _MARGIN_SECONDS
-    # The fixture handler declares a 240 s ceiling of its own, so the run ends
-    # with exit code 1 after the CLI dispatched; the exit code is pinned to that
-    # one outcome. What the overlay decides is read from the public receipt: the
-    # declared timeout is the wait the CLI sized, and no ceiling refusal is named.
+    # The run completes end to end: the fixture handler declares the overlay's
+    # ceiling, so nothing downstream of the CLI refuses the 300 s request. The
+    # receipt carries the request, the raised ceiling and the unclamped
+    # execution window, and names no ceiling refusal.
+    assert exit_code == 0
     receipts = list((tmp_path / "state" / "runs").glob("*/receipt.json"))
     assert len(receipts) == 1
     receipt_text = receipts[0].read_text("utf-8")
-    assert json.loads(receipt_text)["declared_timeout_seconds"] == wait
+    assert json.loads(receipt_text)["budget_evidence"] == {
+        "requested_timeout_seconds": _REQUESTED_SECONDS,
+        "task_class_timeout_ceiling_seconds": _OVERLAY_CEILING_SECONDS,
+        "execution_timeout_seconds": _REQUESTED_SECONDS,
+        "terminal_delivery_margin_seconds": _MARGIN_SECONDS,
+    }
     assert "timeout_exceeds_task_class_ceiling" not in receipt_text
-    assert exit_code == 1
 
 
 def test_without_the_overlay_the_same_request_is_clamped_to_the_contract(

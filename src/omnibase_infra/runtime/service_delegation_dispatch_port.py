@@ -334,7 +334,8 @@ class RuntimeDelegationDispatchPort:
         # change. Defaulted rather than required until the caller passes them:
         # a new argument lands consumer-first or is excluded when unset.
         #
-        # The port and its protocol are pinned to one default by
+        # Unset (None) means the task class's declared budget (OMN-21604). The
+        # port and its protocol are pinned to that one unset default by
         # `tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py`.
         execution_timeout_seconds: int | None = None,
         terminal_delivery_margin_seconds: int | None = None,
