@@ -5,7 +5,8 @@
 """Check executor registry mapping check codes to executor instances.
 
 Provides a centralized registry of all check executors in the catalog
-and a factory function to retrieve executors by check code.
+and a factory function to retrieve executors by check code. The catalog is
+declared in ``check_catalog.yaml``; this module builds one executor per entry.
 
 Check Catalog (12 checks):
     CHECK-PY-001    Typecheck (mypy)                     HandlerSubprocessCheckExecutor
@@ -29,85 +30,23 @@ from __future__ import annotations
 from pathlib import Path
 from types import MappingProxyType
 
-from omnibase_infra.enums import EnumCheckSeverity
-from omnibase_infra.validation.checks.handler_artifact import (
-    HandlerArtifactCompleteness,
-    HandlerReplaySanity,
+from omnibase_infra.models.validation.model_check_catalog_entry import (
+    ModelCheckCatalogEntry,
 )
 from omnibase_infra.validation.checks.handler_check_executor import (
     HandlerCheckExecutor,
-    HandlerSubprocessCheckExecutor,
-)
-from omnibase_infra.validation.checks.handler_measurement import (
-    HandlerCostTokenDelta,
-    HandlerTimeWallClockDelta,
-)
-from omnibase_infra.validation.checks.handler_risk import (
-    HandlerRiskDiffSize,
-    HandlerRiskSensitivePaths,
-    HandlerRiskUnsafeOperations,
 )
 
 
 def _build_registry() -> dict[str, HandlerCheckExecutor]:
-    """Build the default check executor registry.
+    """Build the default check executor registry from the declared catalog.
 
     Returns:
         Mapping from check code to executor instance.
-
-    Note:
-        CHECK-VAL-002 (artifact completeness) is instantiated without an
-        ``artifact_dir``, which means it will return ``skipped=True`` at
-        runtime.  This is intentional: the default registry cannot know
-        the deployment-specific artifact directory.  Callers that need
-        CHECK-VAL-002 to run must replace the registry entry with an
-        instance configured via ``HandlerArtifactCompleteness(artifact_dir=...)``.
     """
     return {
-        # --- Subprocess checks (mypy, ruff, pytest, CI) ---
-        "CHECK-PY-001": HandlerSubprocessCheckExecutor(
-            check_code="CHECK-PY-001",
-            label="Typecheck (mypy)",
-            severity=EnumCheckSeverity.REQUIRED,
-            command="uv run mypy src/",
-        ),
-        "CHECK-PY-002": HandlerSubprocessCheckExecutor(
-            check_code="CHECK-PY-002",
-            label="Lint/format (ruff)",
-            severity=EnumCheckSeverity.REQUIRED,
-            command="uv run ruff check src/ tests/",
-        ),
-        "CHECK-TEST-001": HandlerSubprocessCheckExecutor(
-            check_code="CHECK-TEST-001",
-            label="Unit tests (fast)",
-            severity=EnumCheckSeverity.REQUIRED,
-            command="uv run pytest tests/ -m unit --timeout=60",
-        ),
-        "CHECK-TEST-002": HandlerSubprocessCheckExecutor(
-            check_code="CHECK-TEST-002",
-            label="Targeted integration tests",
-            severity=EnumCheckSeverity.RECOMMENDED,
-            command="uv run pytest tests/ -m integration --timeout=120",
-        ),
-        "CHECK-OUT-001": HandlerSubprocessCheckExecutor(
-            check_code="CHECK-OUT-001",
-            label="CI equivalent pass rate",
-            severity=EnumCheckSeverity.REQUIRED,
-            command="uv run pytest tests/ --timeout=180",
-        ),
-        # --- Analysis checks (no subprocess, inspect candidate) ---
-        "CHECK-VAL-001": HandlerReplaySanity(),
-        # CHECK-VAL-002 requires artifact_dir to be provided by the caller.
-        # The default instance (artifact_dir=None) returns skipped=True.
-        # To enable this check, callers must supply a deployment-specific
-        # artifact directory when constructing HandlerArtifactCompleteness.
-        "CHECK-VAL-002": HandlerArtifactCompleteness(),
-        "CHECK-RISK-001": HandlerRiskSensitivePaths(),
-        "CHECK-RISK-002": HandlerRiskDiffSize(),
-        "CHECK-RISK-003": HandlerRiskUnsafeOperations(),
-        # --- Measurement checks (informational) ---
-        "CHECK-COST-001": HandlerCostTokenDelta(),
-        "CHECK-TIME-001": HandlerTimeWallClockDelta(),
+        entry.check_code: entry.build_executor()
+        for entry in ModelCheckCatalogEntry.load_catalog()
     }
 
 
@@ -119,19 +58,8 @@ CHECK_REGISTRY: MappingProxyType[str, HandlerCheckExecutor] = MappingProxyType(
 )
 
 # Ordered check codes matching the catalog order
-CHECK_CATALOG_ORDER: tuple[str, ...] = (
-    "CHECK-PY-001",
-    "CHECK-PY-002",
-    "CHECK-TEST-001",
-    "CHECK-TEST-002",
-    "CHECK-VAL-001",
-    "CHECK-VAL-002",
-    "CHECK-RISK-001",
-    "CHECK-RISK-002",
-    "CHECK-RISK-003",
-    "CHECK-OUT-001",
-    "CHECK-COST-001",
-    "CHECK-TIME-001",
+CHECK_CATALOG_ORDER: tuple[str, ...] = tuple(
+    entry.check_code for entry in ModelCheckCatalogEntry.load_catalog()
 )
 
 
@@ -155,7 +83,12 @@ def get_check_executor(
         for the given check code.
     """
     if check_code == "CHECK-VAL-002" and artifact_dir is not None:
-        return HandlerArtifactCompleteness(artifact_dir=artifact_dir)
+        entry = next(
+            e
+            for e in ModelCheckCatalogEntry.load_catalog()
+            if e.check_code == check_code
+        )
+        return entry.build_executor(artifact_dir=artifact_dir)
     return CHECK_REGISTRY.get(check_code)
 
 

@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
 from omnibase_infra.docker.catalog.manifest_schema import CatalogManifest, HealthCheck
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 
 # The layer whose services serve ``ServiceHealth`` on the runtime health port.
 # Read off the manifest rather than matched by service name: a runtime service
@@ -107,9 +108,8 @@ def _last_option_value(tokens: list[str], flag: str) -> str | None:
 
 
 def _expected_health_url(manifest: CatalogManifest) -> str | None:
-    if manifest.ports is None:
-        return f"http://localhost:{RUNTIME_HEALTH_PORT}/health"  # url-authority-ok: container self-probe loopback URL rendered into docker healthcheck argv
-    return f"http://localhost:{manifest.ports.internal}/health"  # url-authority-ok: manifest-declared container self-probe loopback URL rendered into docker healthcheck argv
+    port = RUNTIME_HEALTH_PORT if manifest.ports is None else manifest.ports.internal
+    return load_third_party_endpoints().loopback_url(int(port), "/health")
 
 
 def probes_runtime_health(manifest: CatalogManifest) -> bool:

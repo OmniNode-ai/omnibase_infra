@@ -25,10 +25,11 @@ from dataclasses import dataclass
 
 import httpx
 
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DEBOUNCE_SECONDS = 900  # 15 minutes
-_SLACK_POST_URL = "https://slack.com/api/chat.postMessage"
 
 
 @dataclass  # internal-dataclass-ok: event-bus-internal debounce state
@@ -147,7 +148,7 @@ class TopicViolationAlerter:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
-                    _SLACK_POST_URL,
+                    load_third_party_endpoints().slack_post_message_url,
                     headers={"Authorization": f"Bearer {self._token}"},
                     json={"channel": self._channel, "text": text},
                 )
