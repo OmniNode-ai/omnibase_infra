@@ -81,7 +81,11 @@ from deploy_agent.executor import (
 # ``gateway_lane`` opts this module out of the conftest stub that keeps the
 # mutating gateway deploy step inert everywhere else -- this is the module
 # that exercises it, so it controls the seams itself.
-pytestmark = [pytest.mark.unit, pytest.mark.gateway_lane]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.gateway_lane,
+    pytest.mark.usefixtures("gateway_phase_available"),
+]
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GATEWAY_COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.gateway.yml"
