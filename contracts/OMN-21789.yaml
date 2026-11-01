@@ -20,6 +20,9 @@ evidence_requirements:
   - kind: tests
     description: "The recorded forwarder group describe is not judged, the runtime group still is, and the declaration key is required."
     command: "uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py tests/unit/docker/test_omn18789_broker_readiness_lane_scope.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "Deploy check: execute the bind-mounted broker probe with stub rpk responses to prove literal suffix exemptions and fail-closed declaration validation; no live broker or lane access is required."
+    command: "deploy: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -q -p no:cacheprovider -k 'forwarder or suffix'"
 dod_evidence:
   - id: dod-001
     description: "A frozen forwarder outbound group is not judged by the probe; the same stub with the exemption removed is NOT READY."
@@ -42,3 +45,10 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -q -p no:cacheprovider -k declaration'
+  - id: dod-004
+    description: "Each comma-separated suffix exempts its literal ending only; empty elements are refused and regex metacharacters cannot exempt unrelated groups."
+    source: generated
+    binds_ac: [AC1, AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -q -p no:cacheprovider -k 'each_declared_suffix or suffix_elements or suffix_metacharacters'"

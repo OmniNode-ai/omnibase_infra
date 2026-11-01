@@ -565,6 +565,89 @@ def test_probe_fails_closed_when_the_exempt_suffixes_are_not_declared(
     assert "sync_exempt_group_suffixes" in (result.stdout + result.stderr)
 
 
+@pytest.mark.parametrize(
+    "suffixes",
+    [
+        "-gateway-forwarder-outbound,-other-relay",
+        "-other-relay,-gateway-forwarder-outbound",
+    ],
+)
+def test_each_declared_suffix_exempts_only_the_matching_group(
+    probe_env: ProbeRunner, tmp_path: Path, suffixes: str
+) -> None:
+    declaration = tmp_path / "declaration.conf"
+    declaration.write_text(
+        DECLARATION.read_text().replace(
+            "sync_exempt_group_suffixes=-gateway-forwarder-outbound",
+            f"sync_exempt_group_suffixes={suffixes}",
+        )
+    )
+    window = int(_declared("sync_window_seconds"))
+    for index, suffix in enumerate(suffixes.split(",")):
+        state = tmp_path / f"state-{index}"
+        stub = STUB_FROZEN_FORWARDER.replace("-gateway-forwarder-outbound", suffix)
+        probe_env(stub, now=1_000_000, state=state, declaration=declaration)
+        later = probe_env(
+            stub, now=1_000_000 + window + 1, state=state, declaration=declaration
+        )
+        assert later.returncode == 0, later.stdout + later.stderr
+
+    state = tmp_path / "runtime-state"
+    probe_env(STUB_FROZEN_GROUP, now=1_000_000, state=state, declaration=declaration)
+    later = probe_env(
+        STUB_FROZEN_GROUP,
+        now=1_000_000 + window + 1,
+        state=state,
+        declaration=declaration,
+    )
+    assert later.returncode != 0
+    assert "group_not_synced" in later.stdout + later.stderr
+
+
+@pytest.mark.parametrize("suffixes", [",", ",-relay", "-relay,", "-a,,-b"])
+def test_probe_rejects_empty_suffix_elements(
+    probe_env: ProbeRunner, tmp_path: Path, suffixes: str
+) -> None:
+    declaration = tmp_path / "declaration.conf"
+    declaration.write_text(
+        DECLARATION.read_text().replace(
+            "sync_exempt_group_suffixes=-gateway-forwarder-outbound",
+            f"sync_exempt_group_suffixes={suffixes}",
+        )
+    )
+    result = probe_env(STUB_FROZEN_GROUP, now=1_000_000, declaration=declaration)
+    assert result.returncode != 0
+    assert "declaration_invalid_value" in result.stdout + result.stderr
+    assert "sync_exempt_group_suffixes" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("suffix", [".", ".*", "[", "a|b", "$", "(x)", r"\n"])
+def test_suffix_metacharacters_are_literal_and_match_only_at_the_end(
+    probe_env: ProbeRunner, tmp_path: Path, suffix: str
+) -> None:
+    declaration = tmp_path / "declaration.conf"
+    declaration.write_text(
+        DECLARATION.read_text().replace(
+            "sync_exempt_group_suffixes=-gateway-forwarder-outbound",
+            f"sync_exempt_group_suffixes={suffix}",
+        )
+    )
+    window = int(_declared("sync_window_seconds"))
+    for index, (name_suffix, expected_ready) in enumerate(
+        [(suffix, True), (f"{suffix}-runtime", False), ("-runtime", False)]
+    ):
+        state = tmp_path / f"state-{index}"
+        stub = STUB_FROZEN_FORWARDER.replace("-gateway-forwarder-outbound", name_suffix)
+        first = probe_env(stub, now=1_000_000, state=state, declaration=declaration)
+        assert first.returncode == 0, first.stdout + first.stderr
+        later = probe_env(
+            stub, now=1_000_000 + window + 1, state=state, declaration=declaration
+        )
+        assert (later.returncode == 0) == expected_ready, later.stdout + later.stderr
+        if not expected_ready:
+            assert "group_not_synced" in later.stdout + later.stderr
+
+
 def test_probe_has_no_environment_fallback_for_the_window() -> None:
     """Operating Rule 8: a silent default is how a wrong bound ships unseen."""
     source = PROBE.read_text()
