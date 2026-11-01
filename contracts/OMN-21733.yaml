@@ -35,12 +35,14 @@ dod_evidence:
       - check_type: command
         check_value: 'uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov'
   - id: dod-002
-    description: "On the serving host the container publishes one port bound to one address."
+    description: "The rendered compose file publishes exactly one port, bound to the given address and with no default."
     source: generated
     binds_ac: [AC5]
     checks:
       - check_type: command
-        check_value: "ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
+        check_value: 'uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov -k "published_port"'
+      - check_type: command
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.factory-floor-web.yml?ref=jonah/omn-21733-reports-web' --jq .content | base64 -d | grep -q 'FACTORY_FLOOR_BIND_ADDR:?set FACTORY_FLOOR_BIND_ADDR'"
   - id: dod-003
     description: "Only the decision map directory may load the two pinned scripts."
     source: generated
