@@ -53,10 +53,10 @@ dod_evidence:
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'named = {\"budget_source\": result.budget_source} if result.budget_source else {}' | grep -qx 1"
   - id: dod-omn21604-ac1-overlay-terminal-wait
     description: >-
-      A stand-in authority applies a 600 s delegation_budgets overlay; the CLI's terminal wait is the request's seconds plus the 60 s margin (above the contract's 240 s), the receipt names no ceiling refusal, and the same request without the overlay waits 300 s. Mutation check: clamping the CLI's wait to 240 fails the first test.
+      A stand-in authority applies a 600 s delegation_budgets overlay; the CLI's terminal wait is the request's seconds plus the 60 s margin (above the contract's 240 s), the receipt names no ceiling refusal, and the same request without the overlay waits 300 s. The check also runs the dispatch-port budget tests, which import the budget resolver this PR adds, so the whole command fails at the merge base. Mutation check: clamping the CLI's wait to 240 fails the first test.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/cli/test_delegate_overlay_budget_omn21604.py -q -n 0 -p no:cacheprovider
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/cli/test_delegate_overlay_budget_omn21604.py tests/unit/runtime/test_delegation_budget_deadline_check_omn21604.py -q -n 0 -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]

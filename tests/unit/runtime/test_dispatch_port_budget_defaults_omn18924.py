@@ -16,8 +16,8 @@ before dispatch, this refused the lane after it.
 WHY DEFAULTED RATHER THAN REQUIRED. A new argument lands consumer-first or is
 excluded when unset. Requiring it of a caller that does not yet pass it makes
 the failure the caller's, and here the caller is a different repository on a
-different release cadence. The defaults are the contract budget, so a caller
-that does pass them is unaffected.
+different release cadence. An unset budget resolves to the task class's declared budget (OMN-21604),
+so a caller that does pass them is unaffected.
 
 THIS EXACT SHAPE HAS HAPPENED BEFORE ON THIS SIGNATURE. The OMN-18321 comment
 in the protocol records a kwarg added on one side alone, a TypeError on the
