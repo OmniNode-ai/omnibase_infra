@@ -28,10 +28,12 @@ from uuid import uuid4
 import pytest
 
 import omnibase_infra.nodes.node_setup_validate_effect.handlers.handler_service_validate as validate_mod
-from omnibase_core.models.core.model_deployment_topology import (
-    EnumDeploymentMode,
-    ModelDeploymentTopology,
+from omnibase_core.enums.enum_deployment_mode import EnumDeploymentMode
+from omnibase_core.models.core.model_deployment_topology import ModelDeploymentTopology
+from omnibase_core.models.core.model_deployment_topology_local_config import (
     ModelDeploymentTopologyLocalConfig,
+)
+from omnibase_core.models.core.model_deployment_topology_service import (
     ModelDeploymentTopologyService,
 )
 from omnibase_infra.nodes.node_setup_validate_effect.handlers.handler_service_validate import (

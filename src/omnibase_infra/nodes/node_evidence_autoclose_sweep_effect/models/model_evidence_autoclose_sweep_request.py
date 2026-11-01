@@ -87,17 +87,58 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "asked."
         ),
     )
+    # OMN-21722. SIZED FROM THE RECEIPTS, NOT FROM THE ORIGINAL ESTIMATE.
+    #
+    # It was 5, from a ~15 s per-call estimate against a 30-minute cadence. The
+    # cadence is now 2 hours and the job timeout 60 minutes, and the pool is 133
+    # (the 8 scheduled runs of 2026-10-30T20:10Z to 2026-10-31T10:09Z): at 5 per
+    # run one pass of the pool took 27 runs, 54 hours, and the closer flipped 0
+    # tickets in those 8 runs. Measured in those same receipts, the sweep step
+    # took 62 to 285 s; the slowest run (285 s) made 9 verifier-class calls, so
+    # the worst measured cost is 31.7 s per call, including the run's own
+    # enumeration. The sizing rule: the worst measured run plus the ADDED
+    # candidates at the worst measured per-call cost must stay under half the
+    # job timeout. 285 + (40 - 5) * 31.7 = 1395 s = 23.3 min, against 30 min.
+    # tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21715_backfill_width.py
+    # holds that arithmetic against the workflow's own `timeout-minutes`, so a
+    # shorter timeout or a larger width is a red test naming both. 40 sweeps a
+    # 133 pool in 4 runs (8 hours). Linear 503s (10 in those 8 runs) are
+    # recorded per candidate and fail closed; they do not stop the run.
     backfill_max_candidates: int = Field(
-        default=5,
+        default=40,
         ge=1,
         le=100,
         description=(
             "Hard per-run bound on how many backfill candidates reach "
             "dod_verify. This is the run-budget guard and the thing that must "
-            "not track the size of the board: at ~15s per verifier call, 5 is "
-            "~75s of added work against a 30-minute cadence. Raising it trades "
-            "drain rate for run duration and nothing else -- it can never "
-            "widen what the flip predicate accepts."
+            "not track the size of the board: 40 is sized from the measured "
+            "worst run (285 s) and worst per-call cost (31.7 s), 23 minutes "
+            "against a 60-minute job timeout on a 2-hour cadence (OMN-21722). "
+            "Raising it trades drain rate for run duration and nothing else -- "
+            "it can never widen what the flip predicate accepts."
+        ),
+    )
+    # OMN-21731. The ticket-contract arm: it enumerates TICKETS, not merge
+    # windows. The forward window (6 h) and the backfill window (168 h) are
+    # windows over merged PRs, so a ticket whose PR merged longer ago was never
+    # offered: 598 of the 722 done-not-closed tickets of the 2026-10-31 triage.
+    # This arm lists the key's own open tickets, intersects them with the
+    # `contracts/<ticket>.yaml` files on the default branch of the clones the run
+    # holds, and offers a rotating slice through the offer resolution. 10 is
+    # sized with the backfill width against the workflow timeout in
+    # tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21723_contract_enumeration.py.
+    # 0 turns the arm off. It never widens what the flip predicate accepts.
+    contract_enumeration_max_candidates: int = Field(
+        default=10,
+        ge=0,
+        le=100,
+        description=(
+            "OMN-21731. Hard per-run bound on how many open tickets with a "
+            "merged contract the ticket-contract arm offers to the same "
+            "downstream pipeline, rotating on `backfill_rotation_minutes`. 0 "
+            "turns the arm off. Tickets not assigned to the key's user are "
+            "never listed. It widens which tickets are asked and nothing about "
+            "what counts as proven."
         ),
     )
     backfill_pool_size: int = Field(
@@ -522,8 +563,19 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
     )
     # OMN-18489. The In Progress demotion leg. The window is declared here, in
     # the contract-bound request, and nowhere as a literal in the handler.
+    #
+    # ARMED HERE, in the contract's own default, and not by an expression in the
+    # workflow: the same authority split as `scheduled_apply` and
+    # `backfill_lookback_hours` (OMN-17658). 168h = 7 days is the window the leg
+    # was designed, tested and probed at (OMN-18489 AC4 deploy probe, the unit
+    # and integration tests all run at 168). Measured 2026-10-31 (OMN-21714,
+    # the OMN-17427 Linear triage): 19 tickets sat In Progress with no CLAIM, no
+    # open pull request, no ledger work and no merge in seven days while
+    # `in_progress_demotion` was null in all 8 scheduled runs. The leg's own
+    # fences bound the blast radius: `max_demotions_per_run`, the exclusion
+    # fence, the disarm marker, and a dry run (`apply` false) that writes none.
     demotion_window_hours: int = Field(
-        default=0,
+        default=168,
         ge=0,
         le=24 * 365,
         description=(
@@ -531,7 +583,8 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "A ticket In Progress with no comment other than a sweep's own, no "
             "open pull request and no live execution claim for this long, and "
             "not on the exclusion fence, returns to Backlog. 0 turns the leg "
-            "off and is the value until the window is armed in the workflow."
+            "off. The default is 168 (seven days), the window the leg was built "
+            "and probed at; OMN-21714 armed it here, in the contract."
         ),
     )
     max_demotions_per_run: int = Field(

@@ -96,8 +96,9 @@ def test_no_arm64_row_or_pool_carries_the_action_class() -> None:
 def test_declared_totals_keep_action_and_count_multiarch_on_both_arches() -> None:
     config = load_runner_fleet_config(FLEET_CONFIG)
     assert config.declared_total("action") == 26
-    # 10 on the primary host + 16 on the second amd64 host + 4 on the Mac Studio.
-    assert config.declared_total(MULTIARCH_CLASS) == 30
+    # 10 on the primary host + 16 on the second amd64 host + 4 on the Mac Studio
+    # + 4 on the HP DL560 (OMN-17232).
+    assert config.declared_total(MULTIARCH_CLASS) == 34
 
 
 def test_studio_pool_compose_matches_the_declared_count() -> None:
