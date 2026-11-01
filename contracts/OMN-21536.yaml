@@ -13,7 +13,7 @@ requirements:
     acceptance:
       - id: AC8
         statement: >-
-          AC8: both mock handlers read and write through an injected StoreKeyedMemory, and a handler built without one gets its own empty store -- falsifier: uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/integration/handlers/test_registration_storage_handler_swapping.py tests/integration/handlers/test_service_discovery_handler_swapping.py -q; a handler that kept its own dict fails the injected-store assertions.
+          AC8: both mock handlers read and write through an injected StoreKeyedMemory, and a handler built without one gets its own empty store -- falsifier: uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/integration/handlers/test_registration_storage_handler_swapping.py tests/integration/handlers/test_service_discovery_handler_swapping.py tests/integration/handlers/test_mock_handler_shared_store_omn21536.py -q; a handler that kept its own dict fails the injected-store assertions.
       - id: AC9
         statement: >-
           AC9: the validator reports nothing under the registration_storage and service_discovery handler directories -- falsifier: uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape over those directories exits 0; restoring a self-assigning public method makes it exit 1.
@@ -32,7 +32,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/unit/handlers/test_registration_storage_protocol_compliance.py tests/integration/handlers/test_registration_storage_handler_swapping.py tests/integration/handlers/test_service_discovery_handler_swapping.py -q -n 0 -p no:cacheprovider
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/unit/handlers/test_registration_storage_protocol_compliance.py tests/integration/handlers/test_mock_handler_shared_store_omn21536.py tests/integration/handlers/test_registration_storage_handler_swapping.py tests/integration/handlers/test_service_discovery_handler_swapping.py tests/integration/handlers/test_mock_handler_shared_store_omn21536.py -q -n 0 -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC8]
   - id: dod-omn21536-ac9-validator-clean

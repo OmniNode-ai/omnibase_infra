@@ -23,6 +23,10 @@ class StoreKeyedMemory[K: Hashable, V]:
         """Return the value stored under ``key``, or None when absent."""
         return self._items.get(key)
 
+    def has(self, key: K) -> bool:
+        """Return whether ``key`` is stored, even when its value is None."""
+        return key in self._items
+
     def put(self, key: K, value: V) -> None:
         """Store ``value`` under ``key``, replacing any previous value."""
         self._items[key] = value

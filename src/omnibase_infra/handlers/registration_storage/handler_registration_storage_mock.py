@@ -102,7 +102,7 @@ class HandlerRegistrationStorageMock:
         start_time = time.monotonic()
 
         async with self._lock:
-            was_insert = self._store.get(record.node_id) is None
+            was_insert = not self._store.has(record.node_id)
             now = datetime.now(UTC)
 
             # Update timestamps
@@ -314,7 +314,8 @@ class HandlerRegistrationStorageMock:
         start_time = time.monotonic()
 
         async with self._lock:
-            deleted = self._store.evict(node_id) is not None
+            deleted = self._store.has(node_id)
+            self._store.evict(node_id)
 
         duration_ms = (time.monotonic() - start_time) * 1000
 
