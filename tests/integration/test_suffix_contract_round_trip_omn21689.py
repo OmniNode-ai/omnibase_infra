@@ -83,9 +83,8 @@ async def test_enum_suffixes_reach_contract_subscribers() -> None:
             assert type(suffix) is str
             assert suffix == member.value
             assert assignments[name] == f"topic_enums.{enum_name}.{member_name}.value"
-            contract_topic = next(
-                topic for topic in manifest.all_unique_topics if topic == member.value
-            )
+            assert suffix in manifest.all_unique_topics
+            contract_topic = suffix
             unsubscribe = await bus.subscribe_ungrouped(contract_topic, readback)
             try:
                 payload = name.encode()

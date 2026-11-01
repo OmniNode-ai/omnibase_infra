@@ -67,15 +67,15 @@ def _extract_suffix_values(constants_file: Path) -> dict[str, str]:
         Mapping of constant name to string value (e.g., {"SUFFIX_NODE_REGISTRATION": "onex.evt.platform.node-registration.v1"}).
     """
     spec = importlib.util.spec_from_file_location("_suffix_constants", constants_file)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load constants file: {constants_file}")
+    assert spec is not None and spec.loader is not None, constants_file
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return {
-        name: value
-        for name, value in vars(module).items()
-        if name.startswith("SUFFIX_") and isinstance(value, str)
-    }
+    found = {n: v for n, v in vars(module).items() if n[:7] == "SUFFIX_"}
+    if bad := [
+        n for n, v in found.items() if type(v) is not str and isinstance(v, str)
+    ]:
+        raise TypeError(f"{bad} are str subclasses; assign the enum member's .value")
+    return {n: v for n, v in found.items() if isinstance(v, str)}
 
 
 def _is_infrastructure_topic(topic: str) -> bool:

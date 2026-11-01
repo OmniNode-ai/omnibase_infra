@@ -50,6 +50,19 @@ class TestExtractSuffixValues:
         result = _extract_suffix_values(py_file)
         assert result == {"SUFFIX_REAL": "onex.evt.platform.test.v1"}
 
+    def test_refuses_enum_member_assigned_without_value(self, tmp_path: Path) -> None:
+        """A SUFFIX_* bound to a str-mixin enum member (no .value) is refused."""
+        py_file = tmp_path / "suffixes.py"
+        py_file.write_text(
+            textwrap.dedent("""\
+                from omnibase_infra.enums.generated import EnumPlatformTopic
+
+                SUFFIX_NODE_REGISTRATION = EnumPlatformTopic.EVT_NODE_REGISTRATION_V1
+            """)
+        )
+        with pytest.raises(TypeError, match="SUFFIX_NODE_REGISTRATION"):
+            _extract_suffix_values(py_file)
+
     def test_resolves_generated_enum_member_values(self, tmp_path: Path) -> None:
         """SUFFIX_* = EnumProducerTopic.MEMBER.value resolves to the enum's string."""
         py_file = tmp_path / "suffixes.py"
