@@ -5,10 +5,10 @@
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
+    ModelChainRetrievalDecision,
     ModelChainRetrievalResult,
 )
 
@@ -27,39 +27,34 @@ class HandlerChainRetrievalComplete:
         return EnumHandlerTypeCategory.COMPUTE
 
     async def handle(
-        self,
-        retrieval_result: ModelChainRetrievalResult,
-        correlation_id: UUID,
-    ) -> dict[str, str | bool]:
+        self, request: ModelChainRetrievalResult
+    ) -> ModelChainRetrievalDecision:
         """Evaluate retrieval result and decide path.
 
         Args:
-            retrieval_result: Result from chain retrieval effect.
-            correlation_id: Workflow correlation ID.
+            request: Result from chain retrieval effect (carries the workflow
+                correlation ID).
 
         Returns:
-            Dict with path decision and data for next step.
+            Typed decision with path and data for next step.
         """
-        if retrieval_result.is_hit and retrieval_result.matches:
-            best_match = retrieval_result.matches[0]
+        if request.is_hit and request.matches:
+            best_match = request.matches[0]
             logger.info(
                 "Chain HIT: similarity=%.3f, chain_id=%s (correlation_id=%s)",
                 best_match.similarity_score,
                 best_match.chain_entry.chain_id,
-                correlation_id,
+                request.correlation_id,
             )
-            return {
-                "path": "replay",
-                "chain_id": str(best_match.chain_entry.chain_id),
-                "is_hit": True,
-            }
+            return ModelChainRetrievalDecision(
+                path="replay",
+                chain_id=best_match.chain_entry.chain_id,
+                is_hit=True,
+            )
 
         logger.info(
             "Chain MISS: best_similarity=%.3f (correlation_id=%s)",
-            retrieval_result.best_match_similarity,
-            correlation_id,
+            request.best_match_similarity,
+            request.correlation_id,
         )
-        return {
-            "path": "explore",
-            "is_hit": False,
-        }
+        return ModelChainRetrievalDecision(path="explore", is_hit=False)
