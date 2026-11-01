@@ -100,7 +100,7 @@ class HandlerPostgresHeartbeat(MixinPostgresOpExecutor):
         ...     contract_id="my-node:1.0.0",
         ...     last_seen_at=datetime.now(),
         ... )
-        >>> result = await handler.handle(payload, uuid4())
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
 
@@ -131,8 +131,7 @@ class HandlerPostgresHeartbeat(MixinPostgresOpExecutor):
 
     async def handle(
         self,
-        payload: ModelPayloadUpdateHeartbeat,
-        correlation_id: UUID,
+        request: ModelPayloadUpdateHeartbeat,
     ) -> ModelBackendResult:
         """Execute heartbeat timestamp update for a contract.
 
@@ -140,14 +139,13 @@ class HandlerPostgresHeartbeat(MixinPostgresOpExecutor):
         by contract_id, if the contract exists and is active.
 
         Args:
-            payload: Heartbeat parameters containing:
+            request: Heartbeat parameters containing:
                 - contract_id: Derived natural key (node_name:major.minor.patch)
                 - last_seen_at: New heartbeat timestamp
                 - node_name: Contract node name (for logging)
                 - source_node_id: Optional source node ID (for logging)
                 - uptime_seconds: Optional node uptime (for logging)
                 - sequence_number: Optional heartbeat sequence (for logging)
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with:
@@ -165,17 +163,18 @@ class HandlerPostgresHeartbeat(MixinPostgresOpExecutor):
             was found (the contract may have been deregistered), which allows
             heartbeat processing to continue without errors.
         """
+        correlation_id = request.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.HEARTBEAT_ERROR,
             correlation_id=correlation_id,
             log_context={
-                "contract_id": payload.contract_id,
-                "node_name": payload.node_name,
-                "source_node_id": payload.source_node_id,
-                "uptime_seconds": payload.uptime_seconds,
-                "sequence_number": payload.sequence_number,
+                "contract_id": request.contract_id,
+                "node_name": request.node_name,
+                "source_node_id": request.source_node_id,
+                "uptime_seconds": request.uptime_seconds,
+                "sequence_number": request.sequence_number,
             },
-            fn=lambda: self._execute_heartbeat(payload, correlation_id),
+            fn=lambda: self._execute_heartbeat(request, correlation_id),
         )
 
     async def _execute_heartbeat(
