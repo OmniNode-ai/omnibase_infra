@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -33,6 +34,7 @@ from omnibase_infra.cli.cli_delegate import (
     _write_payload,
     delegate_command,
 )
+from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
 from omnibase_infra.cli.model_delegate_locus_decision import ModelDelegateLocusDecision
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 
@@ -290,3 +292,85 @@ def test_named_tests_refuse_to_overwrite_the_caller_lane() -> None:
 def test_the_session_model_refuses_to_overwrite_the_caller_lane() -> None:
     with pytest.raises(ValueError, match="never overwritten"):
         _build(caller_lane="lane-a", lineage={"session_model": "x"}, session_model="m")
+
+
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [
+        ({"session_model": ""}, "--session-model"),
+        ({"session_model": "claude opus"}, "--session-model"),
+        ({"lineage": {"caller_lane": "other"}}, "caller_lane"),
+        ({"named_tests": {"caller_lane": "other"}}, "caller_lane"),
+        (
+            {"session_model": SESSION_MODEL, "lineage": {"session_model": "other"}},
+            "session_model",
+        ),
+    ],
+)
+def test_payload_validation_is_a_usage_error_for_direct_callers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: dict[str, Any],
+    message: str,
+) -> None:
+    calls = _chain(monkeypatch, tmp_path, EnumDelegateLocus.IN_PROCESS)
+    with pytest.raises(click.UsageError, match=message):
+        cli_delegate.run_delegate(
+            prompt="Summarise this.",
+            task_type="document",
+            max_tokens=None,
+            bus="inmemory",
+            locus=EnumDelegateLocus.IN_PROCESS,
+            state_root=tmp_path / "state",
+            timeout=60,
+            verbose=False,
+            emit_socket=tmp_path / "no-daemon.sock",
+            caller=ModelDelegateCaller(lane="lane-a"),
+            **metadata,
+        )
+    assert calls == []
+    assert not list((tmp_path / "state").rglob("delegate-input-*.json"))
+
+
+def test_caller_and_session_model_keep_their_own_payload_fields(tmp_path: Path) -> None:
+    session_id = str(uuid4())
+    path = _write_payload(
+        prompt="Summarise this.",
+        task_type="document",
+        source="claude-code",
+        max_tokens=None,
+        state_root=tmp_path / "state",
+        run_id=uuid4(),
+        correlation_id=uuid4(),
+        caller=ModelDelegateCaller(lane="lane-a", session_id=session_id),
+        session_model=SESSION_MODEL,
+    )
+    payload = json.loads(path.read_text())
+    assert payload["metadata"] == {
+        "caller_lane": "lane-a",
+        "session_model": SESSION_MODEL,
+    }
+    assert payload["session_id"] == session_id
+
+
+def test_empty_session_model_is_refused_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _chain(monkeypatch, tmp_path, EnumDelegateLocus.IN_PROCESS)
+    result = CliRunner().invoke(
+        delegate_command,
+        [
+            "Summarise this.",
+            "--task-type",
+            "document",
+            "--session-model",
+            "",
+            "--state-root",
+            str(tmp_path / "state"),
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "--session-model '' is not a model id" in result.stderr
+    assert "session model: none" not in result.stderr
+    assert calls == []
+    assert not list((tmp_path / "state").rglob("delegate-input-*.json"))

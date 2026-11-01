@@ -138,9 +138,11 @@ def build_delegate_request_payload(
         _merge_metadata(metadata, named_tests, "the named tests")
     # OMN-20557: the caller's session model, the run's savings baseline, under
     # the metadata key omnimarket's handler reads. Omitted entirely when unset.
-    if session_model is not None:
-        entry = ModelDelegateSessionModel(model=session_model).as_metadata()
-        _merge_metadata(metadata, entry, "the session model")
+    checked_session_model = ModelDelegateSessionModel.from_flag(session_model)
+    if checked_session_model is not None:
+        _merge_metadata(
+            metadata, checked_session_model.as_metadata(), "the session model"
+        )
     if metadata:
         payload["metadata"] = metadata
     if session_id is not None:

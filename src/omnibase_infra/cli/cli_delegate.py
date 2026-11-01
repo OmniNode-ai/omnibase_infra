@@ -2496,44 +2496,39 @@ def _write_payload(
     OS process every time), so it owns this run's tracing identity end to end
     instead of delegating that responsibility downstream.
 
-    THE FOUR CALLER-STATED FIELDS (OMN-18305 residual, measured 2026-09-15).
-    ``ModelDelegateSkillRequest`` has carried ``acceptance_criteria``,
-    ``quality_contract_mode``, ``response_contract`` and ``system_prompt``
-    since OMN-15193/OMN-15482, and the quality-gate reducer already branches on
-    ``replace_task_class`` — but this CLI wrote none of them, so the ONLY
-    rubric a ``onex delegate`` caller could be graded against was the one the
-    task class declares. That is the rubric that was wrong in both failures
-    measured on 2026-09-15: a drafting prompt refused on ``planning``'s
-    ``covers_dependencies`` and another refused on ``research``'s
-    ``cites_sources``. Each field is omitted entirely when unset, so no
-    existing caller changes shape.
+    Caller-stated criteria, response contract and system prompt are omitted
+    when unset (OMN-18305). Payload validation errors become usage errors here
+    for both the command and direct ``run_delegate`` callers (OMN-20557).
     """
     tmp_dir = state_root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     payload_path = tmp_dir / f"delegate-input-{run_id}.json"
-    payload = _request_payload(
-        prompt=prompt,
-        task_type=task_type,
-        source=source,
-        max_tokens=max_tokens,
-        correlation_id=correlation_id,
-        acceptance_criteria=acceptance_criteria,
-        quality_contract_mode=quality_contract_mode,
-        response_contract=response_contract,
-        system_prompt=system_prompt,
-        requested_timeout_seconds=requested_timeout_seconds,
-        backend_id=backend_id,
-        model=model,
-        ticket_id=ticket_id,
-        caller_lane=caller.lane if caller is not None else None,
-        session_id=caller.session_id if caller is not None else None,
-        tenant_id=tenant_id,
-        trace_id=trace_id,
-        span_id=span_id,
-        lineage=lineage,
-        named_tests=named_tests,
-        session_model=session_model,
-    )
+    try:
+        payload = _request_payload(
+            prompt=prompt,
+            task_type=task_type,
+            source=source,
+            max_tokens=max_tokens,
+            correlation_id=correlation_id,
+            acceptance_criteria=acceptance_criteria,
+            quality_contract_mode=quality_contract_mode,
+            response_contract=response_contract,
+            system_prompt=system_prompt,
+            requested_timeout_seconds=requested_timeout_seconds,
+            backend_id=backend_id,
+            model=model,
+            ticket_id=ticket_id,
+            caller_lane=caller.lane if caller is not None else None,
+            session_id=caller.session_id if caller is not None else None,
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            span_id=span_id,
+            lineage=lineage,
+            named_tests=named_tests,
+            session_model=session_model,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -4337,7 +4332,10 @@ def run_delegate(
         # OMN-19860: and who issued it, the same way.
         click.echo((caller or ModelDelegateCaller.unattributed()).describe(), err=True)
         # OMN-20557: and the session model its saving is stated against.
-        click.echo(f"session model: {session_model or 'none'}", err=True)
+        click.echo(
+            f"session model: {session_model if session_model is not None else 'none'}",
+            err=True,
+        )
         # OMN-20606: and what it follows, when it follows anything.
         if lineage:
             click.echo(
