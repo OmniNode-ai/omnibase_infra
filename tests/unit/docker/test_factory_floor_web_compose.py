@@ -1,13 +1,16 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The factory floor web service binds one address, serves read-only and needs its deployment values (OMN-21733)."""
+"""Factory floor declarations (OMN-21733).
+
+The contract also requires test_factory_floor_web_runtime.py: it runs nginx -t,
+HTTP requests and Compose refusal checks, and fails if Docker is unavailable.
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -58,18 +61,6 @@ def _compose_config(
     )
 
 
-def _compose_available() -> bool:
-    if shutil.which("docker") is None:
-        return False
-    probe = subprocess.run(
-        ["docker", "compose", "version"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return probe.returncode == 0
-
-
 def test_published_port_names_the_bind_address_and_has_no_default() -> None:
     ports = _service()["ports"]
     assert isinstance(ports, list)
@@ -101,7 +92,7 @@ def test_serve_directory_is_mounted_read_only_and_the_container_is_locked_down()
     assert service["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in service["security_opt"]
     assert service["user"] == "101:101"
-    assert not str(service["image"]).endswith(":latest")
+    assert re.fullmatch(r"nginx:1\.29-alpine@sha256:[0-9a-f]{64}", service["image"])
 
 
 def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
@@ -126,6 +117,7 @@ def _location_block(conf: str, header: str) -> str:
 
 
 def test_only_the_decision_map_directory_may_load_two_pinned_cdn_scripts() -> None:
+    # These declaration checks complement the contract's mandatory HTTP probe.
     conf = NGINX.read_text(encoding="utf-8")
     cdn = "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"
     elk = "https://cdn.jsdelivr.net/npm/elkjs@0.9.2/lib/elk.bundled.js"
@@ -147,7 +139,6 @@ def test_only_the_decision_map_directory_may_load_two_pinned_cdn_scripts() -> No
     assert re.search(r"location\s+/reports/decision-map/\s*\{", conf)
 
 
-@pytest.mark.skipif(not _compose_available(), reason="docker compose is not available")
 @pytest.mark.parametrize("empty", [False, True], ids=["unset", "empty"])
 @pytest.mark.parametrize("missing", REQUIRED)
 def test_compose_refuses_to_render_when_a_required_value_is_missing(
@@ -168,7 +159,6 @@ def test_every_refusal_message_is_the_one_the_compose_file_declares() -> None:
         assert f"${{{name}:?{message}}}" in text
 
 
-@pytest.mark.skipif(not _compose_available(), reason="docker compose is not available")
 def test_compose_renders_one_published_port_on_the_given_address() -> None:
     done = _compose_config(RENDER_ENV, "--format", "json")
     assert done.returncode == 0, done.stderr

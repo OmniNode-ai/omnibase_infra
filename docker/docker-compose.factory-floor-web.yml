@@ -24,7 +24,7 @@
 name: factory-floor-web
 services:
   factory-floor-web:
-    image: nginx:1.29-alpine
+    image: nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
     container_name: omninode-factory-floor-web
     restart: unless-stopped
     init: true

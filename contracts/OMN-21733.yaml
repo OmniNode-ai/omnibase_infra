@@ -26,6 +26,9 @@ evidence_requirements:
   - kind: manual
     description: "Deploy check on the serving host: the container's port bindings name one address, and the page answers on it."
     command: "ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
+  - kind: tests
+    description: "Deploy check on a hosted Ubuntu runner with Docker: start the candidate in an isolated project, verify nginx syntax, actual port bindings, HTTP policies, dot-file refusal and all six missing-value refusals. Docker absence fails this check."
+    command: "deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_factory_floor_web_runtime.py -q --no-cov --log-cli-level=INFO"
 dod_evidence:
   - id: dod-001
     description: "The compose file binds one named address, mounts the serve directory read-only and requires its deployment values."
@@ -50,3 +53,10 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov -k decision_map_directory'
+  - id: dod-004-runtime-readback
+    description: "Mandatory behavioral deploy probe for AC4, AC5 and AC7. It runs the digest-pinned candidate on a random loopback port in its own Compose project, checks nginx -t, actual read-only mounts and security settings, GET/HEAD/POST responses, exact CSP and cache headers on successful and error responses, dot files and Compose refusals. It runs on hosted Docker runners without SSH or lab credentials and never skips."
+    source: generated
+    binds_ac: [AC4, AC5, AC7]
+    checks:
+      - check_type: command
+        check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_factory_floor_web_runtime.py -q --no-cov --log-cli-level=INFO'
