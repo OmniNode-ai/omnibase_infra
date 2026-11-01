@@ -44,7 +44,7 @@ class TestExtractSuffixValues:
         py_file.write_text(
             textwrap.dedent("""\
                 SUFFIX_COUNT: int = 42
-                SUFFIX_REAL: str = "onex.evt.platform.test.v1"
+                SUFFIX_REAL: str = "real-suffix"
             """)
         )
         with pytest.raises(TypeError, match="SUFFIX_COUNT"):
@@ -178,7 +178,7 @@ class TestDriftDetection:
             tmp_path,
             suffix_content=textwrap.dedent("""\
                 SUFFIX_A: str = "onex.evt.platform.topic-a.v1"
-                SUFFIX_ORPHAN: str = "onex.evt.platform.orphan.v1"
+                SUFFIX_ORPHAN: str = "onex.evt.platform.orphan-topic.v1"
             """),
             contracts={
                 "node_a": textwrap.dedent("""\

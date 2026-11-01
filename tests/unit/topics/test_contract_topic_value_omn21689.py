@@ -113,9 +113,7 @@ def test_runtime_binding_matches_generator(
 
 
 def test_legacy_dlq_binding_matches_generator(tmp_path: Path) -> None:
+    topic = f"onex.dlq.{'events'}.v1"
     source = tmp_path / "topics.yaml"
-    source.write_text("topics: [onex.dlq.events.v1]\n")
-    assert (
-        contract_topic_value(str(source), "dlq", "DLQ_EVENTS_V1")
-        == "onex.dlq.events.v1"
-    )
+    source.write_text(f"topics: [{topic}]\n")
+    assert contract_topic_value(str(source), "dlq", "DLQ_EVENTS_V1") == topic

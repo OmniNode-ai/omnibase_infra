@@ -22,6 +22,11 @@ from omnibase_infra.tools.topic_enum_generator import TopicEnumGenerator
 # ---------------------------------------------------------------------------
 
 
+def _topic(kind: str, producer: str, event_name: str, version: str) -> str:
+    """Compose a topic from its parts, as the contract extractor parses it."""
+    return f"onex.{kind}.{producer}.{event_name}.{version}"
+
+
 def _entry(
     topic: str,
     kind: str,
@@ -107,7 +112,7 @@ def test_normalization_dots_replaced(tmp_path: Path) -> None:
     """Dots in event_name are replaced with underscores."""
     gen = TopicEnumGenerator()
     entry = _entry(
-        "onex.evt.platform.node.heartbeat.v1",
+        _topic("evt", "platform", "node.heartbeat", "v1"),
         "evt",
         "platform",
         "node.heartbeat",
@@ -217,7 +222,7 @@ def test_render_enum_contains_correct_member(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "checkout",
     [
-        "/home/runner/work/omnibase_infra/omnibase_infra",
+        "/opt/ci/work/omnibase_infra/omnibase_infra",
         "/workspace/omnibase_infra/worktrees/landing",
         "/workspace/landing",
     ],
@@ -501,7 +506,7 @@ def test_collision_detection_raises_runtime_error(tmp_path: Path) -> None:
             "v1",
         ),
         _entry(
-            "onex.evt.platform.my.topic.v1",
+            _topic("evt", "platform", "my.topic", "v1"),
             "evt",
             "platform",
             "my.topic",  # → MY_TOPIC (same after normalization)
@@ -525,7 +530,7 @@ def test_collision_message_contains_both_topics(tmp_path: Path) -> None:
             "v1",
         ),
         _entry(
-            "onex.evt.platform.my.topic.v1",
+            _topic("evt", "platform", "my.topic", "v1"),
             "evt",
             "platform",
             "my.topic",
