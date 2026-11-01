@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,17 +23,10 @@ REQUIRED_CHECKS_PATH = REPO_ROOT / ".github" / "required-checks.yaml"
 # "Install the pinned verifier" step. The sha lives in tests/ci/receipt_gate_pin.py.
 _FLOOR_REUSABLE_SHA = RECEIPT_GATE_PIN_SHA
 
-# 0.4.303 is the first omnimarket release carrying omnimarket#3511, the refusal of
-# a contract that leaves an acceptance criterion unbound.
-_VERIFIER_FLOOR = (0, 4, 303)
-
-# The verifier floor each pinned receipt-gate reusable enforces; a pin absent here
-# enforces none, so the caller's verifier-version is not held to a floor.
-_REUSABLE_VERIFIER_FLOORS = {_FLOOR_REUSABLE_SHA: _VERIFIER_FLOOR}
-
-
-def _version(text: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in text.split("."))
+# The reusable refuses a verifier-tag that does not descend from the floor commit
+# (omnimarket#3511, the refusal of a contract that leaves an acceptance criterion
+# unbound), so the caller passes a dev-merge tag and no version number (OMN-21853).
+_VERIFIER_TAG_SHAPE = r"dev-\d{14}-[0-9a-f]{12}"
 
 
 def _job() -> dict[str, Any]:
@@ -61,22 +55,27 @@ def test_required_checks_manifest_names_the_same_reusable_pin() -> None:
 
 
 def test_caller_verifier_version_is_at_or_above_the_floor() -> None:
-    job = _job()
-    pinned_sha = job["uses"].rsplit("@", 1)[1]
-    floor = _REUSABLE_VERIFIER_FLOORS.get(pinned_sha)
-    assert floor is not None, (
-        f"the pinned receipt-gate reusable {pinned_sha} enforces no verifier floor"
-    )
-    assert _version(job["with"]["verifier-version"]) >= floor, (
-        "verifier-version must be at or above the pinned reusable's VERIFIER_FLOOR"
-    )
+    """The floor is the tag's ancestry, which the pinned reusable checks (OMN-21853).
+
+    The caller passes an omnimarket dev-merge tag and no verifier-version, the
+    reusable's warned migration fallback.
+    """
+    with_block = _job()["with"]
+    assert "verifier-version" not in with_block, sorted(with_block)
+    assert re.fullmatch(_VERIFIER_TAG_SHAPE, with_block["verifier-tag"]), with_block
 
 
 @pytest.mark.parametrize(
-    ("version", "expected"),
-    [("0.4.280", False), ("0.4.302", False), ("0.4.303", True), ("0.4.305", True)],
+    ("tag", "expected"),
+    [
+        ("dev-20261101000200-949993edf3b7", True),
+        ("0.4.320", False),
+        ("dev-20261101000200-949993edf3b", False),
+        ("dev-20261101000200-949993EDF3B7", False),
+        ("v20261101000200-949993edf3b7", False),
+    ],
 )
 def test_floor_comparison_has_a_refusing_and_an_admitting_case(
-    version: str, expected: bool
+    tag: str, expected: bool
 ) -> None:
-    assert (_version(version) >= _VERIFIER_FLOOR) is expected
+    assert bool(re.fullmatch(_VERIFIER_TAG_SHAPE, tag)) is expected
