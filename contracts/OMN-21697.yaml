@@ -62,7 +62,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          env PYTHONDONTWRITEBYTECODE=1 uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_contract_persistence_effect src/omnibase_infra/nodes/node_session_state_effect --report-json /dev/null
+          env PYTHONDONTWRITEBYTECODE=1 uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_contract_persistence_effect src/omnibase_infra/nodes/node_session_state_effect --report-json /tmp/omn21697-handler-shape-report.json
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
