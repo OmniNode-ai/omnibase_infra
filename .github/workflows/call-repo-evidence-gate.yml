@@ -29,8 +29,9 @@
 # Per-PR concurrency cancels superseded runs so the latest event gets a verdict.
 # Read-only contents and pull-requests permissions are all this caller needs;
 # checkout and verification belong to the reusable, with no caller secrets.
-# The full-SHA pin makes the reusable immutable; verifier-version pins the
-# released verifier used to read the caller's contracts.
+# The full-SHA pin makes the reusable immutable; verifier-tag names the
+# omnimarket dev-merge tag the verifier that reads the caller's contracts is
+# installed from (OMN-21853).
 #
 # The job id is the context prefix: repo-evidence / dod-verify carries the
 # verdict, so do not add a job name.
@@ -42,15 +43,19 @@
 # S6 part 2 (OMN-20074) removed every OCC caller from this repository, so no
 # OCC context is enforced beside it.
 # compare-with-occ is "false", so the difference step stops waiting for OCC.
-# verifier-version 0.4.320 ships the occ-difference classifier and omnimarket#3563,
-# so a rollback turns comparison back on with one input. It is also the first pin
-# the pre-push ticket-contract leg can run contract_prerequisite from (released in
-# 0.4.312, the function onex scm pr-create calls; OMN-21642), which 0.4.305 lacks. The pinned reusable
-# refuses a verifier-version below 0.4.303 before installing it (VERIFIER_FLOOR,
-# omnibase_core#1932; OMN-20032), the first release that refuses a contract leaving
-# a criterion unbound. The full-SHA pin is the squash commit of omnibase_core#1932
-# on dev, a descendant of #1914; caller-mode verify reports a success
-# no-op, leaving only dod-verify to carry the verdict, a writer-app
+# verifier-tag (OMN-21853, operator ruling 2026-10-31T21:49:54Z, OMN-21676) is the
+# omnimarket dev-merge tag the reusable installs the verifier from: it resolves the
+# tag to its commit and refuses a tag that was moved, is not on omnimarket dev, or
+# does not descend from the floor commit e565ba5ba00c (omnimarket#3511, the first
+# verifier that refuses a contract leaving a criterion unbound), so no released
+# package version decides what verifies this repository, and verifier-version, the
+# reusable's warned migration fallback, is not passed. The pre-push ticket-contract
+# leg installs the same tag (scripts/ci/check_deploy_scope_dod.py, OMN-20870), so
+# local and hosted share one pin; omnimarket#3563 (the occ-difference classifier)
+# and the contract_prerequisite function onex scm pr-create calls (OMN-21642) are
+# both in the tag's history. The full-SHA pin is a descendant on dev of the
+# merge commit of omnibase_core#2203, whose receipt-gate.yml takes verifier-tag;
+# caller-mode verify reports a success no-op, leaving only dod-verify to carry the verdict, a writer-app
 # dependency-pin-only head is exempt by a verdict derived in the job
 # (omnibase_core#1911), and so is the writer app's release cut that adds only a
 # changelog entry for the head's version (omnibase_core#1914).
@@ -60,10 +65,10 @@
 # check-timeout-seconds (OMN-21433) is the per-check ceiling the pinned reusable passes to the
 # verifier; its 30 s default kills a cold hosted `uv run pytest` before it reports.
 
-# verifier-version 0.4.310 (OMN-19998) is the first release whose classify_dependency_pin_only
-# admits tool.uv.override-dependencies (omnimarket#3694). This repository pins omnibase-core
-# exactly there (OMN-19655), so under 0.4.305 every writer-app core bump was refused the
-# dependency-pin-only exemption and failed dod-verify (omnibase_infra#5453, #5458).
+# The tag descends from omnimarket#3694, which admits tool.uv.override-dependencies in
+# classify_dependency_pin_only (OMN-19998). This repository pins omnibase-core exactly
+# there (OMN-19655), so a verifier older than that refuses every writer-app core bump
+# the dependency-pin-only exemption (omnibase_infra#5453, #5458).
 
 name: Repo Evidence Gate
 
@@ -82,10 +87,10 @@ permissions:
 
 jobs:
   repo-evidence:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@66d35d2283c3011c436799eacb9bce1a434ee6c9 # dev-20261030152335-66d35d2283c3; carries the fix-parent control fallback (control_uses_fix_parent), #2085 (check-timeout-seconds) and #2079 (verifies only the evidence a pull request adds or changes) (OMN-20134)
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@ac2f26e3e5bfd02c92496f7d3a9a14071f2c4432 # dev-20261101005012-ac2f26e3e5bf; an omnibase_core dev-merge tag; carries #2203 (verifier-tag), the fix-parent control fallback (control_uses_fix_parent), #2085 (check-timeout-seconds) and #2079 (verifies only the evidence a pull request adds or changes) (OMN-20134, OMN-21853)
     with:
       evidence-source: caller
-      verifier-version: 0.4.320
+      verifier-tag: dev-20261101000200-949993edf3b7
       compare-with-occ: "false"
       shadow: "false"
       check-timeout-seconds: "180"
