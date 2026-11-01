@@ -1,11 +1,25 @@
 schema_version: 1.0.0
 ticket_id: OMN-21623
-title: Third-party service URLs the infra handlers and probes call are declared in third_party_endpoints.yaml, not spelled in code
-summary: The contracts_and_di check reported 42 literal_url findings in src/omnibase_infra. This change declares the GitHub, Linear, Slack, Gmail, Claude Code schema and loopback-probe endpoints in models/third_party_endpoints/third_party_endpoints.yaml, loads them through ModelThirdPartyEndpoints (no field defaults, so an omitted value fails to load), and reads them in 11 modules. The check reports no literal_url finding over those modules, which held 16. Separately, the unit drift check and the CLAUDE.md reference check parse home-relative paths with Path parts; the literal_path rule reports nothing in those two files.
+title: omnibase_infra model names leave the code; the node contracts declare them and the LLM adapters take them by injection (contracts_and_di burn-down, literal_model_name slice)
+summary: >-
+  The literal_model_name slice of the contracts_and_di burn-down (omnibase_core#2175) for omnibase_infra. The savings estimation node held a counterfactual model map and a fallback model in its handler and input model; the waste detection analyzer held its premium-model markers; the five LLM enrichment and generation adapters, the OpenAI-compatible provider adapter and the decision search client held default model names. The two nodes now declare their model policy in the contract config block, parsed into frozen models with every field required; the adapters and the search client take the model from their caller, which resolves it from the model-routing policy. Separately, the contracts_and_di check reported 42 literal_url findings in src/omnibase_infra. This change declares the GitHub, Linear, Slack, Gmail, Claude Code schema and loopback-probe endpoints in models/third_party_endpoints/third_party_endpoints.yaml, loads them through ModelThirdPartyEndpoints (no field defaults, so an omitted value fails to load), and reads them in 11 modules. The check reports no literal_url finding over those modules, which held 16. Separately, the unit drift check and the CLAUDE.md reference check parse home-relative paths with Path parts; the literal_path rule reports nothing in those two files.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn21623-model-name-infra
+    statement: >-
+      The savings estimation node, the waste detection analyzer, the LLM adapters and the decision search client hold no model name in code.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the savings counterfactual rules and fallback model and the waste premium-model markers load from their node contracts, and a contract missing any of them fails to load -- falsifier: uv run pytest tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute -q in omnibase_infra, where the contract tests drop each field and expect a validation error
+      - id: AC2
+        statement: >-
+          AC2: the LLM adapters and the decision search client take the model from the caller and refuse construction or use without it -- falsifier: uv run pytest tests/unit/adapters/llm tests/unit/services/session_registry/test_decision_search.py -q in omnibase_infra, where each adapter raises TypeError when built without a model and the search client raises ValueError when asked to embed with none
+      - id: AC3
+        statement: >-
+          AC3: the contracts_and_di check reports no literal_model_name finding in those paths -- falsifier: the runtime_validator_run of ValidatorContractsAndDi over src/omnibase_infra/adapters/llm, src/omnibase_infra/nodes/node_savings_estimation_compute, src/omnibase_infra/nodes/node_waste_detection_compute and src/omnibase_infra/services/session_registry/decision_search.py, filtered for literal_model_name reports no literal_model_name finding where it reported twenty-three before (findings of other rules in those paths are out of this slice)
   - id: req-omn21623-slice-service-endpoints
     statement: The modules that call GitHub, Linear, Slack, Gmail or a loopback probe read the URL from the declared endpoints file, and an endpoints block that omits a value fails to load.
     acceptance:
@@ -21,6 +35,9 @@ requirements:
       - id: AC33
         statement: 'AC33: both path resolvers expand bare and nested home-relative paths, preserve absolute paths and handle non-tilde inputs; reference paths prefer the repository before the workspace root and return None when absent, and installed registry paths obey resolve_registry -- falsifier: any returned path differs from the expected path in the behavioral tests'
 evidence_requirements:
+  - kind: tests
+    description: The savings, waste detection, LLM adapter and decision search tests, including the contract completeness tests.
+    command: uv run pytest tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute tests/unit/adapters/llm tests/unit/services/session_registry/test_decision_search.py -q
   - kind: tests
     description: The loaded endpoints equal the declared file, each omitted value fails to load, the URL builders derive from the declared bases, and every consumer module is free of literal_url.
     command: uv run --frozen pytest tests/unit/models/third_party_endpoints -q
@@ -38,6 +55,36 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn21623-model-name-ac1-node-policy-tests
+    description: The node model policies load from the contracts and a contract missing a field fails to load.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_savings_estimation_compute/test_counterfactual_policy_contract_omn21623.py tests/unit/nodes/node_waste_detection_compute/test_premium_model_policy_contract_omn21623.py tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21623-model-name-ac2-injection-tests
+    description: The adapters and the search client refuse to run without an injected model.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/adapters/llm tests/unit/services/session_registry/test_decision_search.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21623-model-name-ac3-check
+    description: The contracts_and_di check judges the slice's paths free of literal_model_name findings.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: bash -c "! uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/llm src/omnibase_infra/nodes/node_savings_estimation_compute src/omnibase_infra/nodes/node_waste_detection_compute src/omnibase_infra/services/session_registry/decision_search.py | grep -q literal_model_name"
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21623-ac5-service-endpoints
     description: The endpoints load from the declared file, an omitted value is refused, and the consumer constants equal the declared values. Fails at the merge base, where the endpoints model does not exist.
     source: manual
@@ -65,6 +112,17 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-omn21623-model-name-deploy-policy-on-dev
+    description: The deploy-scoped node contracts on the dev branch carry the model policy blocks, so the models the nodes read are declared where the runtime loads them. It reads dev, which holds the blocks only after this change merges, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion (AC1 is bound by the node policy tests).
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_waste_detection_compute/contract.yaml?ref=dev --jq .content | base64 -d | grep -qF 'premium_model_policy'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_savings_estimation_compute/contract.yaml?ref=dev --jq .content | base64 -d | grep -qF 'counterfactual_policy'
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21623-deploy-service-endpoints
     description: 'Post-deploy probe: the runtime container loads the service endpoints from the file it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.'
     source: manual
