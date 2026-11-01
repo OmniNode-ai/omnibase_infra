@@ -1008,4 +1008,15 @@ def test_h105_scm_pr_create_derived_file_is_exactly_the_nodes_output() -> None:
             operation,
         )
         for operation in ("WRITE", "DESCRIBE")
+    } | {
+        # OMN-21279: the 29 hook event topics the shared set produces, produce only.
+        ("dev", "TOPIC", binding.physical_topic, "LITERAL", operation)
+        for binding in shipped_bindings().bindings
+        if binding.direction == "produce"
+        and binding.physical_topic.startswith("onex.evt.omniclaude.")
+        for operation in ("WRITE", "DESCRIBE")
     }
+    assert not any(
+        binding.physical_topic.startswith("onex.cmd.omniintelligence.")
+        for binding in bindings.bindings
+    )

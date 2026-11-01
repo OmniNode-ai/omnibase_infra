@@ -21,6 +21,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: the dev ACL declares WRITE and DESCRIBE on onex.cmd.omnimarket.github-repo-write-requested.v1 for h105''s principal and no other write -- falsifier: the ACL tests added with the change pass, and fail with the produce binding removed'
+  - id: req-omn21401-hook-events
+    statement: The dev ACL declaration also gives h105's principal WRITE and DESCRIBE on the 29 onex.evt.omniclaude.* hook event topics the shared developer set produces, under the orchestrator's derivation of 2026-10-26 from OPERATOR-CONSENT 2026-10-01T14:13:07Z and 2026-10-08T03:53:32Z (OMN-21279), derived from produce bindings and applied with apply-grants --scoped-only; no READ and no onex.cmd.* hook topic.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the dev ACL declares WRITE and DESCRIBE on exactly the 29 onex.evt.omniclaude.* topics of the shared developer set for h105''s principal, no READ on them and no onex.cmd.omniintelligence.* topic -- falsifier: the ACL tests added with the change pass, and fail with a produce binding removed or a cmd hook topic added'
 evidence_requirements:
   - kind: tests
     description: The h105 and developer principal grant tests verify the dev ACL declaration and grant derivation.
@@ -61,12 +66,32 @@ dod_evidence:
       - AC3
   - id: dod-omn21401-ac3-issuer-image-write
     description: >-
-      deploy check for the h105 derived grant file in the issuer image, runnable on the hosted runner with no lab route, broker or credentials: builds the issuer image from the checkout and reads the h105 derived grant file inside it; the only WRITE row is on the github-repo-write-requested topic. It fails at the merge base, whose file holds no WRITE row. It shows the image carries the grant; the live ACL is applied separately with apply-grants --scoped-only and is not claimed here.
+      deploy check for the h105 derived grant file in the issuer image, runnable on the hosted runner with no lab route, broker or credentials: builds the issuer image from the checkout and reads the h105 derived grant file inside it; the only WRITE row outside the onex.evt.omniclaude.* hook event topics (AC4) is on the github-repo-write-requested topic. It fails at the merge base, whose file holds no WRITE row. It shows the image carries the grant; the live ACL is applied separately with apply-grants --scoped-only and is not claimed here.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          docker build -q -f docker/Dockerfile.principal-issuer -t omn21401-principal-issuer-write-probe . && docker run --rm --entrypoint python omn21401-principal-issuer-write-probe -c "import json; d = json.load(open('/app/h105-scm-pr-create-derived-grants.json')); writes = {g['resource'] for g in d['grants'] if g['operation'] == 'WRITE'}; assert d['principal'] == 'dev-jonah-omnibook', d['principal']; assert writes == {'onex.cmd.omnimarket.github-repo-write-requested.v1'}, writes"
+          docker build -q -f docker/Dockerfile.principal-issuer -t omn21401-principal-issuer-write-probe . && docker run --rm --entrypoint python omn21401-principal-issuer-write-probe -c "import json; d = json.load(open('/app/h105-scm-pr-create-derived-grants.json')); writes = {g['resource'] for g in d['grants'] if g['operation'] == 'WRITE'}; assert d['principal'] == 'dev-jonah-omnibook', d['principal']; assert {w for w in writes if not w.startswith('onex.evt.omniclaude.')} == {'onex.cmd.omnimarket.github-repo-write-requested.v1'}, writes"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn21401-ac4-hook-event-test
+    description: the h105 ACL tests assert the derived file holds WRITE and DESCRIBE, and no READ, on the 29 onex.evt.omniclaude.* topics of the shared developer set, no onex.cmd.omniintelligence.* topic, and that the issuer loader still refuses a scoped write on a cmd hook topic.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -n 0 --no-cov -k 'h105 or developer'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn21401-ac4-issuer-image-hook-events
+    description: >-
+      deploy check for the h105 derived grant file in the issuer image, runnable on the hosted runner with no lab route, broker or credentials: builds the issuer image from the checkout and reads the h105 derived grant file inside it; it holds WRITE and DESCRIBE on 29 onex.evt.omniclaude.* topics, no READ on them and no onex.cmd.omniintelligence.* topic. It fails at the merge base, whose file holds none of them. The live ACL is applied separately with apply-grants --scoped-only and is not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          docker build -q -f docker/Dockerfile.principal-issuer -t omn21401-principal-issuer-hook-probe . && docker run --rm --entrypoint python omn21401-principal-issuer-hook-probe -c "import json; d = json.load(open('/app/h105-scm-pr-create-derived-grants.json')); hook = [g for g in d['grants'] if g['resource'].startswith('onex.evt.omniclaude.')]; assert d['principal'] == 'dev-jonah-omnibook', d['principal']; assert {g['operation'] for g in hook} == {'WRITE', 'DESCRIBE'}, hook; assert len({g['resource'] for g in hook}) == 29, len(hook); assert not any(g['resource'].startswith('onex.cmd.omniintelligence.') for g in d['grants'])"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

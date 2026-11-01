@@ -7,6 +7,10 @@
 # is produced (WRITE and DESCRIBE), which is what `onex scm pr-create` publishes.
 # Derive with HandlerBrokerGrantDerive, as for developer-principal-bindings.yaml;
 # never hand-type broker ACL rows.
+# ORCHESTRATOR DERIVATION (basis=orchestrator-derivation), lane=h105-hook-grants-0325, OMN-21279: h105's hook-emit
+# drainer publishes the 29 `onex.evt.omniclaude.*` hook topics, produce only (WRITE and
+# DESCRIBE), the set the other two host logins of the operator hold live (OPERATOR-CONSENT
+# 2026-10-01T14:13:07Z and 2026-10-08T03:53:32Z). No READ, no `onex.cmd.*` hook topic.
 # The client group prefix is already in the shared developer grant set. Stating
 # it here makes this capability's wire bindings complete without widening it.
 principal: dev-jonah-omnibook
@@ -14,5 +18,34 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.github-repo-write-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.github-repo-write-completed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.github-repo-write-failed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.agent-actions.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.agent-status.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.correlation-trace.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.delegation-shadow-comparison.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.dod-guard-fired.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.friction-observed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.hook-event.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.hook-health-error.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.intent-commit-bound.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.llm-routing-decision.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.llm-routing-fallback.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.pattern-enforcement.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.phase-metrics.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.prompt-submitted.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.pr-validation-rollup.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.routing-decision.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.routing-feedback.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.session-ended.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.session-outcome.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.session-started.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.skill-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.skill-invoked.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.skill-started.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.static-context-edit-detected.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.team-evidence-written.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-assigned.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-progress.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.tool-executed.v1, direction: produce}
 group_prefixes:
   - {broker: dev, prefix: local.omnimarket.scm_command_client.consume.v1.}
