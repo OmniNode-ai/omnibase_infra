@@ -36,7 +36,6 @@ dod_evidence:
   - id: dod-003
     description: "Render the deploy configuration with a stale 1G override and require 4G for both the broker and sizing job. This hosted check renders only; it starts no containers and uses placeholder credentials."
     source: generated
-    scope: deploy
     binds_ac: [AC1]
     checks:
       - check_type: command
