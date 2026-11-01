@@ -25,7 +25,7 @@ from aiokafka.structs import TopicPartition
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
-from omnibase_infra.event_bus.kafka_transport import create_groupless_consumer
+from omnibase_infra.event_bus.kafka_transport import create_offset_consumer
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers.kafka_idle_topic_watches import IdleTopicWatch
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
@@ -116,7 +116,7 @@ class HandlerKafkaTopicDemandSource:
             # the kernel (tenant-projection-writer restart loop on the laptop
             # profile, run 40881579955).
             return frozenset(logical_of.values()), _nothing_to_stop
-        consumer = create_groupless_consumer(self._config)
+        consumer = create_offset_consumer(self._config)
         await consumer.start()
         low: dict[TopicPartition, int] = {}
         high: dict[TopicPartition, int] = {}
