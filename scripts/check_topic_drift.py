@@ -39,7 +39,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import runpy
 import sys
 from pathlib import Path
 
@@ -54,7 +54,7 @@ from omnibase_infra.topics.contract_topic_extractor import ContractTopicExtracto
 
 
 def _extract_suffix_values(constants_file: Path) -> dict[str, str]:
-    """Extract SUFFIX_* constant values by importing the constants module.
+    """Extract SUFFIX_* constant values by running the constants module.
 
     A suffix is a string literal or ``EnumProducerTopic.MEMBER.value`` read off the
     per-producer topic enums generated from contract YAML, so the value is read
@@ -69,10 +69,8 @@ def _extract_suffix_values(constants_file: Path) -> dict[str, str]:
     Returns:
         Mapping of constant name to string value (e.g., {"SUFFIX_NODE_REGISTRATION": "onex.evt.platform.node-registration.v1"}).
     """
-    spec = importlib.util.spec_from_file_location("_suffix_constants", constants_file)
-    assert spec is not None and spec.loader is not None, constants_file
-    spec.loader.exec_module(module := importlib.util.module_from_spec(spec))
-    found = {n: v for n, v in vars(module).items() if n.startswith("SUFFIX_")}
+    namespace = runpy.run_path(str(constants_file))
+    found = {n: v for n, v in namespace.items() if n.startswith("SUFFIX_")}
     if bad := sorted(n for n, v in found.items() if type(v) is not str):
         raise TypeError(f"{bad} are not plain str; assign a literal or .value")
     return found

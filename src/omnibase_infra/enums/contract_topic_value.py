@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import pkgutil
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,9 +18,6 @@ from omnibase_infra.tools.contract_topic_extractor import (
 
 if TYPE_CHECKING:
     from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
-
-# Resolved from this file so enum import never depends on importlib.resources.
-_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def render_contract_topic_member(
@@ -44,13 +42,20 @@ def render_contract_topic_member(
 
 
 def _contract_topics(source: str) -> frozenset[str]:
-    """Read a package-relative contract, or an explicitly supplied source file."""
-    resource = (
-        Path(source) if Path(source).is_absolute() else _PACKAGE_ROOT.joinpath(source)
-    )
+    """Read a package-relative contract, or an explicitly supplied source file.
+
+    Package-relative sources go through the package loader so a wheel on
+    ``sys.path`` (a zip archive) resolves the same way as a directory install.
+    """
     try:
-        text = resource.read_text(encoding="utf-8")
-    except OSError as error:
+        if Path(source).is_absolute():
+            text = Path(source).read_text(encoding="utf-8")
+        else:
+            data = pkgutil.get_data("omnibase_infra", source)
+            if data is None:
+                raise FileNotFoundError(source)
+            text = data.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as error:
         raise ValueError(
             f"{source}: cannot read contract ({type(error).__name__})"
         ) from error
