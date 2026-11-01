@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +17,9 @@ from omnibase_infra.tools.contract_topic_extractor import (
 
 if TYPE_CHECKING:
     from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
+
+# Resolved from this file so enum import never depends on importlib.resources.
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def render_contract_topic_member(
@@ -44,9 +46,7 @@ def render_contract_topic_member(
 def _contract_topics(source: str) -> frozenset[str]:
     """Read a package-relative contract, or an explicitly supplied source file."""
     resource = (
-        Path(source)
-        if Path(source).is_absolute()
-        else files("omnibase_infra").joinpath(source)
+        Path(source) if Path(source).is_absolute() else _PACKAGE_ROOT.joinpath(source)
     )
     try:
         text = resource.read_text(encoding="utf-8")
