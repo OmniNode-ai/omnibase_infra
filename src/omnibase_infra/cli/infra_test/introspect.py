@@ -23,6 +23,7 @@ from omnibase_infra.cli.infra_test._helpers import get_broker
 from omnibase_infra.models.discovery.model_introspection_config import (
     DEFAULT_INTROSPECTION_TOPIC,
 )
+from omnibase_infra.models.infra_test import load_infra_test_settings
 
 console = Console()
 
@@ -83,7 +84,7 @@ def _build_introspection_payload(
         "discovered_capabilities": {},
         "contract_capabilities": None,
         "endpoints": {
-            "health": f"{os.environ.get('ONEX_RUNTIME_URL', 'http://localhost:8080')}/{nid}/health"  # fallback-ok: local dev
+            "health": f"{os.environ.get('ONEX_RUNTIME_URL', load_infra_test_settings().runtime_url)}/{nid}/health"  # fallback-ok: local dev
         },
         "reason": "STARTUP",
         "correlation_id": cid,
@@ -116,7 +117,7 @@ def _build_introspection_payload(
     "--broker",
     default=None,
     envvar="KAFKA_BOOTSTRAP_SERVERS",
-    help="Kafka bootstrap server (defaults to localhost:19092).",
+    help="Kafka bootstrap server (defaults to the infra_test_settings.yaml broker_address).",
 )
 def introspect(
     node_id: str | None,
@@ -135,7 +136,6 @@ def introspect(
     resolved_broker: str = broker or get_broker()
 
     payload = _build_introspection_payload(node_id, node_type, version)
-    payload_json = json.dumps(payload)
 
     nid = payload["node_id"]
     cid = payload["correlation_id"]
@@ -158,11 +158,11 @@ def introspect(
             "-k",
             str(nid),
         ],
-        input=payload_json,
+        input=json.dumps(payload),
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=load_infra_test_settings().rpk_command_timeout_seconds,
     )
 
     if result.returncode != 0:

@@ -13,6 +13,9 @@ import pytest
 from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
+from omnibase_infra.models.verification import (
+    model_verification_probe_settings as probe_settings,
+)
 from omnibase_infra.verification.contract_parser import (
     ModelParsedContractForVerification,
 )
@@ -211,10 +214,10 @@ class TestRpkWatermarkFallbackHonorsBrokerEnv:
 
         with (
             patch.object(
-                probe_publication, "rpk_env", return_value=sentinel_env
+                probe_settings, "rpk_env", return_value=sentinel_env
             ) as mock_env,
             patch.object(
-                probe_publication.subprocess, "run", return_value=fake_result
+                probe_settings.subprocess, "run", return_value=fake_result
             ) as mock_run,
         ):
             low, high = _rpk_watermark_fallback("onex.evt.platform.foo.v1")
