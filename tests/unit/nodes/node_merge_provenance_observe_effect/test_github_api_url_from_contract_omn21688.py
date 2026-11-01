@@ -46,9 +46,19 @@ def test_an_injected_base_overrides_the_contract() -> None:
     assert reader._api_url == "https://ghe.example.invalid/api/v3"
 
 
-def test_reader_refuses_a_contract_without_the_base(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        "github_api: {}\n",
+        'github_api:\n  base_url: ""\n',
+        "github_api: not-a-mapping\n",
+        "- just\n- a list\n",
+        "",
+    ],
+)
+def test_reader_refuses_a_malformed_contract(tmp_path: Path, body: str) -> None:
     contract = tmp_path / "contract.yaml"
-    contract.write_text("github_api: {}\n", encoding="utf-8")
+    contract.write_text(body, encoding="utf-8")
     with pytest.raises(ValueError, match=r"github_api\.base_url"):
         contract_api.github_api_url(contract)
 
