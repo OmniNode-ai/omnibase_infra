@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,17 +23,48 @@ REQUIRED_CHECKS_PATH = REPO_ROOT / ".github" / "required-checks.yaml"
 # "Install the pinned verifier" step. The sha lives in tests/ci/receipt_gate_pin.py.
 _FLOOR_REUSABLE_SHA = RECEIPT_GATE_PIN_SHA
 
-# 0.4.303 is the first omnimarket release carrying omnimarket#3511, the refusal of
-# a contract that leaves an acceptance criterion unbound.
-_VERIFIER_FLOOR = (0, 4, 303)
+# The reusable refuses a verifier-tag that does not descend from the floor commit
+# (omnimarket#3511, the refusal of a contract that leaves an acceptance criterion
+# unbound), so the caller passes a dev-merge tag and no version number (OMN-21853).
+_VERIFIER_TAG_SHAPE = r"dev-(\d{14})-[0-9a-f]{12}"
 
-# The verifier floor each pinned receipt-gate reusable enforces; a pin absent here
-# enforces none, so the caller's verifier-version is not held to a floor.
-_REUSABLE_VERIFIER_FLOORS = {_FLOOR_REUSABLE_SHA: _VERIFIER_FLOOR}
+# The first omnimarket dev-merge tag whose history holds each verifier capability this
+# caller depends on, read from the omnimarket clone with `git tag --contains <merge
+# commit>`. Dev-merge tags embed their UTC creation time, so a tag created before a
+# capability's first tag cannot descend from its merge commit. The reusable at the
+# pinned sha resolves the real ancestry from the floor commit at run time (it refuses
+# a moved tag, a tag off omnimarket dev, or one that does not descend from
+# e565ba5ba00c); this holds the caller to every capability's first tag before a push,
+# which a regex on the tag shape alone does not. The comparison is of the creation time
+# the tag name embeds, an ordering heuristic and not an ancestry proof: a tag named with a
+# later time but cut from an older commit passes here and is refused by the reusable at
+# run time, which is the only place ancestry is checked.
+_CAPABILITY_FIRST_TAG = {
+    # omnimarket#3511 (e565ba5ba00c): refuses a contract leaving a criterion unbound.
+    "unbound-criterion refusal": "dev-20261016123308-0a385ce46cdf",
+    # omnimarket#3563: the occ-difference classifier.
+    "occ-difference classifier": "dev-20261016123308-0a385ce46cdf",
+    # omnimarket#3694: admits tool.uv.override-dependencies as a dependency-pin-only change.
+    "override-dependency pin exemption": "dev-20261016123308-0a385ce46cdf",
+    # omnimarket#4683 (OMN-21676): the hosted dod-verify delegates the criteria
+    # comparison to the trusted pre-merge check. A verifier without it reads live
+    # Linear from a runner that holds no credential and ends every contract
+    # VERIFICATION_UNRESOLVED ticket_unavailable (omnimarket 0.4.320 and older).
+    "hosted criteria delegation": "dev-20261031203936-91354974f1e3",
+}
+_VERIFIER_TAG_FLOOR = max(_CAPABILITY_FIRST_TAG.values())
 
 
-def _version(text: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in text.split("."))
+def _tag_time(tag: str) -> int | None:
+    match = re.fullmatch(_VERIFIER_TAG_SHAPE, tag)
+    return int(match.group(1)) if match else None
+
+
+def _tag_is_at_or_above_floor(tag: str, floor_tag: str = _VERIFIER_TAG_FLOOR) -> bool:
+    time = _tag_time(tag)
+    floor = _tag_time(floor_tag)
+    assert floor is not None
+    return time is not None and time >= floor
 
 
 def _job() -> dict[str, Any]:
@@ -60,23 +92,34 @@ def test_required_checks_manifest_names_the_same_reusable_pin() -> None:
     ]
 
 
-def test_caller_verifier_version_is_at_or_above_the_floor() -> None:
-    job = _job()
-    pinned_sha = job["uses"].rsplit("@", 1)[1]
-    floor = _REUSABLE_VERIFIER_FLOORS.get(pinned_sha)
-    assert floor is not None, (
-        f"the pinned receipt-gate reusable {pinned_sha} enforces no verifier floor"
-    )
-    assert _version(job["with"]["verifier-version"]) >= floor, (
-        "verifier-version must be at or above the pinned reusable's VERIFIER_FLOOR"
-    )
+def test_caller_tag_is_no_older_than_every_capability_first_tag() -> None:
+    """The caller's tag is a well-formed dev-merge tag created at or after the first
+    tag of every capability the caller depends on (OMN-21853), and no verifier-version
+    (the reusable's warned migration fallback) is passed.
+    """
+    with_block = _job()["with"]
+    assert "verifier-version" not in with_block, sorted(with_block)
+    tag = with_block["verifier-tag"]
+    for capability, first_tag in _CAPABILITY_FIRST_TAG.items():
+        assert _tag_is_at_or_above_floor(tag, first_tag), (capability, tag, first_tag)
 
 
 @pytest.mark.parametrize(
-    ("version", "expected"),
-    [("0.4.280", False), ("0.4.302", False), ("0.4.303", True), ("0.4.305", True)],
+    ("tag", "expected"),
+    [
+        ("dev-20261101000200-949993edf3b7", True),
+        (_VERIFIER_TAG_FLOOR, True),
+        # Created one second before the criteria-delegation tag: lacks omnimarket#4683.
+        ("dev-20261031203935-91354974f1e3", False),
+        ("dev-20261016123308-0a385ce46cdf", False),
+        ("dev-20261015000000-0a385ce46cdf", False),
+        ("0.4.320", False),
+        ("dev-20261101000200-949993edf3b", False),
+        ("dev-20261101000200-949993EDF3B7", False),
+        ("v20261101000200-949993edf3b7", False),
+    ],
 )
-def test_floor_comparison_has_a_refusing_and_an_admitting_case(
-    version: str, expected: bool
+def test_tag_floor_comparison_refuses_a_tag_older_than_the_newest_capability(
+    tag: str, expected: bool
 ) -> None:
-    assert (_version(version) >= _VERIFIER_FLOOR) is expected
+    assert _tag_is_at_or_above_floor(tag) is expected
