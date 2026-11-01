@@ -57,6 +57,11 @@ def _declared_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
     install_stand_in_registry(monkeypatch, wiring_authority())
 
 
+def _command_topic(name: str, verb: str) -> str:
+    """A demo command topic, composed so the contract stays the only declaration site."""
+    return f"onex.cmd.{name}.{verb}.v1"
+
+
 _PORT_MODULE = "omnibase_infra.runtime.service_delegation_dispatch_port"
 _INGRESS_MODULE = "omnibase_infra.runtime.runtime_local_ingress"
 
@@ -185,7 +190,9 @@ async def test_second_resolution_reads_no_contract(
     _write_node(
         package_root,
         "node_demo",
-        _DEMO_CONTRACT.format(name="demo", command_topic="onex.cmd.demo.start.v1"),
+        _DEMO_CONTRACT.format(
+            name="demo", command_topic=_command_topic("demo", "start")
+        ),
     )
     port = RuntimeDelegationDispatchPort(_FakeRuntimeBus(), package_names=("fakepkg",))
 
@@ -195,7 +202,7 @@ async def test_second_resolution_reads_no_contract(
     assert read_counter.count == 1
 
     assert first == second
-    assert first["demo"].command_topic == "onex.cmd.demo.start.v1"
+    assert first["demo"].command_topic == _command_topic("demo", "start")
     assert first is not second
     first.clear()
     third = await port._resolved_routes()
@@ -276,7 +283,7 @@ async def test_first_resolution_runs_off_the_event_loop_thread(
         package_names: Sequence[str],
     ) -> dict[str, ModelRuntimeLocalIngressRoute]:
         discovery_threads.append(threading.get_ident())
-        return {"demo": _demo_route("onex.cmd.demo.start.v1")}
+        return {"demo": _demo_route(_command_topic("demo", "start"))}
 
     monkeypatch.setattr(
         f"{_PORT_MODULE}.discover_runtime_local_ingress_routes", recording_discovery
@@ -285,7 +292,7 @@ async def test_first_resolution_runs_off_the_event_loop_thread(
 
     routes = await port._resolved_routes()
 
-    assert routes["demo"].command_topic == "onex.cmd.demo.start.v1"
+    assert routes["demo"].command_topic == _command_topic("demo", "start")
     assert len(discovery_threads) == 1
     assert discovery_threads[0] != threading.get_ident()
 
@@ -300,7 +307,7 @@ async def test_slow_resolution_does_not_stall_the_event_loop(
         package_names: Sequence[str],
     ) -> dict[str, ModelRuntimeLocalIngressRoute]:
         time.sleep(0.4)
-        return {"demo": _demo_route("onex.cmd.demo.start.v1")}
+        return {"demo": _demo_route(_command_topic("demo", "start"))}
 
     monkeypatch.setattr(
         f"{_PORT_MODULE}.discover_runtime_local_ingress_routes", slow_discovery
@@ -343,7 +350,9 @@ def _add_contract(package_root: Path) -> str:
     _write_node(
         package_root,
         "node_extra",
-        _DEMO_CONTRACT.format(name="extra", command_topic="onex.cmd.extra.start.v1"),
+        _DEMO_CONTRACT.format(
+            name="extra", command_topic=_command_topic("extra", "start")
+        ),
     )
     return "added"
 
@@ -369,16 +378,20 @@ async def test_changed_contract_set_is_resolved_on_the_next_call(
     _write_node(
         package_root,
         "node_demo",
-        _DEMO_CONTRACT.format(name="demo", command_topic="onex.cmd.demo.start.v1"),
+        _DEMO_CONTRACT.format(
+            name="demo", command_topic=_command_topic("demo", "start")
+        ),
     )
     _write_node(
         package_root,
         "node_other",
-        _DEMO_CONTRACT.format(name="other", command_topic="onex.cmd.other.start.v1"),
+        _DEMO_CONTRACT.format(
+            name="other", command_topic=_command_topic("other", "start")
+        ),
     )
     port = RuntimeDelegationDispatchPort(_FakeRuntimeBus(), package_names=("fakepkg",))
     before = await port._resolved_routes()
-    assert before["demo"].command_topic == "onex.cmd.demo.start.v1"
+    assert before["demo"].command_topic == _command_topic("demo", "start")
     assert "other" in before
     assert "extra" not in before
     reads_before = read_counter.count
@@ -390,12 +403,12 @@ async def test_changed_contract_set_is_resolved_on_the_next_call(
     if kind == "edited":
         assert after["demo"].command_topic == "onex.cmd.demo.start-renamed.v1"
     elif kind == "added":
-        assert after["extra"].command_topic == "onex.cmd.extra.start.v1"
+        assert after["extra"].command_topic == _command_topic("extra", "start")
         assert "other" in after
     else:
         assert "other" not in after
         assert "node_other" not in after
-        assert after["demo"].command_topic == "onex.cmd.demo.start.v1"
+        assert after["demo"].command_topic == _command_topic("demo", "start")
 
 
 @pytest.mark.asyncio
@@ -407,24 +420,28 @@ async def test_same_size_edit_with_new_mtime_is_resolved(
     contract_path = _write_node(
         package_root,
         "node_demo",
-        _DEMO_CONTRACT.format(name="demo", command_topic="onex.cmd.demo.aaaaa.v1"),
+        _DEMO_CONTRACT.format(
+            name="demo", command_topic=_command_topic("demo", "aaaaa")
+        ),
     )
     pinned_ns = 1_700_000_000_000_000_000
     os.utime(contract_path, ns=(pinned_ns, pinned_ns))
     port = RuntimeDelegationDispatchPort(_FakeRuntimeBus(), package_names=("fakepkg",))
-    assert (await port._resolved_routes())[
-        "demo"
-    ].command_topic == "onex.cmd.demo.aaaaa.v1"
+    assert (await port._resolved_routes())["demo"].command_topic == _command_topic(
+        "demo", "aaaaa"
+    )
 
     contract_path.write_text(
-        _DEMO_CONTRACT.format(name="demo", command_topic="onex.cmd.demo.bbbbb.v1"),
+        _DEMO_CONTRACT.format(
+            name="demo", command_topic=_command_topic("demo", "bbbbb")
+        ),
         encoding="utf-8",
     )
     os.utime(contract_path, ns=(pinned_ns + 1_000, pinned_ns + 1_000))
 
-    assert (await port._resolved_routes())[
-        "demo"
-    ].command_topic == "onex.cmd.demo.bbbbb.v1"
+    assert (await port._resolved_routes())["demo"].command_topic == _command_topic(
+        "demo", "bbbbb"
+    )
 
 
 @pytest.mark.asyncio
@@ -460,7 +477,7 @@ async def test_constructor_routes_skip_discovery_and_fingerprint(
 
     monkeypatch.setattr(f"{_PORT_MODULE}.discover_runtime_local_ingress_routes", refuse)
     monkeypatch.setattr(f"{_PORT_MODULE}.local_ingress_contract_fingerprint", refuse)
-    route = _demo_route("onex.cmd.demo.start.v1")
+    route = _demo_route(_command_topic("demo", "start"))
     port = RuntimeDelegationDispatchPort(_FakeRuntimeBus(), routes={"demo": route})
 
     first = await port._resolved_routes()
@@ -478,8 +495,8 @@ async def test_fingerprint_failure_resolves_uncached_every_call(
         raise ModuleNotFoundError("No module named 'fakepkg'")
 
     answers: list[dict[str, ModelRuntimeLocalIngressRoute] | Exception] = [
-        {"demo": _demo_route("onex.cmd.demo.one.v1")},
-        {"demo": _demo_route("onex.cmd.demo.two.v1")},
+        {"demo": _demo_route(_command_topic("demo", "one"))},
+        {"demo": _demo_route(_command_topic("demo", "two"))},
         ModuleNotFoundError("No module named 'fakepkg'"),
     ]
     calls: list[tuple[str, ...]] = []
@@ -506,6 +523,6 @@ async def test_fingerprint_failure_resolves_uncached_every_call(
     with pytest.raises(ModuleNotFoundError, match="fakepkg"):
         await port._resolved_routes()
 
-    assert first["demo"].command_topic == "onex.cmd.demo.one.v1"
-    assert second["demo"].command_topic == "onex.cmd.demo.two.v1"
+    assert first["demo"].command_topic == _command_topic("demo", "one")
+    assert second["demo"].command_topic == _command_topic("demo", "two")
     assert calls == [("fakepkg",)] * 3

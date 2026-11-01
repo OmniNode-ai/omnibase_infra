@@ -14,6 +14,7 @@ resolver is exercised on a lab runtime (see contracts/OMN-21604.yaml).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -144,13 +145,16 @@ def test_overlay_ceiling_of_600_lets_a_300_second_request_wait_300_plus_margin(
     assert _REQUESTED_SECONDS - 5 <= requested <= _REQUESTED_SECONDS
     assert requested > 240, "not clamped to the contract's 240 s ceiling"
     assert wait == requested + _MARGIN_SECONDS
-    # The CLI dispatched the 300 s request and did not refuse it for the ceiling.
-    # (The run's exit code is not asserted: the fixture handler declares a 240 s
-    # ceiling of its own and rejects the request after the CLI has dispatched.)
+    # The fixture handler declares a 240 s ceiling of its own, so the run ends
+    # with exit code 1 after the CLI dispatched; the exit code is pinned to that
+    # one outcome. What the overlay decides is read from the public receipt: the
+    # declared timeout is the wait the CLI sized, and no ceiling refusal is named.
     receipts = list((tmp_path / "state" / "runs").glob("*/receipt.json"))
     assert len(receipts) == 1
-    assert "timeout_exceeds_task_class_ceiling" not in receipts[0].read_text("utf-8")
-    assert exit_code in (0, 1)
+    receipt_text = receipts[0].read_text("utf-8")
+    assert json.loads(receipt_text)["declared_timeout_seconds"] == wait
+    assert "timeout_exceeds_task_class_ceiling" not in receipt_text
+    assert exit_code == 1
 
 
 def test_without_the_overlay_the_same_request_is_clamped_to_the_contract(
