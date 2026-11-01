@@ -14,5 +14,5 @@ tag through the GitHub API and requires it to point at the pinned sha.
 """
 
 RECEIPT_GATE_REUSABLE = "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml"
-RECEIPT_GATE_PIN_TAG = "dev-20261030152335-66d35d2283c3"
-RECEIPT_GATE_PIN_SHA = "66d35d2283c3011c436799eacb9bce1a434ee6c9"
+RECEIPT_GATE_PIN_TAG = "dev-20261101005012-ac2f26e3e5bf"
+RECEIPT_GATE_PIN_SHA = "ac2f26e3e5bfd02c92496f7d3a9a14071f2c4432"
