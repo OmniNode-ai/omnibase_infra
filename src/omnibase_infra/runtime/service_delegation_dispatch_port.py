@@ -22,6 +22,7 @@ from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.models.delegation.model_dispatch_budget import ModelDispatchBudget
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
@@ -35,8 +36,6 @@ from omnibase_infra.runtime.models.model_pattern_b_broker_config import (
     ModelPatternBBrokerConfig,
 )
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
-    DEFAULT_EXECUTION_TIMEOUT_SECONDS,
-    DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
     ProtocolDelegationDispatchPort,
 )
 from omnibase_infra.runtime.runtime_local_ingress import (
@@ -250,6 +249,7 @@ class RuntimeDelegationDispatchPort:
         response_topic: str | None = None,
         terminal_evidence_sink: DelegationTerminalEvidenceSink | None = None,
     ) -> None:
+        ModelDispatchBudget.refuse_past_dispatch_deadline(event_bus)
         self._event_bus = event_bus
         self._package_names = (
             tuple(package_names) if package_names is not None else None
@@ -336,8 +336,8 @@ class RuntimeDelegationDispatchPort:
         #
         # The port and its protocol are pinned to one default by
         # `tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py`.
-        execution_timeout_seconds: int = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
-        terminal_delivery_margin_seconds: int = DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
+        execution_timeout_seconds: int | None = None,
+        terminal_delivery_margin_seconds: int | None = None,
         output_schema_key: str | None = None,
         quality_contract_mode: str = "extend_task_class",
         acceptance_criteria: tuple[str, ...] = (),
@@ -400,10 +400,10 @@ class RuntimeDelegationDispatchPort:
             raise ValueError(
                 "terminal evidence capture requires the actual dispatch tenant_id"
             )
-        if execution_timeout_seconds <= 0:
-            raise ValueError("execution_timeout_seconds must be positive")
-        if terminal_delivery_margin_seconds <= 0:
-            raise ValueError("terminal_delivery_margin_seconds must be positive")
+        # OMN-21604: an unset budget is the class's declared one, overlay included.
+        timeout, margin = ModelDispatchBudget.resolve(
+            task_type, execution_timeout_seconds, terminal_delivery_margin_seconds
+        )
         routes = await self._resolved_routes()
         selected = _select_delegation_route(routes)
         # OMN-18933 (K6): on a bounded lane the declared row, the runtime's broker
@@ -456,7 +456,7 @@ class RuntimeDelegationDispatchPort:
                     raise InfraUnavailableError(
                         "declared dogfood fault backend pin requires no-escalation policy"
                     )
-                if execution_timeout_seconds != fault_route.requested_timeout_seconds:
+                if timeout != fault_route.requested_timeout_seconds:
                     raise InfraUnavailableError(
                         "declared dogfood fault backend pin requires its exact timeout "
                         "policy"
@@ -479,7 +479,7 @@ class RuntimeDelegationDispatchPort:
             # payload as ModelDelegationRequest. Its request timeout is part of
             # that model; the terminal delivery margin only bounds this caller's
             # broker wait and is not a delegation request field.
-            "requested_timeout_seconds": execution_timeout_seconds,
+            "requested_timeout_seconds": timeout,
             "backend_id": backend_id,
             # OMN-18321 / OMN-18172: carried ONTO THE WIRE, not merely accepted.
             # Accepting the keyword and dropping it would trade a loud TypeError
@@ -510,11 +510,7 @@ class RuntimeDelegationDispatchPort:
             },
             correlation_id=correlation_id,
             response_topic=self._response_topic or selected.route.terminal_events[0],
-            timeout_seconds=(
-                float(execution_timeout_seconds + terminal_delivery_margin_seconds)
-                if wait
-                else 1.0
-            ),
+            timeout_seconds=(float(timeout + margin) if wait else 1.0),
         )
         broker = RuntimePatternBBroker(
             self._event_bus,

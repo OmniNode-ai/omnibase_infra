@@ -35,8 +35,6 @@ import inspect
 import pytest
 
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
-    DEFAULT_EXECUTION_TIMEOUT_SECONDS,
-    DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
     ProtocolDelegationDispatchPort,
 )
 from omnibase_infra.runtime.service_delegation_dispatch_port import (
