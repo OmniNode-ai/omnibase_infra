@@ -94,7 +94,7 @@ class HandlerPostgresMarkStale(MixinPostgresOpExecutor):
         >>> pool.acquire = MagicMock(return_value=AsyncContextManager(conn))
         >>> handler = HandlerPostgresMarkStale(pool)
         >>> payload = MagicMock(stale_cutoff=datetime.now(), checked_at=datetime.now())
-        >>> result = await handler.handle(payload, uuid4())
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
 
@@ -125,8 +125,7 @@ class HandlerPostgresMarkStale(MixinPostgresOpExecutor):
 
     async def handle(
         self,
-        payload: ModelPayloadMarkStale,
-        correlation_id: UUID,
+        request: ModelPayloadMarkStale,
     ) -> ModelBackendResult:
         """Execute batch staleness update on contracts.
 
@@ -135,10 +134,9 @@ class HandlerPostgresMarkStale(MixinPostgresOpExecutor):
         rows in a single execution.
 
         Args:
-            payload: Staleness parameters containing:
+            request: Staleness parameters containing:
                 - stale_cutoff: Contracts older than this are marked stale
                 - checked_at: Timestamp used for deregistered_at value
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with:
@@ -155,13 +153,14 @@ class HandlerPostgresMarkStale(MixinPostgresOpExecutor):
             metadata). Callers requiring the count should query the database
             separately or rely on log aggregation.
         """
+        correlation_id = request.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.MARK_STALE_ERROR,
             correlation_id=correlation_id,
             log_context={
-                "stale_cutoff": payload.stale_cutoff.isoformat(),
+                "stale_cutoff": request.stale_cutoff.isoformat(),
             },
-            fn=lambda: self._execute_mark_stale(payload, correlation_id),
+            fn=lambda: self._execute_mark_stale(request, correlation_id),
         )
 
     async def _execute_mark_stale(

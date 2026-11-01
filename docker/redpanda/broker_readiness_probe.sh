@@ -95,23 +95,22 @@ ready() {
 [ -r "$DECLARATION_PATH" ] || not_ready declaration_unreadable \
   "no readable declaration at ${DECLARATION_PATH}"
 
-sync_window_seconds=""
-probe_topic=""
-broker=""
-sasl_mechanism=""
+sync_window_seconds="" sync_exempt_group_suffixes=""
+probe_topic="" broker="" sasl_mechanism=""
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in ''|'#'*) continue ;; esac
   key="${line%%=*}"
   value="${line#*=}"
   case "$key" in
     sync_window_seconds) sync_window_seconds="$value" ;;
+    sync_exempt_group_suffixes) sync_exempt_group_suffixes="$value" ;;
     probe_topic)         probe_topic="$value" ;;
     broker)              broker="$value" ;;
     sasl_mechanism)      sasl_mechanism="$value" ;;
   esac
 done < "$DECLARATION_PATH"
 
-for required in sync_window_seconds probe_topic broker sasl_mechanism; do
+for required in sync_window_seconds sync_exempt_group_suffixes probe_topic broker sasl_mechanism; do
   eval "declared=\${$required}"
   [ -n "$declared" ] || not_ready declaration_missing_key \
     "${required} is not declared in ${DECLARATION_PATH}"
@@ -119,6 +118,10 @@ done
 case "$sync_window_seconds" in
   ''|*[!0-9]*) not_ready declaration_missing_key \
     "sync_window_seconds must be a whole number of seconds" ;;
+esac
+case "$sync_exempt_group_suffixes" in
+  ,*|*,|*,,*|*[[:space:]]*) not_ready declaration_invalid_value \
+    "sync_exempt_group_suffixes must contain only non-empty suffixes with no whitespace" ;;
 esac
 
 [ -n "$NOW" ] || NOW="$(date +%s)"
@@ -171,12 +174,9 @@ for name in $topic_names; do
 done
 [ -n "$target" ] || target="$(printf '%s\n' "$topic_names" | head -n 1)"
 
-describe="$(rpk topic describe -p "$target" 2>&1)"
-describe_status=$?
-if [ "$describe_status" -ne 0 ]; then
+describe="$(rpk topic describe -p "$target" 2>&1)" ||
   not_ready partition_read_failed \
-    "offset read on ${target} exited ${describe_status}: $(printf '%s' "$describe" | head -n 1)"
-fi
+    "offset read on ${target} exited $?: $(printf '%s' "$describe" | head -n 1)"
 
 # The verdict is the NUMBERS, not the exit code: rpk reports a per-partition
 # error in an extra column and can still exit 0. Read the HIGH-WATERMARK column
@@ -203,6 +203,13 @@ if [ "$offsets_verdict" != "ok" ]; then
 fi
 
 # --- check 2: a group that has committed before must still be committing -----
+# A group whose name ends in a declared exempt suffix is not judged (OMN-21789):
+# a relay to the cloud (the gateway forwarder's outbound group) stops committing
+# whenever the cloud link is down, which is the relay's own health and not this
+# broker's. Judging it held `redpanda` unhealthy for hours, and every runtime
+# container that depends on `redpanda: service_healthy` stayed in State=created.
+# Pass the declaration through ENVIRON so awk does not decode backslashes in
+# -v arguments; substr compares literal suffixes without a regex interpretation.
 # `rpk group describe` exit status is deliberately not consulted: the broker has
 # just proved it serves offsets, and a lane whose only fault is that one group
 # listing errored should not be declared down. What is consulted is whatever it
@@ -210,15 +217,18 @@ fi
 groups="$(rpk group describe -r '.*' 2>/dev/null)"
 
 new_state="${STATE_PATH}.new"
-stale="$(printf '%s\n' "$groups" | awk \
+stale="$(printf '%s\n' "$groups" | SYNC_EXEMPT_GROUP_SUFFIXES="$sync_exempt_group_suffixes" awk \
   -v now="$NOW" -v window="$sync_window_seconds" \
   -v statefile="$STATE_PATH" -v newstate="$new_state" '
-  function flush() {
-    if (g != "" && state == "Stable" && members > 0 && lag > 0 && committed > 0) {
-      cur[g] = progress
+  function flush( i, suffix) {
+    for (i in exempt) {
+      suffix = exempt[i]
+      if (length(g) >= length(suffix) && substr(g, length(g) - length(suffix) + 1) == suffix) return
     }
+    if (g != "" && state == "Stable" && members > 0 && lag > 0 && committed > 0) cur[g] = progress
   }
   BEGIN {
+    split(ENVIRON["SYNC_EXEMPT_GROUP_SUFFIXES"], exempt, ",")
     while ((getline line < statefile) > 0) {
       n = split(line, a, "\t")
       if (n == 3) { prev[a[1]] = a[2]; seen[a[1]] = a[3] }
@@ -241,11 +251,7 @@ stale="$(printf '%s\n' "$groups" | awk \
   }
 ')"
 
-if [ -f "$new_state" ]; then
-  mv -f "$new_state" "$STATE_PATH" 2>/dev/null
-else
-  : > "$STATE_PATH" 2>/dev/null
-fi
+if [ -f "$new_state" ]; then mv -f "$new_state" "$STATE_PATH" 2>/dev/null; else : > "$STATE_PATH" 2>/dev/null; fi
 
 if [ -n "$stale" ]; then
   not_ready group_not_synced \

@@ -24,6 +24,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelRunContext,
     ModelSessionStateResult,
+    ModelStaleRunGcRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,12 +81,12 @@ class HandlerStaleRunGC:
 
     async def handle(
         self,
-        correlation_id: UUID,
+        request: ModelStaleRunGcRequest,
     ) -> tuple[list[str], ModelSessionStateResult]:
         """Scan and delete stale run documents.
 
         Args:
-            correlation_id: Correlation ID for distributed tracing.
+            request: Request with the correlation ID for distributed tracing.
 
         Returns:
             Tuple of (list of deleted run_ids, operation result).
@@ -96,7 +97,7 @@ class HandlerStaleRunGC:
             their stems are NOT added to ``deleted_ids`` to avoid false-positive
             removal of active runs whose run_id happens to match the file stem.
         """
-        return await asyncio.to_thread(self._gc_sync, correlation_id)
+        return await asyncio.to_thread(self._gc_sync, request.correlation_id)
 
     def _gc_sync(
         self,
