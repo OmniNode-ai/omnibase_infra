@@ -336,9 +336,8 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     action = _load_yaml(SETUP_PYTHON_UV_ACTION)
     assert action["inputs"]["cache-enabled"]["default"] == "true"
     assert action["inputs"]["shared-env-enabled"]["default"] == "auto"
-    assert (
-        action["inputs"]["shared-env-root"]["default"]
-        == "/home/runner/.cache/omni/ci-envs"
+    assert action["inputs"]["shared-env-root"]["default"].endswith(
+        "/.cache/omni/ci-envs"
     )
     assert (
         action["inputs"]["shared-env-install-args"]["default"]
@@ -387,17 +386,16 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
     )
 
     ci_workflow = _load_yaml(CI_WORKFLOW)
-    assert ci_workflow["env"]["OMNI_CI_ENV_ROOT"] == "/home/runner/.cache/omni/ci-envs"
+    # OMN-21538: the root is the action input's default, not a second literal here.
+    shared_env_root = action["inputs"]["shared-env-root"]["default"]
+    assert "OMNI_CI_ENV_ROOT" not in ci_workflow["env"]
     assert "OMNI_CI_SHARED_ENV_ENABLED" in ci_workflow["env"]
     assert (
         "head.repo.full_name != github.repository"
         in ci_workflow["env"]["OMNI_CI_SHARED_ENV_ENABLED"]
     )
     standards_workflow = _load_yaml(OMNI_STANDARDS_WORKFLOW)
-    assert (
-        standards_workflow["env"]["OMNI_CI_ENV_ROOT"]
-        == "/home/runner/.cache/omni/ci-envs"
-    )
+    assert standards_workflow["env"]["OMNI_CI_ENV_ROOT"] == shared_env_root
     assert "OMNI_CI_SHARED_ENV_ENABLED" in standards_workflow["env"]
 
     for job_name, job in ci_workflow["jobs"].items():
@@ -453,7 +451,7 @@ def test_shared_ci_env_scripts_are_digest_keyed_and_read_only() -> None:
     assert "install_args" in digest_source
 
     ensure_source = ensure_script.read_text(encoding="utf-8")
-    assert "/home/runner/.cache/omni/ci-envs" in ensure_source
+    assert "/.cache/omni/ci-envs" in ensure_source
     assert "flock 9" in ensure_source
     assert 'mkdir "${lock_path}"' in ensure_source
     assert 'UV_PROJECT_ENVIRONMENT="${venv_dir}"' in ensure_source

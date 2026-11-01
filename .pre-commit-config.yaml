@@ -182,12 +182,39 @@ repos:
   # new baseline, allowlist or suppression entry. Shrink-only baseline at
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
+  # OMN-21538: omnibase_core's generic validators, consumed by hook id at the
+  # dev-merge tag; the rules and patterns live in core. This block is the one home
+  # of the tag: the ci.yml jobs canonical-file-shape and core-validators read the
+  # rev from here, and tests/ci/test_core_validators_wired_omn21538.py parses both
+  # files for every id below. Pre-commit judges the staged files; CI runs the same
+  # ids over the files a change touches. The two hooks that take a baseline read a
+  # per-file, shrink-only one with a target of zero and no suppression marker
+  # (.onex_ratchets/handler_di_baseline.txt, config/hardcoded_model_config_baseline.yaml);
+  # no file that a canon-audit finding names (omnibase_infra#5426 and #5425, F44
+  # to F47) is admitted to either, so touching one of those files fails until the
+  # finding is fixed. The other four hooks have no baseline: a file they flag
+  # fails when touched.
+  # Not consumed yet, each for a stated reason:
+  #   - check-no-dict-any, check-no-backward-compat and pydantic-extra-forbid need a
+  #     committed baseline file, and canonical-file-shape (rule new-exception-file)
+  #     refuses one for a hook that is not in its gate list; check-no-backward-compat
+  #     also scans all of src/ on every commit.
+  #   - contract-config-compliance is a hook of omnibase_core's own config, not an id
+  #     its hook repository exports.
+  #   - detect-secrets has no hook id in the omnibase_core hook repository.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261029151319-6e0a5eee541a
+    rev: dev-20261101023710-a66b5ff79cc0
     hooks:
       - id: canonical-file-shape
         args: [--rules, file-shape]
         require_serial: true
+      - id: check-no-raw-sqlite3
+      - id: check-local-paths-compute
+      - id: check-hardcoded-topic-compute
+      - id: check-hardcoded-model-config-compute
+      - id: check-no-io-outside-effects
+      - id: handler-di-gate
+        args: [--baseline, .onex_ratchets/handler_di_baseline.txt]
   # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
   # "Ci runners should be for private repos only"). Refuses a staged workflow job
   # whose runs-on is, or can resolve to, a self-hosted label unless omnibase_core's
