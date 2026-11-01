@@ -46,9 +46,11 @@ class ModelCostSnapshotTopics(BaseModel):
             / "nodes/node_registry_api_effect/contract.yaml"
         )
         contract = yaml.safe_load(path.read_text(encoding="utf-8"))
-        return cls.model_validate(
-            contract.get("config", {}).get("cost_snapshot_topics", {})
+        config = contract.get("config") if isinstance(contract, dict) else None
+        topics = (
+            config.get("cost_snapshot_topics") if isinstance(config, dict) else None
         )
+        return cls.model_validate(topics if isinstance(topics, dict) else {})
 
 
 __all__ = ["ModelCostSnapshotTopics"]

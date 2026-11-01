@@ -145,3 +145,17 @@ async def test_handlers_read_snapshots_under_injected_topics() -> None:
     assert summary.total_tokens == 20
     assert [item.name for item in by_repo.items] == ["r"]
     assert usage.total_tokens == 7
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body", ["", "config:\n", "config:\n  cost_snapshot_topics:\n", "- x\n"]
+)
+def test_from_contract_null_or_malformed_sections_raise_validation_error(
+    tmp_path: Path, body: str
+) -> None:
+    """A null or non-mapping section is a ValidationError, never AttributeError."""
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(body, encoding="utf-8")
+    with pytest.raises(ValidationError):
+        ModelCostSnapshotTopics.from_contract(contract)
