@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21906
+title: "The two bot pin PRs on omnibase_infra are brought current with dev and made green so they can land"
+summary: The bot pin branch carries current origin/dev by a normal merge push and its pin still reads omninode-memory>=0.18.8,<1.0.0; no gate, baseline or allowlist changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-pin-pr-current-and-green
+    statement: The bot pin branch contains current origin/dev and keeps its pin bump unchanged.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the PR head contains current origin/dev by a non-force push and repo-evidence / dod-verify no longer reports ticket_unavailable -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci -q -k dod_verify"
+      - id: AC3
+        statement: "AC3: no gate, baseline or allowlist is widened -- falsifier: git diff origin/dev --stat -- .onex_ratchets shows no added line"
+evidence_requirements:
+  - kind: tests
+    description: The dod_verify tests under tests/ci pass at the merged head.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci -q -k dod_verify"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-pin-pr-dod-verify-tests
+    description: The dod_verify tests under tests/ci pass at the merged head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci -q -k dod_verify"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-pin-pr-ratchets-untouched
+    description: The branch adds no line under .onex_ratchets relative to origin/dev; the count of added lines is zero.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          test "$(git diff origin/dev --numstat -- .onex_ratchets | awk '{s+=$1} END {print s+0}')" = "0"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-pin-pr-deploy-probe
+    description: Deploy probe. The runtime Dockerfile at the checked-out commit carries omninode-memory>=0.18.8,<1.0.0; grep exits nonzero on a tree without it, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          grep -cF '"omninode-memory>=0.18.8,<1.0.0"' docker/Dockerfile.runtime
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
