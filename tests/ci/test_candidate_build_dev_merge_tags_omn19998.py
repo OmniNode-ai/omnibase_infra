@@ -64,7 +64,9 @@ def _git(cwd: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _make_checkout(tmp_path: Path, *, with_tag: bool) -> tuple[Path, str]:
+def _make_checkout(
+    tmp_path: Path, *, with_tag: bool, extra_tags: tuple[str, ...] = ()
+) -> tuple[Path, str]:
     origin = tmp_path / "origin.git"
     work = tmp_path / "work"
     checkout = tmp_path / "checkout"
@@ -81,6 +83,10 @@ def _make_checkout(tmp_path: Path, *, with_tag: bool) -> tuple[Path, str]:
         _git(work, "tag", tag)
         _git(work, "tag", unrelated)
         _git(work, "push", "origin", f"refs/tags/{tag}", f"refs/tags/{unrelated}")
+    for name in extra_tags:
+        name = name.format(sha12=sha12)
+        _git(work, "tag", name)
+        _git(work, "push", "origin", f"refs/tags/{name}")
     _git(tmp_path, "clone", "--no-tags", str(origin), str(checkout))
     assert _git(checkout, "tag", "--points-at", "HEAD") == ""
     return checkout, tag
@@ -179,3 +185,69 @@ def test_the_checker_reads_the_fetched_tag_as_a_dev_merge_tag(
     spec.loader.exec_module(checker)
     record = checker._build_context_record(checkout, checker.load_contract())
     assert record["dev_merge_tag"] == tag
+
+
+@pytest.mark.unit
+def test_the_tag_fetch_picks_the_newest_timestamped_tag_and_ignores_malformed_names(
+    tmp_path: Path,
+    candidate_steps: list[dict[str, Any]],
+) -> None:
+    checkout, tag = _make_checkout(
+        tmp_path,
+        with_tag=True,
+        extra_tags=("dev-hotfix-{sha12}", "dev-20250101000000-{sha12}"),
+    )
+    newer = tag.replace("20261101000000", "20261102000000")
+    _git(tmp_path / "work", "tag", newer)
+    _git(tmp_path / "work", "push", "origin", f"refs/tags/{newer}")
+    result = _run_tag_fetch(checkout, candidate_steps)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _git(checkout, "tag", "--points-at", "HEAD", "--list", "dev-*") == newer
+
+
+@pytest.mark.unit
+def test_the_tag_fetch_retries_until_a_late_tag_appears(
+    tmp_path: Path,
+    candidate_steps: list[dict[str, Any]],
+) -> None:
+    checkout, tag = _make_checkout(tmp_path, with_tag=False)
+    work = tmp_path / "work"
+    _git(work, "tag", tag)
+    script = candidate_steps[_step_index(candidate_steps, _FETCH_STEP)]["run"]
+    # Publish the tag from the step's own sleep, i.e. after the first poll.
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    sleeper = shim / "sleep"
+    sleeper.write_text(
+        f'#!/bin/sh\ngit -C "{work}" push origin "refs/tags/{tag}" >/dev/null 2>&1\n',
+        encoding="utf-8",
+    )
+    sleeper.chmod(0o755)
+    env = scrub_git_location_env(os.environ) | {
+        "DEV_TAG_WAIT_ATTEMPTS": "3",
+        "DEV_TAG_WAIT_SECONDS": "1",
+        "PATH": f"{shim}{os.pathsep}{os.environ['PATH']}",
+    }
+    result = subprocess.run(
+        ["bash", "-c", script],
+        cwd=checkout,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::warning::" not in result.stdout
+    assert _git(checkout, "tag", "--points-at", "HEAD", "--list", "dev-*") == tag
+
+
+@pytest.mark.unit
+def test_the_tag_fetch_survives_an_unreachable_origin(
+    tmp_path: Path,
+    candidate_steps: list[dict[str, Any]],
+) -> None:
+    checkout, _ = _make_checkout(tmp_path, with_tag=True)
+    _git(checkout, "remote", "set-url", "origin", str(tmp_path / "missing.git"))
+    result = _run_tag_fetch(checkout, candidate_steps, attempts=2)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::warning::" in result.stdout

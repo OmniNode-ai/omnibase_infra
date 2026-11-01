@@ -331,16 +331,18 @@ jobs:
           SHA=$(git rev-parse HEAD)
           SHA12="${SHA:0:12}"
           for ((attempt=1; attempt<=DEV_TAG_WAIT_ATTEMPTS; attempt++)); do
-            TAG=$(git ls-remote --tags origin 'refs/tags/dev-*' |
-              awk -v suffix="-${SHA12}" '
-                length($2) > length(suffix) &&
-                substr($2, length($2) - length(suffix) + 1) == suffix {
-                  sub(/^refs\/tags\//, "", $2); print $2
-                }' | LC_ALL=C sort | tail -n 1)
+            # A failed ls-remote or fetch is one more missed attempt, not an abort.
+            TAG=""
+            if REFS=$(git ls-remote --tags origin 'refs/tags/dev-*'); then
+              TAG=$(printf '%s\n' "${REFS}" |
+                sed -n "s#^[0-9a-f]*[[:space:]]refs/tags/\(dev-[0-9]\{14\}-${SHA12}\)\$#\1#p" |
+                LC_ALL=C sort | tail -n 1)
+            fi
             if [ -n "${TAG}" ]; then
-              git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
-              echo "build context ${SHA} carries ${TAG}"
-              exit 0
+              if git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"; then
+                echo "build context ${SHA} carries ${TAG}"
+                exit 0
+              fi
             fi
             if [ "${attempt}" -lt "${DEV_TAG_WAIT_ATTEMPTS}" ]; then
               sleep "${DEV_TAG_WAIT_SECONDS}"
