@@ -39,7 +39,7 @@ Wire Format:
     ```json
     {
         "correlation_id": "...",
-        "topics": [{"topic_name": "onex.evt.foo.bar.v1"}, ...],  # onex-topic-allow: pending contract auto-wiring
+        "topics": [{"topic_name": "onex.evt.<domain>.<name>.v1"}, ...],
         "warnings": []
     }
     ```
@@ -59,7 +59,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-import time
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -178,7 +177,6 @@ class HandlerCatalogRequest:
             ``ModelHandlerOutput`` with exactly one event:
             ``ModelTopicCatalogResponse``.
         """
-        start_time = time.perf_counter()
         now: datetime = request.now
         correlation_id: UUID = request.correlation_id or uuid4()
 
@@ -250,7 +248,6 @@ class HandlerCatalogRequest:
             warnings=tuple(warnings),
         )
 
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
         return ModelHandlerOutput(
             input_envelope_id=request.input_id,
             correlation_id=correlation_id,
@@ -260,7 +257,6 @@ class HandlerCatalogRequest:
             intents=(),
             projections=(),
             result=None,
-            processing_time_ms=processing_time_ms,
             timestamp=now,
         )
 

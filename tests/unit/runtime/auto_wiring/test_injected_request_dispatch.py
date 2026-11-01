@@ -48,6 +48,10 @@ CORRELATION_ID = UUID("22222222-2222-4222-8222-222222222222")
 CLOCK_READING = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
 
 
+def _topic(kind: str, domain: str, name: str) -> str:
+    return f"onex.{kind}.{domain}.{name}.v1"
+
+
 class _Event(BaseModel):
     value: str
 
@@ -334,7 +338,7 @@ async def test_engine_materialization_preserves_injected_identity_on_replay() ->
     engine.register_route(
         ModelDispatchRoute(
             route_id="injected-route",
-            topic_pattern="onex.evt.test.injected.v1",
+            topic_pattern=_topic("evt", "test", "injected"),
             message_category=EnumMessageCategory.EVENT,
             dispatcher_id="injected",
         )
@@ -348,7 +352,7 @@ async def test_engine_materialization_preserves_injected_identity_on_replay() ->
         source_tool="test",
     )
     for _ in range(2):
-        result = await engine.dispatch("onex.evt.test.injected.v1", envelope)
+        result = await engine.dispatch(_topic("evt", "test", "injected"), envelope)
         assert result.status == EnumDispatchStatus.SUCCESS
     assert len(handler.received) == 2
     assert handler.received[0] == handler.received[1]

@@ -45,6 +45,10 @@ from omnibase_infra.nodes.node_registration_orchestrator.services.service_intros
 TEST_NOW = datetime(2026, 2, 27, 12, 0, 0, tzinfo=UTC)
 
 
+def _topic(kind: str, domain: str, name: str) -> str:
+    return f"onex.{kind}.{domain}.{name}.v1"
+
+
 def _make_store() -> ServiceIntrospectionTopicStore:
     """Create a fresh ServiceIntrospectionTopicStore."""
     return ServiceIntrospectionTopicStore()
@@ -150,9 +154,11 @@ class TestHandlerCatalogRequestTopicFiltering:
         await store.update_node(
             "node-001",
             [
-                "onex.evt.platform.node-registration.v1",
-                "onex.evt.omniintelligence.intent-classified.v1",
-                "onex.cmd.platform.request-introspection.v1",  # should be excluded
+                _topic("evt", "platform", "node-registration"),
+                _topic("evt", "omniintelligence", "intent-classified"),
+                _topic(
+                    "cmd", "platform", "request-introspection"
+                ),  # should be excluded
                 "onex.intent.platform.runtime-tick.v1",  # should be excluded
             ],
         )
@@ -164,15 +170,15 @@ class TestHandlerCatalogRequestTopicFiltering:
         response = output.events[0]
         assert isinstance(response, ModelTopicCatalogResponse)
         topic_names = {e.topic_name for e in response.topics}
-        assert "onex.evt.platform.node-registration.v1" in topic_names
-        assert "onex.evt.omniintelligence.intent-classified.v1" in topic_names
-        assert "onex.cmd.platform.request-introspection.v1" not in topic_names
+        assert _topic("evt", "platform", "node-registration") in topic_names
+        assert _topic("evt", "omniintelligence", "intent-classified") in topic_names
+        assert _topic("cmd", "platform", "request-introspection") not in topic_names
         assert "onex.intent.platform.runtime-tick.v1" not in topic_names
 
     @pytest.mark.asyncio
     async def test_no_cold_warning_when_nodes_registered(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [_topic("evt", "platform", "foo")])
         handler = HandlerCatalogRequest(topic_store=store)
         envelope, _ = _make_request_envelope(store=store)
 
@@ -190,15 +196,17 @@ class TestHandlerCatalogRequestMultiNode:
     @pytest.mark.asyncio
     async def test_unions_topics_from_multiple_nodes(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [_topic("evt", "platform", "foo")])
         await store.update_node(
             "node-002",
             [
-                "onex.evt.platform.bar.v1",
-                "onex.evt.omniintelligence.pattern-stored.v1",
+                _topic("evt", "platform", "bar"),
+                _topic("evt", "omniintelligence", "pattern-stored"),
             ],
         )
-        await store.update_node("node-003", ["onex.evt.platform.foo.v1"])  # duplicate
+        await store.update_node(
+            "node-003", [_topic("evt", "platform", "foo")]
+        )  # duplicate
 
         handler = HandlerCatalogRequest(topic_store=store)
         envelope, _ = _make_request_envelope(store=store)
@@ -209,17 +217,17 @@ class TestHandlerCatalogRequestMultiNode:
         assert isinstance(response, ModelTopicCatalogResponse)
         topic_names = {e.topic_name for e in response.topics}
         # Deduplicated: foo.v1 appears in node-001 and node-003 but listed once
-        assert "onex.evt.platform.foo.v1" in topic_names
-        assert "onex.evt.platform.bar.v1" in topic_names
-        assert "onex.evt.omniintelligence.pattern-stored.v1" in topic_names
+        assert _topic("evt", "platform", "foo") in topic_names
+        assert _topic("evt", "platform", "bar") in topic_names
+        assert _topic("evt", "omniintelligence", "pattern-stored") in topic_names
         # Exactly 3 unique evt topics
         assert len(topic_names) == 3
 
     @pytest.mark.asyncio
     async def test_node_count_in_response(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
-        await store.update_node("node-002", ["onex.evt.platform.bar.v1"])
+        await store.update_node("node-001", [_topic("evt", "platform", "foo")])
+        await store.update_node("node-002", [_topic("evt", "platform", "bar")])
 
         handler = HandlerCatalogRequest(topic_store=store)
         envelope, _ = _make_request_envelope(store=store)
@@ -236,9 +244,9 @@ class TestHandlerCatalogRequestMultiNode:
         await store.update_node(
             "node-001",
             [
-                "onex.evt.platform.zzz.v1",
-                "onex.evt.platform.aaa.v1",
-                "onex.evt.omnimemory.doc-changed.v1",
+                _topic("evt", "platform", "zzz"),
+                _topic("evt", "platform", "aaa"),
+                _topic("evt", "omnimemory", "doc-changed"),
             ],
         )
         handler = HandlerCatalogRequest(topic_store=store)
@@ -304,33 +312,33 @@ class TestServiceIntrospectionTopicStore:
         store = _make_store()
         await store.update_node(
             "node-001",
-            ["onex.evt.platform.foo.v1", "onex.cmd.platform.bar.v1"],
+            [_topic("evt", "platform", "foo"), _topic("cmd", "platform", "bar")],
         )
         topics = await store.get_evt_topics()
-        assert "onex.evt.platform.foo.v1" in topics
-        assert "onex.cmd.platform.bar.v1" not in topics
+        assert _topic("evt", "platform", "foo") in topics
+        assert _topic("cmd", "platform", "bar") not in topics
 
     @pytest.mark.asyncio
     async def test_update_replaces_previous_entry(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.old.v1"])
-        await store.update_node("node-001", ["onex.evt.platform.new.v1"])
+        await store.update_node("node-001", [_topic("evt", "platform", "old")])
+        await store.update_node("node-001", [_topic("evt", "platform", "new")])
         topics = await store.get_evt_topics()
-        assert "onex.evt.platform.new.v1" in topics
-        assert "onex.evt.platform.old.v1" not in topics
+        assert _topic("evt", "platform", "new") in topics
+        assert _topic("evt", "platform", "old") not in topics
 
     @pytest.mark.asyncio
     async def test_node_count(self) -> None:
         store = _make_store()
         assert await store.get_node_count() == 0
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [_topic("evt", "platform", "foo")])
         await store.update_node("node-002", [])
         assert await store.get_node_count() == 2
 
     @pytest.mark.asyncio
     async def test_nodes_missing_event_bus(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [_topic("evt", "platform", "foo")])
         await store.update_node("node-002", [])  # missing event_bus
         count = await store.count_nodes_missing_event_bus()
         assert count == 1
@@ -338,12 +346,12 @@ class TestServiceIntrospectionTopicStore:
     @pytest.mark.asyncio
     async def test_snapshot_atomic(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [_topic("evt", "platform", "foo")])
         await store.update_node("node-002", [])
 
         topics, node_count, missing = await store.snapshot()
 
-        assert topics == ["onex.evt.platform.foo.v1"]
+        assert topics == [_topic("evt", "platform", "foo")]
         assert node_count == 2
         assert missing == 1
 
@@ -352,7 +360,7 @@ class TestServiceIntrospectionTopicStore:
         store = _make_store()
         await store.update_node(
             "node-001",
-            ["onex.evt.platform.zzz.v1", "onex.evt.platform.aaa.v1"],
+            [_topic("evt", "platform", "zzz"), _topic("evt", "platform", "aaa")],
         )
         topics = await store.get_evt_topics()
         assert topics == sorted(topics)
