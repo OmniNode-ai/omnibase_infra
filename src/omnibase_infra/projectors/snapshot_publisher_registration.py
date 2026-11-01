@@ -202,7 +202,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         *,
         snapshot_version_tracker: dict[str, int] | None = None,
         bootstrap_servers: str | None = None,
-        consumer_timeout_ms: int = RUNTIME_TIMEOUTS.snapshot_consumer_timeout_ms,
+        consumer_timeout_ms: int = RUNTIME_TIMEOUTS.snapshot_consumer_wait_ms,
         debounce_ms: int = 500,
     ) -> None:
         """Initialize snapshot publisher.
@@ -916,7 +916,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 group_id=consumer_group,
                 auto_offset_reset="earliest",
                 enable_auto_commit=False,
-                session_timeout_ms=RUNTIME_TIMEOUTS.kafka_session_timeout_ms,
+                session_timeout_ms=RUNTIME_TIMEOUTS.kafka_session_ms,
                 heartbeat_interval_ms=RUNTIME_TIMEOUTS.kafka_heartbeat_interval_ms,
                 max_poll_interval_ms=RUNTIME_TIMEOUTS.kafka_max_poll_interval_ms,
                 **build_aiokafka_auth_kwargs_from_env(),

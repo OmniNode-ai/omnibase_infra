@@ -1327,7 +1327,7 @@ class TestSnapshotCacheOperations:
             await publisher.get_latest_snapshot("nonexistent-id", "registration")
 
         kwargs = consumer_class.call_args.kwargs
-        assert kwargs["session_timeout_ms"] == RUNTIME_TIMEOUTS.kafka_session_timeout_ms
+        assert kwargs["session_timeout_ms"] == RUNTIME_TIMEOUTS.kafka_session_ms
         assert (
             kwargs["heartbeat_interval_ms"]
             == RUNTIME_TIMEOUTS.kafka_heartbeat_interval_ms

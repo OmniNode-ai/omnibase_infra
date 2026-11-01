@@ -8,6 +8,7 @@ import ast
 import subprocess
 import sys
 import textwrap
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -31,11 +32,11 @@ _SRC = Path(model_module.__file__).resolve().parents[2]
 
 # (module path under src/omnibase_infra, called name, keyword) -> declared key.
 _KEYWORD_WIRING: dict[tuple[str, str, str], str] = {
-    ("runtime/request_response_wiring.py", "AIOKafkaConsumer", "session_timeout_ms"): "kafka_session_timeout_ms",
+    ("runtime/request_response_wiring.py", "AIOKafkaConsumer", "session_timeout_ms"): "kafka_session_ms",
     ("runtime/request_response_wiring.py", "AIOKafkaConsumer", "heartbeat_interval_ms"): "kafka_heartbeat_interval_ms",
     ("runtime/request_response_wiring.py", "AIOKafkaConsumer", "max_poll_interval_ms"): "kafka_max_poll_interval_ms",
     ("runtime/request_response_wiring.py", "_init_circuit_breaker", "reset_timeout"): "circuit_breaker_reset_seconds",
-    ("projectors/snapshot_publisher_registration.py", "AIOKafkaConsumer", "session_timeout_ms"): "kafka_session_timeout_ms",
+    ("projectors/snapshot_publisher_registration.py", "AIOKafkaConsumer", "session_timeout_ms"): "kafka_session_ms",
     ("projectors/snapshot_publisher_registration.py", "AIOKafkaConsumer", "heartbeat_interval_ms"): "kafka_heartbeat_interval_ms",
     ("projectors/snapshot_publisher_registration.py", "AIOKafkaConsumer", "max_poll_interval_ms"): "kafka_max_poll_interval_ms",
     ("mixins/mixin_llm_http_transport.py", "_init_circuit_breaker", "reset_timeout"): "circuit_breaker_reset_seconds",
@@ -112,10 +113,10 @@ def test_inconsistent_values_fail_to_load(override: dict[str, object]) -> None:
     "key",
     [
         "capability_probe_ttl_seconds",
-        "kafka_session_timeout_ms",
+        "kafka_session_ms",
         "kafka_heartbeat_interval_ms",
         "kafka_max_poll_interval_ms",
-        "snapshot_consumer_timeout_ms",
+        "snapshot_consumer_wait_ms",
         "local_dispatch_seconds",
     ],
 )
@@ -147,7 +148,7 @@ _SENTINEL_SCRIPT = textwrap.dedent(
     import omnibase_infra.models.runtime_timeouts as pkg
 
     sentinel = m.ModelRuntimeTimeouts.from_file(Path(sys.argv[1]))
-    m._TIMEOUTS_PATH = Path(sys.argv[1])
+    m._TIMEOUTS_RESOURCE = Path(sys.argv[1])
     m.load_runtime_timeouts.cache_clear()
     pkg.RUNTIME_TIMEOUTS = m.load_runtime_timeouts()
     assert pkg.RUNTIME_TIMEOUTS == sentinel
@@ -185,7 +186,7 @@ _SENTINEL_SCRIPT = textwrap.dedent(
                 snapshot_publisher_registration.SnapshotPublisherRegistration.__init__,
                 "consumer_timeout_ms",
             ),
-            sentinel.snapshot_consumer_timeout_ms,
+            sentinel.snapshot_consumer_wait_ms,
         ),
         (
             default(
@@ -246,3 +247,50 @@ def test_call_sites_follow_the_declared_file_not_a_literal(tmp_path: Path) -> No
     )
     assert completed.returncode == 0, completed.stderr[-2000:]
     assert completed.stdout.strip() == "20"
+
+
+def test_the_declared_file_loads_from_inside_a_zip(tmp_path: Path) -> None:
+    """A package imported from a zipped wheel has no directory to open; the file still loads."""
+    archive = tmp_path / "wheel.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        handle.write(_DECLARED, "runtime_timeouts.yaml")
+    loaded = ModelRuntimeTimeouts.from_file(
+        zipfile.Path(archive, "runtime_timeouts.yaml")
+    )
+    assert loaded == RUNTIME_TIMEOUTS
+
+
+def test_a_malformed_file_is_refused_as_a_configuration_error(tmp_path: Path) -> None:
+    path = tmp_path / "runtime_timeouts.yaml"
+    path.write_text("timeouts: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ProtocolConfigurationError):
+        ModelRuntimeTimeouts.from_file(path)
+
+
+def test_a_value_outside_its_bounds_in_the_file_is_a_configuration_error(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "runtime_timeouts.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {"timeouts": {**_block(), "health_check_default_seconds": 61.0}}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ProtocolConfigurationError):
+        ModelRuntimeTimeouts.from_file(path)
+
+
+@pytest.mark.parametrize(
+    "key", sorted(k for k, v in _block().items() if isinstance(v, float))
+)
+def test_a_boolean_is_not_a_float_timeout(key: str) -> None:
+    with pytest.raises(ValidationError):
+        ModelRuntimeTimeouts.model_validate({**_block(), key: True})
+
+
+def test_an_llm_post_wait_above_the_transport_ceiling_fails_to_load() -> None:
+    with pytest.raises(ValidationError):
+        ModelRuntimeTimeouts.model_validate(
+            {**_block(), "llm_post_seconds": 121.0, "llm_transport_max_seconds": 120.0}
+        )

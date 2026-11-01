@@ -23,11 +23,11 @@ timeouts:
   handler_shutdown_default_seconds: 10.0
   # Kafka consumer session settings that keep a group out of rebalance storms.
   # The heartbeat interval must stay below the session timeout.
-  kafka_session_timeout_ms: 45000
+  kafka_session_ms: 45000
   kafka_heartbeat_interval_ms: 15000
   kafka_max_poll_interval_ms: 300000
   # Snapshot publisher: consumer wait when reading a snapshot topic.
-  snapshot_consumer_timeout_ms: 5000
+  snapshot_consumer_wait_ms: 5000
   # Circuit breaker reset wait of the request-response wiring and LLM transport.
   circuit_breaker_reset_seconds: 60.0
   # Node invocation adapter: runtime health probe, whole local dispatch, and

@@ -366,7 +366,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             group_id=consumer_group,
             auto_offset_reset=instance.auto_offset_reset,
             enable_auto_commit=True,
-            session_timeout_ms=RUNTIME_TIMEOUTS.kafka_session_timeout_ms,
+            session_timeout_ms=RUNTIME_TIMEOUTS.kafka_session_ms,
             heartbeat_interval_ms=RUNTIME_TIMEOUTS.kafka_heartbeat_interval_ms,
             max_poll_interval_ms=RUNTIME_TIMEOUTS.kafka_max_poll_interval_ms,
             # Reply consumer uses this broker's bound lane transport, like producer (OMN-17427).
