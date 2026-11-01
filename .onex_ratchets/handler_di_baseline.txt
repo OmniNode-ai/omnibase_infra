@@ -52,11 +52,10 @@ src/omnibase_infra/nodes/node_baseline_capture/handlers/handler_baseline_capture
 src/omnibase_infra/nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py 2
 src/omnibase_infra/nodes/node_board_probe_effect/contract_topics.py 1
 src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_collection.py 1
-src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_constants.py 2
+src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_constants.py 1
 src/omnibase_infra/nodes/node_board_probe_effect/handlers/handler_consumer_flow.py 4
 src/omnibase_infra/nodes/node_board_probe_effect/handlers/handler_forwarder_refused_topic.py 4
 src/omnibase_infra/nodes/node_board_probe_effect/models/enum_board_check_id.py 1
-src/omnibase_infra/nodes/node_board_probe_effect/models/model_consumer_flow_request.py 1
 src/omnibase_infra/nodes/node_build_loop_write_effect/handlers/handler_build_loop_append.py 5
 src/omnibase_infra/nodes/node_bus_forwarder_effect/handlers/handler_consume_inbound.py 1
 src/omnibase_infra/nodes/node_bus_forwarder_effect/handlers/handler_forward_outbound.py 1
@@ -110,7 +109,7 @@ src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/handler_bifr
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_inference_command.py 3
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_openai_compatible.py 2
 src/omnibase_infra/nodes/node_merge_gate_effect/handlers/handler_upsert_merge_gate.py 1
-src/omnibase_infra/nodes/node_merge_provenance_observe_effect/handlers/handler_merge_group_run_read_github.py 3
+src/omnibase_infra/nodes/node_merge_provenance_observe_effect/handlers/handler_merge_group_run_read_github.py 2
 src/omnibase_infra/nodes/node_merge_provenance_observe_effect/handlers/handler_merge_provenance_observe.py 1
 src/omnibase_infra/nodes/node_migration_append_only_check_compute/runtime_migration_append_only_check.py 1
 src/omnibase_infra/nodes/node_migration_freeze_check_compute/runtime_migration_freeze_check.py 1
