@@ -44,6 +44,7 @@ async def test_cli_product_repos_reaches_sweep_verification(
     payload = _parse_skill_args(mapping, args)
     correlation_id = uuid4()
     payload["correlation_id"] = str(correlation_id)
+    payload["demotion_window_hours"] = 0
     request = ModelEvidenceAutocloseSweepRequest.model_validate_json(
         json.dumps(payload)
     )
