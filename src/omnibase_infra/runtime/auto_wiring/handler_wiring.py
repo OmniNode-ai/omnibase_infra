@@ -956,6 +956,9 @@ def _make_dispatch_callback(
 
         _effective_handle = _missing_handle
 
+    # Introspect once at wiring time, not per message.
+    _request_model = _resolve_def_b_input_model_type(_effective_handle)
+
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
@@ -1105,17 +1108,15 @@ def _make_dispatch_callback(
         if pre_dispatch_guard is not None:
             pre_dispatch_guard(typed_payload)
         handler_arg: object = typed_payload
-        request_model = _resolve_def_b_input_model_type(handle_method)
         if handler_takes_envelope:
             handler_arg = _materialize_typed_event_envelope(
                 envelope, cast("BaseModel", typed_payload), event_model.name
             )
-        elif request_model is not None and issubclass(
-            request_model, ModelInjectedRequest
+        elif _request_model is not None and issubclass(
+            _request_model, ModelInjectedRequest
         ):
-            # The runtime unwraps the envelope: the handler gets the clock
-            # reading and input id on its typed request, never the envelope.
-            handler_arg = request_model.from_dispatch(envelope, typed_payload)
+            # The runtime unwraps the envelope into the typed request.
+            handler_arg = _request_model.from_dispatch(envelope, typed_payload)
         typed_result = handle_method(handler_arg)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)

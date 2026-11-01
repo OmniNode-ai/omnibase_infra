@@ -147,7 +147,9 @@ async def test_envelope_without_clock_or_id_gets_fresh_ones() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_production_handler_receives_request_through_the_callback() -> None:
+async def test_production_handler_receives_request_through_the_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The real registration handler is driven through the real dispatch callback."""
     correlation_id = uuid4()
     service = MagicMock()
@@ -162,6 +164,14 @@ async def test_production_handler_receives_request_through_the_callback() -> Non
         )
     )
     handler = HandlerTopicCatalogQuery(catalog_service=service)
+    seen: list[ModelInjectedRequest[ModelTopicCatalogQuery]] = []
+    real_handle = handler.handle
+
+    async def _spy(request: ModelInjectedRequest[ModelTopicCatalogQuery]) -> object:
+        seen.append(request)
+        return await real_handle(request)
+
+    monkeypatch.setattr(handler, "handle", _spy)
     result = await _dispatch(
         handler,
         ModelHandlerRef(
@@ -181,3 +191,43 @@ async def test_production_handler_receives_request_through_the_callback() -> Non
     assert isinstance(result, ModelDispatchResult)
     service.build_catalog.assert_awaited_once()
     assert result.correlation_id == correlation_id
+    # The injected clock and input id reach the handler, not just the payload.
+    assert seen[0].input_id == ENVELOPE_ID
+    assert seen[0].now == CLOCK_READING
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "timestamp",
+    [CLOCK_READING.isoformat(), CLOCK_READING.isoformat().replace("+00:00", "Z")],
+)
+def test_from_dispatch_parses_aware_iso_timestamps(timestamp: str) -> None:
+    request = ModelInjectedRequest.from_dispatch(
+        {"envelope_timestamp": timestamp, "envelope_id": str(ENVELOPE_ID)},
+        _Event(value="x"),
+    )
+    assert request.now == CLOCK_READING
+    assert request.input_id == ENVELOPE_ID
+
+
+@pytest.mark.unit
+def test_from_dispatch_keeps_naive_timestamp_for_handler_validation() -> None:
+    request = ModelInjectedRequest.from_dispatch(
+        {"envelope_timestamp": "2026-01-01T00:00:00"}, _Event(value="x")
+    )
+    assert request.now.tzinfo is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "header",
+    [
+        {"envelope_id": "not-a-uuid"},
+        {"envelope_id": ""},
+        {"correlation_id": "not-a-uuid"},
+        {"envelope_timestamp": "not-a-time"},
+    ],
+)
+def test_from_dispatch_rejects_malformed_headers(header: dict[str, str]) -> None:
+    with pytest.raises(ValueError):
+        ModelInjectedRequest.from_dispatch(header, _Event(value="x"))
