@@ -93,9 +93,9 @@ class TestHandlerChainRetrievalComplete:
             best_match_similarity=0.92,
             is_hit=True,
         )
-        result = await handler.handle(retrieval, uuid4())
-        assert result["path"] == "replay"
-        assert result["is_hit"] is True
+        result = await handler.handle(retrieval)
+        assert result.path == "replay"
+        assert result.is_hit is True
 
     @pytest.mark.asyncio
     async def test_miss_path(self) -> None:
@@ -104,9 +104,9 @@ class TestHandlerChainRetrievalComplete:
             correlation_id=uuid4(),
             is_hit=False,
         )
-        result = await handler.handle(retrieval, uuid4())
-        assert result["path"] == "explore"
-        assert result["is_hit"] is False
+        result = await handler.handle(retrieval)
+        assert result.path == "explore"
+        assert result.is_hit is False
 
 
 @pytest.mark.unit
