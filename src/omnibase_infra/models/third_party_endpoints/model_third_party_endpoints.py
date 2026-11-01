@@ -69,8 +69,22 @@ class ModelThirdPartyEndpoints(BaseModel):
         return f"{self.github_api_base_url}/repos/{repo}/pulls/{number}"
 
     def github_clone_url(self, repo: str, token: str = "") -> str:
-        """Return the clone URL of ``repo``; a non-empty ``token`` is embedded as userinfo."""
+        """Return the clone URL of ``repo``; a non-empty ``token`` is embedded as userinfo.
+
+        Raises:
+            ProtocolConfigurationError: If a token is given and the declared web
+                origin is not https.
+        """
         base = urlsplit(self.github_web_base_url)
+        if token and base.scheme != "https":
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="github_clone_url",
+            )
+            raise ProtocolConfigurationError(
+                "github_web_base_url must be https to carry a token in a clone URL",
+                context=context,
+            )
         authority = f"{_GIT_TOKEN_USER}:{token}@{base.netloc}" if token else base.netloc
         return f"{base.scheme}://{authority}/{repo}.git"
 

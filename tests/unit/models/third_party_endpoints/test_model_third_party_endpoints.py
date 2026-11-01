@@ -88,3 +88,14 @@ def test_clone_url_carries_the_token_only_when_given() -> None:
     with_token = endpoints.github_clone_url("owner/name", "tok")
     scheme, _, rest = endpoints.github_web_base_url.partition("://")
     assert with_token == f"{scheme}://x-access-token:tok@{rest}/owner/name.git"
+
+
+def test_clone_url_refuses_to_embed_a_token_over_plain_http() -> None:
+    block = {**_declared_block(), "github_web_base_url": "http://github.example"}
+    endpoints = ModelThirdPartyEndpoints.model_validate(block)
+    assert (
+        endpoints.github_clone_url("owner/name")
+        == "http://github.example/owner/name.git"
+    )
+    with pytest.raises(ProtocolConfigurationError):
+        endpoints.github_clone_url("owner/name", "tok")
