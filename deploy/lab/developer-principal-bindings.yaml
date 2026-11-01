@@ -136,6 +136,7 @@
 # The handler's correlation filter selects responses; it is not an ACL boundary.
 # Runtime command-consumer groups use separate prefixes. Per-principal receipt
 # isolation requires changing the client's group IDs and reply topic routing too.
+# Machine-only writes live in machine-principal-bindings.yaml (OMN-21622).
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}

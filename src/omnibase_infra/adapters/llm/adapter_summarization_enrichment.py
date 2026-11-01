@@ -62,9 +62,6 @@ logger = logging.getLogger(__name__)
 # Prompt version -- bump when system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
 
-# Default model identifier sent to the Qwen-72B endpoint.
-_DEFAULT_MODEL: str = "qwen2.5-72b"
-
 # Token threshold: summarize only when context exceeds this many tokens.
 _TOKEN_THRESHOLD: int = 8_000
 
@@ -142,7 +139,9 @@ class AdapterSummarizationEnrichment:
         handler_category: ``EFFECT`` -- performs external I/O (HTTP call).
 
     Example:
-        >>> adapter = AdapterSummarizationEnrichment()
+        >>> adapter = AdapterSummarizationEnrichment(
+        ...     model=routed_model, transport_name=transport_name,
+        ... )
         >>> result = await adapter.enrich(
         ...     prompt="Summarize the relevant background.",
         ...     context="<large context block>",
@@ -153,12 +152,13 @@ class AdapterSummarizationEnrichment:
     def __init__(
         self,
         base_url: str | None = None,
-        model: str = _DEFAULT_MODEL,
+        *,
+        model: str,
         token_threshold: int = _TOKEN_THRESHOLD,
         summary_max_tokens: int = _SUMMARY_MAX_TOKENS,
         temperature: float = _DEFAULT_TEMPERATURE,
         api_key: str | None = None,
-        transport_name: str = "qwen-72b-summarization",
+        transport_name: str,
     ) -> None:
         """Initialize the adapter.
 
@@ -166,7 +166,7 @@ class AdapterSummarizationEnrichment:
             base_url: Base URL of the Qwen-72B endpoint.  Defaults to the
                 ``LLM_QWEN_72B_URL`` environment variable, falling back to
                 ``http://localhost:8100``.
-            model: Model identifier string sent in inference requests.
+            model: Model identifier from the model-routing policy.
             token_threshold: Minimum token count to trigger summarization.
                 Contexts with fewer than this many tokens are returned as-is.
                 Must be >= 0; raises ``ValueError`` if negative.
@@ -174,10 +174,8 @@ class AdapterSummarizationEnrichment:
             temperature: Sampling temperature.
             api_key: Optional Bearer token for authenticated endpoints.
             transport_name: Label used by ``TransportHolderLlmHttp`` for
-                tracing and logging.  Defaults to ``"qwen-72b-summarization"``.
-                Override when pointing ``base_url`` at a different model
-                endpoint so that traces and logs reflect the actual target
-                (e.g. ``"qwen-14b-summarization"`` for the Mac Mini endpoint).
+                tracing and logging, supplied by the caller to reflect the
+                target endpoint.
         """
         if token_threshold < 0:
             raise ValueError(f"token_threshold must be >= 0, got {token_threshold}")
@@ -199,9 +197,8 @@ class AdapterSummarizationEnrichment:
         self._temperature: float = temperature
         self._api_key: str | None = api_key
 
-        # transport_name is configurable so callers pointing at a non-default
-        # endpoint get accurate labels in traces and logs instead of the
-        # hardcoded "qwen-72b-summarization" default.
+        # The caller supplies transport_name so traces and logs reflect the
+        # target endpoint.
         self._transport = TransportHolderLlmHttp(
             target_name=transport_name,
             max_timeout_seconds=180.0,

@@ -191,10 +191,10 @@ class TestHandlerPostgresContractUpsertSuccess:
 
         handler = HandlerPostgresContractUpsert(pool)
         payload = create_upsert_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -217,10 +217,10 @@ class TestHandlerPostgresContractUpsertSuccess:
 
         handler = HandlerPostgresContractUpsert(pool)
         payload = create_upsert_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -236,10 +236,10 @@ class TestHandlerPostgresContractUpsertSuccess:
 
         handler = HandlerPostgresContractUpsert(pool)
         payload = create_upsert_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -261,10 +261,10 @@ class TestHandlerPostgresContractUpsertErrors:
 
         handler = HandlerPostgresContractUpsert(pool)
         payload = create_upsert_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -283,10 +283,10 @@ class TestHandlerPostgresContractUpsertErrors:
 
         handler = HandlerPostgresContractUpsert(pool)
         payload = create_upsert_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -304,10 +304,10 @@ class TestHandlerPostgresContractUpsertErrors:
 
         handler = HandlerPostgresContractUpsert(pool)
         payload = create_upsert_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -325,10 +325,10 @@ class TestHandlerPostgresContractUpsertErrors:
 
         handler = HandlerPostgresContractUpsert(pool)
         payload = create_upsert_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -359,10 +359,10 @@ class TestHandlerPostgresTopicUpdateSuccess:
 
         handler = HandlerPostgresTopicUpdate(pool)
         payload = create_update_topic_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -381,10 +381,10 @@ class TestHandlerPostgresTopicUpdateSuccess:
 
         handler = HandlerPostgresTopicUpdate(pool)
         payload = create_update_topic_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -405,10 +405,10 @@ class TestHandlerPostgresTopicUpdateErrors:
 
         handler = HandlerPostgresTopicUpdate(pool)
         payload = create_update_topic_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -426,10 +426,10 @@ class TestHandlerPostgresTopicUpdateErrors:
 
         handler = HandlerPostgresTopicUpdate(pool)
         payload = create_update_topic_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -447,10 +447,10 @@ class TestHandlerPostgresTopicUpdateErrors:
 
         handler = HandlerPostgresTopicUpdate(pool)
         payload = create_update_topic_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -468,10 +468,10 @@ class TestHandlerPostgresTopicUpdateErrors:
 
         handler = HandlerPostgresTopicUpdate(pool)
         payload = create_update_topic_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -497,10 +497,10 @@ class TestHandlerPostgresMarkStaleSuccess:
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -519,10 +519,10 @@ class TestHandlerPostgresMarkStaleSuccess:
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -542,10 +542,10 @@ class TestHandlerPostgresMarkStaleErrors:
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -563,10 +563,10 @@ class TestHandlerPostgresMarkStaleErrors:
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -584,10 +584,10 @@ class TestHandlerPostgresMarkStaleErrors:
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -605,10 +605,10 @@ class TestHandlerPostgresMarkStaleErrors:
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -634,10 +634,10 @@ class TestHandlerPostgresHeartbeatSuccess:
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -656,10 +656,10 @@ class TestHandlerPostgresHeartbeatSuccess:
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert - operation still succeeds even if no row found
         assert result.success is True
@@ -679,10 +679,10 @@ class TestHandlerPostgresHeartbeatErrors:
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -700,10 +700,10 @@ class TestHandlerPostgresHeartbeatErrors:
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -721,10 +721,10 @@ class TestHandlerPostgresHeartbeatErrors:
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -742,10 +742,10 @@ class TestHandlerPostgresHeartbeatErrors:
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -771,10 +771,10 @@ class TestHandlerPostgresDeactivateSuccess:
 
         handler = HandlerPostgresDeactivate(pool)
         payload = create_deactivate_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -793,10 +793,10 @@ class TestHandlerPostgresDeactivateSuccess:
 
         handler = HandlerPostgresDeactivate(pool)
         payload = create_deactivate_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert - operation still succeeds even if no row found (idempotent)
         # Per semantic fix: success=True always has error=None (not-found logged instead)
@@ -818,10 +818,10 @@ class TestHandlerPostgresDeactivateErrors:
 
         handler = HandlerPostgresDeactivate(pool)
         payload = create_deactivate_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -839,10 +839,10 @@ class TestHandlerPostgresDeactivateErrors:
 
         handler = HandlerPostgresDeactivate(pool)
         payload = create_deactivate_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -860,10 +860,10 @@ class TestHandlerPostgresDeactivateErrors:
 
         handler = HandlerPostgresDeactivate(pool)
         payload = create_deactivate_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -881,10 +881,10 @@ class TestHandlerPostgresDeactivateErrors:
 
         handler = HandlerPostgresDeactivate(pool)
         payload = create_deactivate_contract_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -910,10 +910,10 @@ class TestHandlerPostgresCleanupTopicsSuccess:
 
         handler = HandlerPostgresCleanupTopics(pool)
         payload = create_cleanup_topics_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -932,10 +932,10 @@ class TestHandlerPostgresCleanupTopicsSuccess:
 
         handler = HandlerPostgresCleanupTopics(pool)
         payload = create_cleanup_topics_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -955,10 +955,10 @@ class TestHandlerPostgresCleanupTopicsErrors:
 
         handler = HandlerPostgresCleanupTopics(pool)
         payload = create_cleanup_topics_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -976,10 +976,10 @@ class TestHandlerPostgresCleanupTopicsErrors:
 
         handler = HandlerPostgresCleanupTopics(pool)
         payload = create_cleanup_topics_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -997,10 +997,10 @@ class TestHandlerPostgresCleanupTopicsErrors:
 
         handler = HandlerPostgresCleanupTopics(pool)
         payload = create_cleanup_topics_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -1018,10 +1018,10 @@ class TestHandlerPostgresCleanupTopicsErrors:
 
         handler = HandlerPostgresCleanupTopics(pool)
         payload = create_cleanup_topics_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is False
@@ -1058,10 +1058,10 @@ class TestTopicNormalization:
             node_name="test-node",
             last_seen_at=TEST_NOW,
         )
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True
@@ -1092,10 +1092,10 @@ class TestTopicNormalization:
             node_name="test-node",
             last_seen_at=TEST_NOW,
         )
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
         # Act
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         # Assert
         assert result.success is True

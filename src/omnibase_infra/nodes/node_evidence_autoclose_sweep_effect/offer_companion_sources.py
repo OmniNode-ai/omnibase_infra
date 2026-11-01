@@ -40,6 +40,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
+
 logger = logging.getLogger(__name__)
 
 WATCHER_STATE_RELATIVE: Final[str] = ".claude_scratch/pr-watcher/state.json"
@@ -115,7 +117,7 @@ def _candidate(
 ) -> dict[str, object]:
     candidate: dict[str, object] = {
         "number": number,
-        "html_url": f"https://github.com/{repo}/pull/{number}",
+        "html_url": load_third_party_endpoints().github_pull_url(repo, number),
         "title": title,
         "merged_at": merged_at,
         "updated_at": merged_at,
@@ -388,7 +390,7 @@ def find_product_contract(
                 "repo": repo,
                 "commit": sha,
                 "merged_at": merged_at,
-                "url": f"https://github.com/{repo}/blob/{sha}/{path}",
+                "url": load_third_party_endpoints().github_blob_url(repo, sha, path),
             }
         )
     if len(holders) > 1:
