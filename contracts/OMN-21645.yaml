@@ -1,0 +1,65 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21645
+title: "A dev redeploy whose gateway-forwarder step fails rolls the healthy new runtime back, killing in-flight delegations and pinning the lane to an old revision"
+summary: >-
+  The dev boot guard no longer replaces a healthy new runtime because a companion lane failed. The gateway-forwarder deploy raises DevCompanionLaneFailedError (a RuntimeError, so every existing handler still catches it). When the guard's protect scope sees that error and every runtime service is running and healthy, it keeps the new family, records its revision as the retained point, notes runtime_kept_revision on the incident, and still raises DevBootRecoveryError so the job stays failed and reported. Any other failure, and a companion failure that leaves a runtime service unhealthy or absent, restores the retained family exactly as before. This PR covers AC1 and AC2; AC3 (three delegate code_generation runs from the operator machine reach a terminal) is the live proof on the lab lane and is declared in the ticket.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21645-companion-lane-keeps-runtime
+    statement: >-
+      A companion-lane failure after a healthy runtime replacement keeps the new runtime and fails the job; every other failure still restores.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: a regression test built from the recorded incident (runtime healthy on the new revision, gateway step raising GATEWAY_DEPLOY_FAILED) fails on the broken guard and passes on the fix: the guard keeps the new runtime, records the new healthy revision as the retained point and still raises DevBootRecoveryError so the job stays failed -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -k companion_lane_failure_keeps -q
+      - id: AC2
+        statement: >-
+          AC2: a failure that leaves the runtime unhealthy or absent still restores the retained revision, and a non-companion failure still restores -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py -q
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The guard, driven through a fake host that answers Docker as the dev lane does, keeps the new family and issues no force-recreate when a companion-lane error follows a healthy replacement, and restores the retained family when the new family is unhealthy or the error is not a companion-lane error.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21645-ac1-keeps-healthy-runtime
+    description: >-
+      The ticket's falsifier. At the merge base the guard restores the retained family on every failure, so the keep-the-new-runtime case fails; the unhealthy and non-companion cases pass on both sides.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2]
+  - id: dod-omn21645-ac2-existing-recovery-unchanged
+    description: >-
+      The gateway executor emits the guard's companion-lane failure type for a nonzero exit or timeout. Across that boundary an unhealthy or absent runtime restores the retained family and the job stays failed. The merge base lacks this failure classification, so this control fails there. The existing guard integration suite also verifies prepare, wait, preflight and restore.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_gateway_boot_guard_companion_lane_omn21645.py tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21645-ac1-deploy-probe
+    description: >-
+      Deploy probe. The guard GitHub serves at the checked-out commit defines DevCompanionLaneFailedError. The probe reads the file from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'class DevCompanionLaneFailedError' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21645-ac2-absent-and-capture-refused
+    description: >-
+      A companion failure restores the retained revision when all runtime containers or one required service are absent, or when capture refuses a healthy candidate whose compose settings differ. The job and incident remain failed and no runtime_kept_revision is recorded.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -k 'unhealthy_or_absent or capture_refuses' -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
