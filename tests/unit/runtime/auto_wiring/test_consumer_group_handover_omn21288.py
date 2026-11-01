@@ -18,6 +18,12 @@ The handover on this substrate is implemented by ``_HandoverSemanticFake``
 below through ``plan_offset_handover``, the same rule the Kafka path of
 ``hand_over_committed_offsets`` applies; that function asks a bus that
 implements ``ProtocolConsumerGroupOffsetHandover`` directly.
+
+``EventBusSemanticFake`` keeps one partition per topic, so this substrate
+cannot exercise several. The Kafka path of the handover (partition enumeration
+off broker metadata, negative-offset normalisation, the empty-topic refusal and
+the per-partition commit) is covered over several partitions, hermetically, by
+``tests/unit/handlers/test_consumer_group_handover_kafka_path_omn21753.py``.
 """
 
 from __future__ import annotations
@@ -187,7 +193,7 @@ class _HandoverSemanticFake(EventBusSemanticFake):
         async with self._lock:
             successor = self._group_committed_offset.get((topic, to_group))
             plan = plan_offset_handover(
-                partitions=(0,),
+                partitions=(0,),  # the semantic fake models one partition per topic
                 successor_committed={0: successor},
                 retired_committed={
                     0: self._group_committed_offset.get((topic, from_group))
@@ -334,12 +340,15 @@ async def test_without_declaration_the_window_is_lost(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_handover_is_idempotent_across_a_runtime_restart(tmp_path: Path) -> None:
     """AC4: the second start keeps the runtime's own position, never rewinds."""
-    bus, _, runtime = await _run_the_fold(tmp_path, declaration=DECLARATION)
+    bus, container, runtime = await _run_the_fold(tmp_path, declaration=DECLARATION)
     successor = next(
         group for (topic, group) in list(bus._group_members) if group != RETIRED_GROUP
     )
     own_offset = await bus.get_committed_offset(TOPIC, successor)
-    assert own_offset == 7
+    # Its own position is past every event projected, by the container and by
+    # the runtime, and not the retired group's earlier one.
+    assert own_offset == len(container) + len(runtime)
+    assert own_offset > (await bus.get_committed_offset(TOPIC, RETIRED_GROUP) or 0)
 
     second = await bus.hand_over_committed_offsets(
         topic=TOPIC,
