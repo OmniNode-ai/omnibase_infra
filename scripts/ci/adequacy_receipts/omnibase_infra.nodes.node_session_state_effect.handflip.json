@@ -1,0 +1,25 @@
+{
+  "base_ref": "a409589629e16b3c0d95a3df7c6850a0c0e4170b",
+  "canonical_handler_module": "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_read",
+  "legacy_handler_module": "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_read",
+  "node_id": "omnibase_infra.nodes.node_session_state_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:a9c54f9bfcce997414eb1ae52013642f3b67df0dc9350d0c0500f3e03ead7d1f",
+      "sha256:c295d364a286e03f1bbdb2c33256dfba0237aa080fe40a6f74a7586f7414af44",
+      "sha256:59f57e4dcab4752f8527a2ce3493c8eaceb02281d43a75157d247fae5bceb981",
+      "sha256:33b348da6a64ce472d9d102735127aca0a7d0f68fef81bcece18f047351769b7"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_session_state_effect/test_handle_typed_request_omn21536.py::TestRunContextReadHandleTypedRequest::test_absent_run_succeeds_with_no_context",
+      "tests/unit/nodes/node_session_state_effect/test_handle_typed_request_omn21536.py::TestRunContextReadHandleTypedRequest::test_valid_run_returns_the_context",
+      "tests/unit/nodes/node_session_state_effect/test_handle_typed_request_omn21536.py::TestRunContextReadHandleTypedRequest::test_corrupt_run_reports_a_parse_error",
+      "tests/unit/nodes/node_session_state_effect/test_handle_typed_request_omn21536.py::TestRunContextReadHandleTypedRequest::test_unsafe_run_id_is_rejected"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerRunContextRead._read_sync"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

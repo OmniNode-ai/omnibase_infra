@@ -154,7 +154,7 @@ class HandlerPostgresTopicUpdate(MixinPostgresOpExecutor):
         >>> import asyncpg
         >>> pool = await asyncpg.create_pool(dsn="...")
         >>> handler = HandlerPostgresTopicUpdate(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
 
@@ -186,8 +186,7 @@ class HandlerPostgresTopicUpdate(MixinPostgresOpExecutor):
 
     async def handle(
         self,
-        payload: ModelPayloadUpdateTopic,
-        correlation_id: UUID,
+        request: ModelPayloadUpdateTopic,
     ) -> ModelBackendResult:
         """Execute PostgreSQL topic routing table update.
 
@@ -197,9 +196,8 @@ class HandlerPostgresTopicUpdate(MixinPostgresOpExecutor):
         - Parameterized SQL for injection prevention
 
         Args:
-            payload: Update topic payload containing topic_suffix, direction,
+            request: Update topic request containing topic_suffix, direction,
                 contract_id, and last_seen_at timestamp.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with:
@@ -214,20 +212,21 @@ class HandlerPostgresTopicUpdate(MixinPostgresOpExecutor):
             Topic suffixes are normalized before storage - environment
             prefixes like "{env}." or "dev." are stripped.
         """
+        correlation_id = request.correlation_id
         # Normalize topic suffix by stripping environment prefix
-        normalized_topic = normalize_topic_for_storage(payload.topic_suffix)
+        normalized_topic = normalize_topic_for_storage(request.topic_suffix)
 
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.TOPIC_UPDATE_ERROR,
             correlation_id=correlation_id,
             log_context={
                 "topic_suffix": normalized_topic,
-                "original_topic": payload.topic_suffix,
-                "direction": payload.direction,
-                "contract_id": payload.contract_id,
+                "original_topic": request.topic_suffix,
+                "direction": request.direction,
+                "contract_id": request.contract_id,
             },
             fn=lambda: self._execute_topic_update(
-                payload, normalized_topic, correlation_id
+                request, normalized_topic, correlation_id
             ),
         )
 
