@@ -93,11 +93,43 @@ def test_every_runner_carries_the_opt_in_label_and_no_required_pool_label() -> N
         assert service["environment"]["RUNNER_GROUP"] == "omnibase-ci"
 
 
+def _runs_on_values(node: object) -> list[str]:
+    """Every scalar under a ``runs-on`` key at any depth, matrix expressions included."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "runs-on":
+                found.extend(_scalars(value))
+            else:
+                found.extend(_runs_on_values(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_runs_on_values(item))
+    return found
+
+
+def _scalars(node: object) -> list[str]:
+    if isinstance(node, dict):
+        return [s for value in node.values() for s in _scalars(value)]
+    if isinstance(node, list):
+        return [s for value in node for s in _scalars(value)]
+    return [str(node)]
+
+
 def test_no_repository_workflow_routes_jobs_to_the_canary_pin() -> None:
     for workflow in (REPO_ROOT / ".github" / "workflows").glob("*.y*ml"):
         document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-        # Include matrix values as well as literal runs-on lists.
-        assert "hp-canary" not in str(document), workflow.name
+        assert not any("hp-canary" in value for value in _runs_on_values(document)), (
+            workflow.name
+        )
+        # A matrix-fed runs-on resolves through matrix values; those must not name it either.
+        matrices = [
+            value
+            for job in (document.get("jobs") or {}).values()
+            if isinstance(job, dict)
+            for value in _scalars((job.get("strategy") or {}).get("matrix", {}))
+        ]
+        assert not any("hp-canary" in value for value in matrices), workflow.name
 
 
 def test_compose_cli_and_yaml_loader_agree_on_inherited_service_settings() -> None:
