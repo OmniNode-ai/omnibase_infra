@@ -179,6 +179,9 @@ class EnumNonRetryableErrorCategory(str, Enum):
         minted, so the topic sustained ~4 guaranteed-undecodable records/s.
     """
 
+    UNICODE_DECODE_ERROR = "UnicodeDecodeError"
+    """The body is not valid text; replaying the same bytes cannot decode it."""
+
     VALIDATION_ERROR = "ValidationError"
     """Input/schema validation errors from Pydantic or custom validators.
 
@@ -291,6 +294,10 @@ class EnumNonRetryableErrorCategory(str, Enum):
                 "JSON decode failure - the message body is not JSON (an empty "
                 "body decodes to nothing at all). Retrying cannot make it "
                 "JSON; requires correction at the producer."
+            ),
+            cls.UNICODE_DECODE_ERROR: (
+                "Text decode failure - the message body has invalid encoding. "
+                "Requires correction at the producer."
             ),
         }
         return descriptions.get(error_type, "Unknown error category")

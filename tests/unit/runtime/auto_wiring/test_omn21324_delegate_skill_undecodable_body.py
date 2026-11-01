@@ -24,6 +24,7 @@ import pytest
 
 from omnibase_core.models.event_bus.model_event_headers import ModelEventHeaders
 from omnibase_core.models.event_bus.model_event_message import ModelEventMessage
+from omnibase_infra.enums import EnumNonRetryableErrorCategory
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     ModelDlqReplayEngineConfig,
     should_replay,
@@ -34,6 +35,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_event_bus_callback,
 )
+from omnibase_infra.runtime.boundary_failure_terminal import classify_boundary_failure
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -147,3 +149,72 @@ def test_delegate_skill_retryable_failure_is_still_replayed() -> None:
     )
     eligible, reason = should_replay(message, _CONFIG)
     assert eligible is True, reason
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_invalid_utf8_terminal_is_typed_and_non_retryable() -> None:
+    terminals = await _terminals_for(b"\xff")
+    assert len(terminals) == 1
+    assert terminals[0]["failure_class"] == "UnicodeDecodeError"
+    assert terminals[0]["failure_code"] == "ONEX_CORE_007_INVALID_INPUT"
+    assert terminals[0]["retryable"] is False
+    assert terminals[0]["correlation_id"] == str(_HEADER_CORRELATION)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("link", ["__cause__", "__context__"])
+def test_undecodable_body_code_walks_exception_links(link: str) -> None:
+    outer = RuntimeError("wrapped")
+    setattr(outer, link, json.JSONDecodeError("bad body", "", 0))
+    assert (
+        EnumNonRetryableErrorCategory.undecodable_body_code(outer)
+        == "ONEX_CORE_007_INVALID_INPUT"
+    )
+
+
+@pytest.mark.unit
+def test_undecodable_body_code_stops_on_exception_cycles() -> None:
+    first, second = RuntimeError("first"), RuntimeError("second")
+    first.__cause__, second.__context__ = second, first
+    assert EnumNonRetryableErrorCategory.undecodable_body_code(first) is None
+    first.__context__ = first
+    first.__cause__ = None
+    assert EnumNonRetryableErrorCategory.undecodable_body_code(first) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("explicit", "expected"), [(False, False), (None, True), (True, True)]
+)
+def test_explicit_retryable_attribute_can_refuse_retry(
+    explicit: bool | None, expected: bool
+) -> None:
+    class FailureError(RuntimeError):
+        retryable = explicit
+
+    terminal = classify_boundary_failure(
+        FailureError("transient"),
+        topic=_COMMAND_TOPIC,
+        correlation_id=_HEADER_CORRELATION,
+        failure_reason="transient",
+    )
+    assert terminal.retryable is expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("wrapped: UnicodeDecodeError: invalid utf8", True),
+        ("wrapped: ProtocolConfigurationError: refused", True),
+        ("NotProtocolConfigurationError: transient", False),
+        ("ProtocolConfigurationErrorSuffix: transient", False),
+        ("_ProtocolConfigurationError: transient", False),
+        ("TimeoutError: transient", False),
+    ],
+)
+def test_non_retryable_text_requires_whole_class_tokens(
+    text: str, expected: bool
+) -> None:
+    assert EnumNonRetryableErrorCategory.is_non_retryable_text(text) is expected

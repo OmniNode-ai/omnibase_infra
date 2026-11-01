@@ -26,8 +26,8 @@ evidence_requirements:
     description: Typed code, header correlation and replay eligibility.
     command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov
   - kind: manual
-    description: The deployed runtime image carries the non-retryable text reader and the typed undecodable-body code.
-    command: 'deploy: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "from omnibase_infra.enums import EnumNonRetryableErrorCategory as E; assert E.is_non_retryable_text(''ProtocolConfigurationError: refused''); assert E.undecodable_body_code(ValueError()) is None"'
+    description: The deployable wheel carries typed JSON and UTF-8 failure codes and refuses replay of permanent failures.
+    command: 'deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn21324_boundary_wheel.py -q --no-cov'
 dod_evidence:
   - id: dod-undecodable-code
     description: Empty and non-JSON bodies terminalize with a typed failure_code.
@@ -46,19 +46,19 @@ dod_evidence:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov -k delegate_skill_array_body_correlation
   - id: dod-no-replay
-    description: A DLQ record whose failure reason names a non-retryable class is not eligible for replay; a retryable one still is.
+    description: The boundary, DLQ serializer, parser and replay handler quarantine permanent failures with no second command or terminal; transient failures replay.
     source: generated
     binds_ac:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov -k 'non_retryable_refusal_is_not_replayed or retryable_failure_is_still_replayed'
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn21324_boundary_dlq_replay.py -q --no-cov
   - id: dod-deploy-boundary
-    description: The deployed runtime image carries the non-retryable text reader and the typed undecodable-body code.
+    description: The deployable wheel carries typed JSON and UTF-8 failure codes and refuses replay of permanent failures.
     source: generated
     binds_ac:
       - AC1
       - AC3
     checks:
       - check_type: command
-        check_value: 'docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "from omnibase_infra.enums import EnumNonRetryableErrorCategory as E; assert E.is_non_retryable_text(''ProtocolConfigurationError: refused''); assert E.undecodable_body_code(ValueError()) is None"'
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn21324_boundary_wheel.py -q --no-cov
