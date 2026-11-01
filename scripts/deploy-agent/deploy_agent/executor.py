@@ -186,9 +186,9 @@ def load_dev_boot_guard() -> ModuleType:
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
-        assert spec is not None and spec.loader is not None, relative
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Cannot load dev boot effect: {relative}")
+        module = sys.modules[module_name] = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     return sys.modules[name]
 

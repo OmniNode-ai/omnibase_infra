@@ -150,9 +150,9 @@ class HandlerWorkLedgerQuery:
                             topics=(completed,),
                             auto_offset_reset="latest",
                         )
-                        self._client.hold(transport)
                         # Establish reply offsets before the first publish.
                         await transport.start()
+                        self._client.hold(transport)
                     await transport.send(
                         command,
                         key=str(correlation_id).encode("utf-8"),
