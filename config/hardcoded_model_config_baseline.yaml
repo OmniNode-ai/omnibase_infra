@@ -2546,96 +2546,6 @@ entries:
   - path: src/omnibase_infra/cli/git_hook_relay.py
     family: O
     content_sha1: a2c7b2d2ce9b8f557d1f30adb93142e7ec5722a8
-  - path: src/omnibase_infra/cli/infra_test/env.py
-    family: O
-    content_sha1: 4f2df44ccaecdc6bb97f62328199a47a502408a9
-  - path: src/omnibase_infra/cli/infra_test/env.py
-    family: O
-    content_sha1: 4f2df44ccaecdc6bb97f62328199a47a502408a9
-  - path: src/omnibase_infra/cli/infra_test/env.py
-    family: O
-    content_sha1: 4f2df44ccaecdc6bb97f62328199a47a502408a9
-  - path: src/omnibase_infra/cli/infra_test/env.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/env.py
-    family: O
-    content_sha1: ba70a938aced97ff549f1d6ad6863412ecf9704e
-  - path: src/omnibase_infra/cli/infra_test/env.py
-    family: O
-    content_sha1: de89283a308cb3ee3b26be3c1a805e5a8cde93eb
-  - path: src/omnibase_infra/cli/infra_test/introspect.py
-    family: E
-    content_sha1: 294f0040f683765f9d00a17099217edf0086409e
-  - path: src/omnibase_infra/cli/infra_test/introspect.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 018b3b6b588b1a67f05c8a290b1162e5c1e88869
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 018b3b6b588b1a67f05c8a290b1162e5c1e88869
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 018b3b6b588b1a67f05c8a290b1162e5c1e88869
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 0730009f94d5c566898cc73eea2b905139f8f892
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 252b860bb945fcea8184b7cfc28a05c6376d91a4
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 38d2b7c964b563bd5574a5d6d454f51eeb25c594
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 4f2df44ccaecdc6bb97f62328199a47a502408a9
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: b8337aa3101fd896064346c6a04508c48aadf656
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: d6533d18f64d6ce39b0af462cdad410138ba4b9f
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: dcc725ca1c175b8b3bd58a4ffecb7ff09f3a16a7
-  - path: src/omnibase_infra/cli/infra_test/run_suite.py
-    family: O
-    content_sha1: e2881025ae9a0fa8c70b4b29bc5c979dd1af6f31
-  - path: src/omnibase_infra/cli/infra_test/verify.py
-    family: O
-    content_sha1: 658f823838b53683b1f4dab564094f01e095c281
-  - path: src/omnibase_infra/cli/infra_test/verify.py
-    family: O
-    content_sha1: 658f823838b53683b1f4dab564094f01e095c281
-  - path: src/omnibase_infra/cli/infra_test/verify.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/verify.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/verify.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/cli/infra_test/verify.py
-    family: O
-    content_sha1: 98dcf908ae4dc997ea61a084a877f58bcef75ce1
-  - path: src/omnibase_infra/cli/infra_test/verify.py
-    family: O
-    content_sha1: e3e45e9eaea264abdecf2ae09f98c29a752a1123
   - path: src/omnibase_infra/cli/linear_relay.py
     family: F
     content_sha1: 9c4bee527e09f653df8acc997be0d5c202bda2c4
@@ -3227,12 +3137,6 @@ entries:
   - path: src/omnibase_infra/nodes/node_bus_forwarder_effect/services/service_gateway_delivery.py
     family: O
     content_sha1: 2bb0688a2f0c1a9f97535d8b33e1b3221303031a
-  - path: src/omnibase_infra/nodes/node_bus_forwarder_effect/services/service_gateway_egress_health.py
-    family: F
-    content_sha1: e93fd46c1f5d43b65c1fa9618d79408559668799
-  - path: src/omnibase_infra/nodes/node_bus_forwarder_effect/services/service_gateway_lane_mirror_health.py
-    family: F
-    content_sha1: 7147189e651949aab016613ab7e8e1f79d102521
   - path: src/omnibase_infra/nodes/node_bus_forwarder_effect/services/service_lane_mirror.py
     family: B
     content_sha1: 12f037e90fcd5255878dbe7d4e5204bd9b200847
@@ -3272,12 +3176,6 @@ entries:
   - path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/offer_companion_sources.py
     family: B
     content_sha1: 10fc04f1dc60753f73d9b63dfc098ec6edaf2382
-  - path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/offer_companion_sources.py
-    family: G
-    content_sha1: 2c490b5142b0bd76d3edd368ff0fa909b73f9443
-  - path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/offer_companion_sources.py
-    family: G
-    content_sha1: 31c378dbf2952590da566316d5d602d9e420bbb9
   - path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/offer_companion_sources.py
     family: O
     content_sha1: cbdb5df492cb8357f313c69679c3bed22f434a7d
@@ -3425,9 +3323,6 @@ entries:
   - path: src/omnibase_infra/nodes/node_rrh_emit_effect/handlers/handler_toolchain_collect.py
     family: O
     content_sha1: 0bd9417c57b5f0ac3696d37b52887e76b4f29ccb
-  - path: src/omnibase_infra/nodes/node_runtime_source_attestor_effect/handlers/handler_source_attestation.py
-    family: G
-    content_sha1: 25b66af0a5f785b0ed0d796fa4543ac6de6a7242
   - path: src/omnibase_infra/nodes/node_runtime_source_attestor_effect/handlers/handler_source_attestation.py
     family: O
     content_sha1: de1ec7cbd9c294e9b9b4ddced19b9f613a18f896
@@ -3590,48 +3485,12 @@ entries:
   - path: src/omnibase_infra/runtime/models/model_batch_publisher_config.py
     family: O
     content_sha1: e4c5f778aad6ec3b4117663df0255c1b2deddb16
-  - path: src/omnibase_infra/runtime/models/model_rsd_artifact_source_relation.py
-    family: M
-    content_sha1: 4c2b5bf07aa50013fd86b4b84e15a4a79e5237fc
-  - path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_authority_envelope.py
-    family: M
-    content_sha1: 099f0f73aa2a6d55022f9d44131f0bfa836b5663
-  - path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_authority_envelope.py
-    family: M
-    content_sha1: 15e623245a64c3b8c4ff05d971bec565280f6eb3
   - path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_authority_envelope.py
     family: M
     content_sha1: e9e5f6e4f22e080c417e7c65a9a016672ae8232b
-  - path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_observation.py
-    family: M
-    content_sha1: 46966c340c78236498596d103a1721dd1229e476
-  - path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_overlay.py
-    family: M
-    content_sha1: 099f0f73aa2a6d55022f9d44131f0bfa836b5663
-  - path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_overlay.py
-    family: M
-    content_sha1: 15e623245a64c3b8c4ff05d971bec565280f6eb3
   - path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_overlay.py
     family: M
     content_sha1: e9e5f6e4f22e080c417e7c65a9a016672ae8232b
-  - path: src/omnibase_infra/runtime/models/model_rsd_model_artifact_provenance.py
-    family: M
-    content_sha1: 019bd70833946f1e309f385b74d57e096e4635a4
-  - path: src/omnibase_infra/runtime/models/model_rsd_model_artifact_provenance.py
-    family: M
-    content_sha1: b94276fd11762b300ca4e649b246fd90cc5c74c8
-  - path: src/omnibase_infra/runtime/models/model_rsd_model_artifact_provenance.py
-    family: M
-    content_sha1: c54f6c56fbb96ced914c3e27ba5937783a2c24ac
-  - path: src/omnibase_infra/runtime/models/model_rsd_model_artifact_provenance.py
-    family: M
-    content_sha1: d4ab33c3353d34a6dcb8df5ad2c3dcad66ec7c2e
-  - path: src/omnibase_infra/runtime/models/model_rsd_model_artifact_provenance.py
-    family: M
-    content_sha1: d925db8b73ba8c5e2fd260fec47ebff5619dc63c
-  - path: src/omnibase_infra/runtime/models/model_rsd_model_artifact_provenance.py
-    family: M
-    content_sha1: ee7c159777eb87b644efbac2b82d2a9e21bc36ae
   - path: src/omnibase_infra/runtime/models/model_runtime_scheduler_config.py
     family: O
     content_sha1: 0433328003ab01831080c4c134fabe8a40293960
@@ -3644,9 +3503,6 @@ entries:
   - path: src/omnibase_infra/runtime/models/model_runtime_scheduler_config.py
     family: O
     content_sha1: dd11c2d6745f6c346d5d7799144a44c0ecc9bcb5
-  - path: src/omnibase_infra/runtime/models/model_runtime_scheduler_config.py
-    family: O
-    content_sha1: e2867fb99b06fdbdd95a86d351bd2b68a7814cf9
   - path: src/omnibase_infra/runtime/node_inventory.py
     family: O
     content_sha1: 38d2b7c964b563bd5574a5d6d454f51eeb25c594
@@ -3891,9 +3747,6 @@ entries:
     family: O
     content_sha1: e68b076a42b2c312fcbc74deddb96e64105b997d
   - path: src/omnibase_infra/services/post_merge/checks.py
-    family: G
-    content_sha1: e9182af6fa79d40911c6017ca49b7ddd1a192594
-  - path: src/omnibase_infra/services/post_merge/checks.py
     family: O
     content_sha1: 98e251966a9af238e9ff58f3d12acb8787b578f6
   - path: src/omnibase_infra/services/post_merge/consumer.py
@@ -4043,27 +3896,6 @@ entries:
   - path: src/omnibase_infra/verification/cli.py
     family: O
     content_sha1: 95bb2584170a4502fd46717344be9ec3f119e09f
-  - path: src/omnibase_infra/verification/orchestrator.py
-    family: O
-    content_sha1: 64764b2cfa4aa85bde4a6664054c321fe77a8e45
-  - path: src/omnibase_infra/verification/probes/probe_handler_execution.py
-    family: O
-    content_sha1: 2fed17e2910a45d8ca70c97ef582e00a145af241
-  - path: src/omnibase_infra/verification/probes/probe_publication.py
-    family: O
-    content_sha1: 98dcf908ae4dc997ea61a084a877f58bcef75ce1
-  - path: src/omnibase_infra/verification/probes/probe_subscription.py
-    family: O
-    content_sha1: 174b1b0e388647c93274837286ff8429ff3a4196
-  - path: src/omnibase_infra/verification/probes/probe_subscription.py
-    family: O
-    content_sha1: 98dcf908ae4dc997ea61a084a877f58bcef75ce1
-  - path: src/omnibase_infra/verification/probes/probe_subscription.py
-    family: O
-    content_sha1: 98dcf908ae4dc997ea61a084a877f58bcef75ce1
-  - path: src/omnibase_infra/verification/probes/probe_subscription.py
-    family: O
-    content_sha1: 98dcf908ae4dc997ea61a084a877f58bcef75ce1
   - path: src/omnibase_infra/verification/probes/util_rpk_env.py
     family: F
     content_sha1: b339bf8e78c93a7a0d1d93952a79f150df738fad
