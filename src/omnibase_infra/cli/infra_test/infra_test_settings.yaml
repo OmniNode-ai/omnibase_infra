@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# onex-infra-test settings (OMN-21623).
+#
+# The endpoints and waits the integration-test CLI runs under. Read by
+# ModelInfraTestSettings; the CLI modules hold no host, URL or timeout literal.
+# Every key is required: a block that omits one fails to load.
+settings:
+  # Host-side defaults for the Docker-exposed E2E stack. KAFKA_BOOTSTRAP_SERVERS
+  # and ONEX_RUNTIME_URL override them.
+  broker_address: "localhost:19092"
+  runtime_url: "http://localhost:8080"
+  # Subprocess timeouts, in seconds.
+  compose_command_timeout_seconds: 300
+  compose_start_timeout_seconds: 60
+  docker_query_timeout_seconds: 30
+  rpk_command_timeout_seconds: 30
+  rpk_consume_timeout_seconds: 10
+  cli_subcommand_timeout_seconds: 120
+  postgres_connect_timeout_seconds: 5
+  # Waits and poll intervals, in seconds.
+  health_wait_timeout_seconds: 120
+  health_poll_interval_seconds: 2
+  registration_wait_seconds: 30
+  registration_backfill_wait_seconds: 60
+  registration_poll_interval_seconds: 2
+  idempotency_settle_seconds: 5
+  runtime_restart_wait_seconds: 10

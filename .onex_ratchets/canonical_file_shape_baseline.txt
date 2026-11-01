@@ -1880,7 +1880,6 @@ src/omnibase_infra/verification/models/model_contract_verification_report.py
 src/omnibase_infra/verification/orchestrator.py
 src/omnibase_infra/verification/probes/__init__.py
 src/omnibase_infra/verification/probes/migration_schema_contract.py
-src/omnibase_infra/verification/probes/probe_handler_execution.py
 src/omnibase_infra/verification/probes/probe_projection.py
 src/omnibase_infra/verification/probes/probe_publication.py
 src/omnibase_infra/verification/probes/probe_schema_validator.py

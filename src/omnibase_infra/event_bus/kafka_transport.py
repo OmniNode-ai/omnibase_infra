@@ -47,14 +47,9 @@ not the client, decides when an offset is durable) and ``auto_offset_reset`` def
 to ``"earliest"`` (a pull-based at-least-once consumer must see the existing backlog
 on first boot of a group). The legacy push-callback consumers in ``EventBusKafka``
 keep their per-consumer ``self._config.enable_auto_commit`` setting untouched — this
-face is a separate class and changes nothing about them.
+face is a separate class and changes nothing about them. The SAME parametrized
+``TransportConformanceSuite`` certifies it and core's ``InMemoryTransport`` (S2).
 
-Substitutability
-----------------
-``KafkaTransport`` is exercised by the SAME parametrized
-``TransportConformanceSuite`` that certifies ``InMemoryTransport`` in core (S2). The
-suite asserting identical observable Kafka semantics against both impls is what
-licenses "in-memory golden chain => Kafka golden chain".
 """
 
 from __future__ import annotations
@@ -89,23 +84,27 @@ from omnibase_infra.topics.topic_namespace import (
     strip_topic_namespace,
 )
 
-__all__ = ["KafkaTransport", "create_groupless_consumer"]
+__all__ = ["KafkaTransport", "create_offset_consumer"]
 
 logger = logging.getLogger(__name__)
 
 
-def create_groupless_consumer(config: ModelKafkaEventBusConfig) -> AIOKafkaConsumer:
-    """Build an unstarted consumer that joins no group and commits no offset.
+def create_offset_consumer(
+    config: ModelKafkaEventBusConfig, group_id: str | None = None
+) -> AIOKafkaConsumer:
+    """Build an unstarted consumer that never auto-commits and is never subscribed.
 
-    The one sanctioned construction site for a group-less reader (OMN-18087):
-    callers that only measure or watch offsets use it instead of building a raw
-    client of their own.
+    The one sanctioned construction site for a reader that only measures or moves
+    offsets (OMN-18087, OMN-21753). Without ``group_id`` it joins no group; with
+    one, hand-assigned partitions read and commit that group's offsets without
+    joining it, so the group's members are undisturbed.
     """
     return AIOKafkaConsumer(
         bootstrap_servers=config.bootstrap_servers,
-        group_id=None,
+        group_id=group_id,
         enable_auto_commit=False,
         **build_aiokafka_auth_kwargs(config),
+        **({} if config.api_version is None else {"api_version": config.api_version}),
     )
 
 

@@ -270,7 +270,7 @@ override-dependencies = [
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261031000524-fc6159b98026" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261031202655-5bb91ae7e720" }
 
 
 [tool.ruff]
@@ -641,6 +641,7 @@ node_contract_loader_effect = "omnibase_infra.nodes.node_contract_loader_effect"
 node_contract_persistence_effect = "omnibase_infra.nodes.node_contract_persistence_effect"
 node_contract_registry_reducer = "omnibase_infra.nodes.node_contract_registry_reducer"
 node_contract_resolver_bridge = "omnibase_infra.nodes.node_contract_resolver_bridge"
+node_contract_subscribe_preflight_effect = "omnibase_infra.nodes.node_contract_subscribe_preflight_effect"
 node_contract_validate_compute = "omnibase_infra.nodes.node_contract_validate_compute"
 node_db_error_linear_effect = "omnibase_infra.nodes.node_db_error_linear_effect"
 node_decision_store_effect = "omnibase_infra.nodes.node_decision_store_effect"

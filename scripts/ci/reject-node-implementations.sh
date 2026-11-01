@@ -10,8 +10,8 @@ Usage: scripts/ci/reject-node-implementations.sh [--all|--staged]
 
 Reject unallowlisted Python files under src/omnibase_infra/nodes/*/handlers/.
 Business-domain node implementations belong in omnimarket. Any infra-owned
-handler that remains in omnibase_infra must be listed in
-scripts/ci/infra-node-allowlist.txt with an inline justification comment.
+handler that remains in omnibase_infra is bound from the node contract and lives in
+src/omnibase_infra/handlers/. The allowlist scripts/ci/infra-node-allowlist.txt only shrinks.
 USAGE
 }
 
@@ -132,8 +132,8 @@ if [[ -s "$violations" ]]; then
   echo "Unallowlisted infra node handler path(s):" >&2
   sed 's/^/  - /' "$violations" >&2
   echo >&2
-  echo "Move business-domain node implementations to omnimarket, or add a justified" >&2
-  echo "infra-only exception to $allowlist_path in the same PR." >&2
+  echo "Move business-domain node implementations to omnimarket, or bind an infra handler from src/omnibase_infra/handlers/ from the node contract (OMN-20821 pattern; omnibase_infra#4565, #5405)." >&2
+  echo "The allowlist only shrinks: $allowlist_path never gains an entry (exception-entry-growth)." >&2
   exit 1
 fi
 

@@ -282,7 +282,7 @@ class TestRpkFallback:
             raise AssertionError(f"Unexpected subprocess invocation: {args}")
 
         monkeypatch.setattr(
-            "omnibase_infra.verification.probes.probe_subscription.subprocess.run",
+            "omnibase_infra.models.verification.model_verification_probe_settings.subprocess.run",
             fake_run,
         )
 
@@ -414,7 +414,7 @@ class TestRpkFallbackDiscoversSplitGroupsByContract:
             raise AssertionError(f"Unexpected subprocess invocation: {args}")
 
         monkeypatch.setattr(
-            "omnibase_infra.verification.probes.probe_subscription.subprocess.run",
+            "omnibase_infra.models.verification.model_verification_probe_settings.subprocess.run",
             fake_run,
         )
 
@@ -447,7 +447,7 @@ class TestRpkFallbackDiscoversSplitGroupsByContract:
             return CompletedProcessStub(stdout=json.dumps({"members": []}))
 
         monkeypatch.setattr(
-            "omnibase_infra.verification.probes.probe_subscription.subprocess.run",
+            "omnibase_infra.models.verification.model_verification_probe_settings.subprocess.run",
             fake_run,
         )
 
