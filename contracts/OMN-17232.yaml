@@ -34,10 +34,20 @@ requirements:
         statement: The kernel resolves the workspace config owner through the one contract-declared resolver and holds no resolver of its own; the resolver names no directory beside the workspace root, so an unset ONEX_WORKSPACE_CONFIG_ROOT with no developer config yields no root and each caller uses its neutral default or refuses naming the variable.
       - id: AC8
         statement: The resolver node runs from its contract and the contract-routed handler, kernel and pre-push guard agree on a real directory tree for the variable, the developer directory and the unset case, including the guard's developer-config opt-out and its refusal to adopt a neighbouring directory.
+  - id: req-hp051-multiarch-pool
+    statement: The HP DL560 (h051) takes arch-neutral CI on the opt-in label only, with its own slice and git mirror.
+    acceptance:
+      - id: AC10
+        statement: Every h051 runner carries omnibase-ci-multiarch and arch-amd64 and neither omnibase-ci nor omnibase-verify, the fleet row declares only the action-multiarch class, and the pool runs in its own omnirunners.slice with declared limits.
+      - id: AC11
+        statement: The pool's git mirror is three units beside the slice (daemon on the pool's bridge gateway, oneshot refresh, timer) whose root is on the data volume, and no runner overrides the mirror address.
 evidence_requirements:
   - kind: tests
     description: Synthetic fixtures cover public-table leakage, missing configuration, concurrent slots, committed authority, and remote transport without live lab dependencies.
     command: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/scripts/test_prepush_actor_fallback.py tests/unit/scripts/test_prepush_remote_leg_policy.py tests/unit/scripts/test_prepush_smart_tests_seam.py tests/ci/test_prepush_hook_host_identity_guard.py tests/ci/test_pytest_full_suite_host_guard.py -q -p no:randomly
+  - kind: tests
+    description: The h051 pool declaration, label and mirror tests pass
+    command: uv run pytest tests/ci/test_hp051_pool_omn17232.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -186,4 +196,70 @@ dod_evidence:
       - check_type: command
         check_value: >-
           bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "HandlerWorkspaceConfigRootResolve" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-hp051-pool-declared
+    description: The pool carries the opt-in label only, a class no omnibase-ci probe counts, its own slice, and its own git mirror units.
+    source: manual
+    binds_ac: [AC10, AC11]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hp051_pool_omn17232.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-hp051-pool-deploy
+    description: Render the shipped compose artifact with Docker Compose and compare inherited labels, memory limits and cgroup settings with the YAML declaration. Parse both mirror units to require data-volume mount ordering and verify the daemon's read-only service flags. The command fails if Docker Compose is absent; it requires no running containers or private configuration.
+    source: manual
+    binds_ac: [AC10, AC11]
+    checks:
+      - check_type: command
+        check_value: |-
+          env PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY'
+          import json, os, pathlib, shlex, subprocess, yaml
+          compose = pathlib.Path("docker/docker-compose.runners-hp051-ci-runner.yml")
+          result = subprocess.run(
+              ["docker", "compose", "-f", str(compose), "config", "--no-interpolate", "--format", "json"],
+              env={**os.environ, "COMPOSE_PROJECT_NAME": "hp051-artifact-probe"},
+              capture_output=True, text=True, check=True, timeout=30,
+          )
+          rendered = json.loads(result.stdout)["services"]
+          declared = yaml.safe_load(compose.read_text())["services"]
+          assert set(rendered) == set(declared) == {f"hp051-ci-runner-{n}" for n in range(1, 5)}
+          def memory_bytes(value):
+              return value if isinstance(value, int) else int(value[:-1]) * 1024**3 if value[-1].lower() == "g" else int(value)
+          for name, service in rendered.items():
+              assert service["environment"] == declared[name]["environment"]
+              assert set(service["environment"]["RUNNER_LABELS"].split(",")) == {"self-hosted", "omnibase-ci-multiarch", "hp-canary", "linux", "x64", "arch-amd64"}
+              assert service["cgroup_parent"] == declared[name]["cgroup_parent"] == "omnirunners.slice"
+              assert memory_bytes(service["mem_limit"]) == memory_bytes(declared[name]["mem_limit"]) == 6 * 1024**3
+              assert memory_bytes(service["memswap_limit"]) == memory_bytes(declared[name]["memswap_limit"]) == 12 * 1024**3
+          pool = pathlib.Path("docker/runners/systemd/pools/hp051-ci-runner")
+          def directives(name):
+              return dict(line.split("=", 1) for line in (pool / name).read_text().replace("\\\n", " ").splitlines() if "=" in line and not line.lstrip().startswith(("#", "[")))
+          daemon = directives("omninode-git-mirror-daemon.service")
+          refresh = directives("omninode-git-mirror-refresh.service")
+          assert daemon["RequiresMountsFor"] == refresh["RequiresMountsFor"] == "/data/scratch/git-mirror"
+          command = shlex.split(daemon["ExecStart"])
+          assert command[0] == "/usr/lib/git-core/git-daemon"
+          assert "--base-path=/data/scratch/git-mirror" in command
+          assert "--listen=${OMNI_GIT_MIRROR_LISTEN}" in command
+          for service in ("receive-pack", "upload-archive"):
+              assert f"--disable={service}" in command and f"--forbid-override={service}" in command
+          assert directives("omnirunners.slice")["MemoryMax"] == "112G"
+          print("hp051 artifacts: four rendered runners, inherited settings, mount ordering, read-only mirror")
+          PY
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-hp051-labels-and-budget-ac10
+    description: Parse the four services, assert the exact labels and runner group, confirm no workflow routes to the canary pin, and check numeric child and parent memory limits and class-specific fleet counts.
+    source: manual
+    binds_ac: [AC10]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_hp051_pool_omn17232.py -q --no-cov -p no:randomly -k "label or workflow or declared_limits or multiarch_class"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-hp051-mirror-runtime-ac11
+    description: Execute the shipped listen preflight against absent, wildcard, multicast, unassigned and assigned addresses, verify bridge retry settings, and run a local git daemon that serves reads and refuses write and archive requests even with repository overrides enabled. This hosted-runner probe uses temporary mirrors and loopback sockets and does not require a live runner host.
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_hp051_pool_omn17232.py -q --no-cov -p no:randomly -k "git_mirror or daemon or mirror_address"
         cwd: ${OMNI_HOME}/omnibase_infra

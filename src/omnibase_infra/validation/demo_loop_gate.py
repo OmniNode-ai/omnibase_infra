@@ -49,7 +49,7 @@ from omnibase_infra.runtime.emit_daemon.topics import (
     TOPIC_NOTIFICATION_COMPLETED,
     TOPIC_PHASE_METRICS,
 )
-from omnibase_infra.topics import topic_keys
+from omnibase_infra.topics import platform_topic_suffixes, topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 from omnibase_infra.validation.enums.enum_assertion_status import EnumAssertionStatus
 from omnibase_infra.validation.models.model_assertion_result import (
@@ -73,7 +73,7 @@ _REGISTRY = ServiceTopicRegistry.from_defaults()
 # These are the topics the canonical pipeline emits to.
 CANONICAL_EVENT_TOPICS: Final[tuple[str, ...]] = (
     # Platform topics (runtime)
-    "onex.evt.platform.node-introspection.v1",  # onex-topic-allow: pending contract auto-wiring
+    platform_topic_suffixes.SUFFIX_NODE_INTROSPECTION,
     # Intelligence topics
     _REGISTRY.resolve(topic_keys.SESSION_OUTCOME_CANONICAL),
     _REGISTRY.resolve(topic_keys.LLM_CALL_COMPLETED),

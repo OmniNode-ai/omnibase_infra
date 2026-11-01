@@ -76,6 +76,7 @@ handler_routing:
         module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_retrieval_complete"
       output_events:
         - "ModelChainReplayInput"
+        # OMN-21761: handle(request) takes ModelChainRetrievalResult and returns ModelChainRetrievalDecision.
     - event_model:
         name: "ModelChainStoreResult"
         module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_store_result"

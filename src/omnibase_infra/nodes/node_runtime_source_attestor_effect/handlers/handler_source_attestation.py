@@ -39,13 +39,14 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.health.model_runtime_booted_event import (
     ModelRuntimeBootedEvent,
 )
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 
 logger = logging.getLogger(__name__)
 
 # Sentinel values that indicate a build without attestation
 _INVALID_HASHES: frozenset[str] = frozenset({"unknown", "", "dev"})
 
-_DEFAULT_REPO_URL = "https://github.com/OmniNode-ai/omnibase_infra.git"
+_DEFAULT_REPO_URL = load_third_party_endpoints().runtime_source_repo_url
 _DEFAULT_DRIFT_THRESHOLD = 5
 _DEFAULT_FRICTION_DIR = Path(".onex_state/friction")
 

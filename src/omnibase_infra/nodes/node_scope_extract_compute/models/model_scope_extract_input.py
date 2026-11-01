@@ -16,8 +16,5 @@ class ModelScopeExtractInput(BaseModel):
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     plan_file_path: str = Field(..., description="Original path of the plan file.")
-    output_path: str = Field(
-        default="~/.claude/scope-manifest.json",
-        description="Path to write the scope manifest JSON.",
-    )
+    output_path: str = Field(..., description="Path to write the scope manifest JSON.")
     content: str = Field(..., description="Plan file content to parse.")
