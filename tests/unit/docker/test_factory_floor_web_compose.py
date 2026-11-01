@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -97,7 +98,10 @@ def test_serve_directory_is_mounted_read_only_and_the_container_is_locked_down()
     assert service["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in service["security_opt"]
     assert service["user"] == "101:101"
-    assert not str(service["image"]).endswith(":latest")
+    assert re.fullmatch(r"[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}", str(service["image"]))
+    assert service["healthcheck"]["test"][1].endswith(
+        "http://127.0.0.1:8080/healthz || exit 1"
+    )
 
 
 def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
@@ -114,6 +118,17 @@ def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
     assert "object-src 'none'" in conf
     assert "root /srv/site;" in conf
     assert "try_files $uri $uri/index.html =404;" in conf
+
+
+def test_nginx_locations_declare_no_add_header_and_healthz_needs_no_page() -> None:
+    conf = NGINX.read_text(encoding="utf-8")
+    blocks = re.findall(r"location [^{]*\{([^}]*)\}", conf)
+    assert len(blocks) == 3
+    assert all("add_header" not in block for block in blocks)
+    health = re.search(r"location = /healthz \{([^}]*)\}", conf)
+    assert health is not None
+    assert "return 200" in health.group(1)
+    assert "try_files" not in health.group(1)
 
 
 @pytest.mark.parametrize("missing", REQUIRED)
@@ -139,3 +154,7 @@ def test_compose_renders_one_published_port_on_the_given_address() -> None:
     assert Path(config[0]["source"]) == NGINX
     assert config[0]["read_only"] is True
     assert config[0]["bind"].get("create_host_path", False) is False
+    serve = [v for v in volumes if v["target"] == "/srv/site"]
+    assert len(serve) == 1
+    assert serve[0]["read_only"] is True
+    assert serve[0]["source"] == RENDER_ENV["FACTORY_FLOOR_SERVE_DIR"]
