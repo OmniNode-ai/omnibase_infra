@@ -266,7 +266,7 @@ class TopicEnumGenerator:
         init_path = output_dir / "__init__.py"
         init_content = _INIT_HEADER
         for stem, class_name in class_exports:
-            init_content += f"from .{stem} import {class_name}\n"
+            init_content += f"from .{stem} import {class_name} as {class_name}\n"
 
         result[init_path] = init_content
 
