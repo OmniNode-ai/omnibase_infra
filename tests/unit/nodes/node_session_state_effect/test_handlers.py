@@ -31,7 +31,12 @@ from omnibase_infra.nodes.node_session_state_effect.handlers import (
 )
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelRunContext,
+    ModelRunContextReadRequest,
+    ModelRunContextWriteRequest,
     ModelSessionIndex,
+    ModelSessionIndexReadRequest,
+    ModelSessionIndexWriteRequest,
+    ModelStaleRunGcRequest,
 )
 
 pytestmark = pytest.mark.unit
@@ -58,7 +63,9 @@ class TestHandlerSessionIndexRead:
     async def test_read_missing_file(self, state_dir: Path) -> None:
         """Reading a non-existent session.json returns default index."""
         handler = HandlerSessionIndexRead(state_dir)
-        idx, result = await handler.handle(uuid4())
+        idx, result = await handler.handle(
+            ModelSessionIndexReadRequest(correlation_id=uuid4())
+        )
         assert result.success
         assert idx.active_run_id is None
         assert idx.recent_run_ids == ()
@@ -74,7 +81,9 @@ class TestHandlerSessionIndexRead:
         (state_dir / "session.json").write_text(json.dumps(data))
 
         handler = HandlerSessionIndexRead(state_dir)
-        idx, result = await handler.handle(uuid4())
+        idx, result = await handler.handle(
+            ModelSessionIndexReadRequest(correlation_id=uuid4())
+        )
         assert result.success
         assert idx.active_run_id == "run-1"
         assert idx.recent_run_ids == ("run-1", "run-2")
@@ -85,7 +94,9 @@ class TestHandlerSessionIndexRead:
         (state_dir / "session.json").write_text("{invalid json")
 
         handler = HandlerSessionIndexRead(state_dir)
-        idx, result = await handler.handle(uuid4())
+        idx, result = await handler.handle(
+            ModelSessionIndexReadRequest(correlation_id=uuid4())
+        )
         assert not result.success
         assert "PARSE_ERROR" in result.error_code
         assert idx is None
@@ -105,7 +116,9 @@ class TestHandlerSessionIndexWrite:
         """Writing creates session.json."""
         handler = HandlerSessionIndexWrite(state_dir)
         idx = ModelSessionIndex(recent_run_ids=("run-1",))
-        result = await handler.handle(idx, uuid4())
+        result = await handler.handle(
+            ModelSessionIndexWriteRequest(index=idx, correlation_id=uuid4())
+        )
         assert result.success
 
         data = json.loads((state_dir / "session.json").read_text())
@@ -117,10 +130,14 @@ class TestHandlerSessionIndexWrite:
         handler = HandlerSessionIndexWrite(state_dir)
 
         idx1 = ModelSessionIndex(recent_run_ids=("run-1",))
-        await handler.handle(idx1, uuid4())
+        await handler.handle(
+            ModelSessionIndexWriteRequest(index=idx1, correlation_id=uuid4())
+        )
 
         idx2 = ModelSessionIndex(recent_run_ids=("run-2", "run-1"))
-        result = await handler.handle(idx2, uuid4())
+        result = await handler.handle(
+            ModelSessionIndexWriteRequest(index=idx2, correlation_id=uuid4())
+        )
         assert result.success
 
         data = json.loads((state_dir / "session.json").read_text())
@@ -132,7 +149,9 @@ class TestHandlerSessionIndexWrite:
         state_dir = tmp_path / "deep" / "nested" / "state"
         handler = HandlerSessionIndexWrite(state_dir)
         idx = ModelSessionIndex()
-        result = await handler.handle(idx, uuid4())
+        result = await handler.handle(
+            ModelSessionIndexWriteRequest(index=idx, correlation_id=uuid4())
+        )
         assert result.success
         assert (state_dir / "session.json").exists()
 
@@ -143,7 +162,9 @@ class TestHandlerSessionIndexWrite:
 
         async def write_index(run_id: str) -> None:
             idx = ModelSessionIndex(recent_run_ids=(run_id,))
-            result = await handler.handle(idx, uuid4())
+            result = await handler.handle(
+                ModelSessionIndexWriteRequest(index=idx, correlation_id=uuid4())
+            )
             assert result.success
 
         # Run 10 concurrent writes
@@ -166,7 +187,9 @@ class TestHandlerSessionIndexWrite:
         handler = HandlerSessionIndexWrite(state_dir)
         # Seed an initial index
         initial = ModelSessionIndex(recent_run_ids=("run-1",))
-        await handler.handle(initial, uuid4())
+        await handler.handle(
+            ModelSessionIndexWriteRequest(index=initial, correlation_id=uuid4())
+        )
 
         # Use read_modify_write to atomically add a run
         new_idx, result = await handler.handle_read_modify_write(
@@ -233,7 +256,9 @@ class TestHandlerRunContextRead:
     async def test_read_missing(self, state_dir: Path) -> None:
         """Reading a non-existent run returns None."""
         handler = HandlerRunContextRead(state_dir)
-        ctx, result = await handler.handle("run-missing", uuid4())
+        ctx, result = await handler.handle(
+            ModelRunContextReadRequest(run_id="run-missing", correlation_id=uuid4())
+        )
         assert result.success
         assert ctx is None
 
@@ -252,7 +277,9 @@ class TestHandlerRunContextRead:
         (runs_dir / "run-1.json").write_text(json.dumps(data))
 
         handler = HandlerRunContextRead(state_dir)
-        ctx, result = await handler.handle("run-1", uuid4())
+        ctx, result = await handler.handle(
+            ModelRunContextReadRequest(run_id="run-1", correlation_id=uuid4())
+        )
         assert result.success
         assert ctx is not None
         assert ctx.run_id == "run-1"
@@ -272,7 +299,9 @@ class TestHandlerRunContextReadPathTraversal:
     async def test_path_traversal_rejected(self, state_dir: Path, bad_id: str) -> None:
         """run_id with path traversal characters returns error result."""
         handler = HandlerRunContextRead(state_dir)
-        ctx, result = await handler.handle(bad_id, uuid4())
+        ctx, result = await handler.handle(
+            ModelRunContextReadRequest(run_id=bad_id, correlation_id=uuid4())
+        )
         assert not result.success
         assert result.error_code == "RUN_CONTEXT_INVALID_ID"
         assert ctx is None
@@ -292,7 +321,9 @@ class TestHandlerRunContextWrite:
         """Writing a run context creates the file."""
         handler = HandlerRunContextWrite(state_dir)
         ctx = ModelRunContext(run_id="run-abc")
-        result = await handler.handle(ctx, uuid4())
+        result = await handler.handle(
+            ModelRunContextWriteRequest(context=ctx, correlation_id=uuid4())
+        )
         assert result.success
         assert (state_dir / "runs" / "run-abc.json").exists()
 
@@ -307,9 +338,13 @@ class TestHandlerRunContextWrite:
             status=EnumSessionLifecycleState.RUN_ACTIVE,
             metadata={"key": "value"},
         )
-        await writer.handle(ctx, uuid4())
+        await writer.handle(
+            ModelRunContextWriteRequest(context=ctx, correlation_id=uuid4())
+        )
 
-        read_ctx, result = await reader.handle("run-rt", uuid4())
+        read_ctx, result = await reader.handle(
+            ModelRunContextReadRequest(run_id="run-rt", correlation_id=uuid4())
+        )
         assert result.success
         assert read_ctx is not None
         assert read_ctx.run_id == "run-rt"
@@ -346,7 +381,9 @@ class TestHandlerStaleRunGC:
         (runs_dir / "fresh-run.json").write_text(fresh_ctx.model_dump_json())
 
         handler = HandlerStaleRunGC(state_dir)
-        deleted, result = await handler.handle(uuid4())
+        deleted, result = await handler.handle(
+            ModelStaleRunGcRequest(correlation_id=uuid4())
+        )
 
         assert result.success
         assert "stale-run" in deleted
@@ -362,7 +399,9 @@ class TestHandlerStaleRunGC:
         (runs_dir / "bad.json").write_text("{invalid json")
 
         handler = HandlerStaleRunGC(state_dir)
-        deleted, result = await handler.handle(uuid4())
+        deleted, result = await handler.handle(
+            ModelStaleRunGcRequest(correlation_id=uuid4())
+        )
 
         assert result.success
         assert "bad" not in deleted
@@ -372,7 +411,9 @@ class TestHandlerStaleRunGC:
     async def test_gc_empty_dir(self, state_dir: Path) -> None:
         """GC with no runs directory returns empty list."""
         handler = HandlerStaleRunGC(state_dir)
-        deleted, result = await handler.handle(uuid4())
+        deleted, result = await handler.handle(
+            ModelStaleRunGcRequest(correlation_id=uuid4())
+        )
         assert result.success
         assert deleted == []
 
@@ -388,7 +429,9 @@ class TestHandlerStaleRunGC:
 
         # With 0-second TTL, everything is stale
         handler = HandlerStaleRunGC(state_dir, ttl_seconds=0.0)
-        deleted, result = await handler.handle(uuid4())
+        deleted, result = await handler.handle(
+            ModelStaleRunGcRequest(correlation_id=uuid4())
+        )
 
         assert result.success
         assert "semi-old" in deleted
@@ -413,28 +456,40 @@ class TestConcurrentPipelineIsolation:
 
         # Pipeline 1 creates a run
         run1 = ModelRunContext(run_id="pipeline-1")
-        await ctx_writer.handle(run1, uuid4())
+        await ctx_writer.handle(
+            ModelRunContextWriteRequest(context=run1, correlation_id=uuid4())
+        )
 
         # Pipeline 2 creates a run
         run2 = ModelRunContext(run_id="pipeline-2")
-        await ctx_writer.handle(run2, uuid4())
+        await ctx_writer.handle(
+            ModelRunContextWriteRequest(context=run2, correlation_id=uuid4())
+        )
 
         # Session index tracks both
         idx = ModelSessionIndex()
         idx = idx.with_run_added("pipeline-1")
         idx = idx.with_run_added("pipeline-2")
-        await idx_writer.handle(idx, uuid4())
+        await idx_writer.handle(
+            ModelSessionIndexWriteRequest(index=idx, correlation_id=uuid4())
+        )
 
         # Both runs exist independently
-        ctx1, _ = await ctx_reader.handle("pipeline-1", uuid4())
-        ctx2, _ = await ctx_reader.handle("pipeline-2", uuid4())
+        ctx1, _ = await ctx_reader.handle(
+            ModelRunContextReadRequest(run_id="pipeline-1", correlation_id=uuid4())
+        )
+        ctx2, _ = await ctx_reader.handle(
+            ModelRunContextReadRequest(run_id="pipeline-2", correlation_id=uuid4())
+        )
         assert ctx1 is not None
         assert ctx2 is not None
         assert ctx1.run_id == "pipeline-1"
         assert ctx2.run_id == "pipeline-2"
 
         # Session index contains both
-        read_idx, _ = await idx_reader.handle(uuid4())
+        read_idx, _ = await idx_reader.handle(
+            ModelSessionIndexReadRequest(correlation_id=uuid4())
+        )
         assert "pipeline-1" in read_idx.recent_run_ids
         assert "pipeline-2" in read_idx.recent_run_ids
 
@@ -447,36 +502,60 @@ class TestConcurrentPipelineIsolation:
         idx_reader = HandlerSessionIndexRead(state_dir)
 
         # Both pipelines create runs
-        await ctx_writer.handle(ModelRunContext(run_id="p1"), uuid4())
-        await ctx_writer.handle(ModelRunContext(run_id="p2"), uuid4())
+        await ctx_writer.handle(
+            ModelRunContextWriteRequest(
+                context=ModelRunContext(run_id="p1"), correlation_id=uuid4()
+            )
+        )
+        await ctx_writer.handle(
+            ModelRunContextWriteRequest(
+                context=ModelRunContext(run_id="p2"), correlation_id=uuid4()
+            )
+        )
 
         idx = ModelSessionIndex()
         idx = idx.with_run_added("p1")
         idx = idx.with_run_added("p2")
-        await idx_writer.handle(idx, uuid4())
+        await idx_writer.handle(
+            ModelSessionIndexWriteRequest(index=idx, correlation_id=uuid4())
+        )
 
         # End pipeline 1: update its context and remove from index
-        p1_ctx, _ = await ctx_reader.handle("p1", uuid4())
+        p1_ctx, _ = await ctx_reader.handle(
+            ModelRunContextReadRequest(run_id="p1", correlation_id=uuid4())
+        )
         assert p1_ctx is not None
         ended_ctx = p1_ctx.with_status(EnumSessionLifecycleState.RUN_ENDED)
-        await ctx_writer.handle(ended_ctx, uuid4())
+        await ctx_writer.handle(
+            ModelRunContextWriteRequest(context=ended_ctx, correlation_id=uuid4())
+        )
 
         # Update index to remove p1
-        read_idx, _ = await idx_reader.handle(uuid4())
+        read_idx, _ = await idx_reader.handle(
+            ModelSessionIndexReadRequest(correlation_id=uuid4())
+        )
         updated_idx = read_idx.with_run_removed("p1")
-        await idx_writer.handle(updated_idx, uuid4())
+        await idx_writer.handle(
+            ModelSessionIndexWriteRequest(index=updated_idx, correlation_id=uuid4())
+        )
 
         # Pipeline 2 is still active
-        p2_ctx, _ = await ctx_reader.handle("p2", uuid4())
+        p2_ctx, _ = await ctx_reader.handle(
+            ModelRunContextReadRequest(run_id="p2", correlation_id=uuid4())
+        )
         assert p2_ctx is not None
         assert p2_ctx.run_id == "p2"
 
         # Pipeline 1's context still exists (but marked ended)
-        p1_read, _ = await ctx_reader.handle("p1", uuid4())
+        p1_read, _ = await ctx_reader.handle(
+            ModelRunContextReadRequest(run_id="p1", correlation_id=uuid4())
+        )
         assert p1_read is not None
         assert p1_read.status == EnumSessionLifecycleState.RUN_ENDED
 
         # Session index only has p2
-        final_idx, _ = await idx_reader.handle(uuid4())
+        final_idx, _ = await idx_reader.handle(
+            ModelSessionIndexReadRequest(correlation_id=uuid4())
+        )
         assert "p2" in final_idx.recent_run_ids
         assert "p1" not in final_idx.recent_run_ids

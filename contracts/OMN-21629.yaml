@@ -17,6 +17,11 @@ requirements:
     acceptance:
       - id: AC2
         statement: "AC2: the topic demand source reports a watched topic as idle until its first record and clears it on that record and on stop, and the health monitor reports projection_attachment HEALTHY for a projection whose topics are all idle-watched while the same projection off the idle set still degrades it -- falsifier: uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py fails at origin/dev 9de6fcbd3, which has no idle_watched_topics"
+  - id: req-omn21629-dev201-gateway-deploy-off
+    statement: "The dev-201 deploy instance declares disabled_phases gateway-deploy in config/deploy_lane_routing.yaml, so the deploy agent skips the gateway phase and its gateway-forwarder service for that instance, while an instance that omits the entry still runs it."
+    acceptance:
+      - id: AC3
+        statement: "AC3: the shipped routing table lists gateway-deploy in disabled_phases for the default dev instance and for no other, the executor never reaches the gateway script or the host for that instance, and an instance without the flag still runs the phase -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_201_gateway_off_omn21629.py -q fails at origin/dev 9de6fcbd3, which has no disabled_phases flag"
 evidence_requirements:
   - kind: tests
     description: "The discovery shim returns the unfiltered manifest, the one filter runs once, and a real node exclusion over a real manifest does not raise."
@@ -24,6 +29,9 @@ evidence_requirements:
   - kind: tests
     description: "A projection whose topics all wait for a first record is out of the attachment scope, and the demand source keeps the idle set."
     command: "uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "The dev-201 instance runs no gateway-deploy phase, the phase stays available to an instance without the flag, and the deploy-agent suite stays green."
+    command: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_201_gateway_off_omn21629.py -q -p no:cacheprovider"
   - kind: manual
     description: "Deploy check: on the dev lane after a deploy at this head, the main runtime's /health reports the discovery_errors dimension HEALTHY rather than CRITICAL with RuntimeHostError."
     command: "deploy: curl -s http://host.docker.internal:8085/health | python3 -c 'import json,sys; d=json.load(sys.stdin); x=[v for v in d[\"details\"][\"runtime_health\"][\"dimensions\"] if v[\"name\"]==\"discovery_errors\"][0]; assert x[\"status\"]==\"HEALTHY\", x'"
@@ -42,3 +50,79 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py -q -p no:cacheprovider'
+  - id: dod-003
+    description: "The default dev instance declares gateway-deploy off and the deploy agent skips that phase for it."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_201_gateway_off_omn21629.py -q -p no:cacheprovider'
+  - id: dod-004
+    description: >-
+      Hosted deploy probe for AC1 and AC3: load the shipped deploy-agent routing table and require the default dev instance to disable gateway-deploy and omit gateway services from its runtime plan. Then start the real ServiceHealth HTTP server and ServiceRuntimeHealthMonitor with node_architecture_validator excluded; read /health over loopback and require a nonempty manifest and discovery_errors HEALTHY. The isolated process uses no broker or containers and makes no claim about the deployed lane. The gateway plan assertions fail before this PR even when the health-monitor fix is already on the merge base.
+    source: generated
+    binds_ac: [AC1, AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          probe_dir=$(mktemp -d);
+          probe_pid=;
+          trap 'if [ -n "$probe_pid" ]; then kill "$probe_pid" 2>/dev/null || :; wait "$probe_pid" 2>/dev/null || :; fi; rm -rf "$probe_dir"' EXIT;
+          env PYTHONDONTWRITEBYTECODE=1 ONEX_ACTIVE_RUNTIME_PACKAGES=omnibase_infra RUNTIME_PROFILE=main ONEX_RUNTIME_NODE_EXCLUSION=node_architecture_validator uv run --frozen python -c 'import asyncio
+          import signal
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd() / "scripts/deploy-agent"))
+          from deploy_agent.events import DEV_LANE_GATEWAY_SERVICES, EnumRuntimeLane, Scope
+          from deploy_agent.executor import DEFAULT_DEV_INSTANCE, EnumInstancePhase, _requested_services_for_up, lane_config_for, lane_runs_phase, select_dev_instance
+          from deploy_agent.routing import AGENT_CLONE_ROOT, lane_flags_for_instance
+          from omnibase_infra.runtime import RuntimeHostProcess
+          from omnibase_infra.services.health_checker import ServiceHealth
+          from omnibase_infra.services.service_runtime_health_monitor import ServiceRuntimeHealthMonitor
+          from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
+
+          async def main():
+              select_dev_instance(DEFAULT_DEV_INSTANCE)
+              flags = lane_flags_for_instance(AGENT_CLONE_ROOT, DEFAULT_DEV_INSTANCE)
+              assert flags.disabled_phases == ("gateway-deploy",), flags
+              assert not lane_runs_phase(EnumRuntimeLane.DEV, EnumInstancePhase.GATEWAY_DEPLOY)
+              config = lane_config_for(EnumRuntimeLane.DEV)
+              assert set(DEV_LANE_GATEWAY_SERVICES) <= config.disabled_services, config
+              services = _requested_services_for_up(Scope.RUNTIME, [], lane=EnumRuntimeLane.DEV)
+              assert services and not set(services) & set(DEV_LANE_GATEWAY_SERVICES), services
+              raw = discover_contracts()
+              assert "node_architecture_validator" in {c.name for c in raw.contracts}
+              monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="")
+              event = await monitor.run_once()
+              runtime = RuntimeHostProcess(config={"service_name": "omnibase_infra", "node_name": "node_architecture_validator"})
+              server = ServiceHealth(runtime=runtime, host="127.0.0.1", port=0)
+              server.set_runtime_health_provider(lambda: event)
+              stopped = asyncio.Event()
+              asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopped.set)
+              try:
+                  await server.start()
+                  port = server._runner.addresses[0][1]
+                  Path(sys.argv[1]).write_text(f"http://127.0.0.1:{port}/health")
+                  await asyncio.wait_for(stopped.wait(), timeout=60)
+              finally:
+                  await server.stop()
+
+          asyncio.run(main())' "$probe_dir/url" &
+          probe_pid=$!;
+          for attempt in $(seq 1 300); do
+            if [ -s "$probe_dir/url" ]; then break; fi;
+            kill -0 "$probe_pid";
+            sleep 0.1;
+          done;
+          test -s "$probe_dir/url";
+          curl --silent --show-error --max-time 10 "$(cat "$probe_dir/url")" > "$probe_dir/health.json";
+          uv run --frozen python -c 'import json
+          import sys
+          from pathlib import Path
+          health = json.loads(Path(sys.argv[1]).read_text())["details"]["runtime_health"]
+          dimension = next(d for d in health["dimensions"] if d["name"] == "discovery_errors")
+          assert dimension["status"] == "HEALTHY", dimension
+          assert health["contract_count"] > 0, health
+          assert health["discovery_error_count"] == 0, health
+          print(json.dumps({"discovery_errors": dimension, "contract_count": health["contract_count"]}))' "$probe_dir/health.json"

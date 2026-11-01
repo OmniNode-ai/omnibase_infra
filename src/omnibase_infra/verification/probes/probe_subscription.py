@@ -12,7 +12,6 @@ compute_consumer_group_id() -- never hardcoded.
 from __future__ import annotations
 
 import logging
-import subprocess
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
@@ -22,13 +21,15 @@ if TYPE_CHECKING:
 from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
+from omnibase_infra.models.verification.model_verification_probe_settings import (
+    load_probe_settings,
+)
 from omnibase_infra.verification.contract_parser import (
     ModelParsedContractForVerification,
 )
 from omnibase_infra.verification.models.model_contract_check_result import (
     ModelContractCheckResult,
 )
-from omnibase_infra.verification.probes.util_rpk_env import rpk_env
 
 logger = logging.getLogger(__name__)
 
@@ -69,14 +70,7 @@ _TOPIC_SUFFIX_INFIX = ".__t."
 def _rpk_group_list() -> list[dict[str, object]]:
     """Return the raw ``rpk group list --format json`` payload as a list."""
     try:
-        result = subprocess.run(
-            ["rpk", "group", "list", "--format", "json"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-            env=rpk_env(),
-        )
+        result = load_probe_settings().run_rpk(["group", "list", "--format", "json"])
     except FileNotFoundError as exc:
         raise RuntimeError("rpk not found on PATH") from exc
 
@@ -179,13 +173,8 @@ def _rpk_fallback(group_id: str, *, contract_name: str | None = None) -> set[str
         RuntimeError: If rpk is not available or returns an error.
     """
     try:
-        result = subprocess.run(
-            ["rpk", "group", "describe", group_id, "--format", "json"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-            env=rpk_env(),
+        result = load_probe_settings().run_rpk(
+            ["group", "describe", group_id, "--format", "json"]
         )
     except FileNotFoundError as exc:
         raise RuntimeError("rpk not found on PATH") from exc
@@ -202,13 +191,8 @@ def _rpk_fallback(group_id: str, *, contract_name: str | None = None) -> set[str
     # group is empty or dead so verification matches the live runtime shape.
     scoped_topics: set[str] = set()
     for scoped_group_id in _list_topic_scoped_groups(group_id):
-        scoped_result = subprocess.run(
-            ["rpk", "group", "describe", scoped_group_id, "--format", "json"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-            env=rpk_env(),
+        scoped_result = load_probe_settings().run_rpk(
+            ["group", "describe", scoped_group_id, "--format", "json"]
         )
         if scoped_result.returncode != 0:
             continue
@@ -293,12 +277,8 @@ def _discover_identity_via_rpk(contract_name: str) -> ModelNodeIdentity | None:
         A ModelNodeIdentity if discovery succeeds, None otherwise.
     """
     try:
-        result = subprocess.run(
-            ["rpk", "group", "list", "--format", "json"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
+        result = load_probe_settings().run_rpk_discovery(
+            ["group", "list", "--format", "json"]
         )
         if result.returncode != 0:
             return None

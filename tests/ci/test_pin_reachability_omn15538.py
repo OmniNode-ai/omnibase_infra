@@ -500,18 +500,20 @@ def test_real_tree_extracts_precommit_revs_and_workflow_git_pins() -> None:
 def test_real_tree_core_ratchet_pins_stay_equal() -> None:
     """Each core ratchet shares one ref between its hook and its CI job.
 
-    canonical-file-shape pins a dev-merge tag of omnibase_core (OMN-21523);
-    node-boundary-imports still pins a full commit SHA.
+    canonical-file-shape pins a dev-merge tag of omnibase_core (OMN-21523); its
+    CI job reads that tag from the hook block at run time (OMN-21538), so ci.yml
+    carries no second literal for it. node-boundary-imports still pins a full
+    commit SHA in both places.
     """
     precommit = REPO_ROOT / ".pre-commit-config.yaml"
     pins = extract_pins([WORKFLOWS_DIR, precommit])
     config = yaml.safe_load(precommit.read_text(encoding="utf-8"))
     ci_loci = {
-        "canonical-file-shape": ".env.CANONICAL_FILE_SHAPE_CORE",
-        "check-node-boundary-imports": ".env.NODE_BOUNDARY_CORE",
+        "canonical-file-shape": (".env.CANONICAL_FILE_SHAPE_CORE", 0),
+        "check-node-boundary-imports": (".env.NODE_BOUNDARY_CORE", 1),
     }
     refs: dict[str, set[str]] = {}
-    for hook_id, ci_suffix in ci_loci.items():
+    for hook_id, (ci_suffix, workflow_pin_count) in ci_loci.items():
         workflow_pins = [
             p
             for p in pins
@@ -520,7 +522,7 @@ def test_real_tree_core_ratchet_pins_stay_equal() -> None:
             and p.repo == "omnibase_core"
             and p.locus.endswith(ci_suffix)
         ]
-        assert len(workflow_pins) == 1
+        assert len(workflow_pins) == workflow_pin_count
         hook_loci = [
             f"repos[{index}].rev"
             for index, entry in enumerate(config["repos"])

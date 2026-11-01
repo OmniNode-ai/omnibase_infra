@@ -158,6 +158,29 @@ hosts:
       - runner_name_prefix: omnipc2-customer-plane-runner
         expected_count: 1
         classes: [customer-plane]
+  # h051 -- HP ProLiant DL560 Gen8 (hp-gen8), amd64, no AVX2 (OMN-17232). Its CI
+  # pool of the primary-host offload plan (T2): four runners labelled
+  # `omnibase-ci-multiarch` and NEVER `omnibase-ci`, so only a job that opted in
+  # can land here. The opt-in is deliberate: this CPU has no AVX2, and a job
+  # that imports a wheel built for it (the `pedalboard` import in a
+  # private repository's unit tests died here with SIGILL, exit 132, measured 2026-10-29) must stay
+  # on the `omnibase-ci` pools. The class is `action-multiarch`, which no
+  # required-label spread or capacity probe counts, so the pool adds no
+  # availability claim to `omnibase-ci`. The primary host keeps every runner
+  # (operator RULING 2026-10-29T14:00:26Z, make before break). Slice and
+  # per-host git mirror: docker/runners/systemd/pools/hp051-ci-runner/
+  # (installed by hand, see the compose header). The host is an ssh alias, h051,
+  # that each operator's ssh config resolves; the address is not kept in this
+  # public file. Deployed with `deploy-runners.sh --host=h051`; the four runners
+  # already registered are moved to the opt-in label with
+  # `deploy-runners.sh --host=h051 --relabel`, which is additive only, so the
+  # canary's own pin label `hp-canary` stays beside it (a job names it to land on
+  # this host alone; it is not a production label).
+  - host: h051
+    arch: amd64
+    runner_name_prefix: hp051-ci-runner
+    expected_count: 4
+    classes: [action-multiarch]
   # .200 -- Mac Studio M2 Ultra, arm64, always-on (OMN-19657, operator approval
   # ledger 2026-09-25T18:27:30Z, answering the open question at ledger
   # 2026-09-25T10:29:02Z). One verify runner, labelled host-200, for the
