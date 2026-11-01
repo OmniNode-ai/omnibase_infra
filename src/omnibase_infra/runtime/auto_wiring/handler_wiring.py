@@ -126,9 +126,7 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
-from omnibase_infra.models.dispatch.model_injected_request import (
-    ModelInjectedRequest,
-)
+from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
 )
@@ -427,8 +425,8 @@ _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 # OMN-14507: staged rollout for the auto-wired consume boundary DLQ fix.
 # DEFAULT OFF (warn-first) -- see _boundary_dlq_enabled() below.
 _BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
-_BOUNDARY_DLQ_MAX_ATTEMPTS = 3
 _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
+_BOUNDARY_DLQ_MAX_ATTEMPTS = len(_BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS) + 1
 
 # OMN-14498 / OMN-15029: strong references to the detached DLQ-routing tasks
 # `_make_sync_event_publisher` schedules for a failed fire-and-forget publish
@@ -10775,7 +10773,8 @@ async def _interleave_contract(
 # Bounded background NOT_READY reconciliation (OMN-15215, OMN-13237 follow-up).
 DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS: float = 30.0
 DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS: float = 30.0
-DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = 5
+_NOT_READY_PAUSES = (DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS,) * 5
+DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = len(_NOT_READY_PAUSES)
 
 
 async def reattach_not_ready_contracts(
