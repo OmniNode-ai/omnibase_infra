@@ -67,7 +67,7 @@ repos:
       merge_policy:
         queue: disabled
         strict: false
-        rule: "queue disabled org-wide; strict recorded as-is"
+        rule: "observed omniui:main settings 2026-11-01, not an org-wide policy; re-read before relying on it"
       load_bearing_gates:
         - context: "deploy-gate / deploy-gate"
           coverage: direct
@@ -116,7 +116,7 @@ repos:
       merge_policy:
         queue: disabled
         strict: false
-        rule: "queue disabled org-wide; strict recorded as-is"
+        rule: "observed omniui:main settings 2026-11-01, not an org-wide policy; re-read before relying on it"
       load_bearing_gates:
         - context: "deploy-gate / deploy-gate"
           coverage: direct
@@ -142,7 +142,7 @@ repos:
       merge_policy:
         queue: disabled
         strict: false
-        rule: "queue disabled org-wide; strict recorded as-is"
+        rule: "observed omniui:main settings 2026-11-01, not an org-wide policy; re-read before relying on it"
       load_bearing_gates:
         # omniclaude runs deploy-gate inline (single-segment context), unlike the
         # reusable-workflow "deploy-gate / deploy-gate" on core/infra/market.
@@ -192,7 +192,7 @@ repos:
       merge_policy:
         queue: disabled
         strict: false
-        rule: "queue disabled org-wide; strict recorded as-is"
+        rule: "observed omniui:main settings 2026-11-01, not an org-wide policy; re-read before relying on it"
       load_bearing_gates:
         - context: "kb-doc-gate / kb-doc-gate"
           coverage: direct
