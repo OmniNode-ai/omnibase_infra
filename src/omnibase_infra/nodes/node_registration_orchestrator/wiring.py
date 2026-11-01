@@ -678,14 +678,13 @@ async def wire_registration_handlers(
 
         topic_store = ServiceIntrospectionTopicStore()
 
-        handler_introspected = HandlerNodeIntrospected(
-            projection_reader,
-            reducer=reducer,
-            topic_store=topic_store,
-        )
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
-            instance=handler_introspected,
+            instance=HandlerNodeIntrospected(
+                projection_reader,
+                reducer=reducer,
+                topic_store=topic_store,
+            ),
             scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "Handler for NodeIntrospectionEvent",
@@ -724,15 +723,14 @@ async def wire_registration_handlers(
             )
             logger.debug("TimeoutCoordinator wired into HandlerRuntimeTick")
 
-        handler_runtime_tick = HandlerRuntimeTick(
-            projection_reader,
-            reducer=reducer,
-            snapshot_publisher=snapshot_publisher,
-            timeout_coordinator=timeout_coordinator,
-        )
         await container.service_registry.register_instance(
             interface=HandlerRuntimeTick,
-            instance=handler_runtime_tick,
+            instance=HandlerRuntimeTick(
+                projection_reader,
+                reducer=reducer,
+                snapshot_publisher=snapshot_publisher,
+                timeout_coordinator=timeout_coordinator,
+            ),
             scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "Handler for RuntimeTick",
@@ -742,14 +740,13 @@ async def wire_registration_handlers(
         services_registered.append("HandlerRuntimeTick")
         logger.debug("Registered HandlerRuntimeTick in container")
 
-        handler_acked = HandlerNodeRegistrationAcked(
-            projection_reader,
-            reducer=reducer,
-            snapshot_publisher=snapshot_publisher,
-        )
         await container.service_registry.register_instance(
             interface=HandlerNodeRegistrationAcked,
-            instance=handler_acked,
+            instance=HandlerNodeRegistrationAcked(
+                projection_reader,
+                reducer=reducer,
+                snapshot_publisher=snapshot_publisher,
+            ),
             scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "Handler for NodeRegistrationAcked",
@@ -767,18 +764,21 @@ async def wire_registration_handlers(
                 ProtocolNodeHeartbeat,
             )
 
-            handler_heartbeat = HandlerNodeHeartbeat(
-                projection_reader,
-                reducer=reducer,
-            )
             await container.service_registry.register_instance(
                 interface=HandlerNodeHeartbeat,
-                instance=handler_heartbeat,
+                instance=HandlerNodeHeartbeat(
+                    projection_reader,
+                    reducer=reducer,
+                ),
                 scope=EnumInjectionScope.GLOBAL,
                 metadata={
                     "description": "Handler for NodeHeartbeatEvent",
                     "version": str(semver_default),
                 },
+            )
+            # The protocol binding shares the instance the container now holds.
+            handler_heartbeat = await container.service_registry.resolve_service(
+                HandlerNodeHeartbeat
             )
             await container.service_registry.register_instance(
                 # Why: Registry stores protocol contracts, not instantiable concrete implementations.
@@ -846,12 +846,11 @@ async def wire_registration_handlers(
                 )
 
         if catalog_service is not None:
-            handler_topic_catalog_query = HandlerTopicCatalogQuery(
-                catalog_service=catalog_service,
-            )
             await container.service_registry.register_instance(
                 interface=HandlerTopicCatalogQuery,
-                instance=handler_topic_catalog_query,
+                instance=HandlerTopicCatalogQuery(
+                    catalog_service=catalog_service,
+                ),
                 scope=EnumInjectionScope.GLOBAL,
                 metadata={
                     "description": "Handler for ModelTopicCatalogQuery",
@@ -864,37 +863,15 @@ async def wire_registration_handlers(
         # Register HandlerCatalogRequest (OMN-2923) with shared topic store.
         # Always registered (no optional dependency check) — the topic store
         # is a simple in-memory object that requires no external services.
+        # HandlerNodeIntrospected was registered above with this same topic
+        # store, so introspection events populate the store this handler reads.
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerCatalogRequest,
         )
-        from omnibase_infra.nodes.node_registration_orchestrator.services import (
-            ServiceIntrospectionTopicStore,
-        )
 
-        topic_store = ServiceIntrospectionTopicStore()
-
-        # Update HandlerNodeIntrospected to use the shared topic store.
-        # Re-create with topic_store so introspection events populate the store.
-        handler_introspected_with_store = HandlerNodeIntrospected(
-            projection_reader,
-            reducer=reducer,
-            topic_store=topic_store,
-        )
-        # Re-register to replace the earlier instance
-        await container.service_registry.register_instance(
-            interface=HandlerNodeIntrospected,
-            instance=handler_introspected_with_store,
-            scope=EnumInjectionScope.GLOBAL,
-            metadata={
-                "description": "Handler for NodeIntrospectionEvent (with topic store)",
-                "version": str(semver_default),
-            },
-        )
-
-        handler_catalog_request = HandlerCatalogRequest(topic_store=topic_store)
         await container.service_registry.register_instance(
             interface=HandlerCatalogRequest,
-            instance=handler_catalog_request,
+            instance=HandlerCatalogRequest(topic_store=topic_store),
             scope=EnumInjectionScope.GLOBAL,
             metadata={
                 "description": "Handler for ModelTopicCatalogRequest (OMN-2923)",

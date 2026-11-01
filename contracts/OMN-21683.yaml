@@ -1,0 +1,47 @@
+# OMN-21683 contract file for omnibase_infra: handler_hand_construction burn-down, slice rf1140-c1.
+schema_version: "1.0.0"
+ticket_id: "OMN-21683"
+title: "omnibase_infra contracts_and_di handler_hand_construction burn-down, slice rf1140-c1"
+summary: "The registration orchestrator wiring and the LLM completion registry build each handler only as the instance argument of the container registration call, and nine never-called node-registry factory methods that built their node by hand are deleted, taking handler_hand_construction over src/omnibase_infra from 133 to 116 with no baseline entry or suppression."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21683-no-hand-construction-in-slice
+    statement: "The slice paths no longer construct a handler or node class by hand outside a container registration call."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the contracts_and_di count for handler_hand_construction over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
+      - id: AC2
+        statement: "AC2: every hand-built dependency is taken through an injected parameter bound from the node contract and no hand construction remains in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths"
+      - id: AC3
+        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
+evidence_requirements:
+  - kind: tests
+    description: "The core contracts_and_di validator reports no handler_hand_construction finding on any slice path, with a positive control that the rule still fires."
+    command: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py -q -p no:cacheprovider --no-cov"
+  - kind: tests
+    description: "Unit tests of the touched wiring and registries pass."
+    command: "uv run --frozen pytest tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/node_registration_orchestrator tests/unit/nodes/test_node_auth_gate_compute.py tests/unit/nodes/node_contract_resolver_bridge tests/unit/nodes/node_registry_api_effect tests/unit/nodes/node_registration_reducer tests/unit/nodes/test_llm_completion_registry.py -q -p no:cacheprovider --no-cov"
+dod_evidence:
+  - id: dod-001
+    description: "The contracts_and_di validator, run per slice path, reports zero handler_hand_construction findings, and the rule still reports a hand-built handler in a probe file."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py -q -p no:cacheprovider --no-cov"
+  - id: dod-002
+    description: "The registration wiring registers every handler through the container, the heartbeat protocol binding shares the container's instance, and the registries keep their remaining behaviour."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/node_registration_orchestrator tests/unit/nodes/test_node_auth_gate_compute.py tests/unit/nodes/node_contract_resolver_bridge tests/unit/nodes/node_registry_api_effect tests/unit/nodes/node_registration_reducer tests/unit/nodes/test_llm_completion_registry.py -q -p no:cacheprovider --no-cov"
+  - id: dod-003
+    description: "The slice regression and the touched modules' unit tests pass together at the PR head."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py -q -p no:cacheprovider --no-cov tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/node_registration_orchestrator"

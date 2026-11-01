@@ -1109,11 +1109,6 @@ class TestRegistryInfraAuthGateCompute:
         cls = RegistryInfraAuthGateCompute.get_node_class()
         assert cls is NodeAuthGateCompute
 
-    def test_create_node(self, mock_container: MagicMock) -> None:
-        """create_node creates instance."""
-        node = RegistryInfraAuthGateCompute.create_node(mock_container)
-        assert isinstance(node, NodeAuthGateCompute)
-
 
 # =============================================================================
 # TestContractValidation
