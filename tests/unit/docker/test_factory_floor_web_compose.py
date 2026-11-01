@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -52,18 +51,6 @@ def _compose_config(
     )
 
 
-def _compose_available() -> bool:
-    if shutil.which("docker") is None:
-        return False
-    probe = subprocess.run(
-        ["docker", "compose", "version"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return probe.returncode == 0
-
-
 def test_published_port_names_the_bind_address_and_has_no_default() -> None:
     ports = _service()["ports"]
     assert isinstance(ports, list)
@@ -86,11 +73,26 @@ def test_serve_directory_is_mounted_read_only_and_the_container_is_locked_down()
     None
 ):
     service = _service()
-    volumes = [str(v) for v in service["volumes"]]
+    volumes = service["volumes"]
     serve = [v for v in volumes if "FACTORY_FLOOR_SERVE_DIR" in v]
     assert len(serve) == 1
     assert serve[0].endswith(":/srv/site:ro")
-    assert all(v.endswith(":ro") for v in volumes)
+    assert all(
+        v.endswith(":ro") if isinstance(v, str) else v["read_only"] is True
+        for v in volumes
+    )
+    config = [v for v in volumes if isinstance(v, dict)]
+    assert config == [
+        {
+            "type": "bind",
+            "source": "./factory-floor-web/nginx.conf",
+            "target": "/etc/nginx/nginx.conf",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+    assert (COMPOSE.parent / config[0]["source"]).resolve() == NGINX
+    assert NGINX.is_file()
     assert service["read_only"] is True
     assert service["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in service["security_opt"]
@@ -105,11 +107,15 @@ def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
     assert "limit_except GET HEAD" in conf
     assert 'Cache-Control "no-store"' in conf
     assert "default-src 'self'" in conf
+    assert "connect-src 'self'" in conf
+    assert "form-action 'none'" in conf
+    assert "base-uri 'none'" in conf
+    assert "frame-ancestors 'none'" in conf
+    assert "object-src 'none'" in conf
     assert "root /srv/site;" in conf
     assert "try_files $uri $uri/index.html =404;" in conf
 
 
-@pytest.mark.skipif(not _compose_available(), reason="docker compose is not available")
 @pytest.mark.parametrize("missing", REQUIRED)
 def test_compose_refuses_to_render_when_a_required_value_is_missing(
     missing: str,
@@ -120,7 +126,6 @@ def test_compose_refuses_to_render_when_a_required_value_is_missing(
     assert missing in done.stderr
 
 
-@pytest.mark.skipif(not _compose_available(), reason="docker compose is not available")
 def test_compose_renders_one_published_port_on_the_given_address() -> None:
     done = _compose_config(RENDER_ENV, "--format", "json")
     assert done.returncode == 0, done.stderr
@@ -128,3 +133,9 @@ def test_compose_renders_one_published_port_on_the_given_address() -> None:
     assert [(p["host_ip"], str(p["published"]), p["target"]) for p in published] == [
         ("192.0.2.1", "8088", 8080)
     ]
+    volumes = json.loads(done.stdout)["services"]["factory-floor-web"]["volumes"]
+    config = [v for v in volumes if v["target"] == "/etc/nginx/nginx.conf"]
+    assert len(config) == 1
+    assert Path(config[0]["source"]) == NGINX
+    assert config[0]["read_only"] is True
+    assert config[0]["bind"].get("create_host_path", False) is False
