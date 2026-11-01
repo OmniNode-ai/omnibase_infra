@@ -68,6 +68,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/nodes/test_evidence_autoclose_demotion_omn18489.py -q --no-cov -k sweep_deploy
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-demotion-window-default-armed
+    description: The request default arms the demotion leg at the designed 168-hour window (OMN-21714); the contract-declared default is read from the model.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q --no-cov -k "contract_default_arms_the_leg"
+        cwd: ${OMNI_HOME}/omnibase_infra
 requirements:
   - id: req-in-progress-demotion
     statement: The In Progress queue reflects work in flight.
