@@ -254,7 +254,9 @@ def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
         "apply": False,
     }
     defaults.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**defaults)
+    return ModelEvidenceAutocloseSweepRequest(
+        **{"demotion_window_hours": 0, **defaults}
+    )
 
 
 def _tickets(result) -> set[str]:
@@ -339,7 +341,7 @@ async def test_the_contract_default_is_armed_and_that_is_the_arming_authority() 
     """
     assert (
         ModelEvidenceAutocloseSweepRequest(
-            correlation_id=uuid4()
+            demotion_window_hours=0, correlation_id=uuid4()
         ).backfill_lookback_hours
         > 0
     )
