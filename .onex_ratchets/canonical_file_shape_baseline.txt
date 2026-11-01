@@ -846,7 +846,6 @@ src/omnibase_infra/lab_proof/enum_lab_proof_profile_status.py
 src/omnibase_infra/lab_proof/enum_lab_proof_step_id.py
 src/omnibase_infra/lab_proof/enum_lab_proof_step_phase.py
 src/omnibase_infra/lab_proof/lab_proof_profile_registry.py
-src/omnibase_infra/lab_proof/model_lab_proof_bundle_policy.py
 src/omnibase_infra/lab_proof/model_lab_proof_check_result.py
 src/omnibase_infra/lab_proof/model_lab_proof_companion_rule.py
 src/omnibase_infra/lab_proof/model_lab_proof_excluded_repo.py
