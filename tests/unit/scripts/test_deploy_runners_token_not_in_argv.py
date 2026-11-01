@@ -54,6 +54,13 @@ FAKE_SSH = """\
 log_dir="${FAKE_LOG_DIR}"
 { printf 'ARGV:'; printf ' [%s]' "$@"; printf '\\n'; } >> "${log_dir}/ssh_argv.log"
 script="${2:-}"
+# The remote preamble prepends the host's tool dirs to PATH; on a machine that
+# has a real docker there, that would bypass the stub and never run compose.
+strip='/usr/local/bin:/opt/homebrew/bin:'
+script="${script//"${strip}"/}"
+# The script's default host dir lives under /home/jonah, which only exists on
+# the real host; point it at the harness dir so the remote cd succeeds.
+script="${script//"/home/jonah/.omnibase/runners"/"${FAKE_HOST_DIR}"}"
 if [[ "${script}" == *'$(cat)'* ]]; then
     stdin_copy="$(cat)"
     printf '%s' "${stdin_copy}" >> "${log_dir}/ssh_stdin.log"
@@ -124,6 +131,7 @@ def _env(h: dict[str, Path]) -> dict[str, str]:
     env["FAKE_LOG_DIR"] = str(h["logs"])
     env["FAKE_TOKEN"] = TOKEN
     env["FAKE_SERVICE"] = SERVICE
+    env["FAKE_HOST_DIR"] = str(h["host_dir"])
     env["ROLL_ONLINE_INTERVAL_SECONDS"] = "0"
     env["ROLL_ONLINE_MAX_SECONDS"] = "1"
     env.pop("DEPLOY_RUNNER_TOKEN", None)
