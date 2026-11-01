@@ -106,7 +106,6 @@ env:
       && 'false'
       || 'true'
     }}
-  OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
   # uv resolves several pinned git dependencies during CI.  The self-hosted
   # runner pool has intermittent HTTP/2 stream resets against GitHub; force git
   # subprocesses spawned by uv onto HTTP/1.1 so dependency installs are stable.
@@ -4207,8 +4206,6 @@ jobs:
     name: Canonical File Shape (OMN-20304)
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     timeout-minutes: 15
-    env:
-      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261029151319-6e0a5eee541a"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4222,6 +4219,19 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: "0.8.3"
+      # OMN-21538: the core tag has one home, the omnibase_core block of
+      # .pre-commit-config.yaml that holds the canonical-file-shape hook.
+      - name: Read the core pin from .pre-commit-config.yaml
+        run: |
+          set -eu
+          spec="$(uv run --no-project --with pyyaml python -c '
+          import yaml
+          config = yaml.safe_load(open(".pre-commit-config.yaml"))
+          blocks = [r for r in config["repos"] if any(h["id"] == "canonical-file-shape" for h in r["hooks"])]
+          assert len(blocks) == 1, blocks
+          print("omnibase-core @ git+" + blocks[0]["repo"] + "@" + blocks[0]["rev"])
+          ')"
+          echo "CANONICAL_FILE_SHAPE_CORE=${spec}" >> "$GITHUB_ENV"
       - name: Positive control (planted bad sample refused, clean sample accepted)
         run: |
           set -u
@@ -4251,7 +4261,7 @@ jobs:
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          set -u
+          set -euo pipefail
           base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
             base="$(git merge-base "$base" HEAD)"
@@ -4372,7 +4382,7 @@ jobs:
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          set -u
+          set -euo pipefail
           base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
           args=(--repo omnibase_infra --visibility public)
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
@@ -4382,6 +4392,75 @@ jobs:
           fi
           uv run --no-project --with "$RUNNER_PLACEMENT_CORE" \
             python -m omnibase_core.handlers.handler_public_runner_placement_cli "${args[@]}"
+
+  # OMN-21538: omnibase_core's generic validators run in CI as the hook ids of
+  # .pre-commit-config.yaml over the files a change touches, so this job and the local hooks
+  # name one core dev-merge tag (read from the config, never typed here) and cannot
+  # drift. Each baseline is per file, shrink-only, target zero. Unconditional: no
+  # needs/if; GitHub-hosted by literal. The CI Summary sweep fails when it fails.
+  core-validators:
+    name: Core Validators (OMN-21538)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      # The literals are split through printf so this workflow file holds none of
+      # the defects it plants. check-no-io-outside-effects and handler-di-gate have no
+      # planted control: their findings depend on a node or handler module's place in
+      # the package, which a single planted file at the root does not reproduce.
+      - name: Positive control (planted defects refused)
+        run: |
+          set -euo pipefail
+          printf 'import sqlite3\n\nCONNECTION = sqlite3.connect(":memory:")\n' > zz_planted_sqlite3.py
+          printf 'ROOT = "/%s/planted/project"\n' Users > zz_planted_local_path.py
+          printf 'TOPIC = "%s.evt.planted.thing.v1"\n' onex > zz_planted_topic.py
+          printf 'MODEL = "%s-%s-opus-20240229"\n' claude 3 > zz_planted_model_config.py
+          for pair in check-no-raw-sqlite3:zz_planted_sqlite3.py \
+            check-local-paths-compute:zz_planted_local_path.py \
+            check-hardcoded-topic-compute:zz_planted_topic.py \
+            check-hardcoded-model-config-compute:zz_planted_model_config.py; do
+            hook="${pair%%:*}"
+            planted="${pair#*:}"
+            if uvx pre-commit@4.5.1 run "$hook" --files "$planted"; then
+              echo "POSITIVE CONTROL FAILED: $hook accepted $planted"
+              exit 1
+            fi
+            echo "positive control: $hook refused $planted"
+          done
+          rm zz_planted_sqlite3.py zz_planted_local_path.py zz_planted_topic.py \
+            zz_planted_model_config.py
+      # check-no-raw-sqlite3, check-local-paths-compute, check-hardcoded-topic-compute
+      # and check-no-io-outside-effects have no baseline, and the two baselines omit
+      # the files that findings F44 to F47 name, so each hook judges the files this
+      # change touches, the same set the pre-commit hooks see.
+      - name: Run the core validators over the files this change touches
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="HEAD^"
+          fi
+          from_ref="$(git merge-base "$base" HEAD)"
+          for hook in check-no-raw-sqlite3 check-local-paths-compute \
+            check-hardcoded-topic-compute check-hardcoded-model-config-compute \
+            check-no-io-outside-effects handler-di-gate; do
+            uvx pre-commit@4.5.1 run "$hook" --from-ref "$from_ref" --to-ref HEAD
+          done
 
   ci-summary:
     name: CI Summary
