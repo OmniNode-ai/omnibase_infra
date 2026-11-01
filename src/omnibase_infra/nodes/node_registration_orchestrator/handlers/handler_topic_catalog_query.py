@@ -183,7 +183,7 @@ class HandlerTopicCatalogQuery:
             ``ModelTopicCatalogResponse``. The response may contain warnings
             for partial-success scenarios (Consul unavailable, timeout, etc.).
         """
-        start_time = time.perf_counter()
+        start_time = request.clock.monotonic()
         now: datetime = request.now
         correlation_id: UUID = request.correlation_id or uuid4()
 
@@ -197,9 +197,10 @@ class HandlerTopicCatalogQuery:
             )
             empty_response = self._empty_response(
                 correlation_id=correlation_id,
+                generated_at=now,
                 warnings=(INVALID_QUERY_PAYLOAD,),
             )
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            processing_time_ms = (request.clock.monotonic() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
@@ -233,6 +234,7 @@ class HandlerTopicCatalogQuery:
             )
             catalog_response = self._empty_response(
                 correlation_id=correlation_id,
+                generated_at=now,
                 warnings=(INTERNAL_ERROR,),
             )
         else:
@@ -250,6 +252,7 @@ class HandlerTopicCatalogQuery:
                 )
                 catalog_response = self._empty_response(
                     correlation_id=correlation_id,
+                    generated_at=now,
                     warnings=(INTERNAL_ERROR,),
                 )
 
@@ -273,7 +276,7 @@ class HandlerTopicCatalogQuery:
                 },
             )
 
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        processing_time_ms = (request.clock.monotonic() - start_time) * 1000
         return ModelHandlerOutput(
             input_envelope_id=request.input_id,
             correlation_id=correlation_id,
@@ -290,12 +293,14 @@ class HandlerTopicCatalogQuery:
     def _empty_response(
         self,
         correlation_id: UUID,
+        generated_at: datetime,
         warnings: tuple[str, ...],
     ) -> ModelTopicCatalogResponse:
         """Build an empty catalog response for error conditions.
 
         Args:
             correlation_id: Correlation ID to embed in the response.
+            generated_at: Generation timestamp, the injected request time.
             warnings: Warning tokens describing the error condition.
 
         Returns:
@@ -310,7 +315,7 @@ class HandlerTopicCatalogQuery:
             topics=(),
             catalog_version=0,
             node_count=0,
-            generated_at=datetime.now(UTC),
+            generated_at=generated_at,
             warnings=warnings,
         )
 

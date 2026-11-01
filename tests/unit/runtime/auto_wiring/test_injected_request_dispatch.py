@@ -42,6 +42,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 from omnibase_infra.runtime.auto_wiring.models import ModelHandlerRef
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_NODE_HEARTBEAT
 
 ENVELOPE_ID = UUID("11111111-1111-4111-8111-111111111111")
 CORRELATION_ID = UUID("22222222-2222-4222-8222-222222222222")
@@ -334,7 +335,7 @@ async def test_engine_materialization_preserves_injected_identity_on_replay() ->
     engine.register_route(
         ModelDispatchRoute(
             route_id="injected-route",
-            topic_pattern="onex.evt.test.injected.v1",
+            topic_pattern=SUFFIX_NODE_HEARTBEAT,
             message_category=EnumMessageCategory.EVENT,
             dispatcher_id="injected",
         )
@@ -348,7 +349,7 @@ async def test_engine_materialization_preserves_injected_identity_on_replay() ->
         source_tool="test",
     )
     for _ in range(2):
-        result = await engine.dispatch("onex.evt.test.injected.v1", envelope)
+        result = await engine.dispatch(SUFFIX_NODE_HEARTBEAT, envelope)
         assert result.status == EnumDispatchStatus.SUCCESS
     assert len(handler.received) == 2
     assert handler.received[0] == handler.received[1]

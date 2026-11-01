@@ -227,7 +227,7 @@ class HandlerNodeIntrospected:
                 "This handler must be wired via the domain registry, not auto-wiring."
             )
 
-        start_time = time.perf_counter()
+        start_time = request.clock.monotonic()
 
         event = request.event
         now: datetime = request.now
@@ -271,7 +271,7 @@ class HandlerNodeIntrospected:
         )
 
         if decision.action == "no_op":
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            processing_time_ms = (request.clock.monotonic() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
@@ -295,7 +295,7 @@ class HandlerNodeIntrospected:
             },
         )
 
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        processing_time_ms = (request.clock.monotonic() - start_time) * 1000
         return ModelHandlerOutput(
             input_envelope_id=request.input_id,
             correlation_id=correlation_id,

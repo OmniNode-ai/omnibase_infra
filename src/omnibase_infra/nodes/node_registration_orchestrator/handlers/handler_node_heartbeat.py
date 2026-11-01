@@ -175,7 +175,7 @@ class HandlerNodeHeartbeat:
             The intents contain ModelPayloadPostgresUpdateRegistration payloads
             for the effect layer to execute.
         """
-        start_time = time.perf_counter()
+        start_time = request.clock.monotonic()
 
         event = request.event
         now = request.now
@@ -207,7 +207,7 @@ class HandlerNodeHeartbeat:
                     "correlation_id": str(correlation_id),
                 },
             )
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            processing_time_ms = (request.clock.monotonic() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
@@ -235,7 +235,7 @@ class HandlerNodeHeartbeat:
                     "correlation_id": str(correlation_id),
                 },
             )
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            processing_time_ms = (request.clock.monotonic() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
@@ -279,7 +279,7 @@ class HandlerNodeHeartbeat:
                     "correlation_id": str(correlation_id),
                 },
             )
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            processing_time_ms = (request.clock.monotonic() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
@@ -301,7 +301,7 @@ class HandlerNodeHeartbeat:
             },
         )
 
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        processing_time_ms = (request.clock.monotonic() - start_time) * 1000
         return ModelHandlerOutput(
             input_envelope_id=request.input_id,
             correlation_id=correlation_id,

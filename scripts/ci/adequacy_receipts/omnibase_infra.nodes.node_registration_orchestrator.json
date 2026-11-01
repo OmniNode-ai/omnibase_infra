@@ -3,7 +3,7 @@
   "candidate_count": 2,
   "coverage_target": 80.0,
   "handler_module": "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected",
-  "handler_module_sha256": "sha256:a4cbb7a8278137c50f95af9f5bd65a7d1127a27983dafe08aa5117d59b1b542a",
+  "handler_module_sha256": "sha256:f70bc96b54003e5a9111324504a7fcd479b2847a940fbcf323b76ec8cfa16788",
   "meets_target": true,
   "node_id": "omnibase_infra.nodes.node_registration_orchestrator",
   "receipt_schema": "adequacy_receipt.v1",

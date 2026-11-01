@@ -215,7 +215,7 @@ class HandlerRuntimeTick:
             RuntimeHostError: If projection queries fail (propagated from reader).
             ProtocolConfigurationError: If the injected clock reading is naive (no timezone info).
         """
-        start_time = time.perf_counter()
+        start_time = request.clock.monotonic()
 
         tick = request.event
         now = request.now
@@ -237,7 +237,7 @@ class HandlerRuntimeTick:
                 "HandlerRuntimeTick: projection_reader or reducer not configured — skipping tick",
                 extra={"correlation_id": str(correlation_id)},
             )
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            processing_time_ms = (request.clock.monotonic() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
@@ -257,7 +257,7 @@ class HandlerRuntimeTick:
         # events=() is mandatory here — coordinator already published; no double-publish.
         if self._timeout_coordinator is not None:
             await self._timeout_coordinator.coordinate(tick, domain="registration")
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            processing_time_ms = (request.clock.monotonic() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
@@ -326,7 +326,7 @@ class HandlerRuntimeTick:
                             },
                         )
 
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        processing_time_ms = (request.clock.monotonic() - start_time) * 1000
         return ModelHandlerOutput(
             input_envelope_id=request.input_id,
             correlation_id=correlation_id,

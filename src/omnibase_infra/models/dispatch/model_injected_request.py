@@ -7,7 +7,8 @@ at the dispatch boundary and hands the handler this request: the domain event,
 the clock reading the runtime took for the dispatch, the id of the input that
 produced the call and the correlation id that travelled with it.
 
-Handlers that need the time use ``request.now``; they never call a clock or read
+Handlers that need the time use ``request.now``, and ``request.clock`` for a
+duration or a further reading; they never call a clock or read
 ``envelope_timestamp``. Handlers that stamp an output with the id of the input
 they answered use ``request.input_id``; they never read ``envelope_id``.
 
@@ -24,6 +25,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.dispatch.model_system_clock import ModelSystemClock
+from omnibase_infra.protocols.protocol_clock import ProtocolClock
+
 
 class ModelInjectedRequest[TEvent: BaseModel](BaseModel):
     """The request a handler receives in place of an event envelope.
@@ -34,12 +38,16 @@ class ModelInjectedRequest[TEvent: BaseModel](BaseModel):
         input_id: The id of the input envelope that carried the event.
         correlation_id: The correlation id from the input envelope, or ``None``
             when the input carried none.
+        clock: The clock the handler reads durations and further wall-clock
+            readings from. The system clock unless the caller injects another;
+            tests inject a fixed one.
     """
 
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
         from_attributes=True,
+        arbitrary_types_allowed=True,
     )
 
     event: TEvent = Field(..., description="The domain event the handler decides on")
@@ -51,6 +59,11 @@ class ModelInjectedRequest[TEvent: BaseModel](BaseModel):
     )
     correlation_id: UUID | None = Field(
         default=None, description="Correlation id carried by the input envelope"
+    )
+    clock: ProtocolClock = Field(
+        default_factory=ModelSystemClock,
+        exclude=True,
+        description="Clock the handler reads durations and wall-clock readings from",
     )
 
     @staticmethod

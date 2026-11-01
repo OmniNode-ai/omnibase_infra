@@ -37,7 +37,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -65,6 +64,11 @@ from omnibase_infra.models.registration.commands.model_node_registration_acked i
 from omnibase_infra.models.registration.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
 )
+from omnibase_infra.models.registration.model_registration_settings import (
+    DEFAULT_LIVENESS_INTERVAL_SECONDS,
+    ENV_LIVENESS_INTERVAL_SECONDS,
+    ModelRegistrationSettings,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
@@ -77,6 +81,7 @@ from omnibase_infra.utils import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_clock import ProtocolClock
     from omnibase_infra.protocols.protocol_snapshot_publisher import (
         ProtocolSnapshotPublisher,
     )
@@ -98,71 +103,30 @@ class OutputContext:
     correlation_id: UUID
     now: datetime
     start_time: float
+    clock: ProtocolClock
 
 
-# Environment variable name for liveness interval configuration
-ENV_LIVENESS_INTERVAL_SECONDS: Final[str] = "ONEX_LIVENESS_INTERVAL_SECONDS"
-
-# Default liveness interval (60 seconds). This value is used when:
-# 1. No explicit value is passed to the handler constructor
-# 2. No environment variable ONEX_LIVENESS_INTERVAL_SECONDS is set
-# 3. Container config does not specify liveness_interval_seconds
-DEFAULT_LIVENESS_INTERVAL_SECONDS: Final[int] = 60
-
-
-def get_liveness_interval_seconds(explicit_value: int | None = None) -> int:
-    """Get liveness interval from explicit value, environment, or default.
-
-    Env vars are resolved at call time (not module load), so changes to
-    ONEX_LIVENESS_INTERVAL_SECONDS take effect without process restart.
+def get_liveness_interval_seconds(
+    explicit_value: int | None = None,
+    settings: ModelRegistrationSettings | None = None,
+) -> int:
+    """Get the liveness interval from an explicit value, injected settings or the contract.
 
     Resolution order (first non-None wins):
         1. Explicit value passed as parameter
-        2. Environment variable ONEX_LIVENESS_INTERVAL_SECONDS
-        3. Default constant (60 seconds)
-
-    Args:
-        explicit_value: Explicitly provided value (highest priority).
-            Pass None to use environment or default.
-
-    Returns:
-        Liveness interval in seconds.
+        2. ``settings.liveness_interval_seconds`` when settings are injected
+        3. The node contract's ``descriptor.liveness_interval_seconds``, resolved
+           at call time through the overlay (default 60 seconds)
 
     Raises:
-        ProtocolConfigurationError: If environment variable is set but not a valid integer.
-
-    Example:
-        >>> # Use default or env var
-        >>> interval = get_liveness_interval_seconds()
-        >>> # Force explicit value
-        >>> interval = get_liveness_interval_seconds(120)
+        ProtocolConfigurationError: If the contract-declared value does not
+            resolve to an integer.
     """
-    # 1. Explicit value takes priority
     if explicit_value is not None:
         return explicit_value
-
-    # 2. Try environment variable
-    env_value = os.getenv(ENV_LIVENESS_INTERVAL_SECONDS)
-    if env_value is not None:
-        try:
-            return int(env_value)
-        except ValueError as e:
-            # Use ProtocolConfigurationError for invalid environment variable values.
-            # No correlation_id available at module-level configuration, so context
-            # is created without one (will auto-generate).
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="get_liveness_interval_seconds",
-                target_name="env.ONEX_LIVENESS_INTERVAL_SECONDS",
-            )
-            raise ProtocolConfigurationError(
-                f"Invalid value for {ENV_LIVENESS_INTERVAL_SECONDS}: "
-                f"'{env_value}' is not a valid integer",
-                context=ctx,
-            ) from e
-
-    # 3. Fall back to default
-    return DEFAULT_LIVENESS_INTERVAL_SECONDS
+    return (
+        settings or ModelRegistrationSettings.from_contract()
+    ).liveness_interval_seconds
 
 
 class HandlerNodeRegistrationAcked:
@@ -285,7 +249,7 @@ class HandlerNodeRegistrationAcked:
             RuntimeHostError: If projection query fails (propagated from reader).
             ProtocolConfigurationError: If the injected clock reading is naive (no timezone info).
         """
-        start_time = time.perf_counter()
+        start_time = request.clock.monotonic()
 
         command = request.event
         now = request.now
@@ -305,6 +269,7 @@ class HandlerNodeRegistrationAcked:
             correlation_id=correlation_id,
             now=now,
             start_time=start_time,
+            clock=request.clock,
         )
 
         node_id = command.node_id
@@ -404,14 +369,14 @@ class HandlerNodeRegistrationAcked:
         """Create a ModelHandlerOutput with the given events and intents.
 
         Args:
-            ctx: Output context containing input_id, correlation_id, now, start_time.
+            ctx: Output context containing input_id, correlation_id, now, start_time, clock.
             events: Tuple of events to include in the output.
             intents: Tuple of intents for the effect layer (default empty).
 
         Returns:
             ModelHandlerOutput with the provided events, intents, and metadata.
         """
-        processing_time_ms = (time.perf_counter() - ctx.start_time) * 1000
+        processing_time_ms = (ctx.clock.monotonic() - ctx.start_time) * 1000
         return ModelHandlerOutput(
             input_envelope_id=ctx.input_id,
             correlation_id=ctx.correlation_id,
