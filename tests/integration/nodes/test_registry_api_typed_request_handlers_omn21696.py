@@ -26,24 +26,20 @@ from omnibase_infra.nodes.node_registry_api_effect.models import (
 pytestmark = pytest.mark.integration
 
 
-def _routed_handlers() -> list[tuple[str, str, str, str]]:
+def _routed_handlers() -> list[tuple[str, dict[str, str], dict[str, str]]]:
+    """Return ``(operation, handler, input_model)`` per routed handler.
+
+    A missing ``input_model`` yields an empty mapping so the failure is raised by the
+    test for that operation, not by collection of the whole module.
+    """
     contract_path = (
         Path(str(node_registry_api_effect.__file__)).parent / "contract.yaml"
     )
     contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
-    rows: list[tuple[str, str, str, str]] = []
-    for entry in contract["handler_routing"]["handlers"]:
-        handler = entry["handler"]
-        model = entry["input_model"]
-        rows.append(
-            (
-                handler["module"],
-                handler["name"],
-                model["module"],
-                model["name"],
-            )
-        )
-    return rows
+    return [
+        (entry["operation"], entry["handler"], entry.get("input_model") or {})
+        for entry in contract["handler_routing"]["handlers"]
+    ]
 
 
 def _imported_from(module_name: str, name: str) -> str | None:
@@ -62,26 +58,29 @@ def test_the_contract_routes_nine_handlers() -> None:
 
 
 @pytest.mark.parametrize(
-    ("handler_module", "handler_name", "model_module", "model_name"),
+    ("operation", "handler", "input_model"),
     _routed_handlers(),
+    ids=[row[0] for row in _routed_handlers()],
 )
 def test_routed_handler_takes_its_contract_input_model(
-    handler_module: str,
-    handler_name: str,
-    model_module: str,
-    model_name: str,
+    operation: str,
+    handler: dict[str, str],
+    input_model: dict[str, str],
 ) -> None:
+    assert {"name", "module"} <= input_model.keys(), (
+        f"{operation}: the contract declares no input_model name and module"
+    )
+    handler_module = handler["module"]
+    handler_name = handler["name"]
+    model_name = input_model["name"]
     handler_cls = getattr(importlib.import_module(handler_module), handler_name)
-    model_cls = getattr(importlib.import_module(model_module), model_name)
+    model_cls = getattr(importlib.import_module(input_model["module"]), model_name)
 
-    signature = inspect.signature(handler_cls.handle)
-    params = list(signature.parameters)
+    params = list(inspect.signature(handler_cls.handle).parameters)
     assert params == ["self", "request"], f"{handler_name}.handle takes {params}"
-    # Handlers annotate with strings (``from __future__ import annotations``), so pin
-    # the raw string to the model name, evaluate it against the contract's own model
-    # class and require that class, then pin the module identity through the
-    # handler's own import of that name.
-    assert signature.parameters["request"].annotation == model_name
+    # Resolve the annotations the way the runtime does, so a string annotation, a
+    # qualified name and a ``from __future__ import annotations`` module all agree;
+    # the handler's own import of the model then pins the module identity.
     hints = get_type_hints(
         handler_cls.handle,
         localns={

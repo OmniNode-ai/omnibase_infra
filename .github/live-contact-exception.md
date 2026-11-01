@@ -1,1 +1,1 @@
-Live-contact exception: the changed ratchet files are adequacy receipt data and a baseline list that name no external service, so there is no contact surface to record.
+Live-contact exception: the CI-tooling files this change touches are adequacy and hand-flip receipt data for the registry API effect node and a one-line removal from a baseline list; none of them names an external service, and the handler, contract and test edits are product and test code, so there is no contact surface to record.
