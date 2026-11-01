@@ -74,5 +74,7 @@ def test_contracts_and_di_reports_no_literal_path_on_the_slice() -> None:
         text=True,
         check=False,
     )
-    assert "Traceback" not in completed.stderr, completed.stderr
-    assert "literal_path" not in completed.stdout + completed.stderr
+    output = completed.stdout + completed.stderr
+    assert completed.returncode in (0, 1), output
+    assert "Traceback" not in output, output
+    assert "literal_path" not in output

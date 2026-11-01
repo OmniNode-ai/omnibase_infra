@@ -31,7 +31,7 @@ class ModelOptionalDirectoryBindMount:
     def __post_init__(self) -> None:
         paths = (self.container_path, self.absent_source)
         valid = self.source_env and all(p.startswith("/") for p in paths)
-        if not valid or not isinstance(self.read_only, bool):
+        if not valid or {type(self.read_only), type(self.source_env)} != {bool, str}:
             raise ValueError(
                 "optional directory bind mount needs source_env, absolute "
                 "container_path and absent_source, and a boolean read_only"
