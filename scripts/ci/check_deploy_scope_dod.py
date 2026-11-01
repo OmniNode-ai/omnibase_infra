@@ -106,10 +106,6 @@ from types import ModuleType
 
 import yaml
 
-from omnibase_core.validators.no_unguarded_git_subprocess import (
-    scrub_git_location_env,
-)
-
 # Relative location of the canonical deploy-gate validator inside the omniclaude
 # sibling clone. This is the SAME file the hosted reusable workflow sparse-checks
 # out and executes (deploy-gate-reusable.yml), so importing it here is byte-DRY.
@@ -617,6 +613,12 @@ def install_verifier(tag: str) -> Path:
     # hosted reusable refuses a moved tag and syncs the tag's lock (a plain install of
     # the git commit cannot resolve the unreleased first-party tags it pins); this
     # does the same once per tag, under a file lock.
+    # Imported here, not at module load, so the deploy-scope leg and the other legs of
+    # this hook run without omnibase_core importable; only the tag install needs it.
+    from omnibase_core.validators.no_unguarded_git_subprocess import (
+        scrub_git_location_env,
+    )
+
     cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
     entry = Path(cache) / "onex-dod-verifier" / tag
     env = {**scrub_git_location_env(os.environ), "VERIFIER_REPO": _VERIFIER_REPO}

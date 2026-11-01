@@ -26,7 +26,26 @@ _FLOOR_REUSABLE_SHA = RECEIPT_GATE_PIN_SHA
 # The reusable refuses a verifier-tag that does not descend from the floor commit
 # (omnimarket#3511, the refusal of a contract that leaves an acceptance criterion
 # unbound), so the caller passes a dev-merge tag and no version number (OMN-21853).
-_VERIFIER_TAG_SHAPE = r"dev-\d{14}-[0-9a-f]{12}"
+_VERIFIER_TAG_SHAPE = r"dev-(\d{14})-[0-9a-f]{12}"
+
+# The first omnimarket dev-merge tag whose history holds omnimarket#3511 (commit
+# e565ba5ba00c), omnimarket#3563 and omnimarket#3694, read from the omnimarket clone with
+# `git tag --contains`. Dev-merge tags embed their UTC creation time, so a tag created
+# before this one cannot descend from the floor commit. The reusable resolves the real
+# ancestry at run time; this holds the caller to the same floor before a push.
+_VERIFIER_TAG_FLOOR = "dev-20261016123308-0a385ce46cdf"
+
+
+def _tag_time(tag: str) -> int | None:
+    match = re.fullmatch(_VERIFIER_TAG_SHAPE, tag)
+    return int(match.group(1)) if match else None
+
+
+def _tag_is_at_or_above_floor(tag: str) -> bool:
+    time = _tag_time(tag)
+    floor = _tag_time(_VERIFIER_TAG_FLOOR)
+    assert floor is not None
+    return time is not None and time >= floor
 
 
 def _job() -> dict[str, Any]:
@@ -55,20 +74,23 @@ def test_required_checks_manifest_names_the_same_reusable_pin() -> None:
 
 
 def test_caller_verifier_version_is_at_or_above_the_floor() -> None:
-    """The floor is the tag's ancestry, which the pinned reusable checks (OMN-21853).
+    """The caller's tag is no older than the first tag holding the floor commit (OMN-21853).
 
     The caller passes an omnimarket dev-merge tag and no verifier-version, the
-    reusable's warned migration fallback.
+    reusable's warned migration fallback; the reusable checks the real ancestry.
     """
     with_block = _job()["with"]
     assert "verifier-version" not in with_block, sorted(with_block)
-    assert re.fullmatch(_VERIFIER_TAG_SHAPE, with_block["verifier-tag"]), with_block
+    assert _tag_is_at_or_above_floor(with_block["verifier-tag"]), with_block
 
 
 @pytest.mark.parametrize(
     ("tag", "expected"),
     [
         ("dev-20261101000200-949993edf3b7", True),
+        (_VERIFIER_TAG_FLOOR, True),
+        ("dev-20261016123307-0a385ce46cdf", False),
+        ("dev-20261015000000-0a385ce46cdf", False),
         ("0.4.320", False),
         ("dev-20261101000200-949993edf3b", False),
         ("dev-20261101000200-949993EDF3B7", False),
@@ -78,4 +100,4 @@ def test_caller_verifier_version_is_at_or_above_the_floor() -> None:
 def test_floor_comparison_has_a_refusing_and_an_admitting_case(
     tag: str, expected: bool
 ) -> None:
-    assert bool(re.fullmatch(_VERIFIER_TAG_SHAPE, tag)) is expected
+    assert _tag_is_at_or_above_floor(tag) is expected
