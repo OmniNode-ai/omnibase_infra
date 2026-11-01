@@ -846,7 +846,6 @@ src/omnibase_infra/lab_proof/enum_lab_proof_profile_status.py
 src/omnibase_infra/lab_proof/enum_lab_proof_step_id.py
 src/omnibase_infra/lab_proof/enum_lab_proof_step_phase.py
 src/omnibase_infra/lab_proof/lab_proof_profile_registry.py
-src/omnibase_infra/lab_proof/model_lab_proof_bundle_policy.py
 src/omnibase_infra/lab_proof/model_lab_proof_check_result.py
 src/omnibase_infra/lab_proof/model_lab_proof_companion_rule.py
 src/omnibase_infra/lab_proof/model_lab_proof_excluded_repo.py
@@ -1044,8 +1043,6 @@ src/omnibase_infra/registry/models/__init__.py
 src/omnibase_infra/registry/models/model_artifact_registry.py
 src/omnibase_infra/registry/models/model_artifact_registry_entry.py
 src/omnibase_infra/registry/models/model_source_trigger.py
-src/omnibase_infra/resources/__init__.py
-src/omnibase_infra/resources/handler_resource_manager.py
 src/omnibase_infra/runtime/__init__.py
 src/omnibase_infra/runtime/_enum_coercion.py
 src/omnibase_infra/runtime/action_authorization_claim/__init__.py
