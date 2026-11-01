@@ -82,6 +82,7 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",
             "docker-compose.dev-tenant-fold.yml",
+            "docker-compose.dev-fold.yml",
         ),
         lane="compose-dev",
         # OMN-19513: the claude hook-events writer is a main-profile runtime

@@ -40,13 +40,18 @@ def _lane_overlay() -> Path:
     raise AssertionError(f"no compose overlay names project {project!r}")
 
 
-def test_exactly_one_lane_folds_effects() -> None:
+def test_only_declared_lanes_fold_and_lab_folds_only_effects() -> None:
     contract = load_contract()
     folding = {
         name: profile
         for name, profile in contract.profiles.items()
-        if "effects" in profile.processes["main"].folded_profiles
+        if profile.processes["main"].folded_profiles
     }
+    assert "dev" in folding
+    assert folding.pop("dev").processes["main"].folded_profiles == (
+        "workers",
+        "tenant-projection",
+    )
     assert len(folding) == 1, sorted(folding)
     (profile,) = folding.values()
     assert profile.compose_project == _lane_project()
@@ -59,7 +64,7 @@ def test_rendered_env_carries_the_fold_for_that_lane_only() -> None:
     rendered = render_env(load_contract())
     assert {k: v for k, v in rendered.items() if k.endswith("_FOLDED_PROFILES")} == {
         FOLDED_KEY: "effects",
-        "DEV_RUNTIME_MAIN_FOLDED_PROFILES": "tenant-projection",
+        "DEV_RUNTIME_MAIN_FOLDED_PROFILES": "workers,tenant-projection",
     }
     committed = (ROOT / "docker" / "runtime-policy.env").read_text(encoding="utf-8")
     assert committed == format_dotenv(rendered)
@@ -78,6 +83,9 @@ def test_main_reads_the_fold_and_preserves_the_effects_archive_volume() -> None:
         "effects_logs:/app/effects-logs:ro" in services["omninode-runtime"]["volumes"]
     )
     assert "effects_data:/app/data" in services["runtime-effects"]["volumes"]
+    assert main_env["ONEX_FOLDED_EFFECTS_STATE_ROOT"] == effects_env[
+        "ONEX_STATE_DIR"
+    ].replace("/app/data/", "/app/effects-data/")
     for key, value in ARCHIVE_DIRS.items():
         assert effects_env[key] == value
         # Both runtime paths address the same directory in the old volume.

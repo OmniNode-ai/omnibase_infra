@@ -35,6 +35,12 @@ if [ "$(id -u)" -eq 0 ]; then
   echo "[entrypoint] Bootstrapping runtime volume ownership..."
   install -d -o omniinfra -g omniinfra /app/data /app/data/delegation /app/logs /app/tmp
   chown -R omniinfra:omniinfra /app/data /app/logs /app/tmp
+  # A folded effects role retains its original local delegation claims and
+  # archives. Fresh named volumes need the same ownership bootstrap as data.
+  if [ -n "${ONEX_FOLDED_EFFECTS_STATE_ROOT:-}" ]; then
+    install -d -o omniinfra -g omniinfra /app/effects-data
+    chown -R omniinfra:omniinfra /app/effects-data
+  fi
   # The runtime-owned secret store (OMN-17099): a named volume mounted under the
   # runtime user's home is root-owned when fresh, and the process below runs as
   # omniinfra, so it could neither read nor create the store until repaired.

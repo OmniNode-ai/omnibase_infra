@@ -294,6 +294,9 @@ def _dockerfiles_built_by(compose_files: set[str]) -> set[str]:
         )
         model = yaml.safe_load(text)
         for service in model.get("services", {}).values():
+            # `!reset null` removes a service from the composed definition.
+            if not isinstance(service, dict):
+                continue
             build = service.get("build")
             if not isinstance(build, dict) or "dockerfile" not in build:
                 continue

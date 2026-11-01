@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from tests.unit.docker.conftest import DOCKER_DIR
@@ -66,3 +69,41 @@ def test_runtime_image_installs_gosu_for_privilege_drop() -> None:
     assert "gosu \\" in dockerfile
     assert "USER root" in dockerfile
     assert "dropping to the non-root runtime user" in dockerfile
+
+
+@pytest.mark.parametrize("folded", [False, True])
+def test_effects_volume_is_owned_before_privilege_drop_only_when_folded(
+    tmp_path: Path, folded: bool
+) -> None:
+    """Run the real root bootstrap with filesystem commands recorded, never executed."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls"
+    for name in ("id", "install", "chown", "gosu"):
+        script = bin_dir / name
+        script.write_text(
+            "#!/bin/sh\nprintf '0\\n'\n"
+            if name == "id"
+            else f'#!/bin/sh\nprintf \'{name} %s\\n\' "$*" >> "$CALLS"\n'
+        )
+        script.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "CALLS": str(calls)}
+    if folded:
+        env["ONEX_FOLDED_EFFECTS_STATE_ROOT"] = (
+            "/app/effects-data/.onex_state_stability_test"
+        )
+    subprocess.run(
+        ["sh", str(DOCKER_DIR / "entrypoint-runtime.sh"), "onex-runtime"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    recorded = calls.read_text().splitlines()
+    repair = "chown -R omniinfra:omniinfra /app/effects-data"
+    assert (repair in recorded) is folded
+    if folded:
+        assert recorded.index(repair) < next(
+            index for index, call in enumerate(recorded) if call.startswith("gosu ")
+        )

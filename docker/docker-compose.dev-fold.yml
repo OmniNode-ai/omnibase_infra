@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-21288: last overlay for the primary dev instance only. The shared
+# dev-lane overlay is also used by other dev instances, which keep their roles.
+services:
+  omninode-runtime:
+    environment:
+      ONEX_RUNTIME_FOLDED_PROFILES: ${DEV_RUNTIME_MAIN_FOLDED_PROFILES:?runtime policy contract must set DEV_RUNTIME_MAIN_FOLDED_PROFILES}
+      # The worker role's only additional runtime setting; identity stays main.
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+    volumes:
+      # Retain the old logs; there is no worker data volume to migrate.
+      - worker_logs:/app/worker-logs:ro
+  # Remove the service from the composed dev definition, including explicit
+  # compose invocations. Other lanes still inherit the base worker definition.
+  runtime-worker: !reset null

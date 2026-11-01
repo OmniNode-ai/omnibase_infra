@@ -255,6 +255,9 @@ services:
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: stability-test-main
       ONEX_RUNTIME_FOLDED_PROFILES: ${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES}
+      # The claim reader uses ONEX_STATE_DIR/delegation. Boot links that
+      # directory to the preserved effects volume before any handler starts.
+      ONEX_FOLDED_EFFECTS_STATE_ROOT: /app/effects-data/.onex_state_stability_test
       # Folded prunes keep writing the retired effects volume, so existing
       # archives stay in place. Main retains its own /app/data state.
       ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/effects-data/dead-letter-archive

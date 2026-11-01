@@ -237,6 +237,9 @@ def test_no_compose_file_anywhere_gates_a_consumer_on_the_runtime_health() -> No
             # content depends on which bundle was generated last.
             continue
         for name, config in _load_services(path).items():
+            # `!reset null` removes a service; it declares no dependency.
+            if not isinstance(config, dict):
+                continue
             condition = _depends_on(config).get(RUNTIME_SERVICE)
             if condition == BLOCKING_CONDITION:
                 findings.append(f"{path.name}: {name} -> {RUNTIME_SERVICE}")

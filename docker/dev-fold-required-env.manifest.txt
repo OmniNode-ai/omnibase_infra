@@ -1,0 +1,3 @@
+# Required variable names for docker-compose.dev-fold.yml (OMN-21288).
+# Values come from the contract-rendered runtime-policy.env.
+DEV_RUNTIME_MAIN_FOLDED_PROFILES
