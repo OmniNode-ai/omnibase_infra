@@ -88,14 +88,37 @@ class ModelInjectedRequest[TEvent: BaseModel](BaseModel):
             return getattr(envelope, name, None)
 
         now = read("envelope_timestamp")
-        if not isinstance(now, (datetime, str)):
-            raise ValueError("Dispatch envelope requires a datetime or ISO timestamp")
+        if isinstance(now, str):
+            try:
+                now = datetime.fromisoformat(now)
+            except ValueError as exc:
+                raise ValueError(
+                    "Dispatch envelope_timestamp must be an ISO datetime"
+                ) from exc
+        if not isinstance(now, datetime):
+            raise ValueError(
+                "Dispatch envelope_timestamp requires a datetime or ISO timestamp"
+            )
+
+        def read_uuid(name: str, *, optional: bool = False) -> UUID | None:
+            value = read(name)
+            if value is None and optional:
+                return None
+            if isinstance(value, UUID):
+                return value
+            if isinstance(value, str):
+                try:
+                    return UUID(value)
+                except ValueError as exc:
+                    raise ValueError(f"Dispatch {name} must be a UUID") from exc
+            raise ValueError(f"Dispatch {name} must be a UUID")
+
         return cls.model_validate(
             {
                 "event": event,
                 "now": now,
-                "input_id": read("envelope_id"),
-                "correlation_id": read("correlation_id"),
+                "input_id": read_uuid("envelope_id"),
+                "correlation_id": read_uuid("correlation_id", optional=True),
             }
         )
 

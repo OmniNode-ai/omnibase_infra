@@ -1064,14 +1064,6 @@ def _make_dispatch_callback(
                 if isinstance(payload, model_cls)
                 else model_cls.model_validate(payload)
             )
-            handler_arg: object = typed_payload
-            if _injected_request_model is not None and not handler_takes_envelope:
-                # Engine materialization omits transport metadata; unwrap the
-                # original envelope retained for this dispatch.
-                handler_arg = _injected_request_model.from_dispatch(
-                    current_dispatch_envelope() or envelope,
-                    cast("BaseModel", typed_payload),
-                )
         except Exception as exc:
             # An envelope-accepting handler (a multi-step ORCHESTRATOR) declares
             # its ``event_model`` as the workflow ENTRYPOINT, yet it also consumes
@@ -1106,6 +1098,16 @@ def _make_dispatch_callback(
             if failure_result is not None:
                 return failure_result
             raise
+        # Metadata failures belong to the dispatch boundary, not the domain
+        # payload-validation fallback above.
+        handler_arg: object = typed_payload
+        if _injected_request_model is not None and not handler_takes_envelope:
+            # Engine materialization omits transport metadata; unwrap the
+            # original envelope retained for this dispatch.
+            handler_arg = _injected_request_model.from_dispatch(
+                current_dispatch_envelope() or envelope,
+                cast("BaseModel", typed_payload),
+            )
         if pre_dispatch_guard is not None:
             pre_dispatch_guard(typed_payload)
         if handler_takes_envelope:

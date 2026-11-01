@@ -233,9 +233,14 @@ def test_from_dispatch_keeps_naive_timestamp_for_handler_validation() -> None:
     [
         {"envelope_id": "not-a-uuid"},
         {"envelope_id": ""},
+        {"envelope_id": None},
+        {"envelope_id": ENVELOPE_ID.bytes},
         {"correlation_id": "not-a-uuid"},
         {"correlation_id": ""},
+        {"correlation_id": 123},
+        {"correlation_id": CORRELATION_ID.bytes},
         {"envelope_timestamp": "not-a-time"},
+        {"envelope_timestamp": "123"},
         {"envelope_timestamp": 123},
         {"envelope_timestamp": None},
         {"envelope_timestamp": {}},
@@ -251,6 +256,39 @@ def test_from_dispatch_rejects_malformed_headers(header: dict[str, object]) -> N
             },
             _Event(value="x"),
         )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("header", "field"),
+    [
+        ({"envelope_id": None}, "envelope_id"),
+        ({"envelope_timestamp": "123"}, "envelope_timestamp"),
+        ({"correlation_id": 123}, "correlation_id"),
+    ],
+)
+async def test_dispatch_metadata_failure_bypasses_payload_fallback(
+    monkeypatch: pytest.MonkeyPatch, header: dict[str, object], field: str
+) -> None:
+    handler = _RecordingHandler()
+    fallback = MagicMock(return_value=None)
+    monkeypatch.setattr(
+        handler_wiring, "_build_inference_intent_validation_failure_result", fallback
+    )
+    with pytest.raises(ValueError, match=f"Dispatch {field}"):
+        await _dispatch(
+            handler,
+            ModelHandlerRef(name="_Event", module=__name__),
+            {
+                "payload": {"value": "valid-domain-event"},
+                "envelope_timestamp": CLOCK_READING,
+                "envelope_id": ENVELOPE_ID,
+                **header,
+            },
+        )
+    fallback.assert_not_called()
+    assert handler.received == []
 
 
 @pytest.mark.unit

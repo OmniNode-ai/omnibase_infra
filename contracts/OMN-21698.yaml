@@ -98,3 +98,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn21698-dispatch-metadata-boundary
+    description: >-
+      Invalid dispatch metadata names the failing envelope field and never enters the domain payload-validation fallback or reaches the handler.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/auto_wiring/test_injected_request_dispatch.py -k dispatch_metadata_failure_bypasses_payload_fallback -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
