@@ -43,6 +43,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn21690-ac2-shipped-file-literals
+    description: The shipped endpoint defaults file holds the previous literal values, written out in the test, and each consumer resolves them. Fails at the merge base, where the defaults model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/integration/endpoint_defaults -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
   - id: dod-omn21690-deploy-endpoint-defaults
     description: >-
       Post-deploy probe: the runtime container loads the endpoint defaults from the file it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
