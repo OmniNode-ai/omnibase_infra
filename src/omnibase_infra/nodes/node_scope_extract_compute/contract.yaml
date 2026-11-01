@@ -29,6 +29,11 @@ handler_routing:
       handler:
         name: "HandlerScopeExtract"
         module: "omnibase_infra.nodes.node_scope_extract_compute.handlers.handler_scope_extract"
+descriptor:
+  node_archetype: compute
+  purity: pure
+  idempotent: true
+  timeout_ms: 30000
 metadata:
   description: "Scope extraction compute node for scope-check workflow using the canonical def-B typed ModelScopeExtractInput handler entrypoint"
   author: "OmniNode Team"

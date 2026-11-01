@@ -100,6 +100,11 @@ workflow_coordination:
       failure_recovery_strategy: fail_fast
       max_retries: 0
       timeout_ms: 15000
+descriptor:
+  node_archetype: orchestrator
+  purity: orchestration
+  idempotent: false
+  timeout_ms: 30000
 metadata:
   description: "Scope-check workflow orchestrator (skill-to-node canary)"
   author: "OmniNode Team"

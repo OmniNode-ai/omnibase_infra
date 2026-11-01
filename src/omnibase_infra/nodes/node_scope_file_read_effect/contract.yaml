@@ -25,6 +25,11 @@ handler_routing:
       handler:
         name: "HandlerScopeFileRead"
         module: "omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_file_read"
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: true
+  timeout_ms: 30000
 metadata:
   description: "Filesystem read effect for scope-check workflow"
   author: "OmniNode Team"
