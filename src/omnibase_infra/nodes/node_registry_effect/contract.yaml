@@ -119,7 +119,6 @@ handler_routing:
     # Persists registration record to PostgreSQL for durability.
     # Uses upsert semantics for idempotent re-registration.
     - operation: "register_node"
-      # OMN-21761: handle() takes the one typed registry request.
       handler:
         name: "HandlerPostgresUpsert"
         module: "omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_upsert"

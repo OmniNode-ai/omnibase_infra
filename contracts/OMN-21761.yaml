@@ -2,11 +2,11 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-21761"
 title: "omnibase_infra handler-shape burn-down, slice rf1400-s1: handlers take one typed request and the runtime owns the envelope"
-summary: "Four noncanonical_handle findings of core's ValidatorHandlerShape in the chain orchestrator, registry effect effect handlers are cleared: each handle now takes one typed request model (the registry request protocol and models carry correlation_id themselves). No node becomes fully canonical, so no flip proof is owed. Repo total 104 to 100, no baseline entry or suppression added."
+summary: "Two noncanonical_handle findings are cleared: chain retrieval-complete and PostgreSQL deactivate take one typed request. The first-bound learn-initiate and upsert handlers remain outside this slice; migrating those entry points requires complete node flips and adequacy proof. The retrieval response remains a dict, so AC2 is partial. No baseline entry or suppression is added."
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - "handle signatures of HandlerChainLearnInitiate, HandlerChainRetrievalComplete, HandlerPostgresUpsert and HandlerPostgresDeactivate"
+  - "public_api"
 requirements:
   - id: req-omn21761-handle-takes-one-typed-request
     statement: "The slice handlers take one typed request and ValidatorHandlerShape reports nothing on the slice paths."
@@ -19,20 +19,35 @@ requirements:
         statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the validator re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
 evidence_requirements:
   - kind: tests
-    description: "The unit tests of the touched handlers pass with the typed request calls."
-    command: "uv run pytest tests/unit/nodes/node_chain_learning tests/unit/nodes/node_registry_effect -q -p no:cacheprovider"
+    description: "Typed requests cross the shared runtime adapter and publish the existing response fields."
+    command: "env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_handler_requests_omn21761.py -q -p no:cacheprovider"
 dod_evidence:
   - id: dod-001
-    description: "The touched handlers' unit tests pass with handle(request) calls."
+    description: "The two slice handlers pass the handler-shape validator; the untouched first-bound handlers retain their legacy signatures."
     source: generated
-    binds_ac: [AC1, AC2]
+    binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: "uv run pytest tests/unit/nodes/node_chain_learning tests/unit/nodes/node_registry_effect -q -p no:cacheprovider"
+        check_value: "uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_chain_orchestrator/handlers/handler_chain_retrieval_complete.py src/omnibase_infra/nodes/node_registry_effect/handlers/handler_postgres_deactivate.py --report-json /tmp/omn21761-handler-shape.json"
   - id: dod-002
-    description: "The unit suite passes at the PR head on a lab host."
+    description: "Lab runtime readback exercises hit, miss, successful deactivation, refusal and timeout through the shared adapter."
     source: generated
     binds_ac: [AC3]
     checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_handler_requests_omn21761.py -q -p no:cacheprovider"
+  - id: dod-003
+    description: "The typed-request calls retain branch decisions and deactivation correlation IDs; the dict retrieval response remains an AC2 follow-up."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/nodes/node_chain_learning/test_handlers.py tests/unit/nodes/node_registry_effect/handlers/test_handler_postgres_deactivate.py -q -p no:cacheprovider"
+  - id: dod-004-deploy
+    description: "Hosted deploy source probe reads the PostgreSQL deactivate handler served by GitHub at the checkout commit and requires its one-request signature. The merge-base source fails this assertion."
+    source: generated
+    binds_ac: [AC1]
+    checks:
       - check_type: command
-        check_value: "uv run pytest tests/unit/nodes/node_chain_learning tests/unit/nodes/node_registry_effect -q -p no:cacheprovider"
+        check_value: >-
+          curl -fsSL "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/nodes/node_registry_effect/handlers/handler_postgres_deactivate.py" | python3 -c 'import ast,sys; t=ast.parse(sys.stdin.read()); c=next(n for n in t.body if isinstance(n,ast.ClassDef) and n.name=="HandlerPostgresDeactivate"); f=next(n for n in c.body if isinstance(n,ast.AsyncFunctionDef) and n.name=="handle"); assert [a.arg for a in f.args.args]==["self","request"]'

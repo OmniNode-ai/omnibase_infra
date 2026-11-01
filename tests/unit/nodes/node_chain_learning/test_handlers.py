@@ -21,7 +21,6 @@ from omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_store_c
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
     EnumChainVerifyState,
     ModelChainEntry,
-    ModelChainLearnCommand,
     ModelChainMatch,
     ModelChainReplayInput,
     ModelChainReplayResult,
@@ -71,12 +70,10 @@ class TestHandlerChainLearnInitiate:
         handler = HandlerChainLearnInitiate()
         cid = uuid4()
         result = await handler.handle(
-            ModelChainLearnCommand(
-                prompt_text="hello world",
-                workflow_ref="test_wf",
-                correlation_id=cid,
-                similarity_threshold=0.9,
-            )
+            prompt_text="hello world",
+            workflow_ref="test_wf",
+            correlation_id=cid,
+            similarity_threshold=0.9,
         )
         assert result["prompt_text"] == "hello world"
         assert result["workflow_ref"] == "test_wf"
