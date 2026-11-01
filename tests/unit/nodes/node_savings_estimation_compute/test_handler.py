@@ -136,6 +136,7 @@ class TestSavingsComputation:
             session_id="sonnet-session",
             effectiveness_entries=entries,
             actual_total_tokens=20000,
+            actual_model_id="claude-opus-4-6",
         )
         result = handler.compute_savings(inp)
 
@@ -158,6 +159,7 @@ class TestSavingsComputation:
         inp = ModelSavingsEstimationInput(
             session_id="output-session",
             effectiveness_entries=entries,
+            actual_model_id="claude-opus-4-6",
         )
         result = handler.compute_savings(inp)
 
@@ -185,6 +187,7 @@ class TestSavingsComputation:
         inp = ModelSavingsEstimationInput(
             session_id="mixed-session",
             effectiveness_entries=entries,
+            actual_model_id="claude-opus-4-6",
         )
         result = handler.compute_savings(inp)
 
@@ -230,6 +233,7 @@ class TestConfidence:
         inp = ModelSavingsEstimationInput(
             session_id="weighted-session",
             effectiveness_entries=entries,
+            actual_model_id="claude-opus-4-6",
         )
         result = handler.compute_savings(inp)
 
@@ -257,6 +261,7 @@ class TestConfidence:
         inp = ModelSavingsEstimationInput(
             session_id="heuristic-session",
             effectiveness_entries=entries,
+            actual_model_id="claude-opus-4-6",
         )
         result = handler.compute_savings(inp)
 
