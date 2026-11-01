@@ -14,6 +14,7 @@ The scenarios double as the candidate inputs the adequacy receipt under
 
 from __future__ import annotations
 
+import inspect
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -75,11 +76,26 @@ def build_request(scenario: ModelGetNodeScenario) -> ModelRegistryApiRequest:
     )
 
 
+async def call_handle(
+    handler: HandlerRegistryApiGetNode, request: ModelRegistryApiRequest
+) -> ModelRegistryApiResponse:
+    """Call ``handle`` with the one typed request, failing on a legacy signature.
+
+    The merge-base ``handle(request, correlation_id)`` cannot bind a single
+    argument; that is reported as this test's own failure, not a ``TypeError``.
+    """
+    try:
+        inspect.signature(handler.handle).bind(request)
+    except TypeError as exc:
+        pytest.fail(f"handle() does not take one typed request: {exc}")
+    return await handler.handle(request)
+
+
 class TestGetNodeHandleTypedRequest:
     @pytest.mark.asyncio
     async def test_found_node_answers_with_the_request_correlation_id(self) -> None:
         scenario = SCENARIOS[0]
-        response = await build_handler(scenario).handle(build_request(scenario))
+        response = await call_handle(build_handler(scenario), build_request(scenario))
         assert isinstance(response, ModelRegistryApiResponse)
         assert response.success is True
         assert response.correlation_id == scenario.correlation_id
@@ -91,7 +107,7 @@ class TestGetNodeHandleTypedRequest:
     @pytest.mark.asyncio
     async def test_missing_node_fails_with_the_request_correlation_id(self) -> None:
         scenario = SCENARIOS[1]
-        response = await build_handler(scenario).handle(build_request(scenario))
+        response = await call_handle(build_handler(scenario), build_request(scenario))
         assert response.success is False
         assert response.error == "Node not found"
         assert response.correlation_id == scenario.correlation_id
@@ -100,4 +116,4 @@ class TestGetNodeHandleTypedRequest:
     async def test_request_without_node_id_is_rejected(self) -> None:
         scenario = SCENARIOS[2]
         with pytest.raises(ValueError, match="node_id is required"):
-            await build_handler(scenario).handle(build_request(scenario))
+            await call_handle(build_handler(scenario), build_request(scenario))

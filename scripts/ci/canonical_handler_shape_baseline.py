@@ -46,7 +46,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_registration_orchestrator",
     "omnibase_infra.nodes.node_registration_reducer",
     "omnibase_infra.nodes.node_registration_storage_effect",
-    "omnibase_infra.nodes.node_registry_api_effect",
     "omnibase_infra.nodes.node_registry_effect",
     "omnibase_infra.nodes.node_reward_binder_effect",
     "omnibase_infra.nodes.node_routing_orchestrator",
