@@ -9,6 +9,7 @@ from .model_chain_learn_result import ModelChainLearnResult
 from .model_chain_match import ModelChainMatch
 from .model_chain_replay_input import ModelChainReplayInput
 from .model_chain_replay_result import ModelChainReplayResult
+from .model_chain_retrieval_decision import ModelChainRetrievalDecision
 from .model_chain_retrieval_result import ModelChainRetrievalResult
 from .model_chain_step import ModelChainStep
 from .model_chain_store_request import ModelChainStoreRequest
@@ -22,6 +23,7 @@ __all__ = [
     "ModelChainMatch",
     "ModelChainReplayInput",
     "ModelChainReplayResult",
+    "ModelChainRetrievalDecision",
     "ModelChainRetrievalResult",
     "ModelChainStep",
     "ModelChainStoreRequest",
