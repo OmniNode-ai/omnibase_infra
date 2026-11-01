@@ -37,13 +37,25 @@ dod_evidence:
     binds_ac: [AC8]
   - id: dod-omn21536-ac9-validator-clean
     description: >-
-      Core's handler-shape validator reports nothing for the two handler directories.
+      Core's handler-shape validator reports nothing for the two handler directories, and exits 1 when a temporary copy of either handler restores a self-assigning public method.
     source: manual
     checks:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/handlers/registration_storage src/omnibase_infra/handlers/service_discovery --report-json /tmp/omn21536-handler-shape-report.json
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/handlers/test_mock_handler_shape_omn21536.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC9]
+  - id: dod-omn21536-deploy-shared-store-lock
+    description: >-
+      Deploy smoke probe over the installed runtime modules: both mock handlers wait for the shared store lock, and concurrent registration of one key returns one insert and one update. Runs without a runtime container on hosted CI.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/handlers/test_mock_handler_shared_store_omn21536.py -q -k wait_for_shared_store_lock -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC8]
   - id: dod-omn21536-deploy-mock-handler-store-injection
     description: >-
       Post-deploy probe: the running runtime image carries the injected-store constructor on both mock handlers. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.

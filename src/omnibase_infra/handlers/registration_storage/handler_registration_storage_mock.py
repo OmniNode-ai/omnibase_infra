@@ -12,7 +12,6 @@ Thread Safety:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -45,7 +44,7 @@ class HandlerRegistrationStorageMock:
 
     Thread Safety:
         This handler is coroutine-safe. All operations on the injected
-        record store are protected by asyncio.Lock.
+        record store share the store's asyncio.Lock across handler instances.
 
     Attributes:
         handler_type: Returns "mock" identifier.
@@ -66,7 +65,7 @@ class HandlerRegistrationStorageMock:
                 is used when none is injected.
         """
         self._store = store if store is not None else StoreKeyedMemory()
-        self._lock = asyncio.Lock()
+        self._lock = self._store.lock
 
         logger.debug("HandlerRegistrationStorageMock initialized")
 

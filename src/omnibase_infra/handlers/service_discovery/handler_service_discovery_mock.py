@@ -8,7 +8,6 @@ handler protocol for testing purposes.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -41,7 +40,7 @@ class HandlerServiceDiscoveryMock:
 
     Thread Safety:
         This handler is coroutine-safe. All operations on the injected
-        service store are protected by asyncio.Lock.
+        service store share the store's asyncio.Lock across handler instances.
 
     Attributes:
         handler_type: Returns "mock" identifier.
@@ -57,7 +56,7 @@ class HandlerServiceDiscoveryMock:
     ) -> None:
         """Initialize with the injected service store, or an empty one."""
         self._store = store if store is not None else StoreKeyedMemory()
-        self._lock = asyncio.Lock()
+        self._lock = self._store.lock
 
         logger.debug("HandlerServiceDiscoveryMock initialized")
 

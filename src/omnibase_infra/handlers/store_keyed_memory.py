@@ -3,12 +3,14 @@
 """In-memory keyed store for handlers that hold test or lifecycle state.
 
 A handler keeps no mutable state of its own: it receives a ``StoreKeyedMemory``
-and reads and writes through it. The store takes no lock; the owning handler
-serializes access.
+and reads and writes through it. Handlers sharing a store use its lock to
+serialize compound operations on a single event loop. Direct synchronous store
+operations do not acquire the lock; callers must not share it between threads.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Hashable
 
 
@@ -18,6 +20,12 @@ class StoreKeyedMemory[K: Hashable, V]:
     def __init__(self) -> None:
         """Initialize an empty store."""
         self._items: dict[K, V] = {}
+        self._lock = asyncio.Lock()
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """Return the shared coroutine lock for compound store operations."""
+        return self._lock
 
     def get(self, key: K) -> V | None:
         """Return the value stored under ``key``, or None when absent."""
