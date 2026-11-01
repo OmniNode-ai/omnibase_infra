@@ -33,6 +33,16 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn21689-relocatable-source-bindings
+    description: Node contracts and runtime manifests render package-relative bindings even when checkout ancestors have the package name. The hosted checkout cases fail before the path selection fix.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/tools/test_topic_enum_generator.py -k ignores_checkout_name -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
   - id: dod-omn21689-ac1-suffix-binding
     description: The converted SUFFIX_* constants are no longer string literals in the registry source and keep their former values. Fails at the merge base, where each of the seven is assigned a string literal.
     source: manual

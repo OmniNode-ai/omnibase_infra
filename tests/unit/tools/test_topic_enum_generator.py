@@ -214,6 +214,38 @@ def test_render_enum_contains_correct_member(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "checkout",
+    [
+        "/home/runner/work/omnibase_infra/omnibase_infra",
+        "/workspace/omnibase_infra/worktrees/landing",
+        "/workspace/landing",
+    ],
+)
+@pytest.mark.parametrize(
+    "resource", ["nodes/node_example/contract.yaml", "runtime/topics.yaml"]
+)
+def test_render_binding_ignores_checkout_name(
+    tmp_path: Path, checkout: str, resource: str
+) -> None:
+    """Node and manifest bindings remain package-relative on hosted runners."""
+    entry = _entry(
+        "onex.evt.platform.intent-classified.v1",
+        "evt",
+        "platform",
+        "intent-classified",
+        "v1",
+        source=f"{checkout}/src/omnibase_infra/{resource}",
+    )
+    rendered = TopicEnumGenerator().render([entry], output_dir=tmp_path)
+    content = rendered[tmp_path / "enum_platform_topic.py"]
+    assert (
+        f"contract_topic_value('{resource}', 'platform', 'EVT_INTENT_CLASSIFIED_V1')"
+        in content
+    )
+
+
+@pytest.mark.unit
 def test_render_enum_class_name(tmp_path: Path) -> None:
     """Enum file contains the class definition with correct name."""
     gen = TopicEnumGenerator()

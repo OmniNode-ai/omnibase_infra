@@ -24,8 +24,14 @@ def render_contract_topic_member(
 ) -> str:
     """Render a member with a relocatable source binding and no fallback value."""
     source = entry.source_contracts[0]
-    if "omnibase_infra" in source.parts:
-        source = Path(*source.parts[source.parts.index("omnibase_infra") + 1 :])
+    # Hosted checkouts can have package-named ancestors. Use the nearest
+    # package directory so checkout names cannot enter generated bindings.
+    package_root = next(
+        (parent for parent in source.parents if parent.name == "omnibase_infra"),
+        None,
+    )
+    if package_root is not None:
+        source = source.relative_to(package_root)
     args = ", ".join(repr(value) for value in (str(source), entry.producer, key))
     return template.format(key=key, args=args, topic=entry.topic)
 
