@@ -335,11 +335,12 @@ jobs:
             TAG=""
             if REFS=$(git ls-remote --tags origin 'refs/tags/dev-*'); then
               TAG=$(printf '%s\n' "${REFS}" |
-                sed -n "s#^[0-9a-f]*[[:space:]]refs/tags/\(dev-[0-9]\{14\}-${SHA12}\)\$#\1#p" |
-                LC_ALL=C sort | tail -n 1)
+                sed -En "s#^${SHA}[[:space:]]refs/tags/(dev-[0-9]{14}-${SHA12})(\^\{\})?\$#\1#p" |
+                LC_ALL=C sort -u | tail -n 1)
             fi
             if [ -n "${TAG}" ]; then
-              if git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"; then
+              if git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}" &&
+                [ "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "${SHA}" ]; then
                 echo "build context ${SHA} carries ${TAG}"
                 exit 0
               fi
@@ -348,8 +349,8 @@ jobs:
               sleep "${DEV_TAG_WAIT_SECONDS}"
             fi
           done
-          echo "::warning::no dev-merge tag names ${SHA12} on origin; the first-party source audit will refuse the build context"
-          exit 0
+          echo "::error::no dev-merge tag on origin points at ${SHA} after ${DEV_TAG_WAIT_ATTEMPTS} attempts; the first-party source audit would refuse the build context"
+          exit 1
 
       - name: Stage workspace sibling trees into the build context
         env:

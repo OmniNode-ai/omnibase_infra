@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,8 +28,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = (
     _REPO_ROOT / ".github" / "workflows" / "build-workspace-candidate-runtime.yml"
 )
-_FETCH_STEP = "DEV_TAG_WAIT_ATTEMPTS"
-_STAGING_STEP = "DEPLOY_REF"
+_FETCH_STEP = "Fetch the build context's dev-merge tag"
+_STAGING_STEP = "Stage workspace sibling trees into the build context"
 _CHECKOUT_STEP = "actions/checkout@"
 
 
@@ -45,10 +46,28 @@ def _step_index(steps: list[dict[str, Any]], marker: str) -> int:
     indices = [
         index
         for index, step in enumerate(steps)
-        if marker in step.get("env", {}) or step.get("uses", "").startswith(marker)
+        if step.get("name") == marker or step.get("uses", "").startswith(marker)
     ]
-    assert len(indices) == 1, f"expected exactly one step with {marker!r}: {indices}"
+    assert len(indices) == 1, f"expected exactly one step {marker!r}: {indices}"
     return indices[0]
+
+
+def _evaluate_deploy_ref(expression: str, inputs: dict[str, str]) -> str:
+    """Evaluate the workflow's `a || b` expression with GitHub's empty-string falsiness."""
+    body = expression.strip().removeprefix("${{").removesuffix("}}").strip()
+    result = ""
+    for operand in body.split("||"):
+        operand = operand.strip()
+        if operand.startswith("format("):
+            match = re.fullmatch(r"format\('([^']*)', inputs\.(\w+)\)", operand)
+            assert match is not None, operand
+            result = match.group(1).replace("{0}", inputs[match.group(2)])
+        else:
+            assert operand.startswith("inputs."), operand
+            result = inputs[operand.removeprefix("inputs.")]
+        if result:
+            return result
+    return result
 
 
 def _load_script(path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
@@ -129,9 +148,10 @@ def test_unpinned_siblings_are_armed_with_the_remote_tracking_ref(
 ) -> None:
     staging = candidate_steps[_step_index(candidate_steps, _STAGING_STEP)]
     deploy_ref = staging["env"]["DEPLOY_REF"]
-    assert "inputs.pinned_revision" in deploy_ref
-    assert "format('origin/{0}', inputs.sibling_ref)" in deploy_ref
-    assert deploy_ref != "${{ inputs.pinned_revision || inputs.sibling_ref }}"
+    unpinned = {"pinned_revision": "", "sibling_ref": "dev"}
+    assert _evaluate_deploy_ref(deploy_ref, unpinned) == "origin/dev"
+    pinned = {"pinned_revision": "a" * 40, "sibling_ref": "dev"}
+    assert _evaluate_deploy_ref(deploy_ref, pinned) == "a" * 40
 
 
 @pytest.mark.unit
@@ -210,14 +230,14 @@ def test_the_tag_fetch_brings_the_head_tag_into_the_checkout(
 
 
 @pytest.mark.unit
-def test_the_tag_fetch_warns_and_continues_when_no_tag_exists(
+def test_the_tag_fetch_fails_fast_when_no_tag_exists(
     tmp_path: Path,
     candidate_steps: list[dict[str, Any]],
 ) -> None:
     checkout, _ = _make_checkout(tmp_path, with_tag=False)
     result = _run_tag_fetch(checkout, candidate_steps, attempts=2)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "::warning::" in result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "::error::" in result.stdout
     assert _git(checkout, "tag", "--points-at", "HEAD") == ""
 
 
@@ -239,11 +259,13 @@ def test_the_checker_reads_the_fetched_tag_as_a_dev_merge_tag(
         _git(work, "tag", tag)
         _git(work, "push", "origin", f"refs/tags/{tag}")
     result = _run_tag_fetch(checkout, candidate_steps)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "::warning::" not in result.stdout
-    assert (
-        _git(checkout, "rev-parse", tag) == _git(checkout, "rev-parse", "HEAD")
-    ) == points_at_head
+    assert (result.returncode == 0) == points_at_head, result.stdout + result.stderr
+    assert ("::error::" not in result.stdout) == points_at_head
+    if points_at_head:
+        assert _git(checkout, "rev-parse", tag) == _git(checkout, "rev-parse", "HEAD")
+    else:
+        # A same-suffix tag on another commit is never fetched into the checkout.
+        assert _git(checkout, "tag", "--list", "dev-*") == ""
 
     source = _REPO_ROOT / "src/omnibase_infra/validation/checker_first_party_sources.py"
     checker = _load_script(source, monkeypatch)
@@ -308,20 +330,20 @@ def test_the_tag_fetch_retries_until_a_late_tag_appears(
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "::warning::" not in result.stdout
+    assert "::error::" not in result.stdout
     assert _git(checkout, "tag", "--points-at", "HEAD", "--list", "dev-*") == tag
 
 
 @pytest.mark.unit
-def test_the_tag_fetch_survives_an_unreachable_origin(
+def test_the_tag_fetch_fails_when_origin_stays_unreachable(
     tmp_path: Path,
     candidate_steps: list[dict[str, Any]],
 ) -> None:
     checkout, _ = _make_checkout(tmp_path, with_tag=True)
     _git(checkout, "remote", "set-url", "origin", str(tmp_path / "missing.git"))
     result = _run_tag_fetch(checkout, candidate_steps, attempts=2)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "::warning::" in result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "::error::" in result.stdout
 
 
 @pytest.mark.unit
@@ -364,5 +386,5 @@ def test_the_tag_fetch_recovers_after_a_transient_git_error(
     )
     assert (tmp_path / "failed-once").is_file()
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "::warning::" not in result.stdout
+    assert "::error::" not in result.stdout
     assert _git(checkout, "tag", "--points-at", "HEAD", "--list", "dev-*") == tag
