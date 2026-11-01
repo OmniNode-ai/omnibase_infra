@@ -26,7 +26,7 @@ evidence_requirements:
   - kind: tests
     description: The registry API handlers answer a typed request and the handler invariants hold.
     command: >-
-      uv run pytest tests/unit/nodes/test_handler_registry_api_read.py tests/unit/nodes/test_handler_registry_api_operational.py tests/unit/nodes/test_registry_api_effect_handler_stubs.py tests/ci/test_handler_architecture_invariants.py -q -n 0 -p no:cacheprovider
+      uv run pytest tests/unit/nodes/test_handler_registry_api_read.py tests/unit/nodes/test_handler_registry_api_operational.py tests/unit/nodes/test_registry_api_effect_handler_stubs.py tests/unit/nodes/node_registry_api_effect/test_handle_typed_request_omn21536.py tests/integration/nodes/test_registry_api_typed_request_handlers_omn21696.py tests/ci/test_handler_architecture_invariants.py -q -n 0 -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
