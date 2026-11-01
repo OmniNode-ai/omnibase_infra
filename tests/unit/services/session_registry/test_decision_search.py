@@ -7,6 +7,7 @@ Part of the Multi-Session Coordination Layer (OMN-6850, Task 14).
 
 from __future__ import annotations
 
+import inspect
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +18,7 @@ from omnibase_infra.services.session_registry.decision_search import (
 )
 
 _TEST_EMBEDDING_URL = "http://test-embed:8100"
+_TEST_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
 
 
 @pytest.mark.unit
@@ -85,7 +87,9 @@ class TestDecisionSearchClientFormatResults:
                 timestamp="2026-03-26T10:00:00Z",
             ),
         ]
-        client = DecisionSearchClient(qdrant=None, embedder=None)
+        client = DecisionSearchClient(
+            qdrant=None, embedder=None, embedding_model=_TEST_EMBEDDING_MODEL
+        )
         formatted = client.format_results(results)
         assert "OMN-1234" in formatted
         assert "0.92" in formatted
@@ -96,7 +100,9 @@ class TestDecisionSearchClientFormatResults:
         assert "coordination design" in formatted
 
     def test_format_empty_results(self) -> None:
-        client = DecisionSearchClient(qdrant=None, embedder=None)
+        client = DecisionSearchClient(
+            qdrant=None, embedder=None, embedding_model=_TEST_EMBEDDING_MODEL
+        )
         formatted = client.format_results([])
         assert formatted == "No related decisions found."
 
@@ -108,7 +114,9 @@ class TestDecisionSearchClientFormatResults:
                 score=0.88,
             ),
         ]
-        client = DecisionSearchClient(qdrant=None, embedder=None)
+        client = DecisionSearchClient(
+            qdrant=None, embedder=None, embedding_model=_TEST_EMBEDDING_MODEL
+        )
         formatted = client.format_results(results)
         assert "OMN-5000" in formatted
         assert "Context:" not in formatted
@@ -120,7 +128,9 @@ class TestDecisionSearchClientSearch:
 
     @pytest.mark.asyncio
     async def test_search_returns_empty_without_qdrant(self) -> None:
-        client = DecisionSearchClient(qdrant=None, embedder=None)
+        client = DecisionSearchClient(
+            qdrant=None, embedder=None, embedding_model=_TEST_EMBEDDING_MODEL
+        )
         results = await client.search("test query")
         assert results == []
 
@@ -145,6 +155,7 @@ class TestDecisionSearchClientSearch:
             qdrant=mock_qdrant,
             embedder=embedder,
             embedding_base_url=_TEST_EMBEDDING_URL,
+            embedding_model=_TEST_EMBEDDING_MODEL,
         )
         results = await client.search("event bus choice")
 
@@ -167,6 +178,7 @@ class TestDecisionSearchClientSearch:
             qdrant=mock_qdrant,
             embedder=embedder,
             embedding_base_url=_TEST_EMBEDDING_URL,
+            embedding_model=_TEST_EMBEDDING_MODEL,
         )
         await client.search("test", task_id="OMN-5555")
 
@@ -180,7 +192,9 @@ class TestDecisionSearchClientSearchRelated:
 
     @pytest.mark.asyncio
     async def test_search_related_returns_empty_without_qdrant(self) -> None:
-        client = DecisionSearchClient(qdrant=None, embedder=None)
+        client = DecisionSearchClient(
+            qdrant=None, embedder=None, embedding_model=_TEST_EMBEDDING_MODEL
+        )
         results = await client.search_related("OMN-1234")
         assert results == []
 
@@ -189,7 +203,9 @@ class TestDecisionSearchClientSearchRelated:
         mock_qdrant = MagicMock()
         mock_qdrant.scroll.return_value = ([], None)
 
-        client = DecisionSearchClient(qdrant=mock_qdrant, embedder=None)
+        client = DecisionSearchClient(
+            qdrant=mock_qdrant, embedder=None, embedding_model=_TEST_EMBEDDING_MODEL
+        )
         results = await client.search_related("OMN-9999")
         assert results == []
 
@@ -223,6 +239,7 @@ class TestDecisionSearchClientSearchRelated:
             qdrant=mock_qdrant,
             embedder=None,
             embedding_base_url=_TEST_EMBEDDING_URL,
+            embedding_model=_TEST_EMBEDDING_MODEL,
         )
         results = await client.search_related("OMN-1234")
 
@@ -239,6 +256,7 @@ class TestDecisionSearchClientUrlInjection:
         """URL passed at construction is stored and not resolved from env."""
         client = DecisionSearchClient(
             embedding_base_url="http://injected-host:9999",
+            embedding_model=_TEST_EMBEDDING_MODEL,
         )
         assert client._embedding_base_url == "http://injected-host:9999"
 
@@ -255,6 +273,7 @@ class TestDecisionSearchClientUrlInjection:
         with patch("os.getenv", side_effect=AssertionError("env read")):
             client = DecisionSearchClient(
                 embedding_base_url=_TEST_EMBEDDING_URL,
+                embedding_model=_TEST_EMBEDDING_MODEL,
             )
         assert client._embedding_base_url == _TEST_EMBEDDING_URL
 
@@ -299,6 +318,7 @@ class TestDecisionSearchClientUrlInjection:
         client = DecisionSearchClient(
             qdrant=MagicMock(),
             embedding_base_url=injected_url,
+            embedding_model="Qwen3-Embedding-8B",
         )
         with (
             patch("os.getenv", side_effect=AssertionError("env read")),
@@ -313,12 +333,20 @@ class TestDecisionSearchClientUrlInjection:
         assert requested["url"] == f"{injected_url}/v1/embeddings"
         assert requested["json"] == {
             "input": "test text",
-            "model": "Qwen3-Embedding-8B",
+            "model": _TEST_EMBEDDING_MODEL,
         }
 
     @pytest.mark.asyncio
     async def test_embed_raises_on_empty_url_without_embedder(self) -> None:
         """_embed fails fast when no custom embedder and URL is empty."""
-        client = DecisionSearchClient(qdrant=MagicMock(), embedder=None)
+        client = DecisionSearchClient(
+            qdrant=MagicMock(), embedder=None, embedding_model=_TEST_EMBEDDING_MODEL
+        )
         with pytest.raises(ValueError, match="embedding_base_url is empty"):
             await client._embed("test text")
+
+    def test_embedding_model_is_required(self) -> None:
+        """The caller supplies the embedding model; there is no default."""
+        signature = inspect.signature(DecisionSearchClient)
+        with pytest.raises(TypeError, match="embedding_model"):
+            signature.bind(embedding_base_url=_TEST_EMBEDDING_URL)
