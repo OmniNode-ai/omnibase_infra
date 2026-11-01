@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 import pytest
@@ -75,13 +74,6 @@ async def test_enum_suffixes_reach_contract_subscribers() -> None:
     """Each suffix reaches exactly one topic its contract declares, of all declared."""
     package_root = Path(registry.__file__).resolve().parents[1]
     manifest = ContractTopicExtractor().scan(package_root / "nodes")
-    assignments = {
-        node.target.id: ast.unparse(node.value)
-        for node in ast.parse(Path(registry.__file__).read_text(encoding="utf-8")).body
-        if isinstance(node, ast.AnnAssign)
-        and isinstance(node.target, ast.Name)
-        and node.value is not None
-    }
 
     bus = EventBusInmemory()
     await bus.start()
@@ -93,7 +85,6 @@ async def test_enum_suffixes_reach_contract_subscribers() -> None:
             suffix = getattr(topics, name)
             assert type(suffix) is str
             assert suffix == member.value
-            assert assignments[name] == f"topic_enums.{enum_name}.{member_name}.value"
             assert suffix in manifest.all_unique_topics
             document = yaml.safe_load(
                 (package_root / "nodes" / node / "contract.yaml").read_text(

@@ -58,7 +58,10 @@ def _extract_suffix_values(constants_file: Path) -> dict[str, str]:
 
     A suffix is a string literal or ``EnumProducerTopic.MEMBER.value`` read off the
     per-producer topic enums generated from contract YAML, so the value is read
-    from the module itself rather than from its source text.
+    from the module itself rather than from its source text. This executes the
+    target module, so it must only be pointed at this repository's own constants
+    file. A SUFFIX_* attribute that is not a plain ``str`` raises ``TypeError``
+    rather than being dropped.
 
     Args:
         constants_file: Path to platform_topic_suffixes.py or similar.
@@ -68,14 +71,11 @@ def _extract_suffix_values(constants_file: Path) -> dict[str, str]:
     """
     spec = importlib.util.spec_from_file_location("_suffix_constants", constants_file)
     assert spec is not None and spec.loader is not None, constants_file
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    found = {n: v for n, v in vars(module).items() if n[:7] == "SUFFIX_"}
-    if bad := [
-        n for n, v in found.items() if type(v) is not str and isinstance(v, str)
-    ]:
-        raise TypeError(f"{bad} are str subclasses; assign the enum member's .value")
-    return {n: v for n, v in found.items() if isinstance(v, str)}
+    spec.loader.exec_module(module := importlib.util.module_from_spec(spec))
+    found = {n: v for n, v in vars(module).items() if n.startswith("SUFFIX_")}
+    if bad := sorted(n for n, v in found.items() if type(v) is not str):
+        raise TypeError(f"{bad} are not plain str; assign a literal or .value")
+    return found
 
 
 def _is_infrastructure_topic(topic: str) -> bool:

@@ -38,8 +38,8 @@ class TestExtractSuffixValues:
             "SUFFIX_NODE_HEARTBEAT": "onex.evt.platform.node-heartbeat.v1",
         }
 
-    def test_ignores_non_string_assignments(self, tmp_path: Path) -> None:
-        """Non-string SUFFIX_* values are ignored."""
+    def test_refuses_non_string_assignments(self, tmp_path: Path) -> None:
+        """A non-string SUFFIX_* value is refused, never silently dropped."""
         py_file = tmp_path / "suffixes.py"
         py_file.write_text(
             textwrap.dedent("""\
@@ -47,8 +47,8 @@ class TestExtractSuffixValues:
                 SUFFIX_REAL: str = "onex.evt.platform.test.v1"
             """)
         )
-        result = _extract_suffix_values(py_file)
-        assert result == {"SUFFIX_REAL": "onex.evt.platform.test.v1"}
+        with pytest.raises(TypeError, match="SUFFIX_COUNT"):
+            _extract_suffix_values(py_file)
 
     def test_refuses_enum_member_assigned_without_value(self, tmp_path: Path) -> None:
         """A SUFFIX_* bound to a str-mixin enum member (no .value) is refused."""
