@@ -37,6 +37,15 @@ requirements:
       - id: AC5
         statement: |-
           AC5: every DRIFT or MISSING unit in the lab-host drift fixture except the prod-pinned deploy-agent.service declares a committed installer, the log monitor installs through install-host-maintenance.sh --log-monitor (run against a temporary home with a fake systemctl) and the git-mirror units through the omninode-host-maintenance-sync.sh manifest (row parity with the drift manifest), the text report prints repair=bash <installer> <args>, and no tracked unit's Documentation= URL names a missing repo path -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
+  - id: req-omn21288-t24-entry-point-census
+    statement: "T24: the lane census records each runtime-image container with its command, and a command outside the declared allowed list reads as an entry point to remove."
+    acceptance:
+      - id: AC2401
+        statement: |-
+          AC-T24-1: every lane's runtime-image containers list their command, and a command outside the allowed list reads as an entry point to remove -- falsifier: uv run pytest over a census fixture with one planted python -m container, reported by name
+      - id: AC2402
+        statement: |-
+          AC-T24-2: the dev numbers reproduce, 17 containers and 4 on onex-runtime -- falsifier: the census run on the dev lane, read-only on the lab host, with the live numbers in the PR body
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -169,7 +178,36 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
+  - id: dod-omn21288-t24-planted-entry-point
+    description: >-
+      The census handler run over a recorded docker inspect fixture that plants a python -m consumer and a python -m handler writer beside onex-runtime containers: each planted container is reported by name under remove, every runtime-image container lists its command, and a widened allowed list in the data file changes the verdict without a code change. Fails at the merge base, which has no census handler.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_handler_lane_entry_point_census.py tests/integration/runtime/test_lane_entry_point_census_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2401]
+  - id: dod-omn21288-t24-dev-lane-numbers
+    description: >-
+      The census handler run over the recorded live dev-lane inspection (read-only against the lab host, 2026-11-01) reports the container and onex-runtime counts the PR body states. The live command and its result are in the PR body's Lab line.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_dev_lane_recorded_census.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2402]
+  - id: dod-omn21288-t24-deploy-probe-handler
+    description: >-
+      Deploy-scope source readback for a read-only census node with no live deploy: read the handler at the evaluated commit through GitHub and require the handler class the change introduces. It does not deploy a service or claim a runtime runs it; no deployed runtime carries the node's local-dev profile. Fails at the parent, which has no such file.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_lane_entry_point_census.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerLaneEntryPointCensus:" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2401]
 context:
   remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
   worker_integration: "The independently owned worker fold must preserve both overlays and union main.folded_profiles to [workers, tenant-projection]; then remove runtime-worker from SEPARATE_SERVICES as well. This branch never changes the worker branch."
+  t24_census: "T24 adds node_lane_entry_point_census_effect (local-dev profile) and deploy/lane-census/runtime-entry-points.yaml. Installing the census on a lab host is the host owner's step; nothing is deployed by this change."

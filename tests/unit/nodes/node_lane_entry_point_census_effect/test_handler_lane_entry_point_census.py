@@ -1,0 +1,130 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""The lane entry-point census records each runtime-image command (OMN-21288, T24)."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+import yaml
+
+from omnibase_infra.handlers.handler_lane_entry_point_census import (
+    HandlerLaneEntryPointCensus,
+    entry_point_of,
+)
+from omnibase_infra.models.lane_entry_point_census import (
+    ModelLaneEntryPointCensusRequest,
+)
+
+pytestmark = pytest.mark.unit
+
+FIXTURE = Path(__file__).parent / "fixtures" / "inspect_planted.json"
+POLICY = (
+    Path(__file__).parents[4] / "deploy" / "lane-census" / "runtime-entry-points.yaml"
+)
+PLANTED = "proj-a-ctx-consumer"
+WRITER = "proj-a-delegation-writer"
+
+
+def _run(policy: Path = POLICY, **extra: str):
+    request = ModelLaneEntryPointCensusRequest(
+        policy_path=str(policy), inspect_json_path=str(FIXTURE), **extra
+    )
+    return HandlerLaneEntryPointCensus().handle(request)
+
+
+def test_planted_python_dash_m_container_is_reported_by_name() -> None:
+    result = _run()
+    assert result.success, result.error_message
+    lane_a = next(c for c in result.censuses if c.lane == "proj-a")
+    assert PLANTED in lane_a.remove
+    assert WRITER in lane_a.remove
+    planted = next(e for e in lane_a.containers if e.container == PLANTED)
+    assert planted.verdict == "remove"
+    assert planted.entry_point.startswith("python -m ")
+    assert planted.command.startswith("tini -- /app/entrypoint-runtime.sh python -m ")
+
+
+def test_every_runtime_image_container_lists_its_command() -> None:
+    result = _run()
+    lane_a = next(c for c in result.censuses if c.lane == "proj-a")
+    assert lane_a.container_count == 6  # postgres is not a runtime-image container
+    assert lane_a.allowed_count == 3
+    assert lane_a.remove_count == 3
+    assert all(e.command and e.cmd for e in lane_a.containers)
+    assert "proj-a-postgres" not in {e.container for e in lane_a.containers}
+
+
+def test_lane_without_a_foreign_command_has_nothing_to_remove() -> None:
+    result = _run()
+    lane_b = next(c for c in result.censuses if c.lane == "proj-b")
+    assert lane_b.remove == ()
+    assert (lane_b.container_count, lane_b.allowed_count) == (1, 1)
+
+
+def test_table_is_regenerated_from_the_census() -> None:
+    table = _run().table_markdown
+    assert "| `onex-runtime` | 3 |" in table
+    assert "| `python -m ...consumer` | 1 | proj-a-ctx-consumer |" in table
+    assert (
+        "| `python -m omnimarket...handler_*` | 1 | proj-a-delegation-writer |" in table
+    )
+    assert "| `uvicorn` | 1 | proj-a-resolver | entry point to remove |" in table
+
+
+def test_allowed_list_in_data_changes_the_verdict_without_a_code_change(
+    tmp_path: Path,
+) -> None:
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    policy["allowed_commands"] = ["onex-runtime", "uvicorn"]
+    widened = tmp_path / "policy.yaml"
+    widened.write_text(yaml.safe_dump(policy), encoding="utf-8")
+    lane_a = next(c for c in _run(widened).censuses if c.lane == "proj-a")
+    assert "proj-a-resolver" not in lane_a.remove
+    assert lane_a.remove_count == 2
+
+
+def test_manifest_names_the_lane_by_its_compose_project(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        yaml.safe_dump({"lanes": {"dev": {"compose_project": "proj-a"}}}),
+        encoding="utf-8",
+    )
+    lanes = {c.lane for c in _run(manifest_path=str(manifest)).censuses}
+    assert lanes == {"dev", "proj-b"}
+
+
+def test_unreadable_policy_is_a_refusal_not_an_empty_census(tmp_path: Path) -> None:
+    result = _run(tmp_path / "absent.yaml")
+    assert result.success is False
+    assert result.censuses == ()
+    assert result.error_message
+
+
+def test_an_undeclared_policy_key_is_refused(tmp_path: Path) -> None:
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    policy["surprise"] = True
+    bad = tmp_path / "policy.yaml"
+    bad.write_text(yaml.safe_dump(policy), encoding="utf-8")
+    assert _run(bad).success is False
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (("tini", "--", "/app/entrypoint-runtime.sh", "onex-runtime"), "onex-runtime"),
+        (("python3.12", "-m", "pkg.mod", "--x"), "python -m pkg.mod"),
+        (("/usr/local/bin/uvicorn", "app:a"), "uvicorn"),
+        ((), ""),
+    ],
+)
+def test_entry_point_of(argv: tuple[str, ...], expected: str) -> None:
+    prefix = ("tini", "--", "/app/entrypoint-runtime.sh")
+    assert entry_point_of(argv, prefix) == expected
+
+
+def test_fixture_is_the_recorded_inspect_shape() -> None:
+    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    assert {"Name", "Config", "State"} <= set(data[0])

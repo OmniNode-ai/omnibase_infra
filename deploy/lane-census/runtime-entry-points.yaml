@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-21288 (one-runtime plan T24): the entry-point policy the lane census grades
+# runtime-image containers against. T27 owns the final allowed list; until it lands
+# the image runs one command, `onex-runtime`, and every other command reads as an
+# entry point to remove.
+schema_version: "1.0.0"
+# An image reference matching any of these is a runtime-image container.
+runtime_image_patterns:
+  - '(^|[/-])runtime(:|@|$)'
+# The image entrypoint's wrapper tokens, stripped before the command is graded.
+launcher_prefix: [tini, "--", /app/entrypoint-runtime.sh]
+allowed_commands:
+  - onex-runtime
+# Entry points the table reports as one row.
+entry_point_families:
+  - label: "python -m ...consumer"
+    pattern: '^python -m .*\.consumer$'
+  - label: "python -m omnimarket...handler_*"
+    pattern: '^python -m omnimarket\..*\.handler_[a-z_]+$'
