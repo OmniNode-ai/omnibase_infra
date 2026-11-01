@@ -11,8 +11,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.model_node_contract_config_block import (
+    ModelNodeContractConfigBlock,
+)
 
 _NODE_CONTRACT_PATH = Path(__file__).resolve().parents[1] / "contract.yaml"
 _POLICY_KEY = "premium_model_policy"
@@ -36,9 +39,7 @@ class ModelWastePremiumModelPolicy(BaseModel):
         cls, contract_path: Path = _NODE_CONTRACT_PATH
     ) -> ModelWastePremiumModelPolicy:
         """Load the policy from the ``config`` block of the node contract."""
-        document = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
-        config = document.get("config") if isinstance(document, dict) else None
-        block = config.get(_POLICY_KEY) if isinstance(config, dict) else None
+        block = ModelNodeContractConfigBlock.load(contract_path, _POLICY_KEY)
         return cls.model_validate(block)
 
 
