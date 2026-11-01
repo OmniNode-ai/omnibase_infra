@@ -18,6 +18,9 @@ from pydantic import (
     model_validator,
 )
 
+from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
+    EnumOmnibaseInfraTopic,
+)
 from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
 from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
     host_aliases_in,
@@ -302,7 +305,7 @@ class ModelChainCanaryRequest(BaseModel):
         ),
     )
     quarantine_topic: str = Field(
-        default="onex.dlq.omnibase-infra.quarantine.v1",
+        default=EnumOmnibaseInfraTopic.DLQ_QUARANTINE_V1.value,
         description=(
             "Platform quarantine sink. Handlers with no DLQ topic declared "
             "in their own contract fall through to this topic, which is how "

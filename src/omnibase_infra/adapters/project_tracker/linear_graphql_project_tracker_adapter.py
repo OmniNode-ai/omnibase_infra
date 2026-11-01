@@ -48,13 +48,12 @@ from omnibase_infra.handlers.done_write_receipt_guard import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.protocols.protocol_linear_graphql_transport import (
     ProtocolLinearGraphQLTransport,
 )
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
-# Default Linear GraphQL endpoint; overridable via constructor.
-DEFAULT_LINEAR_GRAPHQL_ENDPOINT: Final[str] = "https://api.linear.app/graphql"
 # Service identifier for circuit breaker / error context.
 SERVICE_NAME: Final[str] = "linear-graphql"
 
@@ -350,7 +349,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
     def __init__(
         self,
         api_key: str | None = None,
-        endpoint: str = DEFAULT_LINEAR_GRAPHQL_ENDPOINT,
+        endpoint: str = load_third_party_endpoints().linear_graphql_url,
         timeout_seconds: float = _T.linear_graphql_request_seconds,
         client: httpx.AsyncClient | None = None,
         done_write_guard: DoneWriteReceiptGuard | None = None,
