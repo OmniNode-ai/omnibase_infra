@@ -29,9 +29,10 @@ from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
 from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.runtime.service_kernel import (
-    WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH,
     resolve_embedded_runtime_config,
 )
+
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
 
 pytestmark = pytest.mark.unit
 

@@ -39,9 +39,10 @@ from omnibase_infra.handlers.handler_workspace_runtime_config_materializer impor
     STALE_AFTER,
 )
 from omnibase_infra.runtime.service_kernel import (
-    WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH,
     resolve_embedded_runtime_config,
 )
+
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
 
 pytestmark = pytest.mark.unit
 

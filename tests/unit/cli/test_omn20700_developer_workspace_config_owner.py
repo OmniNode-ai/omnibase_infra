@@ -29,9 +29,10 @@ from omnibase_core.enums.enum_event_bus_type import EnumEventBusType
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime import service_kernel
 from omnibase_infra.runtime.service_kernel import (
-    WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH,
     resolve_embedded_runtime_config,
 )
+
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
 
 pytestmark = pytest.mark.unit
 

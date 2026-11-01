@@ -55,10 +55,11 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.models.enum_event_bus_profile import EnumEventBusProfile
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
 from omnibase_infra.runtime.service_kernel import (
-    WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH,
     load_runtime_config,
     resolve_embedded_runtime_config,
 )
+
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
 
 pytestmark = pytest.mark.unit
 
@@ -292,7 +293,7 @@ class TestRunDelegateDefaultPath:
 
         def _no_consumer(**_: object) -> object:
             raise DelegateLocusRefusedError(
-                "no live consumer group is bound to 'onex.cmd.test.v1'"
+                "no live consumer group is bound to the delegation topic"
             )
 
         monkeypatch.setattr(cli_delegate, "resolve_delegate_locus", _no_consumer)
