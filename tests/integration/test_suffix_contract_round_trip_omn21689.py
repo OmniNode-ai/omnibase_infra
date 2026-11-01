@@ -57,39 +57,36 @@ _BINDINGS = (
     ),
 )
 
-# Select subscriber destinations independently of the public suffix and enum.
+# Name the subscriber contract and direction only; the topic is found by
+# membership so a reordered contract list does not move the binding.
 _SUBSCRIBER_CONTRACTS = (
-    ("node_waste_detection_compute", "subscribe_topics", 0),
-    ("node_reward_binder_effect", "publish_topics", 1),
-    ("node_validation_ledger_projection_compute", "subscribe_topics", 0),
-    ("node_validation_ledger_projection_compute", "subscribe_topics", 1),
-    ("node_validation_ledger_projection_compute", "subscribe_topics", 2),
-    ("node_emit_daemon_runtime", "subscribe_topics", 1),
-    ("node_emit_daemon_runtime", "subscribe_topics", 2),
+    ("node_waste_detection_compute", "subscribe_topics"),
+    ("node_reward_binder_effect", "publish_topics"),
+    ("node_validation_ledger_projection_compute", "subscribe_topics"),
+    ("node_validation_ledger_projection_compute", "subscribe_topics"),
+    ("node_validation_ledger_projection_compute", "subscribe_topics"),
+    ("node_emit_daemon_runtime", "subscribe_topics"),
+    ("node_emit_daemon_runtime", "subscribe_topics"),
 )
 
 
 @pytest.mark.asyncio
 async def test_enum_suffixes_reach_contract_subscribers() -> None:
-    """Read real contracts, then read back messages sent using all seven suffixes."""
+    """Each suffix reaches exactly one topic its contract declares, of all declared."""
     package_root = Path(registry.__file__).resolve().parents[1]
     manifest = ContractTopicExtractor().scan(package_root / "nodes")
     assignments = {
         node.target.id: ast.unparse(node.value)
-        for node in ast.parse(Path(registry.__file__).read_text()).body
+        for node in ast.parse(Path(registry.__file__).read_text(encoding="utf-8")).body
         if isinstance(node, ast.AnnAssign)
         and isinstance(node.target, ast.Name)
         and node.value is not None
     }
-    received: list[tuple[str, bytes]] = []
-
-    async def readback(message: ModelEventMessage) -> None:
-        received.append((message.topic, message.value))
 
     bus = EventBusInmemory()
     await bus.start()
     try:
-        for (name, enum_name, member_name), (node, direction, index) in zip(
+        for (name, enum_name, member_name), (node, direction) in zip(
             _BINDINGS, _SUBSCRIBER_CONTRACTS, strict=True
         ):
             member = getattr(getattr(generated, enum_name), member_name)
@@ -99,16 +96,32 @@ async def test_enum_suffixes_reach_contract_subscribers() -> None:
             assert assignments[name] == f"topic_enums.{enum_name}.{member_name}.value"
             assert suffix in manifest.all_unique_topics
             document = yaml.safe_load(
-                (package_root / "nodes" / node / "contract.yaml").read_text()
+                (package_root / "nodes" / node / "contract.yaml").read_text(
+                    encoding="utf-8"
+                )
             )
-            contract_topic = document["event_bus"][direction][index]
-            unsubscribe = await bus.subscribe_ungrouped(contract_topic, readback)
+            contract_topics = document["event_bus"][direction]
+            assert suffix in contract_topics, (node, direction, suffix)
+            # Subscribe to every topic the contract declares, so the readback
+            # shows the suffix routes to its own declaration and no sibling.
+            received: list[tuple[str, bytes]] = []
+
+            async def readback(
+                message: ModelEventMessage,
+                sink: list[tuple[str, bytes]] = received,
+            ) -> None:
+                sink.append((message.topic, message.value))
+
+            unsubscribes = [
+                await bus.subscribe_ungrouped(contract_topic, readback)
+                for contract_topic in contract_topics
+            ]
             try:
                 payload = name.encode()
                 await bus.publish(topic=suffix, key=None, value=payload)
-                assert received[-1] == (contract_topic, payload)
+                assert received == [(suffix, payload)], (node, received)
             finally:
-                await unsubscribe()
-        assert len(received) == len(_BINDINGS)
+                for unsubscribe in unsubscribes:
+                    await unsubscribe()
     finally:
         await bus.close()
