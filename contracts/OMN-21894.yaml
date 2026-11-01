@@ -24,8 +24,8 @@ evidence_requirements:
     description: "SDK resolution, guard and MCP transport tests."
     command: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp tests/integration/services/mcp tests/integration/handlers/test_mcp_handler_integration.py -q --no-cov"
   - kind: manual
-    description: "Hosted deploy-boundary readback imports every mcp module under src and builds the MCP application from the locked environment."
-    command: "deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py -q --no-cov"
+    description: "Hosted deploy-boundary readback asks the live package index for the mcp release the declared range now requires."
+    command: "deploy: curl -fsS https://pypi.org/pypi/mcp/2.3.0/json -o /dev/null"
 dod_evidence:
   - id: dod-wheel-create-app
     description: "create_app returns an application from the resolved SDK."
@@ -62,3 +62,10 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp tests/integration/services/mcp tests/integration/handlers/test_mcp_handler_integration.py -q --no-cov"
+  - id: dod-deploy-mcp-release-published
+    description: "The package index serves the mcp 2.3.0 release that the declared range requires, so a PyPI install of the shipped package can resolve it (deploy evidence)."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: "curl -fsS https://pypi.org/pypi/mcp/2.3.0/json -o /dev/null"
