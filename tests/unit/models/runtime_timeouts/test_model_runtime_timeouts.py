@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -68,6 +69,7 @@ def test_a_file_without_a_timeouts_mapping_is_refused(tmp_path: Path) -> None:
         {"health_check_default_seconds": 61.0},
         {"handler_shutdown_default_seconds": 0.5},
         {"kafka_heartbeat_interval_ms": 45000},
+        {"kafka_max_poll_interval_ms": 30000},
     ],
 )
 def test_inconsistent_values_fail_to_load(override: dict[str, object]) -> None:
@@ -118,7 +120,7 @@ def test_call_sites_carry_the_declared_values() -> None:
             "kafka_heartbeat_interval_ms",
             "kafka_max_poll_interval_ms",
         ):
-            assert f"=RUNTIME_TIMEOUTS.{key}" in source
+            assert re.search(rf"=\s*RUNTIME_TIMEOUTS\.{key}\b", source)
     assert (
         _default(
             snapshot_publisher_registration.SnapshotPublisherRegistration.__init__,

@@ -73,7 +73,7 @@ class ModelRuntimeTimeouts(BaseModel):
 
     @model_validator(mode="after")
     def _defaults_lie_within_bounds(self) -> ModelRuntimeTimeouts:
-        """Refuse a default outside its bounds and a heartbeat that outlasts the session."""
+        """Refuse a default outside its bounds and a heartbeat that outlasts the session or a poll interval below it."""
         if not (
             self.health_check_min_seconds
             <= self.health_check_default_seconds
@@ -89,6 +89,10 @@ class ModelRuntimeTimeouts(BaseModel):
         if self.kafka_heartbeat_interval_ms >= self.kafka_session_timeout_ms:
             raise ValueError(
                 "kafka_heartbeat_interval_ms must be below kafka_session_timeout_ms"
+            )
+        if self.kafka_max_poll_interval_ms < self.kafka_session_timeout_ms:
+            raise ValueError(
+                "kafka_max_poll_interval_ms must not be below kafka_session_timeout_ms"
             )
         return self
 
