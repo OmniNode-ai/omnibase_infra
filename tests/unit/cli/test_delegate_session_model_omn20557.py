@@ -120,7 +120,7 @@ def test_a_colliding_metadata_key_is_refused_not_overwritten() -> None:
 
 
 @pytest.mark.parametrize(
-    "value", ["   ", "claude opus", "x" * 129, "-claude", "claude\nopus"]
+    "value", ["", "   ", "claude opus", "x" * 129, "-claude", "claude\nopus"]
 )
 def test_a_malformed_session_model_is_a_usage_error(value: str) -> None:
     result = CliRunner().invoke(
@@ -275,3 +275,18 @@ def test_named_tests_refuse_to_overwrite_the_ticket() -> None:
 def test_named_tests_refuse_to_overwrite_lineage() -> None:
     with pytest.raises(ValueError, match="never overwritten"):
         _build(lineage={"a": "1"}, named_tests={"a": "2"})
+
+
+def test_lineage_refuses_to_overwrite_the_caller_lane() -> None:
+    with pytest.raises(ValueError, match="never overwritten"):
+        _build(caller_lane="lane-a", lineage={"caller_lane": "x"})
+
+
+def test_named_tests_refuse_to_overwrite_the_caller_lane() -> None:
+    with pytest.raises(ValueError, match="never overwritten"):
+        _build(caller_lane="lane-a", named_tests={"caller_lane": "x"})
+
+
+def test_the_session_model_refuses_to_overwrite_the_caller_lane() -> None:
+    with pytest.raises(ValueError, match="never overwritten"):
+        _build(caller_lane="lane-a", lineage={"session_model": "x"}, session_model="m")

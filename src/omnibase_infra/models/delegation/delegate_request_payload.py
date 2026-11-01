@@ -9,16 +9,15 @@ every existing caller's payload. Keys a released consumer may not declare ride
 in the ``metadata`` map, which every released request consumer accepts.
 
 Moved out of ``omnibase_infra.cli.cli_delegate`` when the session model joined
-the metadata (OMN-20557), so the command line module only shrinks. The caller
-parameter is now typed by a Protocol rather than the command line's model, and
-every metadata write is collision-checked.
+the metadata (OMN-20557), so the command line module only shrinks. The caller's
+lane and session arrive as plain strings, so this module imports nothing from
+the command line package, and every metadata write is collision-checked.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from typing import Protocol
 
 from omnibase_infra.models.delegation.model_delegate_session_model import (
     ModelDelegateSessionModel,
@@ -27,7 +26,6 @@ from omnibase_infra.models.delegation.model_delegate_session_model import (
 __all__ = [
     "DELEGATE_CALLER_LANE_METADATA_KEY",
     "DELEGATE_TICKET_METADATA_KEY",
-    "ProtocolDelegateRequestCaller",
     "build_delegate_request_payload",
 ]
 
@@ -40,16 +38,6 @@ DELEGATE_TICKET_METADATA_KEY = "ticket_id"
 #: this module depends on nothing in the command line package and the key cannot
 #: drift. omnimarket's delegate-skill handler and projection read the same key.
 DELEGATE_CALLER_LANE_METADATA_KEY = "caller_lane"
-
-
-class ProtocolDelegateRequestCaller(Protocol):
-    """The caller's lane and session, as the command line resolves them."""
-
-    @property
-    def lane(self) -> str | None: ...
-
-    @property
-    def session_id(self) -> str | None: ...
 
 
 def _merge_metadata(
@@ -84,7 +72,8 @@ def build_delegate_request_payload(
     backend_id: str | None = None,
     model: str | None = None,
     ticket_id: str | None = None,
-    caller: ProtocolDelegateRequestCaller | None = None,
+    caller_lane: str | None = None,
+    session_id: str | None = None,
     tenant_id: str | None = None,
     trace_id: uuid.UUID | None = None,
     span_id: uuid.UUID | None = None,
@@ -133,10 +122,10 @@ def build_delegate_request_payload(
     # OMN-19860: who issued the run. The lane rides in the same metadata map;
     # the session rides in the declared ``session_id`` field, only ever as a
     # UUID. Each is omitted entirely when unresolved.
-    if caller is not None and caller.lane is not None:
+    if caller_lane is not None:
         _merge_metadata(
             metadata,
-            {DELEGATE_CALLER_LANE_METADATA_KEY: caller.lane},
+            {DELEGATE_CALLER_LANE_METADATA_KEY: caller_lane},
             "the caller lane",
         )
     # OMN-20606: the delegation this run falls back or escalates from, already
@@ -154,8 +143,8 @@ def build_delegate_request_payload(
         _merge_metadata(metadata, entry, "the session model")
     if metadata:
         payload["metadata"] = metadata
-    if caller is not None and caller.session_id is not None:
-        payload["session_id"] = caller.session_id
+    if session_id is not None:
+        payload["session_id"] = session_id
     # OMN-17427: the tenant of the install the command runs under, written to
     # the ``tenant_id`` field the request model has declared since OMN-14058.
     # Omitted entirely when unresolved (the in-process first-delegation path),

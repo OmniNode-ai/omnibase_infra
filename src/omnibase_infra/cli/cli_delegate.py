@@ -2525,7 +2525,8 @@ def _write_payload(
         backend_id=backend_id,
         model=model,
         ticket_id=ticket_id,
-        caller=caller,
+        caller_lane=caller.lane if caller is not None else None,
+        session_id=caller.session_id if caller is not None else None,
         tenant_id=tenant_id,
         trace_id=trace_id,
         span_id=span_id,
@@ -3916,7 +3917,7 @@ def delegate_command(
             own_correlation_id=correlation_id,
         )
         lineage = resolved_lineage.as_metadata() if resolved_lineage else None
-        resolved_session_model = ModelDelegateSessionModel.from_flag(session_model)
+        ModelDelegateSessionModel.from_flag(session_model)
         resolved_named_tests = ModelDelegateNamedTests.from_flags(
             named_tests, test_files, answer_path
         )
@@ -3958,9 +3959,7 @@ def delegate_command(
             correlation_id=correlation_id,
             lineage=lineage,
             named_tests=named_test_metadata,
-            session_model=resolved_session_model.model
-            if resolved_session_model
-            else None,
+            session_model=session_model,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
