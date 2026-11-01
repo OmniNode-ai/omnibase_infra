@@ -65,7 +65,7 @@ dod_evidence:
           wiring = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "wire_registration_handlers")
           calls = [node for node in ast.walk(wiring) if isinstance(node, ast.Call)]
           for name in ("ServiceIntrospectionTopicStore", "HandlerNodeIntrospected"):
-              count = sum(isinstance(call.func, ast.Name) and call.func.id == name for call in calls)
+              count = sum((call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", None)) == name for call in calls)
               assert count == 1, (name, count)
           print("registration deploy artifact: one topic store and one introspection handler")
           PYPROBE
