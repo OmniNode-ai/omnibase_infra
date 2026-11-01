@@ -21,15 +21,14 @@ from scripts.ci.ci_summary_gate import (
     evaluate_external_contexts,
     evaluate_external_sweep,
 )
-from tests.ci.receipt_gate_pin import RECEIPT_GATE_PIN_SHA
+from tests.ci.receipt_gate_pin import RECEIPT_GATE_PIN_SHA, RECEIPT_GATE_PIN_TAG
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CALLER_PATH = REPO_ROOT / ".github" / "workflows" / "call-repo-evidence-gate.yml"
 
-# First release whose wheel ships node_dod_verify occ-difference, omnimarket#3277.
-_DIFFERENCE_CLASSIFIER_FLOOR = (0, 4, 294)
+_VERIFIER_TAG_SHAPE = r"dev-\d{14}-[0-9a-f]{12}"
 
 _VERIFY = "repo-evidence / verify"
 _DOD_VERIFY = "repo-evidence / dod-verify"
@@ -81,8 +80,11 @@ def test_caller_workflow_shape() -> None:
     assert job["with"]["evidence-source"] == "caller", (
         "caller evidence mode is required"
     )
-    assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", job["with"]["verifier-version"]), (
-        "verifier-version must be a numeric semantic version"
+    assert re.fullmatch(_VERIFIER_TAG_SHAPE, job["with"]["verifier-tag"]), (
+        "verifier-tag must be an omnimarket dev-merge tag"
+    )
+    assert "verifier-version" not in job["with"], (
+        "the caller installs its verifier from verifier-tag, never a version"
     )
     for key in ("steps", "secrets", "if", "name", "permissions"):
         assert key not in job, f"caller job must not declare {key}"
@@ -90,21 +92,22 @@ def test_caller_workflow_shape() -> None:
 
 
 def test_caller_verifier_ships_the_occ_difference_classifier() -> None:
+    """The verifier comes from a dev-merge tag, which postdates omnimarket#3563.
+
+    The reusable resolves the tag to its commit and refuses one that is moved, off
+    omnimarket dev, or not a descendant of the floor commit (OMN-21853), so no
+    release number is compared here.
+    """
     inputs = _job()["with"]
-    version = tuple(int(part) for part in inputs["verifier-version"].split("."))
-    assert version >= _DIFFERENCE_CLASSIFIER_FLOOR, (
-        "verifier-version must ship node_dod_verify occ-difference "
-        f"(>= {'.'.join(map(str, _DIFFERENCE_CLASSIFIER_FLOOR))})"
-    )
-    assert version >= (0, 4, 305), (
-        "verifier-version must ship omnimarket#3563 (omnimarket v0.4.305), "
-        "the release the receipt-gate pin's contract-home step expects"
-    )
+    assert re.fullmatch(_VERIFIER_TAG_SHAPE, inputs["verifier-tag"]), inputs
+    assert "verifier-version" not in inputs, sorted(inputs)
 
 
 def test_caller_pins_the_s6_part1_inputs() -> None:
     job = _job()
     assert job["uses"].endswith(f"@{RECEIPT_GATE_PIN_SHA}")
+    assert RECEIPT_GATE_PIN_SHA.startswith(RECEIPT_GATE_PIN_TAG.rsplit("-", 1)[1])
+    assert re.fullmatch(_VERIFIER_TAG_SHAPE, RECEIPT_GATE_PIN_TAG)
     assert job["with"].get("shadow") == "false"
     assert job["with"].get("compare-with-occ") == "false"
 
