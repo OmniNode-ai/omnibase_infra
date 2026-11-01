@@ -137,7 +137,7 @@ class TestStep1WhitelistedPaths:
         """Memory files bypass all auth checks."""
         request = ModelAuthGateRequest(
             tool_name="Write",
-            target_path="/home/user/.claude/memory/notes.md",
+            target_path="/workspace/.claude/memory/notes.md",
         )
         decision = handler.handle(request)
 
@@ -148,7 +148,7 @@ class TestStep1WhitelistedPaths:
         """Project-specific memory files bypass auth checks."""
         request = ModelAuthGateRequest(
             tool_name="Write",
-            target_path="/home/user/.claude/projects/my-proj/memory/MEMORY.md",
+            target_path="/workspace/.claude/projects/my-proj/memory/MEMORY.md",
         )
         decision = handler.handle(request)
 
