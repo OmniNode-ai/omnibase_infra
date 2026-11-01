@@ -103,18 +103,35 @@ def test_built_wheel_loads_defaults_and_runs_consumers(tmp_path: Path) -> None:
     assert "retry attempts=3; consumer starts=2" in result.stdout
 
 
-@pytest.mark.parametrize("failure", ["missing", "malformed", "invalid"])
+@pytest.mark.parametrize(
+    "failure", ["missing", "malformed", "invalid", "unordered_backoff"]
+)
 def test_unusable_timeout_configuration_has_a_typed_error(
     tmp_path: Path, failure: str
 ) -> None:
+    import yaml
+
     from omnibase_infra.errors import ProtocolConfigurationError
-    from omnibase_infra.models.operational_timeouts import ModelOperationalTimeouts
+    from omnibase_infra.models.operational_timeouts import (
+        ModelOperationalTimeouts,
+        model_operational_timeouts,
+    )
 
     path = tmp_path / "operational_timeouts.yaml"
     if failure == "malformed":
         path.write_text("timeouts: [\n", encoding="utf-8")
     elif failure == "invalid":
         path.write_text("timeouts: {database_query_seconds: -1}\n", encoding="utf-8")
+    elif failure == "unordered_backoff":
+        shipped_path = Path(model_operational_timeouts.__file__).with_name(
+            "operational_timeouts.yaml"
+        )
+        shipped = yaml.safe_load(shipped_path.read_text(encoding="utf-8"))
+        block = shipped["timeouts"]
+        block["optimistic_retry_initial_backoff_seconds"] = (
+            block["optimistic_retry_max_backoff_seconds"] + 1
+        )
+        path.write_text(yaml.safe_dump(shipped), encoding="utf-8")
     with pytest.raises(ProtocolConfigurationError, match=r"operational_timeouts\.yaml"):
         ModelOperationalTimeouts.from_file(path)
 
