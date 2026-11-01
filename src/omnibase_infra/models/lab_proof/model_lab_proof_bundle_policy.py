@@ -9,7 +9,7 @@ Ticket: OMN-19572
 from __future__ import annotations
 
 import re
-from ipaddress import IPv6Address
+from ipaddress import AddressValueError, IPv4Address, IPv6Address
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -53,7 +53,8 @@ class ModelLabProofBundlePolicy(BaseModel):
     bus_bootstrap_servers: str = Field(
         min_length=1,
         description="Comma-separated host:port bus addresses the effects container's "
-        "delegation step reaches. IPv6 hosts must be bracketed.",
+        "delegation step reaches. IPv6 hosts must be bracketed; whitespace around a "
+        "broker is rejected, not trimmed.",
     )
     step_timeouts: ModelLabProofStepTimeouts
     uv_image: str = Field(min_length=1)
@@ -72,7 +73,14 @@ class ModelLabProofBundlePolicy(BaseModel):
             ):
                 raise ValueError("each bus broker must have a port in 1..65535")
             if host.startswith("[") and host.endswith("]"):
-                IPv6Address(host[1:-1])
+                try:
+                    IPv6Address(host[1:-1])
+                except AddressValueError as error:
+                    raise ValueError(
+                        f"bus broker {broker!r} has an invalid bracketed IPv6 host"
+                    ) from error
+                if "%" in host:
+                    raise ValueError(f"bus broker {broker!r} must not carry a zone id")
             elif (
                 len(host) > 253
                 or re.fullmatch(
@@ -83,8 +91,16 @@ class ModelLabProofBundlePolicy(BaseModel):
                 is None
             ):
                 raise ValueError(
-                    "each bus broker must have a valid hostname or IPv6 address"
+                    f"bus broker {broker!r} must have a valid hostname or a "
+                    "bracketed IPv6 address"
                 )
+            elif re.fullmatch(r"[0-9.]+", host):
+                try:
+                    IPv4Address(host)
+                except AddressValueError as error:
+                    raise ValueError(
+                        f"bus broker {broker!r} has a malformed IPv4 host"
+                    ) from error
         return value
 
 

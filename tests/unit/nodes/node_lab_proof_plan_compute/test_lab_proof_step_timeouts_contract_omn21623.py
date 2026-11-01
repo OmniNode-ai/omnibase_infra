@@ -83,6 +83,13 @@ def test_a_timeout_below_one_second_is_refused_at_load(name: str, value: int) ->
         "bus:9092,",
         "bus:9092,other:0",
         "[invalid]:9092",
+        "[fe80::1%eth0]:9092",
+        "[::1:9092",
+        "::1:9092",
+        "999.999.999.999:9092",
+        "1.2.3:9092",
+        "a:9092, b:9092",
+        " a:9092",
     ],
 )
 def test_a_malformed_bus_address_is_refused_at_load(address: str) -> None:
