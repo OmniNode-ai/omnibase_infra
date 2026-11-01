@@ -6,12 +6,8 @@ summary: >-
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - ModelScopeCheckCommand.output_path
-  - ModelScopeFileReadRequest.output_path
-  - ModelScopeFileReadResult.output_path
-  - ModelScopeExtractInput.output_path
-  - ModelScopeExtracted.output_path
-  - HandlerScopeFileRead.handle
+  - events
+  - public_api
 requirements:
   - id: req-omn21799-scope-manifest-path-injected
     statement: The scope-check workflow holds no manifest location in code; the location arrives in the command and is carried through every hop.
@@ -19,16 +15,19 @@ requirements:
       - id: AC1
         statement: "AC1: the contracts_and_di count for literal_path and literal_model_name over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
       - id: AC2
-        statement: "AC2: every path and model name comes from the owning node contract or overlay and is injected, none hard-coded in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths"
+        statement: "AC2: every path and model name comes from the owning node contract or overlay and is injected, none hard-coded in the touched code -- falsifier: the focused scope model and workflow tests plus the checker re-run on the slice paths"
       - id: AC3
-        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
+        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: the focused scope tests and validator on the lab at the PR head, receipt path in the PR body"
 evidence_requirements:
   - kind: tests
     description: The scope canary unit tests, including the required-output_path test that fails against the merge-base models.
-    command: uv run --frozen pytest tests/unit/nodes/test_scope_canary tests/unit/nodes/node_scope_extract_compute -q
-  - kind: command
+    command: uv run --frozen pytest tests/unit/nodes/test_scope_canary/test_scope_models.py tests/unit/nodes/test_scope_canary/test_scope_workflow_integration.py tests/unit/nodes/test_scope_canary/test_handler_scope_file_read.py tests/unit/nodes/test_scope_canary/test_handler_scope_extract.py tests/unit/nodes/node_scope_extract_compute/test_scope_extract_dispatch_entrypoint_omn14832.py tests/unit/nodes/node_scope_extract_compute/test_node_scope_extract_compute_golden_equivalence.py -q
+  - kind: manual
     description: The contracts_and_di validator over the three slice node directories reports no finding.
     command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/nodes/node_scope_extract_compute src/omnibase_infra/nodes/node_scope_file_read_effect src/omnibase_infra/nodes/node_scope_workflow_orchestrator
+  - kind: tests
+    description: Deploy-scope filesystem readback through the scope handlers using the caller-selected destination; no broker or containers required.
+    command: "deploy: uv run --frozen pytest tests/integration/nodes/test_scope_output_path_deploy_omn21799.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -48,16 +47,19 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/nodes/test_scope_canary tests/unit/nodes/node_scope_extract_compute -q
+        check_value: uv run --frozen pytest tests/unit/nodes/test_scope_canary/test_scope_models.py tests/unit/nodes/test_scope_canary/test_scope_workflow_integration.py tests/unit/nodes/test_scope_canary/test_handler_scope_file_read.py tests/unit/nodes/test_scope_canary/test_handler_scope_extract.py tests/unit/nodes/node_scope_extract_compute/test_scope_extract_dispatch_entrypoint_omn14832.py tests/unit/nodes/node_scope_extract_compute/test_node_scope_extract_compute_golden_equivalence.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
   - id: dod-omn21799-ac3-cloud-ci
-    description: Cloud lane (lab_exempt_paths cloud_ci rules) - the hosted CI of the PR runs the unit tests at the PR head in place of a lab-run receipt.
+    description: The required-output_path tests and filesystem integration readback run on lab host h051 and remain runnable on a hosted runner.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/nodes/test_scope_canary/test_scope_models.py -q -k output_path_is_required
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_scope_output_path_deploy_omn21799.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3

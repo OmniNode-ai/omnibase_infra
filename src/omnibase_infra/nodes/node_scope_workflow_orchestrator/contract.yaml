@@ -12,8 +12,8 @@ runtime_profiles: [main]
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
   Orchestrates the scope-check workflow: receive command, dispatch file read, dispatch scope extraction, dispatch manifest write, emit completion event.
 
@@ -50,7 +50,7 @@ event_bus:
 input_model:
   name: "ModelScopeCheckCommand"
   module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.models.model_scope_check_command"
-  description: "Command to initiate scope-check workflow."
+  description: "Command to initiate scope-check workflow. output_path is required and non-empty; the producer supplies the manifest destination (OMN-21799)."
 output_model:
   name: "ModelScopeCheckResult"
   module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.models.model_scope_check_result"
