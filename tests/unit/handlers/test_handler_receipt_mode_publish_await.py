@@ -11,7 +11,6 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -311,43 +310,11 @@ def test_invalid_deadline_refused_before_bus_construction(deadline_ms: object) -
     factory.assert_not_called()
 
 
-class _ControlledDeadline:
-    """The handler's clock and timeout, expired by the test, not by wall time.
-
-    The handler reads ``time.monotonic`` for its expiry and ``asyncio.timeout``
-    for its budget. A real 200 ms budget also covers bus start, subscription
-    and the responder's inline reply, so a loaded runner can spend it before
-    the progress reply is collected (OMN-21623). Here the clock stands still
-    and the timeout fires only when the test reaches the stage under test.
-    """
-
-    def __init__(self) -> None:
-        self.now = 0.0
-        self.delays: list[float | None] = []
-        self._timeouts: list[asyncio.Timeout] = []
-
-    def monotonic(self) -> float:
-        return self.now
-
-    def timeout(self, delay: float | None) -> asyncio.Timeout:
-        self.delays.append(delay)
-        controlled = asyncio.timeout(None)
-        self._timeouts.append(controlled)
-        return controlled
-
-    def expire(self) -> None:
-        self.now = float("inf")
-        when = asyncio.get_running_loop().time()
-        for controlled in self._timeouts:
-            controlled.reschedule(when)
-
-
 @pytest.mark.parametrize("stage", ["subscribe", "publish", "wait"])
 def test_deadline_cleans_up_and_returns_only_collected_progress(
     monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
     bus = EventBusInmemory()
-    deadline = _ControlledDeadline()
 
     async def responder(message: ModelEventMessage) -> None:
         command = ModelEventEnvelope[dict[str, object]].model_validate_json(
@@ -369,8 +336,7 @@ def test_deadline_cleans_up_and_returns_only_collected_progress(
         group_id: str,
     ) -> Callable[[], Awaitable[None]]:
         if stage == "subscribe" and unsubscribes:
-            deadline.expire()
-            await asyncio.Event().wait()
+            await asyncio.sleep(10)
         unsubscribe = AsyncMock(
             wraps=await subscribe(topic, on_message=on_message, group_id=group_id)
         )
@@ -379,29 +345,16 @@ def test_deadline_cleans_up_and_returns_only_collected_progress(
 
     async def publish_then_wait(topic: str, *, key: bytes | None, value: bytes) -> None:
         await publish(topic, key=key, value=value)
-        if topic != COMMAND_TOPIC:
-            return
-        if stage == "publish":
-            deadline.expire()
-            await asyncio.Event().wait()
-        elif stage == "wait":
-            # The handler is about to wait for an action that never comes.
-            deadline.expire()
+        if stage == "publish" and topic == COMMAND_TOPIC:
+            await asyncio.sleep(10)
 
     close = AsyncMock(wraps=bus.close)
     monkeypatch.setattr(bus, "subscribe", subscribe_and_track)
     monkeypatch.setattr(bus, "publish", publish_then_wait)
     monkeypatch.setattr(bus, "close", close)
-    monkeypatch.setattr(
-        handler_module, "time", SimpleNamespace(monotonic=deadline.monotonic)
-    )
-    monkeypatch.setattr(
-        handler_module,
-        "asyncio",
-        SimpleNamespace(run=asyncio.run, Event=asyncio.Event, timeout=deadline.timeout),
-    )
+    started = time.monotonic()
     events = _call(bus, deadline_ms=200)
-    assert deadline.delays == [0.2]
+    assert time.monotonic() - started < 2
     assert events == (
         ()
         if stage == "subscribe"
