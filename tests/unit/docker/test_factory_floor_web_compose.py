@@ -4,10 +4,15 @@
 
 from __future__ import annotations
 
+import gzip
+import http.client
 import json
 import os
 import re
 import subprocess
+import time
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +47,10 @@ def _service() -> dict[str, Any]:
 def _compose_config(
     env_values: dict[str, str], *extra: str
 ) -> subprocess.CompletedProcess[str]:
-    env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", ""), **env_values}
+    # The ambient environment stays (the container tooling needs its own wiring to run at all); only the
+    # three deployment values are replaced, so one set in the caller's shell can never satisfy a refusal test.
+    env = {k: v for k, v in os.environ.items() if k not in REQUIRED}
+    env.update(env_values)
     try:
         return subprocess.run(
             ["docker", "compose", "-f", str(COMPOSE), "config", *extra],
@@ -256,3 +264,147 @@ def test_compose_renders_one_published_port_on_the_given_address() -> None:
     assert len(serve) == 1
     assert serve[0]["read_only"] is True
     assert serve[0]["source"] == RENDER_ENV["FACTORY_FLOOR_SERVE_DIR"]
+
+
+def _fetch(
+    host: str,
+    port: int,
+    method: str,
+    path: str,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, str], bytes]:
+    connection = http.client.HTTPConnection(host, port, timeout=5)
+    try:
+        connection.request(method, path, headers=headers or {})
+        response = connection.getresponse()
+        return (
+            response.status,
+            {k.lower(): v for k, v in response.getheaders()},
+            response.read(),
+        )
+    finally:
+        connection.close()
+
+
+def _container_logs(name: str) -> str:
+    return subprocess.run(
+        ["docker", "logs", name], capture_output=True, text=True, check=False
+    ).stderr
+
+
+@pytest.fixture(scope="module")
+def nginx_address(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[tuple[str, int]]:
+    """The pinned image running the committed nginx.conf with the compose file's lock-down."""
+    site = tmp_path_factory.mktemp("site")
+    site.chmod(0o755)
+    files = {
+        "index.html": "<!doctype html><title>floor</title>" + "<p>x</p>" * 400,
+        "factory-floor.json": json.dumps({"generated_at": "t", "pad": "y" * 3000}),
+        ".hidden": "secret",
+    }
+    for file_name, text in files.items():
+        (site / file_name).write_text(text, encoding="utf-8")
+        (site / file_name).chmod(0o644)
+    service = _service()
+    name = f"factory-floor-web-test-{uuid.uuid4().hex[:12]}"
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--read-only",
+            "--user",
+            str(service["user"]),
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--tmpfs",
+            str(service["tmpfs"][0]),
+            "-p",
+            "127.0.0.1::8080",
+            "-v",
+            f"{site}:/srv/site:ro",
+            "-v",
+            f"{NGINX}:/etc/nginx/nginx.conf:ro",
+            str(service["image"]),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert started.returncode == 0, started.stderr
+    try:
+        mapped = subprocess.run(
+            ["docker", "port", name, "8080/tcp"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()[0]
+        host, _, port = mapped.rpartition(":")
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                if _fetch(host, int(port), "GET", "/healthz")[0] == 200:
+                    break
+            except OSError:
+                pass
+            assert time.monotonic() < deadline, _container_logs(name)
+            time.sleep(0.3)
+        yield host, int(port)
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+
+
+@pytest.mark.parametrize(
+    ("path", "status"),
+    [
+        ("/", 200),
+        ("/factory-floor.json", 200),
+        ("/healthz", 200),
+        ("/missing", 404),
+        ("/.hidden", 404),
+        ("/nested/.hidden", 404),
+    ],
+)
+def test_running_nginx_sends_the_security_headers_on_every_response(
+    nginx_address: tuple[str, int], path: str, status: int
+) -> None:
+    code, headers, _body = _fetch(*nginx_address, "GET", path)
+    assert code == status
+    assert headers["cache-control"] == "no-store"
+    assert headers["x-content-type-options"] == "nosniff"
+    assert "default-src 'self'" in headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in headers["content-security-policy"]
+
+
+def test_running_nginx_serves_the_record_and_answers_health_without_a_page(
+    nginx_address: tuple[str, int],
+) -> None:
+    code, _headers, body = _fetch(*nginx_address, "GET", "/factory-floor.json")
+    assert code == 200
+    assert json.loads(body)["generated_at"] == "t"
+    code, _headers, body = _fetch(*nginx_address, "GET", "/healthz")
+    assert (code, body) == (200, b"ok\n")
+
+
+def test_running_nginx_compresses_the_record(nginx_address: tuple[str, int]) -> None:
+    _code, headers, body = _fetch(
+        *nginx_address, "GET", "/factory-floor.json", {"Accept-Encoding": "gzip"}
+    )
+    assert headers["content-encoding"] == "gzip"
+    assert json.loads(gzip.decompress(body))["generated_at"] == "t"
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE"])
+def test_running_nginx_refuses_every_method_but_get_and_head(
+    nginx_address: tuple[str, int], method: str
+) -> None:
+    code, headers, _body = _fetch(*nginx_address, method, "/")
+    assert code == 403
+    assert headers["cache-control"] == "no-store"
+    assert _fetch(*nginx_address, "HEAD", "/")[0] == 200
