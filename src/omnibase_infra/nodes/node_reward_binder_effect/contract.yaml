@@ -4,6 +4,8 @@
 # Ticket: OMN-2552
 name: "node_reward_binder_effect"
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 contract_version:
   major: 1
   minor: 0

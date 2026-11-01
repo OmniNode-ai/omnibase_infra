@@ -2,7 +2,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-21784"
 title: "omnibase_infra contracts_and_di handler_hand_construction burn-down, slice rf1505-c1"
-summary: "Deletes the four unreferenced node registries (contract persistence, pattern lifecycle, reward binder, RRH emit) and builds the LLM inference and embedding handlers only as the argument of the container registration call, taking handler_hand_construction over src/omnibase_infra from 133 to 125."
+summary: "Deletes the four unreferenced node registries (contract persistence, pattern lifecycle, reward binder, RRH emit) and builds the LLM inference and embedding handlers only as the argument of the container registration call, removing handler_hand_construction findings in this slice."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -16,6 +16,8 @@ requirements:
         statement: "AC2: the embedding and inference registries build their handler only as the instance argument of the container registration call, and the registered instance is the real handler class -- falsifier: the registry registration cases of tests/integration/nodes/test_llm_registry_registration_omn21784.py"
       - id: AC3
         statement: "AC3: the metrics registration resolves the handler from the container with get_service_async before wrapping it, and an unset service registry builds and registers nothing -- falsifier: test_inference_metrics_registry_wraps_the_registered_handler and the without_service_registry cases of the same file, which run against a real ModelONEXContainer"
+      - id: AC4
+        statement: "AC4: the reward binder contract declares its EFFECT archetype so the core no-I/O validator permits the package's wall-clock read -- falsifier: tests/integration/nodes/test_reward_binder_archetype_omn21784.py"
 evidence_requirements:
   - kind: tests
     description: "Unit tests of every touched node (LLM inference, LLM embedding, reward binder, contract persistence, RRH emit, pattern lifecycle) pass."
@@ -51,3 +53,10 @@ dod_evidence:
         check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_embedding_effect/registry/registry_infra_llm_embedding_effect.py?ref=omn-21784-handler-binding-sites-dead-registries" | grep -Eq ''instance=HandlerEmbeddingOpenaiCompatible\('''
       - check_type: command
         check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_inference_effect/registry/registry_infra_llm_inference_effect.py?ref=omn-21784-handler-binding-sites-dead-registries" | grep -Eq ''get_service_async\(\s*HandlerLlmOpenaiCompatible'''
+  - id: dod-reward-archetype
+    description: "The core no-I/O validator accepts both the reward binder contract and its handler as an EFFECT package."
+    source: generated
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/nodes/test_reward_binder_archetype_omn21784.py -q -p no:cacheprovider
