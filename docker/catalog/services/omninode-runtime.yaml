@@ -97,7 +97,8 @@ ulimits:
     hard: 65535
 resources:
   cpus: '1.0'
-  memory: 1536M
+  # OMN-18087: declared in runtime_policy.contract.yaml, rendered into runtime-policy.env.
+  memory: ${DEV_RUNTIME_MAIN_MEMORY_LIMIT:?runtime policy contract must set DEV_RUNTIME_MAIN_MEMORY_LIMIT}
   cpus_reservation: '0.25'
   memory_reservation: 256M
 stop_grace_period: 90s

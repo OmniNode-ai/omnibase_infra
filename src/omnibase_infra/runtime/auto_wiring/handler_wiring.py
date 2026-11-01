@@ -10378,9 +10378,11 @@ async def subscribe_wired_contract_topics(
             )
         )
 
+    knobs = readiness_config or ModelTopicReadinessConfig()
     for result in _prioritize_subscription_results(
         report,
         result_appliers_by_contract,
+        knobs.priority_contracts,
     ):
         if result.outcome is not EnumWiringOutcome.WIRED:
             # OMN-17372: this was the one filter of the six that logged
@@ -10476,7 +10478,6 @@ async def subscribe_wired_contract_topics(
             continue
         eligible.append((result, contract))
 
-    knobs = readiness_config or ModelTopicReadinessConfig()
     # Bounded parallelism across contracts; each contract keeps its own
     # provision->ready->attach order (§3.9).
     semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
@@ -11044,25 +11045,23 @@ def _prioritize_subscription_results(
     report: ModelAutoWiringReport,
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
+    priority_contracts: Sequence[str] = (),
 ) -> tuple[ModelContractWiringResult, ...]:
-    """Return wired results with explicitly-applied contracts first.
+    """Return wired results in subscription order.
 
-    Contract-specific result appliers represent durable side effects such as
-    projection writes. Subscribing them before the generic backlog avoids
-    missing readiness-critical events during long Kafka group-join startup.
+    *priority_contracts* (runtime policy contract, OMN-18087) come first, in
+    order, then contracts with a result applier (durable side effects such as
+    projection writes, subscribed before the generic backlog so readiness-critical
+    events are not missed). The sort is stable within each rank.
     """
-    if not result_appliers_by_contract:
-        return tuple(report.results)
-
-    priority_contracts = frozenset(result_appliers_by_contract)
-    indexed_results = tuple(enumerate(report.results))
+    rank = {name: index for index, name in enumerate(priority_contracts)}
+    appliers = frozenset(result_appliers_by_contract or ())
     return tuple(
-        result
-        for _, result in sorted(
-            indexed_results,
-            key=lambda item: (
-                0 if item[1].contract_name in priority_contracts else 1,
-                item[0],
+        sorted(
+            report.results,
+            key=lambda r: (
+                rank.get(r.contract_name, len(rank)),
+                r.contract_name not in appliers,
             ),
         )
     )

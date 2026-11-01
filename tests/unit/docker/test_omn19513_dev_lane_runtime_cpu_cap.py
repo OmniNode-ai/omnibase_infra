@@ -29,7 +29,8 @@ def test_dev_lane_raises_omninode_runtime_cpu_cap() -> None:
     )
 
     assert float(limits["cpus"]) == 2.0
-    assert limits["memory"] == "1536M"
+    # OMN-18087: main's memory limit is declared in the runtime policy contract.
+    assert limits["memory"].startswith("${DEV_RUNTIME_MAIN_MEMORY_LIMIT:?")
 
 
 def test_base_file_keeps_the_one_cpu_cap() -> None:
