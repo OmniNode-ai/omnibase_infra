@@ -44,9 +44,6 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 )
 from omnibase_infra.models.runtime import ModelRuntimeIntrospectionConfig
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
-from omnibase_infra.protocols.protocol_introspection_data_source import (
-    ProtocolIntrospectionDataSource,
-)
 from omnibase_infra.protocols.protocol_node_introspection import (
     ProtocolNodeIntrospection,
 )
@@ -190,11 +187,13 @@ class HandlerRuntimeIntrospectionStartup:
         request: ModelRuntimeIntrospectionStartupRequest,
     ) -> None:
         """Publish one introspection event per announce record."""
-        if not isinstance(service, ProtocolIntrospectionDataSource):
+        get_data = getattr(service, "get_introspection_data", None)
+        if not callable(get_data):
             raise TypeError("introspection service cannot report its identity")
-        identity = ModelRuntimeIdentity.from_introspection_event(
-            await service.get_introspection_data()
-        )
+        data = await get_data()
+        if not isinstance(data, ModelNodeIntrospectionEvent):
+            raise TypeError("introspection service cannot report its identity")
+        identity = ModelRuntimeIdentity.from_introspection_event(data)
         for event in HandlerRegistrationFromAnnouncement.build_events(
             request.announcements, identity
         ):

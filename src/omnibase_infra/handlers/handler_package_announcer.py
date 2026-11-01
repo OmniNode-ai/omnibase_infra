@@ -53,6 +53,7 @@ from omnibase_core.models.nodes.package_announce.model_node_catalog import (
 )
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.protocols.services.protocol_announce_bus import ProtocolAnnounceBus
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors.error_contract_content_hash import (
     ContractContentHashError,
 )
@@ -432,6 +433,14 @@ class HandlerPackageAnnouncer:
 
     def __init__(self, bus: ProtocolAnnounceBus[object]) -> None:
         self._bus = bus
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self, request: ModelPackageAnnounceRequest
