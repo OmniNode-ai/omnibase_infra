@@ -210,6 +210,8 @@ class ContractRegistrationEventRouter:
         self._state: ModelContractRegistryState = ModelContractRegistryState()
         self._shutdown_event = asyncio.Event()
         self._tick_task: asyncio.Task[None] | None = None
+        # Position of the next catalog-fed event; the reducer keys idempotency on it.
+        self._announced_offset = 0
         self._tick_sequence: int = 0
 
         logger.debug(
@@ -539,6 +541,31 @@ class ContractRegistrationEventRouter:
                     "callback_duration_seconds": callback_duration,
                 },
             )
+
+    async def register_announced(
+        self,
+        event: ModelContractRegisteredEvent,
+        correlation_id: UUID,
+        *,
+        topic: str,
+    ) -> None:
+        """Reduce a contract the node catalog announced, with no bus in between (OMN-21590).
+
+        Does what ``handle_message`` does for a ``contract-registered`` record once the
+        record is parsed: reduce, keep the state, execute the intents. The kernel calls
+        it for every contract the catalog yielded, so a boot publishes nothing.
+        """
+        event_metadata: dict[str, JsonType] = {
+            "topic": topic,
+            "partition": 0,
+            "offset": self._announced_offset,
+            "data_provenance": "unknown",
+        }
+        self._announced_offset += 1
+        output = self._reducer.reduce(self._state, event, event_metadata)
+        self._state = output.result
+        if output.intents:
+            await self._execute_intents(output.intents, correlation_id)
 
     async def _execute_intents(
         self,
