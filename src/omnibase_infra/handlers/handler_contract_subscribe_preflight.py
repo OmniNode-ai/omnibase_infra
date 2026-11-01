@@ -50,7 +50,9 @@ Substrates:
   own per-topic group, resolved here by the bus's own
   ``_resolve_effective_group_id`` so the offsets land on the group the consumer
   will join. (The bus module is baselined and only shrinks, so this lives here
-  rather than as a bus method.)
+  rather than as a bus method.) The consumers come from
+  ``create_offset_consumer``: this module builds no raw Kafka client
+  of its own, as the imperative contract guard requires.
 * ``EventBusInmemory``: keeps no committed offset for any group and delivers a
   record only to the subscribers joined when it is published. No retired group
   on it has a position, so nothing is committed.
@@ -78,7 +80,7 @@ from aiokafka.structs import TopicPartition
 from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
+from omnibase_infra.event_bus.kafka_transport import create_offset_consumer
 from omnibase_infra.models.event_bus.model_consumer_group_handover import (
     ModelConsumerGroupHandover,
 )
@@ -204,19 +206,12 @@ async def _hand_over_on_kafka(
     binding = bus.resolve_bus_binding(topic, consumer_group=effective)
     successor_group = binding.consumer_group or effective
     physical_topic = binding.physical_topic
-    client_kwargs: dict[str, object] = dict(build_aiokafka_auth_kwargs(bus.config))
-    if bus.config.api_version is not None:
-        client_kwargs["api_version"] = bus.config.api_version
+    config = bus.config.model_copy(update={"bootstrap_servers": bus.bootstrap_servers})
 
-    def _consumer(group: str) -> AIOKafkaConsumer:
-        return AIOKafkaConsumer(
-            bootstrap_servers=bus.bootstrap_servers,
-            group_id=group,
-            enable_auto_commit=False,
-            **client_kwargs,
-        )
-
-    successor, retired = _consumer(successor_group), _consumer(from_group)
+    successor, retired = (
+        create_offset_consumer(config, group_id=group)
+        for group in (successor_group, from_group)
+    )
     await successor.start()
     try:
         await retired.start()
