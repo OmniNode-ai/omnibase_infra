@@ -59,6 +59,8 @@ consumer_flow_topics:
   audit_projection: "onex.evt.omnibase-infra.gateway-heartbeat.v1"
   publishing_reducer: "onex.evt.platform.node-heartbeat.v1"
   applied: "onex.evt.omnimarket.projection-consumer-flow-applied.v1"
+  exposure: "onex.snapshot.projection.consumer-flow.v1"
+  seam_dlq: "onex.dlq.omnimarket.consumer-flow-stall-alert-malformed.v1"
 # The projection API the consumer-flow check reads, as seen from the lab lane's
 # runtime container; a request names another base_url to override it (OMN-21688).
 consumer_flow_endpoints:

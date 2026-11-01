@@ -21,6 +21,7 @@ from omnibase_infra.cli.infra_test._helpers import (
     get_broker,
     get_postgres_dsn,
 )
+from omnibase_infra.models.infra_test import load_infra_test_settings
 from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_REGISTRATION_SNAPSHOTS,
@@ -78,7 +79,7 @@ def verify_topics() -> None:
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=load_infra_test_settings().rpk_command_timeout_seconds,
     )
 
     if result.returncode != 0:
@@ -155,7 +156,7 @@ def verify_snapshots(topic: str) -> None:
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=load_infra_test_settings().rpk_command_timeout_seconds,
     )
 
     if result.returncode != 0:
@@ -182,11 +183,11 @@ def verify_snapshots(topic: str) -> None:
             "-n",
             "1",
             "--format",
-            "%v\\n",
+            "%v\n",
         ],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=load_infra_test_settings().rpk_consume_timeout_seconds,
         check=False,
     )
 
@@ -240,21 +241,12 @@ def verify_idempotency(topic: str, repetitions: int) -> None:
 
     for i in range(repetitions):
         result = subprocess.run(
-            [
-                "rpk",
-                "topic",
-                "produce",
-                topic,
-                "--brokers",
-                broker,
-                "-k",
-                node_id,
-            ],
+            ["rpk", "topic", "produce", topic, "--brokers", broker, "-k", node_id],
             input=payload_json,
             capture_output=True,
             text=True,
             check=False,
-            timeout=30,
+            timeout=load_infra_test_settings().rpk_command_timeout_seconds,
         )
         if result.returncode != 0:
             console.print(
@@ -264,8 +256,8 @@ def verify_idempotency(topic: str, repetitions: int) -> None:
         console.print(f"  Published event {i + 1}/{repetitions}")
 
     # Wait for processing
-    console.print("[yellow]Waiting for registration processing (5s)...[/yellow]")
-    time.sleep(5)
+    console.print("[yellow]Waiting for registration processing...[/yellow]")
+    time.sleep(load_infra_test_settings().idempotency_settle_seconds)
 
     # Check PostgreSQL for duplicate records
     dsn = get_postgres_dsn()
@@ -307,7 +299,10 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
     import psycopg2
 
     try:
-        with psycopg2.connect(dsn, connect_timeout=5) as conn:
+        with psycopg2.connect(
+            dsn,
+            connect_timeout=load_infra_test_settings().postgres_connect_timeout_seconds,
+        ) as conn:
             with conn.cursor() as cur:
                 if node_id:
                     cur.execute(
@@ -374,7 +369,10 @@ def _count_postgres_registrations(dsn: str, node_id: str) -> int | None:
     import psycopg2
 
     try:
-        with psycopg2.connect(dsn, connect_timeout=5) as conn:
+        with psycopg2.connect(
+            dsn,
+            connect_timeout=load_infra_test_settings().postgres_connect_timeout_seconds,
+        ) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
