@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import inspect
 from collections.abc import Callable
 from pathlib import Path
@@ -76,8 +75,8 @@ class TestOutboundTimeoutsContract:
 
     def test_non_positive_wait_is_refused(self, tmp_path: Path) -> None:
         block = _declared_block()
-        block["probe_connect_seconds"] = 0
-        with pytest.raises(ValueError, match="probe_connect_seconds"):
+        block["git_diff_seconds"] = 0
+        with pytest.raises(ValueError, match="git_diff_seconds"):
             ModelOutboundTimeouts.from_file(_write(tmp_path, block))
 
     @pytest.mark.parametrize(
@@ -225,12 +224,15 @@ class TestCallSitesPassDeclaredTimeouts:
         discovery: list[float] = []
         offsets: list[float] = []
 
+        class _StopAuditError(Exception):
+            pass
+
         class FakeAdmin:
             def __init__(self, _config: object) -> None: ...
 
             def list_topics(self, timeout: float) -> object:
                 discovery.append(timeout)
-                return _Metadata()
+                raise _StopAuditError  # the discovery wait is recorded; stop here
 
         class _Partitions:
             partitions = {0: object()}
@@ -253,6 +255,6 @@ class TestCallSitesPassDeclaredTimeouts:
         metadata.topics = {"t": _Partitions()}
         bus_audit._collect_watermarks(config, {"t"}, cast("Any", metadata))
         assert offsets == [_TIMEOUTS.audit_offsets_seconds]
-        with contextlib.suppress(Exception):
-            bus_audit.run_audit(config)  # later phases need a live broker
+        with pytest.raises(_StopAuditError):
+            bus_audit.run_audit(config)
         assert discovery == [_TIMEOUTS.audit_topic_discovery_seconds]
