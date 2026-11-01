@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 
+from omnibase_infra.models.infra_test import load_infra_test_settings
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
 )
@@ -21,9 +22,8 @@ def get_broker() -> str:
     Returns:
         Kafka bootstrap server address.
     """
-    return os.getenv(
-        "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
-    )  # kafka-fallback-ok — integration test default
+    broker = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+    return broker or load_infra_test_settings().broker_address  # kafka-fallback-ok
 
 
 def get_postgres_dsn() -> str:

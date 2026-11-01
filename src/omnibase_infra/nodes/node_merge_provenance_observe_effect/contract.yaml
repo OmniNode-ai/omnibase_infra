@@ -53,6 +53,10 @@ handler_routing:
         module: "omnibase_infra.nodes.node_merge_provenance_observe_effect.handlers.handler_merge_provenance_observe"
       output_events:
         - "ModelMergeProvenanceObservation"
+# The REST API the GitHub binding of the read port calls. A GitHub Enterprise
+# deployment binds its own base here or passes api_url to the handler (OMN-21688).
+github_api:
+  base_url: "https://api.github.com"
 dependencies:
   - name: "protocol_merge_group_run_reader"
     type: "protocol"

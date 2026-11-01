@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# Check catalog (OMN-2147, OMN-2151; declared here under OMN-21623).
+#
+# One entry per check, in catalog order. `handler` names the executor class in
+# omnibase_infra.validation.checks; the registry builds each executor from its
+# entry. Subprocess checks carry label, severity and command; every other
+# executor owns its label and severity and takes none.
+#
+# CHECK-VAL-002 (artifact completeness) is built without an artifact_dir, so
+# the default registry entry returns skipped=True at runtime: the registry
+# cannot know the deployment-specific artifact directory. Callers that need it
+# to run use get_check_executor("CHECK-VAL-002", artifact_dir=...).
+checks:
+  - check_code: CHECK-PY-001
+    handler: omnibase_infra.validation.checks.handler_check_executor.HandlerSubprocessCheckExecutor
+    label: Typecheck (mypy)
+    severity: required
+    command: uv run mypy src/
+  - check_code: CHECK-PY-002
+    handler: omnibase_infra.validation.checks.handler_check_executor.HandlerSubprocessCheckExecutor
+    label: Lint/format (ruff)
+    severity: required
+    command: uv run ruff check src/ tests/
+  - check_code: CHECK-TEST-001
+    handler: omnibase_infra.validation.checks.handler_check_executor.HandlerSubprocessCheckExecutor
+    label: Unit tests (fast)
+    severity: required
+    command: uv run pytest tests/ -m unit --timeout=60
+  - check_code: CHECK-TEST-002
+    handler: omnibase_infra.validation.checks.handler_check_executor.HandlerSubprocessCheckExecutor
+    label: Targeted integration tests
+    severity: recommended
+    command: uv run pytest tests/ -m integration --timeout=120
+  - check_code: CHECK-VAL-001
+    handler: omnibase_infra.validation.checks.handler_artifact.HandlerReplaySanity
+  - check_code: CHECK-VAL-002
+    handler: omnibase_infra.validation.checks.handler_artifact.HandlerArtifactCompleteness
+  - check_code: CHECK-RISK-001
+    handler: omnibase_infra.validation.checks.handler_risk.HandlerRiskSensitivePaths
+  - check_code: CHECK-RISK-002
+    handler: omnibase_infra.validation.checks.handler_risk.HandlerRiskDiffSize
+  - check_code: CHECK-RISK-003
+    handler: omnibase_infra.validation.checks.handler_risk.HandlerRiskUnsafeOperations
+  - check_code: CHECK-OUT-001
+    handler: omnibase_infra.validation.checks.handler_check_executor.HandlerSubprocessCheckExecutor
+    label: CI equivalent pass rate
+    severity: required
+    command: uv run pytest tests/ --timeout=180
+  - check_code: CHECK-COST-001
+    handler: omnibase_infra.validation.checks.handler_measurement.HandlerCostTokenDelta
+  - check_code: CHECK-TIME-001
+    handler: omnibase_infra.validation.checks.handler_measurement.HandlerTimeWallClockDelta

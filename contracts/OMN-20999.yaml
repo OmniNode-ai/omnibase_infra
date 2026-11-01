@@ -13,11 +13,16 @@ requirements:
         statement: 'AC1: The dev-lane Infisical container receives the seven SMTP variables the v0.146 image reads and the instance reports email as configured -- falsifier: the status read against the running instance prints emailConfigured true'
       - id: AC4
         statement: 'AC4: A lane that sets no SMTP values starts exactly as before, so the change is inert for every other machine -- falsifier: the catalog unit suites exit 0 and a lane with no INFISICAL_SMTP_ override set still reports emailConfigured false'
+  - id: req-ac2-site-url-dev-lane-port
+    statement: AC2 transcribed from the ticket body, added after the first contract was accepted. The live half (SITE_URL returns 200 from an operator Mac) is a host reading recorded on the ticket; the repo half is that every place an operator reads SITE_URL from is override-backed and names the dev-lane port 8881, not the other lane's 8880.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: SITE_URL resolves to a host an operator Mac can reach, so an invite link is clickable off-box -- falsifier: curl of the container SITE_URL from the operator Mac prints 200'
 evidence_requirements:
   - kind: ci
     description: The compose service passes the SMTP variables at the pinned commit, read through the API rather than from the working tree.
     command: "gh api -H 'Accept: application/vnd.github.raw' \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=6385c8808108b394e8e912d5cc45671e96a3d124\" | grep -cE '^      SMTP_[A-Z_]+: [$][{]INFISICAL_SMTP_'"
-  - kind: test
+  - kind: tests
     description: The catalog schema and runtime-validation suites accept the manifest.
     command: uv run python -m pytest tests/unit/infra/test_catalog_validate_runtime.py tests/unit/infra/test_manifest_schema.py tests/unit/infra/test_catalog_duplicate_host_ports.py -q
 emergency_bypass:
@@ -52,3 +57,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run python -m pytest tests/unit/infra/test_catalog_validate_runtime.py tests/unit/infra/test_manifest_schema.py tests/unit/infra/test_catalog_duplicate_host_ports.py -q
+  - id: dod-omn-20999-ac2-site-url-override
+    description: 'AC2, red-first. tests/unit/infra/test_infisical_site_url_omn20999.py asserts the compose service, the catalog manifest and the env example all give SITE_URL as an INFISICAL_SITE_URL override defaulting to the dev-lane port 8881. At the merge base the catalog SITE_URL is a literal that discards the override and the env example documents port 8880 of the other lane, the value the live container was found advertising, and the core bundle the catalog generator renders carries that literal, so three of four tests fail there and all four pass at this head. The compose test passes at both and guards against regression.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run python -m pytest tests/unit/infra/test_infisical_site_url_omn20999.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - "AC2"
