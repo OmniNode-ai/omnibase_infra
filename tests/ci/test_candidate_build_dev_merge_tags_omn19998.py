@@ -10,7 +10,9 @@ concurrent dev-merge-tag workflow has published it.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,9 +27,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = (
     _REPO_ROOT / ".github" / "workflows" / "build-workspace-candidate-runtime.yml"
 )
-_FETCH_STEP = "Fetch the build context's dev-merge tag"
-_STAGING_STEP = "Stage workspace sibling trees into the build context"
-_CHECKOUT_STEP = "Checkout omnibase_infra (the consuming repo / build context)"
+_FETCH_STEP = "DEV_TAG_WAIT_ATTEMPTS"
+_STAGING_STEP = "DEPLOY_REF"
+_CHECKOUT_STEP = "actions/checkout@"
 
 
 @pytest.fixture(scope="module")
@@ -39,10 +41,23 @@ def candidate_steps() -> list[dict[str, Any]]:
     )
 
 
-def _step_index(steps: list[dict[str, Any]], name: str) -> int:
-    indices = [index for index, step in enumerate(steps) if step.get("name") == name]
-    assert len(indices) == 1, f"expected exactly one step named {name!r}: {indices}"
+def _step_index(steps: list[dict[str, Any]], marker: str) -> int:
+    indices = [
+        index
+        for index, step in enumerate(steps)
+        if marker in step.get("env", {}) or step.get("uses", "").startswith(marker)
+    ]
+    assert len(indices) == 1, f"expected exactly one step with {marker!r}: {indices}"
     return indices[0]
+
+
+def _load_script(path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    spec = importlib.util.spec_from_file_location(f"candidate_{path.stem}", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -120,11 +135,52 @@ def test_unpinned_siblings_are_armed_with_the_remote_tracking_ref(
 
 
 @pytest.mark.unit
-def test_follow_dev_tag_engages_only_on_a_remote_tracking_ref() -> None:
-    source = (_REPO_ROOT / "scripts/runtime_build/deploy_source_ref.py").read_text(
-        encoding="utf-8"
+@pytest.mark.parametrize(
+    "ref_kind", ["remote", "branch", "sha", "fallback", "same_fallback"]
+)
+def test_follow_dev_tag_engages_only_on_a_remote_tracking_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ref_kind: str
+) -> None:
+    checkout, tag = _make_checkout(tmp_path, with_tag=True)
+    tagged = _git(checkout, "rev-parse", "HEAD")
+    work = tmp_path / "work"
+    (work / "source.txt").write_text("untagged branch advance\n", encoding="utf-8")
+    _git(work, "add", "source.txt")
+    _git(work, "commit", "-m", "Advance beyond the dev tag")
+    _git(work, "push", "origin", "dev")
+    branch_head = _git(work, "rev-parse", "HEAD")
+    _git(checkout, "fetch", "origin", "dev")
+    _git(checkout, "checkout", "-B", "dev", "origin/dev")
+
+    primary = {
+        "remote": "origin/dev",
+        "branch": "dev",
+        "sha": branch_head,
+        "fallback": "f" * 40,
+        "same_fallback": "origin/dev",
+    }[ref_kind]
+    fallback = "origin/dev" if ref_kind in {"fallback", "same_fallback"} else None
+    resolver = _load_script(
+        _REPO_ROOT / "scripts/runtime_build/deploy_source_ref.py", monkeypatch
     )
-    assert 'follow_dev_tag and effective_ref.startswith("origin/")' in source
+    result = resolver.clean_checkout(
+        checkout,
+        primary,
+        fallback_ref=fallback,
+        follow_dev_tag=True,
+        worktree_root=tmp_path / "trees",
+    )
+    follows = ref_kind in {"remote", "fallback", "same_fallback"}
+    expected = tagged if follows else branch_head
+    assert tagged != branch_head
+    assert result.head_sha == result.expected_sha == expected
+    assert _git(Path(result.path), "rev-parse", "HEAD") == expected
+    assert result.ref == (tag if follows else primary)
+    assert result.dev_tag_from == ("origin/dev" if follows else "")
+    assert result.fallback_from == (primary if ref_kind == "fallback" else "")
+    assert (Path(result.path) / "source.txt").read_text() == (
+        "candidate source\n" if follows else "untagged branch advance\n"
+    )
 
 
 @pytest.mark.unit
@@ -166,25 +222,40 @@ def test_the_tag_fetch_warns_and_continues_when_no_tag_exists(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("points_at_head", [True, False])
 def test_the_checker_reads_the_fetched_tag_as_a_dev_merge_tag(
     tmp_path: Path,
     candidate_steps: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
+    points_at_head: bool,
 ) -> None:
-    checkout, tag = _make_checkout(tmp_path, with_tag=True)
+    checkout, tag = _make_checkout(tmp_path, with_tag=points_at_head)
+    if not points_at_head:
+        # Even a name with HEAD's suffix must not stamp a different commit.
+        work = tmp_path / "work"
+        (work / "source.txt").write_text("different commit\n", encoding="utf-8")
+        _git(work, "add", "source.txt")
+        _git(work, "commit", "-m", "Different tag target")
+        _git(work, "tag", tag)
+        _git(work, "push", "origin", f"refs/tags/{tag}")
     result = _run_tag_fetch(checkout, candidate_steps)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "::warning::" not in result.stdout
+    assert (
+        _git(checkout, "rev-parse", tag) == _git(checkout, "rev-parse", "HEAD")
+    ) == points_at_head
 
     source = _REPO_ROOT / "src/omnibase_infra/validation/checker_first_party_sources.py"
-    spec = importlib.util.spec_from_file_location(
-        "candidate_dev_merge_tag_checker", source
-    )
-    assert spec is not None and spec.loader is not None
-    checker = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, checker)
-    spec.loader.exec_module(checker)
-    record = checker._build_context_record(checkout, checker.load_contract())
-    assert record["dev_merge_tag"] == tag
+    checker = _load_script(source, monkeypatch)
+    staging = tmp_path / "staging.json"
+    expected = tmp_path / "expected.json"
+    staging.write_text('{"siblings": {}}\n', encoding="utf-8")
+    expected.write_text('{"repos": {}}\n', encoding="utf-8")
+    checker.stamp(staging, expected, checkout)
+    record = json.loads(staging.read_text())["build_context"]["omnibase_infra"]
+    assert record["dev_merge_tag"] == (tag if points_at_head else "")
+    assert record["vcs_ref"] == _git(checkout, "rev-parse", "HEAD")
+    assert record["vcs_dirty"] is False
 
 
 @pytest.mark.unit
@@ -251,3 +322,47 @@ def test_the_tag_fetch_survives_an_unreachable_origin(
     result = _run_tag_fetch(checkout, candidate_steps, attempts=2)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "::warning::" in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("operation", ["ls-remote", "fetch"])
+def test_the_tag_fetch_recovers_after_a_transient_git_error(
+    tmp_path: Path, candidate_steps: list[dict[str, Any]], operation: str
+) -> None:
+    checkout, tag = _make_checkout(tmp_path, with_tag=True)
+    real_git = shutil.which("git")
+    assert real_git is not None
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    wrapper = shim / "git"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "$FAIL_OPERATION" ] && [ ! -f "$FAIL_STATE" ]; then\n'
+        '  touch "$FAIL_STATE"\n'
+        "  exit 128\n"
+        "fi\n"
+        'exec "$REAL_GIT" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    script = candidate_steps[_step_index(candidate_steps, _FETCH_STEP)]["run"]
+    result = subprocess.run(
+        ["bash", "-c", script],
+        cwd=checkout,
+        env=scrub_git_location_env(os.environ)
+        | {
+            "DEV_TAG_WAIT_ATTEMPTS": "2",
+            "DEV_TAG_WAIT_SECONDS": "0",
+            "PATH": f"{shim}{os.pathsep}{os.environ['PATH']}",
+            "REAL_GIT": real_git,
+            "FAIL_OPERATION": operation,
+            "FAIL_STATE": str(tmp_path / "failed-once"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (tmp_path / "failed-once").is_file()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::warning::" not in result.stdout
+    assert _git(checkout, "tag", "--points-at", "HEAD", "--list", "dev-*") == tag

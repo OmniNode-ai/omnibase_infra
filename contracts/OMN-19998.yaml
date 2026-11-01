@@ -623,7 +623,7 @@ dod_evidence:
     binds_ac:
       - AC32
   - id: dod-omn19998-ac33-candidate-dev-merge-tags
-    description: AC33 tests read DEPLOY_REF and the step order of the candidate build, and run the tag fetch step in a tagless clone of a local bare origin, with and without a dev tag naming HEAD, then read the clone through the first-party checker.
+    description: AC33 tests check candidate wiring, execute RT-1 against real origins for remote, bare, explicit SHA and pinned fallback refs, and run the workflow tag fetch through late tags, multiple tags and transient listing or fetch failures. The public stamp API writes the fetched build-context tag into provenance.
     source: manual
     checks:
       - check_type: test_passes
@@ -632,11 +632,11 @@ dod_evidence:
     binds_ac:
       - AC33
   - id: dod-omn19998-ac33-dev-tags-deploy-probe
-    description: Hosted-runner deployment artifact check for AC33. Runs the candidate workflow's tag fetch step against a local origin and fails when the build context would reach staging with no dev-merge tag at HEAD.
+    description: Hosted-runner deployment artifact check for AC33 using disposable local origins. Runs the full staging path, builds and installs wheels, and audits the resulting provenance and content. Rejects a mismatched tag and a stale installed wheel. This checks candidate artifacts without claiming live deployment.
     source: manual
     checks:
       - check_type: command
-        check_value: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py -q -k test_the_checker_reads_the_fetched_tag_as_a_dev_merge_tag
+        check_value: uv run pytest tests/integration/runtime/test_first_party_tag_sources_omn17427.py -q -k test_staged_wheels_have_tag_identity_and_content_parity
         cwd: .
     binds_ac:
       - AC33
