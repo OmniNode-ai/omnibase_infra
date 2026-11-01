@@ -47,11 +47,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn21622-deploy
-    description: Post-merge deploy smoke -- the deployed runtime image imports the developer principal plan handler this change edits.
+    description: Deploy probe -- the grant documents copied into the issuer image load and drive issuance, apply and audit for each trusted role with a fake broker; fails when machine grants are shared or the image omits a referenced document.
     source: manual
-    execution_scope: local_done_gate
     checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -o addopts='' -p no:cacheprovider -k "same_role_profile or issuer_image"
+        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.handlers.handler_developer_principal_plan import HandlerDeveloperPrincipalPlan; print('deploy smoke ok', HandlerDeveloperPrincipalPlan.__name__)\""
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.principal-issuer?ref=jonah/omn-21622-machine-principal-profile' --jq .content | base64 -d | grep -q machine-principal-derived-grants.json && grep -q machine-principal-derived-grants.json docker/Dockerfile.principal-issuer"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
