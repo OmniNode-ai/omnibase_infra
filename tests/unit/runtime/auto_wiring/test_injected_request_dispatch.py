@@ -18,8 +18,10 @@ import pytest
 from pydantic import BaseModel
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.enums import EnumDispatchStatus, EnumMessageCategory
 from omnibase_infra.models.catalog.model_topic_catalog_query import (
     ModelTopicCatalogQuery,
 )
@@ -33,11 +35,13 @@ from omnibase_infra.models.dispatch.model_injected_request import (
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_catalog_query import (
     HandlerTopicCatalogQuery,
 )
+from omnibase_infra.runtime.auto_wiring import handler_wiring
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     ProtocolHandleable,
     _make_dispatch_callback,
 )
 from omnibase_infra.runtime.auto_wiring.models import ModelHandlerRef
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
 ENVELOPE_ID = UUID("11111111-1111-4111-8111-111111111111")
 CORRELATION_ID = UUID("22222222-2222-4222-8222-222222222222")
@@ -128,21 +132,20 @@ async def test_event_envelope_object_becomes_injected_request() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_envelope_without_clock_or_id_gets_fresh_ones() -> None:
+@pytest.mark.parametrize("missing", ["envelope_timestamp", "envelope_id"])
+async def test_envelope_without_clock_or_id_is_rejected(missing: str) -> None:
     handler = _RecordingHandler()
     event_model = ModelHandlerRef(name="_Event", module=__name__)
 
-    await _dispatch(
-        handler,
-        event_model,
-        {"payload": {"value": "beat"}, "__debug_trace": {"topic": "t"}},
-    )
-
-    request = handler.received[0]
-    assert isinstance(request, ModelInjectedRequest)
-    assert request.now.tzinfo is not None
-    assert isinstance(request.input_id, UUID)
-    assert request.correlation_id is None
+    envelope = {
+        "payload": {"value": "beat"},
+        "envelope_timestamp": CLOCK_READING.isoformat(),
+        "envelope_id": str(ENVELOPE_ID),
+    }
+    del envelope[missing]
+    with pytest.raises(ValueError):
+        await _dispatch(handler, event_model, envelope)
+    assert handler.received == []
 
 
 @pytest.mark.unit
@@ -165,11 +168,14 @@ async def test_production_handler_receives_request_through_the_callback(
     )
     handler = HandlerTopicCatalogQuery(catalog_service=service)
     seen: list[ModelInjectedRequest[ModelTopicCatalogQuery]] = []
+    outputs: list[ModelHandlerOutput[object]] = []
     real_handle = handler.handle
 
     async def _spy(request: ModelInjectedRequest[ModelTopicCatalogQuery]) -> object:
         seen.append(request)
-        return await real_handle(request)
+        output = await real_handle(request)
+        outputs.append(output)
+        return output
 
     monkeypatch.setattr(handler, "handle", _spy)
     result = await _dispatch(
@@ -194,6 +200,8 @@ async def test_production_handler_receives_request_through_the_callback(
     # The injected clock and input id reach the handler, not just the payload.
     assert seen[0].input_id == ENVELOPE_ID
     assert seen[0].now == CLOCK_READING
+    assert outputs[0].input_envelope_id == ENVELOPE_ID
+    assert outputs[0].timestamp == CLOCK_READING
 
 
 @pytest.mark.unit
@@ -213,7 +221,8 @@ def test_from_dispatch_parses_aware_iso_timestamps(timestamp: str) -> None:
 @pytest.mark.unit
 def test_from_dispatch_keeps_naive_timestamp_for_handler_validation() -> None:
     request = ModelInjectedRequest.from_dispatch(
-        {"envelope_timestamp": "2026-01-01T00:00:00"}, _Event(value="x")
+        {"envelope_timestamp": "2026-01-01T00:00:00", "envelope_id": ENVELOPE_ID},
+        _Event(value="x"),
     )
     assert request.now.tzinfo is None
 
@@ -225,9 +234,151 @@ def test_from_dispatch_keeps_naive_timestamp_for_handler_validation() -> None:
         {"envelope_id": "not-a-uuid"},
         {"envelope_id": ""},
         {"correlation_id": "not-a-uuid"},
+        {"correlation_id": ""},
         {"envelope_timestamp": "not-a-time"},
+        {"envelope_timestamp": 123},
+        {"envelope_timestamp": None},
+        {"envelope_timestamp": {}},
     ],
 )
-def test_from_dispatch_rejects_malformed_headers(header: dict[str, str]) -> None:
+def test_from_dispatch_rejects_malformed_headers(header: dict[str, object]) -> None:
     with pytest.raises(ValueError):
-        ModelInjectedRequest.from_dispatch(header, _Event(value="x"))
+        ModelInjectedRequest.from_dispatch(
+            {
+                "envelope_timestamp": CLOCK_READING,
+                "envelope_id": ENVELOPE_ID,
+                **header,
+            },
+            _Event(value="x"),
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_engine_materialization_preserves_injected_identity_on_replay() -> None:
+    handler = _RecordingHandler()
+    engine = MessageDispatchEngine()
+    callback = _make_dispatch_callback(
+        cast("ProtocolHandleable", handler),
+        ModelHandlerRef(name="_Event", module=__name__),
+    )
+    engine.register_dispatcher("injected", callback, EnumMessageCategory.EVENT)
+    engine.register_route(
+        ModelDispatchRoute(
+            route_id="injected-route",
+            topic_pattern="onex.evt.test.injected.v1",
+            message_category=EnumMessageCategory.EVENT,
+            dispatcher_id="injected",
+        )
+    )
+    engine.freeze()
+    envelope = ModelEventEnvelope(
+        payload=_Event(value="replay"),
+        envelope_id=ENVELOPE_ID,
+        envelope_timestamp=CLOCK_READING,
+        correlation_id=CORRELATION_ID,
+        source_tool="test",
+    )
+    for _ in range(2):
+        result = await engine.dispatch("onex.evt.test.injected.v1", envelope)
+        assert result.status == EnumDispatchStatus.SUCCESS
+    assert len(handler.received) == 2
+    assert handler.received[0] == handler.received[1]
+    for request in handler.received:
+        assert isinstance(request, ModelInjectedRequest)
+        assert request.input_id == ENVELOPE_ID
+        assert request.now == CLOCK_READING
+        assert request.correlation_id == CORRELATION_ID
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_callback_does_not_introspect_per_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handler = _RecordingHandler()
+    callback = _make_dispatch_callback(
+        cast("ProtocolHandleable", handler),
+        ModelHandlerRef(name="_Event", module=__name__),
+    )
+
+    def unexpected_introspection(*args: object, **kwargs: object) -> None:
+        pytest.fail("Handler signature introspected during dispatch")
+
+    for name in (
+        "_resolve_def_b_input_model_type",
+        "_handler_accepts_event_envelope",
+        "_handler_declares_typed_event_envelope",
+    ):
+        monkeypatch.setattr(handler_wiring, name, unexpected_introspection)
+    for _ in range(2):
+        await callback(
+            ModelEventEnvelope(
+                payload=_Event(value="beat"),
+                envelope_id=ENVELOPE_ID,
+                envelope_timestamp=CLOCK_READING,
+                source_tool="test",
+            )
+        )
+    assert len(handler.received) == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_invalid_domain_payload_never_reaches_handler() -> None:
+    handler = _RecordingHandler()
+    with pytest.raises(ValueError):
+        await _dispatch(
+            handler,
+            ModelHandlerRef(name="_Event", module=__name__),
+            {
+                "payload": {"wrong": "field"},
+                "envelope_timestamp": CLOCK_READING,
+                "envelope_id": ENVELOPE_ID,
+            },
+        )
+    assert handler.received == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_model", [None, ModelHandlerRef(name="_Event", module=__name__)]
+)
+async def test_payload_handler_still_receives_validated_event(
+    event_model: ModelHandlerRef | None,
+) -> None:
+    received: list[_Event] = []
+
+    class PayloadHandler:
+        def handle(self, event: _Event) -> _Event:
+            received.append(event)
+            return event
+
+    callback = _make_dispatch_callback(
+        cast("ProtocolHandleable", PayloadHandler()), event_model
+    )
+    result = await callback(
+        {"payload": {"value": "payload"}, "__bindings": {}, "__debug_trace": {}}
+    )
+    assert received == [_Event(value="payload")]
+    assert isinstance(result, ModelDispatchResult)
+    assert result.output_events == [_Event(value="payload")]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_envelope_handler_output_is_normalized() -> None:
+    class EnvelopeHandler:
+        async def handle(self, envelope: ModelEventEnvelope[_Event]) -> _Event:
+            assert isinstance(envelope, ModelEventEnvelope)
+            assert isinstance(envelope.payload, _Event)
+            return envelope.payload
+
+    result = await _dispatch(
+        EnvelopeHandler(),
+        ModelHandlerRef(name="_Event", module=__name__),
+        {"payload": {"value": "enveloped"}, "__bindings": {}, "__debug_trace": {}},
+    )
+    assert isinstance(result, ModelDispatchResult)
+    assert result.output_events == [_Event(value="enveloped")]

@@ -87,3 +87,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn21698-deploy-dispatch-identity
+    description: >-
+      Hosted-runner runtime readback: the real dispatch engine materializes the envelope and the callback preserves the input id, timestamp and correlation id across replay. The probe fails if the callback generates metadata or reads only the materialized mapping.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/auto_wiring/test_injected_request_dispatch.py -k engine_materialization_preserves_injected_identity_on_replay -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

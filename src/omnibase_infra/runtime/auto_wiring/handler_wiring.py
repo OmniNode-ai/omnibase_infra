@@ -958,6 +958,8 @@ def _make_dispatch_callback(
 
     # Introspect once at wiring time, not per message.
     _request_model = _resolve_def_b_input_model_type(_effective_handle)
+    _injected_request_model = ModelInjectedRequest.narrow(_request_model)
+    handler_takes_envelope = _handler_accepts_event_envelope(_effective_handle)
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
@@ -1014,7 +1016,7 @@ def _make_dispatch_callback(
                     envelope, raw_payload, fallback_event_type="unknown"
                 )
             else:
-                target_model = _resolve_def_b_input_model_type(handle_method)
+                target_model = _request_model
                 if target_model is not None:
                     # OMN-16050: pass the registered input model so the unwrap
                     # STOPS at it. ``ModelEmitRequest`` declares ``payload`` plus
@@ -1061,9 +1063,6 @@ def _make_dispatch_callback(
         # keeps its pre-OMN-16050 structural behaviour.
         payload_target_model = _safe_import_event_model_class(event_model)
         payload = _extract_dispatch_payload(envelope, payload_target_model)
-        handler_takes_envelope = _handler_accepts_event_envelope(
-            cast("Callable[..., object]", handle_method)
-        )
         try:
             model_cls = _import_event_model_class(event_model)
             typed_payload: object = (
@@ -1071,6 +1070,14 @@ def _make_dispatch_callback(
                 if isinstance(payload, model_cls)
                 else model_cls.model_validate(payload)
             )
+            handler_arg: object = typed_payload
+            if _injected_request_model is not None and not handler_takes_envelope:
+                # Engine materialization omits transport metadata; unwrap the
+                # original envelope retained for this dispatch.
+                handler_arg = _injected_request_model.from_dispatch(
+                    current_dispatch_envelope() or envelope,
+                    cast("BaseModel", typed_payload),
+                )
         except Exception as exc:
             # An envelope-accepting handler (a multi-step ORCHESTRATOR) declares
             # its ``event_model`` as the workflow ENTRYPOINT, yet it also consumes
@@ -1107,16 +1114,10 @@ def _make_dispatch_callback(
             raise
         if pre_dispatch_guard is not None:
             pre_dispatch_guard(typed_payload)
-        handler_arg: object = typed_payload
         if handler_takes_envelope:
             handler_arg = _materialize_typed_event_envelope(
                 envelope, cast("BaseModel", typed_payload), event_model.name
             )
-        elif _request_model is not None and issubclass(
-            _request_model, ModelInjectedRequest
-        ):
-            # The runtime unwraps the envelope into the typed request.
-            handler_arg = _request_model.from_dispatch(envelope, typed_payload)
         typed_result = handle_method(handler_arg)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)

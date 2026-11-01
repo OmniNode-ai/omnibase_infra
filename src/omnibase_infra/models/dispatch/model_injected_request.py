@@ -19,8 +19,8 @@ naive reading fails with the handler's own error context.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,6 +53,13 @@ class ModelInjectedRequest[TEvent: BaseModel](BaseModel):
         default=None, description="Correlation id carried by the input envelope"
     )
 
+    @staticmethod
+    def narrow(candidate: object) -> type[ModelInjectedRequest[BaseModel]] | None:
+        """Return ``candidate`` when it is a request model class, else ``None``."""
+        if isinstance(candidate, type) and issubclass(candidate, ModelInjectedRequest):
+            return candidate
+        return None
+
     @classmethod
     def from_dispatch(
         cls, envelope: object, event: TEvent
@@ -63,9 +70,9 @@ class ModelInjectedRequest[TEvent: BaseModel](BaseModel):
         dispatch boundary, and never reaches the handler. ``envelope`` is the
         materialized dispatch mapping or a ``ModelEventEnvelope``; its
         ``envelope_timestamp``, ``envelope_id`` and ``correlation_id`` become
-        ``now``, ``input_id`` and ``correlation_id``. An envelope that carries no
-        timestamp or id gets a fresh reading and id, as the runtime's typed
-        envelope materialization does.
+        ``now``, ``input_id`` and ``correlation_id``. Timestamp and input id are
+        required: generating either here would change the identity of a replay.
+        Malformed metadata fails validation at the dispatch boundary.
 
         Args:
             envelope: The dispatch envelope (mapping or object).
@@ -81,15 +88,15 @@ class ModelInjectedRequest[TEvent: BaseModel](BaseModel):
             return getattr(envelope, name, None)
 
         now = read("envelope_timestamp")
-        if isinstance(now, str):
-            now = datetime.fromisoformat(now.replace("Z", "+00:00"))
-        input_id = read("envelope_id")
-        correlation_id = read("correlation_id")
-        return cls(
-            event=event,
-            now=now if isinstance(now, datetime) else datetime.now(UTC),
-            input_id=UUID(str(input_id)) if input_id is not None else uuid4(),
-            correlation_id=UUID(str(correlation_id)) if correlation_id else None,
+        if not isinstance(now, (datetime, str)):
+            raise ValueError("Dispatch envelope requires a datetime or ISO timestamp")
+        return cls.model_validate(
+            {
+                "event": event,
+                "now": now,
+                "input_id": read("envelope_id"),
+                "correlation_id": read("correlation_id"),
+            }
         )
 
 
