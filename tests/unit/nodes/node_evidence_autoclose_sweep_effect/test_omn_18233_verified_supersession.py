@@ -748,6 +748,7 @@ def _companion(number: int, ticket: str) -> dict[str, object]:
 
 def _request() -> ModelEvidenceAutocloseSweepRequest:
     return ModelEvidenceAutocloseSweepRequest(
+        demotion_window_hours=0,
         correlation_id=uuid4(),
         evidence_repo=_OCC_REPO,
         lookback_hours=24,
