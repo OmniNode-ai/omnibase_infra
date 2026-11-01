@@ -3,7 +3,9 @@
 """Process-local cache for latest cost projection snapshots.
 
 Entries are keyed by topic and window; the topics come from the registry API node
-contract (``config.cost_snapshot_topics``) and are injected by the caller.
+contract (``config.cost_snapshot_topics``) and are injected by the caller. That
+contract section is the only declaration of these topics; a writer stores a snapshot
+under the same ``ModelCostSnapshotTopics`` values the routes read with.
 """
 
 from __future__ import annotations
