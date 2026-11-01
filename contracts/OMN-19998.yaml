@@ -632,11 +632,11 @@ dod_evidence:
     binds_ac:
       - AC33
   - id: dod-omn19998-ac33-dev-tags-deploy-probe
-    description: Hosted-runner deployment artifact check for AC33 using disposable local origins. Runs the full staging path, builds and installs wheels, and audits the resulting provenance and content. Rejects a mismatched tag and a stale installed wheel. This checks candidate artifacts without claiming live deployment.
+    description: Hosted-runner deployment artifact check for AC33 using disposable local origins. First runs the candidate workflow tag fetch and public stamp API, accepting only a tag pointing at the build checkout HEAD. Then runs the full staging path, builds and installs wheels, and audits provenance and content, rejecting a mismatched tag and a stale installed wheel. The candidate fetch control fails against the merge-base workflow, which has no fetch step. This checks candidate artifacts without claiming live deployment.
     source: manual
     checks:
       - check_type: command
-        check_value: uv run pytest tests/integration/runtime/test_first_party_tag_sources_omn17427.py -q -k test_staged_wheels_have_tag_identity_and_content_parity
+        check_value: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py::test_the_checker_reads_the_fetched_tag_as_a_dev_merge_tag tests/integration/runtime/test_first_party_tag_sources_omn17427.py::test_staged_wheels_have_tag_identity_and_content_parity -q -n 0
         cwd: .
     binds_ac:
       - AC33
