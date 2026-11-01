@@ -33,11 +33,21 @@ _WORKFLOW = (
 )
 
 
+# The drain promise of OMN-21722: a 133 pool in ceil(133/40) = 4 scheduled ticks
+# (8 hours at the 2-hour cadence), not the 27 ticks (54 hours) of the old width.
+_POOL_SIZE = 133
+_DRAIN_TICKS = math.ceil(_POOL_SIZE / 40)
+
+
 def test_consecutive_ticks_at_the_default_width_drain_the_pool() -> None:
     request = ModelEvidenceAutocloseSweepRequest(correlation_id=uuid4())
     width = request.backfill_max_candidates
-    pool = list(range(133))
+    pool = list(range(_POOL_SIZE))
     ticks = math.ceil(len(pool) / width)
+    assert ticks <= _DRAIN_TICKS, (
+        f"backfill_max_candidates={width} needs {ticks} ticks to sweep a "
+        f"{_POOL_SIZE} pool once; the sized width drains it in {_DRAIN_TICKS}"
+    )
     seen: set[int] = set()
     for tick in range(ticks):
         seen |= set(_rotating_slice(pool, width, tick))
