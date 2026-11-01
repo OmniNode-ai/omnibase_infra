@@ -68,6 +68,23 @@ _BIND_ALL_CONFIGS = (
 )
 
 
+# Pinned independently of the YAML: editing the declared file must not silently
+# change which interface a service binds.
+_PINNED_LOOPBACK_ADDRESS = "127.0.0.1"
+_PINNED_BIND_ALL_ADDRESS = ".".join(["0"] * 4)
+_PINNED_POSTGRES_PORT = 5432
+_PINNED_TCP_PORT_BOUNDS = (1, 65535)
+
+
+def test_the_declared_settings_equal_the_pinned_values() -> None:
+    settings = load_network_binding_settings()
+
+    assert settings.loopback_address == _PINNED_LOOPBACK_ADDRESS
+    assert settings.bind_all_address == _PINNED_BIND_ALL_ADDRESS
+    assert settings.postgres_port == _PINNED_POSTGRES_PORT
+    assert (settings.tcp_port_min, settings.tcp_port_max) == _PINNED_TCP_PORT_BOUNDS
+
+
 def _field_default(module_name: str, class_name: str, field: str) -> object:
     model = getattr(importlib.import_module(module_name), class_name)
     return model.model_fields[field].default
@@ -79,6 +96,7 @@ def test_health_servers_bind_the_declared_loopback_address(
 ) -> None:
     default = _field_default(module_name, class_name, "health_check_host")
 
+    assert default == _PINNED_LOOPBACK_ADDRESS
     assert default == load_network_binding_settings().loopback_address
 
 
@@ -88,12 +106,20 @@ def test_container_facing_servers_bind_the_declared_bind_all_address(
 ) -> None:
     default = _field_default(module_name, class_name, field)
 
+    assert default == _PINNED_BIND_ALL_ADDRESS
     assert default == load_network_binding_settings().bind_all_address
 
 
 @pytest.mark.parametrize(
     ("module_name", "class_name"),
-    [*_LOOPBACK_BOUND_CONFIGS, *(item[:2] for item in _BIND_ALL_CONFIGS[:2])],
+    [
+        *_LOOPBACK_BOUND_CONFIGS,
+        *(
+            (module, cls)
+            for module, cls, field in _BIND_ALL_CONFIGS
+            if field == "health_check_host"
+        ),
+    ],
 )
 def test_a_health_host_environment_override_still_wins(
     monkeypatch: pytest.MonkeyPatch, module_name: str, class_name: str
@@ -101,8 +127,10 @@ def test_a_health_host_environment_override_still_wins(
     model = getattr(importlib.import_module(module_name), class_name)
 
     prefix = model.model_config["env_prefix"]
-    monkeypatch.setenv(f"{prefix}KAFKA_BOOTSTRAP_SERVERS", "broker.test:9092")
-    monkeypatch.setenv(f"{prefix}POSTGRES_DSN", "postgresql://db.test/observability")
+    for name, info in model.model_fields.items():
+        if info.is_required():
+            value = "postgresql://db.test/x" if "dsn" in name else "required.test:9092"
+            monkeypatch.setenv(f"{prefix}{name.upper()}", value)
     monkeypatch.delenv(f"{prefix}HEALTH_CHECK_HOST", raising=False)
     assert (
         model(_env_file=None).health_check_host
@@ -130,6 +158,7 @@ def test_the_registration_storage_port_default_is_the_declared_port() -> None:
         .default
     )
 
+    assert default == _PINNED_POSTGRES_PORT
     assert default == load_network_binding_settings().postgres_port
 
 
@@ -146,5 +175,6 @@ def test_the_declared_port_bounds_gate_the_kernel_and_the_domain_validator() -> 
     )
     refused = validator.validate_domains([f"example.com:{bounds.tcp_port_max + 1}"])
 
+    assert (bounds.tcp_port_min, bounds.tcp_port_max) == _PINNED_TCP_PORT_BOUNDS
     assert accepted == []
     assert len(refused) == 1
