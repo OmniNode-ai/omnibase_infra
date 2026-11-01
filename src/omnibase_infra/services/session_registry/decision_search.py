@@ -36,7 +36,6 @@ from qdrant_client.http import models as qdrant_models
 logger = logging.getLogger(__name__)
 
 _COLLECTION_NAME = "session_decisions"
-_DEFAULT_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
 
 
 class ModelDecisionSearchResult(BaseModel):
@@ -72,8 +71,8 @@ class DecisionSearchClient:
             ``"http://192.0.2.10:8100"``). Required when no custom
             ``embedder`` is provided; must be injected from the node contract
             or routing authority — no env-var fallback.
-        embedding_model: Model name to request from the embedding API.
-            Defaults to ``"Qwen3-Embedding-8B"``.
+        embedding_model: Model name to request from the embedding API; the
+            caller supplies it from the model-routing policy.
     """
 
     def __init__(
@@ -81,7 +80,8 @@ class DecisionSearchClient:
         qdrant: QdrantClient | None = None,
         embedder: object | None = None,
         embedding_base_url: str = "",
-        embedding_model: str = _DEFAULT_EMBEDDING_MODEL,
+        *,
+        embedding_model: str,
     ) -> None:
         self._qdrant = qdrant
         self._embedder = embedder

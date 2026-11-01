@@ -29,10 +29,12 @@ from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savin
     _build_effectiveness_entries,
     _classify_severity,
     _compute_validator_catch_savings,
-    _resolve_counterfactual,
 )
 from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_correlation_batch_command import (
     ModelSavingsCorrelationBatchCommand,
+)
+from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_counterfactual_policy import (
+    ModelSavingsCounterfactualPolicy,
 )
 
 
@@ -90,12 +92,24 @@ class TestPureHelpers:
         assert _classify_severity("something-unknown") == EnumCatchSeverity.MINOR
 
     def test_resolve_counterfactual_never_returns_none(self) -> None:
-        assert _resolve_counterfactual("claude-sonnet-4") == "claude-opus-4-6"
-        assert _resolve_counterfactual("claude-opus-4-6") == "claude-opus-4-6"
+        assert (
+            ModelSavingsCounterfactualPolicy.from_node_contract().resolve(
+                "claude-sonnet-4"
+            )
+            == "claude-opus-4-6"
+        )
+        assert (
+            ModelSavingsCounterfactualPolicy.from_node_contract().resolve(
+                "claude-opus-4-6"
+            )
+            == "claude-opus-4-6"
+        )
         # Unknown model still resolves to *something* non-empty — the
         # downstream omnimarket consumer DLQs on an empty
         # model_cloud_baseline (OMN-14533), so this must never be falsy.
-        resolved = _resolve_counterfactual("some-unknown-model")
+        resolved = ModelSavingsCounterfactualPolicy.from_node_contract().resolve(
+            "some-unknown-model"
+        )
         assert resolved == "some-unknown-model"
         assert resolved
 

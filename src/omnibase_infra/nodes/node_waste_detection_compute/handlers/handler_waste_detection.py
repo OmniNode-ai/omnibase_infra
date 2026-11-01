@@ -39,6 +39,7 @@ from omnibase_infra.nodes.node_waste_detection_compute.models import (
     ModelWasteCall,
     ModelWasteDetectionInput,
     ModelWasteFinding,
+    ModelWastePremiumModelPolicy,
 )
 from omnibase_infra.utils import sanitize_error_message
 
@@ -53,7 +54,6 @@ ANALYZERS: tuple[Analyzer, ...] = (
     analyze_agent_loop,
     analyze_retry_waste,
     analyze_high_output,
-    analyze_model_overkill,
     analyze_low_cache,
 )
 
@@ -99,7 +99,20 @@ ON CONFLICT (dedup_key) DO UPDATE SET
 
 
 class HandlerWasteDetection:
-    """Run pure waste analyzers over a session window."""
+    """Run pure waste analyzers over a session window.
+
+    The premium-model markers the model_overkill rule needs come from the node
+    contract unless a policy is injected.
+    """
+
+    def __init__(
+        self, premium_model_policy: ModelWastePremiumModelPolicy | None = None
+    ) -> None:
+        self._premium_model_policy = (
+            ModelWastePremiumModelPolicy.from_node_contract()
+            if premium_model_policy is None
+            else premium_model_policy
+        )
 
     @property
     def handler_id(self) -> str:
@@ -128,6 +141,13 @@ class HandlerWasteDetection:
             findings.extend(
                 analyzer(detection_input.calls, detection_input.detected_at)
             )
+        findings.extend(
+            analyze_model_overkill(
+                detection_input.calls,
+                detection_input.detected_at,
+                self._premium_model_policy.markers,
+            )
+        )
         return tuple(
             sorted(
                 findings,
