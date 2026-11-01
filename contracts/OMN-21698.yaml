@@ -124,3 +124,18 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn21698-settings-injection
+    description: >-
+      The registration orchestrator's auto-ACK switch and liveness interval are declared in the node contract and reach the dispatcher and the handler module by injection: an injected value is used as given whatever the environment says, and the node package reads no environment variable.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/nodes/node_registration_orchestrator/test_registration_settings_injection_omn21698.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: >-
+          sh -c '! grep -rnE "os\.(environ|getenv)|import os" src/omnibase_infra/nodes/node_registration_orchestrator/dispatchers src/omnibase_infra/nodes/node_registration_orchestrator/handlers'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
