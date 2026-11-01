@@ -545,6 +545,8 @@ handler_routing:
         - companions_scanned
         - backfill_pool_size
         - backfill_candidates_selected
+        - contract_pool_size
+        - contract_candidates_selected
         - bindings_extracted
         - tickets_flipped
         - tickets_gap_posted
@@ -714,6 +716,7 @@ io_operations:
       - lookback_hours
       - backfill_lookback_hours
       - backfill_max_candidates
+      - contract_enumeration_max_candidates
       - backfill_pool_size
       - backfill_rotation_minutes
       # OMN-17658. `scheduled_apply` is THE arming authority for unattended
@@ -770,6 +773,8 @@ io_operations:
       - companions_scanned
       - backfill_pool_size
       - backfill_candidates_selected
+      - contract_pool_size
+      - contract_candidates_selected
       - bindings_extracted
       - tickets_flipped
       - tickets_gap_posted
@@ -835,6 +840,10 @@ dependencies:
     type: "service"
     description: "OMN-17678: every Linear GraphQL POST goes through AdapterLinearGraphQLProjectTracker.graphql_transport (ProtocolLinearGraphQLTransport). The handler keeps its own status, retry and Done-write handling."
     required: false
+  - name: "third_party_endpoints"
+    type: "service"
+    description: "OMN-21623: The GitHub pull and blob URLs the sweep records. Read from the declared third_party_endpoints.yaml through load_third_party_endpoints(), not spelled in the handler."
+    required: true
 # Health check
 health_check:
   enabled: true

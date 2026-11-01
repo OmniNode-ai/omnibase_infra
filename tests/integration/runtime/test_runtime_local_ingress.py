@@ -54,7 +54,12 @@ async def test_unix_socket_request_dispatches_through_runtime_host(
     )
 
     process = RuntimeHostProcess(
-        config=make_runtime_config(local_ingress={"enabled": True}),
+        config=make_runtime_config(
+            local_ingress={
+                "enabled": True,
+                "socket_path": "/var/run/onex-test/runtime.sock",
+            }
+        ),
         dispatch_engine=AsyncMock(),
     )
     process._is_running = True

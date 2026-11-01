@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21792
+title: Reducer and projection intent target URIs are declared in intent_target_uris.yaml, not spelled in code
+summary: The contracts_and_di check reported 42 literal_url findings in src/omnibase_infra. This change declares the base URI of each postgres intent target in models/intent_target_uris/intent_target_uris.yaml, loads them through ModelIntentTargetUris (no field defaults, so an omitted value fails to load), and reads them in 7 modules. The check reports no literal_url finding over those modules, which held 15, and the repo total falls from 42 to 27.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21792-intent-target-uris
+    statement: The reducers and projection handlers that emit postgres intent targets read the base URI from the declared file, and a block that omits a value fails to load.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the contracts_and_di literal_url count over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: a literal_url issue from a slice module, or none from the planted module'
+      - id: AC2
+        statement: 'AC2: every url comes from the owning declared file and is injected, none hard-coded in the touched code -- falsifier: an omitted value that still loads, or a touched-module test that fails'
+evidence_requirements:
+  - kind: tests
+    description: The loaded URIs equal the declared file, each omitted value fails to load, and every consumer module is free of literal_url.
+    command: uv run --frozen pytest tests/unit/models/intent_target_uris -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21792-ac1-no-literal-url
+    description: The contracts_and_di check reports no literal_url issue in the 7 consuming modules and reports the planted URL. Fails at the merge base, where those modules held 15 literal_url findings.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/intent_target_uris/test_intent_target_consumers_omn21792.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21792-ac2-declared-uris
+    description: The URIs load from the declared file and an omitted value is refused. Fails at the merge base, where the model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/intent_target_uris/test_model_intent_target_uris.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21792-deploy-intent-target-uris
+    description: >-
+      Post-deploy probe: the runtime container loads the intent target base URIs from the file it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.intent_target_uris import load_intent_target_uris; load_intent_target_uris()'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
