@@ -44,8 +44,10 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/nodes/test_llm_registry_registration_omn21784.py -q -p no:cacheprovider
   - id: dod-deploy
-    description: "Deploy probe: the registries register the handlers into a real container and the registered handlers resolve back from it (the same integration test, runnable on a hosted runner with no live runtime)."
+    description: "Deploy probe: the LLM registries on the PR branch (read from GitHub by branch name, so it follows later pushes rather than one commit) build the handler as the instance argument of the container registration call, and the inference metrics path resolves it with get_service_async. The behavior itself is proved by dod-003 against a real container; this probe is the hermetic content read the deploy gate accepts for a ticket with no live-deploy step."
     source: generated
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/integration/nodes/test_llm_registry_registration_omn21784.py -q -p no:cacheprovider'
+        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_embedding_effect/registry/registry_infra_llm_embedding_effect.py?ref=omn-21784-handler-binding-sites-dead-registries" | grep -Eq ''instance=HandlerEmbeddingOpenaiCompatible\('''
+      - check_type: command
+        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_inference_effect/registry/registry_infra_llm_inference_effect.py?ref=omn-21784-handler-binding-sites-dead-registries" | grep -Eq ''get_service_async\(\s*HandlerLlmOpenaiCompatible'''
