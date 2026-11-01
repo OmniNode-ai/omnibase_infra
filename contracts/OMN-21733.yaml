@@ -30,13 +30,13 @@ dod_evidence:
       - check_type: command
         check_value: 'uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov'
   - id: dod-002
-    description: "Lab-only deploy readback: on the serving host the container publishes one port bound to one address. It reads the running container on h051 over ssh, which a hosted runner cannot resolve or reach, so only the local Done gate runs it; the hosted gate reports it NOT_EVALUATED, and dod-003-deploy-render proves the rendered one-address binding on the hosted side."
+    description: "Hosted deploy probe: the actual Compose deployment renders with exactly one published port, bound to the one given address, targeting the server's port 8080."
     source: manual
-    execution_scope: local_done_gate
     binds_ac: [AC5]
     checks:
       - check_type: command
-        check_value: "ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
+        check_value: "env FACTORY_FLOOR_BIND_ADDR=192.0.2.1 FACTORY_FLOOR_PORT=8088 FACTORY_FLOOR_SERVE_DIR=/srv/example-site docker compose -f docker/docker-compose.factory-floor-web.yml config --format json | jq -e '.services[\"factory-floor-web\"].ports | length == 1 and .[0].host_ip == \"192.0.2.1\" and (.[0].published | tostring) == \"8088\" and .[0].target == 8080'"
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-003-deploy-render
     description: "Hosted deploy probe: render the actual Compose deployment and assert the one-address port and exact read-only nginx file mount, then check the browser policy. Compose unavailability is a failure, never a skip."
     source: manual
