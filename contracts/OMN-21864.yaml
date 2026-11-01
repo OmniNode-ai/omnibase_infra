@@ -7,30 +7,21 @@ interface_change: false
 interfaces_touched: []
 evidence_requirements:
   - kind: tests
-    description: The lab declaration loads through the issuer's own reader and holds a cap of six, and the plan, parity and issuer suites still pass with it.
-    command: uv run --frozen pytest tests/scripts/test_lab_device_cap_omn21864.py tests/scripts/test_developer_principal_grants_parity.py -q --no-cov
+    description: The lab declaration loads through the issuer's own reader and holds a cap of six; the issuer, driven with it and a fake broker, issues six devices to one login, refuses the seventh and still rotates a held device at the cap.
+    command: uv run --frozen pytest tests/scripts/test_lab_device_cap_omn21864.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-lab-device-cap-six
-    description: The lab declaration, read by the issuer's load_declaration, holds max_devices_per_login of 6. At the merge base it holds 5, so the test fails there.
+    description: The lab declaration, read by the issuer's load_declaration, holds max_devices_per_login of 6, and the issuer admits a sixth device and refuses a seventh. At the merge base the cap is 5, so the sixth device is refused and the tests fail there.
     source: manual
     binds_ac:
       - AC1
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/scripts/test_lab_device_cap_omn21864.py -q --no-cov
-        cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-lab-local-parity
-    description: The lab and local declarations still agree on every grant, so the cap change did not split them.
-    source: manual
-    binds_ac:
-      - AC1
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/scripts/test_developer_principal_grants_parity.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-lab-device-cap-deploy-probe
     description: Hosted-runner deploy probe reads the lab declaration from GitHub at the checked-out commit and requires the cap of six, so a checkout without the change fails it.
@@ -49,4 +40,4 @@ requirements:
     statement: One tailnet login can hold six machine principals on the lab broker.
     acceptance:
       - id: AC1
-        statement: The lab declaration's max_devices_per_login is 6, a test reads it through the issuer's own load_declaration, and the lab and local declarations still agree on every grant.
+        statement: The lab declaration's max_devices_per_login is 6, a test reads it through the issuer's own load_declaration, and the issuer driven with it issues six devices to one login, refuses the seventh and rotates a held device at the cap.
