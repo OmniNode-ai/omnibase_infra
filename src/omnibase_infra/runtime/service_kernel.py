@@ -155,6 +155,7 @@ from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
 from omnibase_infra.models.network_binding import load_network_binding_settings
+from omnibase_infra.models.runtime_kernel_defaults import load_runtime_kernel_defaults
 from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
@@ -259,7 +260,6 @@ except Exception:  # noqa: BLE001 — boundary: catch-all for resilience
     KERNEL_VERSION = "unknown"
 
 # Default configuration
-DEFAULT_CONTRACTS_DIR = "./contracts"
 DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 
 # OMN-17304: the SHIPPED tier-0 default runtime configuration — the
@@ -277,7 +277,8 @@ TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 # The VALUES (which transport, which lane) belong to the workspace that
 # declares them and are never shipped in this package: lab configuration is
 # not hardcoded in the product every customer runs (OMN-19184).
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
+_DEFAULTS = load_runtime_kernel_defaults()
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path(_DEFAULTS.workspace_contracts_dir)
 
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
@@ -666,7 +667,7 @@ def _get_contracts_dir() -> Path:
     if onex_value:
         return Path(onex_value)
 
-    return Path(DEFAULT_CONTRACTS_DIR)
+    return Path(_DEFAULTS.default_contracts_dir)
 
 
 def _load_runtime_database_topology() -> ModelDeploymentTopology | None:
@@ -2475,13 +2476,7 @@ async def bootstrap() -> int:
         if use_kafka:
             try:
                 _llm_endpoints: dict[str, str] = {}
-                for env_key, logical_name in [
-                    ("LLM_CODER_URL", "coder"),
-                    ("LLM_CODER_FAST_URL", "coder-fast"),
-                    ("LLM_EMBEDDING_URL", "embedding"),
-                    ("LLM_DEEPSEEK_R1_URL", "deepseek-r1"),
-                    ("LLM_SMALL_URL", "small"),
-                ]:
+                for env_key, logical_name in _DEFAULTS.llm_endpoint_names.items():
                     _url = os.environ.get(env_key, "").strip()
                     if _url:
                         _llm_endpoints[logical_name] = _url

@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Runtime kernel defaults (OMN-21623).
+#
+# Where the runtime kernel looks for contracts when the environment names no
+# directory, and which environment variables name the LLM endpoints it probes.
+# Read by ModelRuntimeKernelDefaults; the kernel holds no path or endpoint-name
+# literal for them. Every key is required: a block that omits one fails to load.
+settings:
+  # Contracts directory used when ONEX_CONTRACTS_DIR is unset.
+  default_contracts_dir: "./contracts"
+  # Where a workspace keeps its own runtime contracts, relative to its config root.
+  workspace_contracts_dir: "config/onex"
+  # Environment variables whose value is an LLM endpoint the kernel health-probes.
+  # An endpoint's logical name is the variable name between LLM_ and _URL.
+  llm_endpoint_env_keys:
+    - LLM_CODER_URL
+    - LLM_CODER_FAST_URL
+    - LLM_EMBEDDING_URL
+    - LLM_DEEPSEEK_R1_URL
+    - LLM_SMALL_URL
