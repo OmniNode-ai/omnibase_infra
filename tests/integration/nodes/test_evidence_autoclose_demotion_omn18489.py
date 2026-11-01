@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import json
+from asyncio import CancelledError
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import uuid4
 
 import httpx
@@ -146,7 +148,6 @@ async def test_sweep_deploy_demotion_over_linear_http_transport(
             ModelEvidenceAutocloseSweepRequest(
                 correlation_id=uuid4(),
                 apply=apply,
-                demotion_window_hours=168,
                 linear_retry_max_attempts=1,
             )
         )
@@ -154,6 +155,7 @@ async def test_sweep_deploy_demotion_over_linear_http_transport(
     demotion = result.in_progress_demotion
     assert demotion is not None
     if fail_second_page:
+        assert result.success is False
         assert demotion.success is False
         assert demotion.outcomes == ()
         assert "enumeration failed" in demotion.error_message
@@ -188,3 +190,82 @@ async def test_sweep_deploy_demotion_over_linear_http_transport(
                 assert resolution in comments[0]
         else:
             assert comments == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_method", [True, False])
+async def test_demotion_enumeration_failure_preserves_the_sweep_receipt(
+    missing_method: bool,
+) -> None:
+    from tests.integration.nodes.test_evidence_autoclose_per_check_receipt_integration import (
+        _FakeLinear,
+        _handler,
+    )
+
+    class RaisingLinear(_FakeLinear):
+        async def fetch_in_progress_issues(
+            self, since_iso: str
+        ) -> tuple[list[dict[str, object]] | None, str]:
+            raise RuntimeError("enumeration unavailable")
+
+    linear = _FakeLinear() if missing_method else RaisingLinear()
+    result = await _handler(linear).handle(
+        ModelEvidenceAutocloseSweepRequest(
+            correlation_id=uuid4(),
+            evidence_repo="OmniNode-ai/onex_change_control",
+            backfill_lookback_hours=0,
+        )
+    )
+
+    # Completed forward evidence remains readable, while a failed census
+    # cannot masquerade as a successful sweep or release a demotion write.
+    assert result.outcomes
+    assert result.outcomes[0].check_results
+    assert result.success is False
+    assert "enumeration failed" in result.error_message
+    demotion = result.in_progress_demotion
+    assert demotion is not None
+    assert demotion.window_hours == 168
+    assert demotion.success is False
+    assert demotion.candidates_scanned == demotion.tickets_demoted == 0
+    assert demotion.outcomes == ()
+    assert (
+        "AttributeError" if missing_method else "RuntimeError"
+    ) in demotion.error_message
+    assert linear.state_updates == linear.comments == []
+    readback = type(result).model_validate_json(result.model_dump_json())
+    assert readback == result
+
+
+@pytest.mark.asyncio
+async def test_demotion_enumeration_cancellation_propagates() -> None:
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.in_progress_demotion import (
+        InProgressDemotionLeg,
+    )
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_progress_demotion_request import (
+        ModelInProgressDemotionRequest,
+    )
+
+    class CancelledLinear:
+        async def fetch_in_progress_issues(
+            self, since_iso: str
+        ) -> tuple[list[dict[str, object]] | None, str]:
+            raise CancelledError
+
+    async def unexpected_gh(args: list[str], timeout: float) -> tuple[object, str]:
+        pytest.fail("a cancelled census must not reach GitHub")
+
+    with pytest.raises(CancelledError):
+        await InProgressDemotionLeg(
+            linear_client=cast("_LinearClient", CancelledLinear()),
+            run_gh_command=unexpected_gh,
+        ).handle(
+            ModelInProgressDemotionRequest(
+                correlation_id=uuid4(),
+                window_hours=168,
+                apply=True,
+                max_demotions_per_run=5,
+                pr_owner="OmniNode-ai",
+                gh_timeout_seconds=10,
+            )
+        )

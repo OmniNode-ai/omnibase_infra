@@ -374,7 +374,9 @@ def _request(**overrides: Any) -> ModelEvidenceAutocloseSweepRequest:
         "pr_watcher_state_path": _SANDBOX["watcher"],
     }
     defaults.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**defaults)
+    return ModelEvidenceAutocloseSweepRequest(
+        **{"demotion_window_hours": 0, **defaults}
+    )
 
 
 # =====================================================================
