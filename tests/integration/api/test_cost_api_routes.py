@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from omnibase_core.container import ModelONEXContainer
-from omnibase_infra.nodes.node_registry_api_effect.models.model_cost_snapshot_topics import (
+from omnibase_infra.models.model_cost_snapshot_topics import (
     ModelCostSnapshotTopics,
 )
 from omnibase_infra.services.cost_api.snapshot_cache import (

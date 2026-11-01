@@ -41,10 +41,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.nodes.node_registry_api_effect.models.model_cost_snapshot_topics import (
-    ModelCostSnapshotTopics,
+from omnibase_infra.handlers.handler_cost_api_dependencies import (
+    HandlerCostApiDependencies,
 )
-from omnibase_infra.services.cost_api import router as cost_api_router
 from omnibase_infra.services.registry_api.registry_discovery import (
     ServiceRegistryDiscovery,
 )
@@ -197,20 +196,15 @@ def create_app(
     )
 
     # Create and attach service
-    service = ServiceRegistryDiscovery(
+    app.state.registry_service = ServiceRegistryDiscovery(
         container=container,
         projection_reader=projection_reader,
         widget_mapping_path=widget_mapping_path,
     )
-    app.state.registry_service = service
-    app.state.cost_api_pool = cost_api_pool
-    # Cost API snapshot topics: bound from config.cost_snapshot_topics of the
-    # registry API node contract and injected into the cost routes (OMN-21736).
-    app.state.cost_snapshot_topics = ModelCostSnapshotTopics.from_contract()
+    HandlerCostApiDependencies.handle(app, cost_api_pool)
 
     # Include routes
     app.include_router(router)
-    app.include_router(cost_api_router)
 
     # Root endpoint
     @app.get("/", include_in_schema=False)

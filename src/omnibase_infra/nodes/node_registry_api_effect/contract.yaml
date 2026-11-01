@@ -62,6 +62,11 @@ config:
   postgres_query_timeout_seconds: 30
   # Widget mapping cache behaviour
   widget_mapping_cache_enabled: true
+  # HTTP application composition; separate from registry request dispatch.
+  cost_api_binding:
+    handler:
+      name: "HandlerCostApiDependencies"
+      module: "omnibase_infra.handlers.handler_cost_api_dependencies"
   # Cost API: topics whose latest projection snapshot backs the cost routes.
   # Injected into the route handlers through create_app (OMN-21736).
   cost_snapshot_topics:

@@ -11,11 +11,10 @@ Ticket: OMN-21736
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pathlib import Path
 
-from omnibase_infra.nodes.node_registry_api_effect.node import (
-    load_registry_api_config,
-)
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelCostSnapshotTopics(BaseModel):
@@ -34,14 +33,21 @@ class ModelCostSnapshotTopics(BaseModel):
     token_usage: str = Field(..., min_length=1)
 
     @classmethod
-    def from_contract(cls) -> ModelCostSnapshotTopics:
+    def from_contract(
+        cls, contract_path: Path | None = None
+    ) -> ModelCostSnapshotTopics:
         """Build the topics from ``config.cost_snapshot_topics`` of the node contract.
 
         Raises:
             pydantic.ValidationError: If the contract does not declare every topic.
         """
+        path = contract_path or (
+            Path(__file__).resolve().parents[1]
+            / "nodes/node_registry_api_effect/contract.yaml"
+        )
+        contract = yaml.safe_load(path.read_text(encoding="utf-8"))
         return cls.model_validate(
-            load_registry_api_config().get("cost_snapshot_topics", {})
+            contract.get("config", {}).get("cost_snapshot_topics", {})
         )
 
 

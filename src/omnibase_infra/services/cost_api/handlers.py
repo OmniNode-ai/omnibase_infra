@@ -9,9 +9,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
 
-from omnibase_infra.nodes.node_registry_api_effect.models.model_cost_snapshot_topics import (
-    ModelCostSnapshotTopics,
-)
+from omnibase_infra.models.model_cost_snapshot_topics import ModelCostSnapshotTopics
 from omnibase_infra.services.cost_api.models import (
     AggregationWindow,
     ModelCostBreakdown,

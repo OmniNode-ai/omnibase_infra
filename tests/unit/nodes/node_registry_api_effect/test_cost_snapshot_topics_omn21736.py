@@ -19,10 +19,8 @@ import yaml
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.models.model_cost_snapshot_topics import ModelCostSnapshotTopics
 from omnibase_infra.nodes.node_registry_api_effect import load_registry_api_config
-from omnibase_infra.nodes.node_registry_api_effect.models import (
-    ModelCostSnapshotTopics,
-)
 from omnibase_infra.services.cost_api import handlers as cost_handlers
 from omnibase_infra.services.cost_api.router import get_cost_snapshot_topics
 from omnibase_infra.services.cost_api.snapshot_cache import (
@@ -68,15 +66,12 @@ def test_from_contract_reads_declared_topics() -> None:
 
 @pytest.mark.unit
 def test_from_contract_fails_loudly_without_the_section(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    from omnibase_infra.nodes.node_registry_api_effect.models import (
-        model_cost_snapshot_topics as module,
-    )
-
-    monkeypatch.setattr(module, "load_registry_api_config", dict)
+    contract = tmp_path / "contract.yaml"
+    contract.write_text("config: {}\n")
     with pytest.raises(ValidationError):
-        ModelCostSnapshotTopics.from_contract()
+        ModelCostSnapshotTopics.from_contract(contract)
 
 
 @pytest.mark.unit
