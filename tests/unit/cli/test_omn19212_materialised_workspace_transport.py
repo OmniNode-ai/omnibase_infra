@@ -40,9 +40,8 @@ from omnibase_infra.handlers.handler_workspace_runtime_config_materializer impor
 )
 from omnibase_infra.runtime.service_kernel import (
     resolve_embedded_runtime_config,
+    workspace_runtime_contracts_dir,
 )
-
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
 
 pytestmark = pytest.mark.unit
 
@@ -74,8 +73,7 @@ _STABILITY = (
 
 def _write_working_tree_config(root: Path, text: str) -> Path:
     path = (
-        Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
-        / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+        workspace_runtime_contracts_dir(Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"]))
         / "runtime"
     )
     path.mkdir(parents=True, exist_ok=True)
@@ -210,8 +208,9 @@ class TestTheRefusal:
             / "runtime_config.yaml"
         )
         tree = (
-            Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
-            / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+            workspace_runtime_contracts_dir(
+                Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+            )
             / "runtime"
             / "runtime_config.yaml"
         )

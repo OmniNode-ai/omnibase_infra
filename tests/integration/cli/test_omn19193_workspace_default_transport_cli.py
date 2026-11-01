@@ -34,8 +34,7 @@ from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import delegate_command
 from omnibase_infra.cli.delegate_lane import LANE_DECLARATION_RELATIVE_PATH
 from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
-
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
+from omnibase_infra.runtime.service_kernel import workspace_runtime_contracts_dir
 
 pytestmark = pytest.mark.integration
 
@@ -83,8 +82,9 @@ def _workspace(root: Path, *, with_config: bool) -> Path:
     declaration.write_text(_DECLARATION, encoding="utf-8")
     if with_config:
         config = (
-            Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
-            / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+            workspace_runtime_contracts_dir(
+                Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+            )
             / "runtime"
             / "runtime_config.yaml"
         )

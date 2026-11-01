@@ -646,7 +646,7 @@ def _load_node_graph_config() -> ModelRuntimeNodeGraphConfig:
     return ModelRuntimeNodeGraphConfig.from_contracts_dir(contracts_dir)
 
 
-def _workspace_runtime_contracts_dir(config_root: Path) -> Path:
+def workspace_runtime_contracts_dir(config_root: Path) -> Path:
     """Tier-1 runtime contracts under the owning config root (OMN-19193)."""
     return config_root / "config" / "onex"
 
@@ -1630,7 +1630,7 @@ def resolve_embedded_runtime_config(
             return config, provenance
         workspace_config: Path | None = None
         if config_root is not None:
-            workspace_contracts = _workspace_runtime_contracts_dir(config_root)
+            workspace_contracts = workspace_runtime_contracts_dir(config_root)
             workspace_config = workspace_contracts / DEFAULT_RUNTIME_CONFIG
             if workspace_config.is_file():
                 config = load_runtime_config(
@@ -1645,7 +1645,7 @@ def resolve_embedded_runtime_config(
         missing_owner_details = ""
         if config_root is None:
             developer_config = (
-                _workspace_runtime_contracts_dir(
+                workspace_runtime_contracts_dir(
                     workspace_root.resolve() / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
                 )
                 / DEFAULT_RUNTIME_CONFIG
@@ -6155,4 +6155,5 @@ __all__: list[str] = [
     "load_runtime_config",
     "main",
     "raise_nofile_soft_limit",
+    "workspace_runtime_contracts_dir",
 ]

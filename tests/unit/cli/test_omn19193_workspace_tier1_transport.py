@@ -57,9 +57,8 @@ from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusCo
 from omnibase_infra.runtime.service_kernel import (
     load_runtime_config,
     resolve_embedded_runtime_config,
+    workspace_runtime_contracts_dir,
 )
-
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
 
 pytestmark = pytest.mark.unit
 
@@ -105,8 +104,9 @@ def _workspace(root: Path, *, tier1: str | None = _TIER1) -> Path:
     declaration.write_text(_LANES, encoding="utf-8")
     if tier1 is not None:
         config = (
-            Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
-            / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+            workspace_runtime_contracts_dir(
+                Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+            )
             / "runtime"
             / "runtime_config.yaml"
         )
@@ -137,8 +137,9 @@ class TestTheWorkspaceTier:
         assert "workspace tier-1" in source
         assert (
             str(
-                Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
-                / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+                workspace_runtime_contracts_dir(
+                    Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+                )
             )
             in source
         )
@@ -152,8 +153,9 @@ class TestTheWorkspaceTier:
         message = str(exc.value)
         assert (
             str(
-                Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
-                / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+                workspace_runtime_contracts_dir(
+                    Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+                )
                 / "runtime"
             )
             in message
@@ -205,7 +207,7 @@ class TestTheLaneField:
         # Lab configuration is never hardcoded in the product every customer
         # runs (OMN-19184). The package ships the resolution tier and the
         # optional field; the lane a workspace uses is the workspace's own.
-        assert not (_REPO_ROOT / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH).exists()
+        assert not (workspace_runtime_contracts_dir(_REPO_ROOT)).exists()
         declared = [
             path
             for path in _REPO_ROOT.rglob("runtime_config.yaml")
