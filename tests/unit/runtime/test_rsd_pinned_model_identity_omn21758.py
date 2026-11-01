@@ -4,18 +4,34 @@
 
 from __future__ import annotations
 
-import pytest
-from pydantic import ValidationError
+from pathlib import Path
 
+import pytest
+import yaml
+from pydantic import BaseModel, ValidationError
+
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.rsd import model_rsd_pinned_model_identity as pin
 from omnibase_infra.models.rsd.model_rsd_pinned_model_identity import (
     ModelRsdPinnedModelIdentity,
 )
 from omnibase_infra.runtime.models.model_rsd_artifact_source_relation import (
     ModelRsdArtifactSourceRelation,
 )
+from omnibase_infra.runtime.models.model_rsd_live_delegation_authority_envelope import (
+    ModelRsdLiveDelegationAuthorityEnvelope,
+)
 from omnibase_infra.runtime.models.model_rsd_live_delegation_observation import (
     ModelRsdLiveDelegationObservation,
 )
+from omnibase_infra.runtime.models.model_rsd_live_delegation_overlay import (
+    ModelRsdLiveDelegationOverlay,
+)
+from omnibase_infra.runtime.models.model_rsd_model_artifact_provenance import (
+    ModelRsdModelArtifactProvenance,
+)
+from tests.unit.runtime.test_rsd_live_delegation_overlay import _OVERLAY_TEXT
+from tests.unit.runtime.test_rsd_model_artifact_provenance import _EXAMPLE_TEXT
 
 pytestmark = pytest.mark.unit
 
@@ -83,3 +99,110 @@ def test_observation_takes_its_observed_model_from_the_contract() -> None:
             installed_public_rsd_revision_sha=revision,
             observed_model_id=pinned.served_model,
         )
+
+
+@pytest.mark.parametrize(
+    ("model", "field", "pin_field"),
+    [
+        (ModelRsdLiveDelegationAuthorityEnvelope, "model_id", "served_model"),
+        (
+            ModelRsdLiveDelegationAuthorityEnvelope,
+            "observed_model_id",
+            "observed_model",
+        ),
+        (ModelRsdLiveDelegationOverlay, "model_id", "served_model"),
+        (ModelRsdLiveDelegationOverlay, "observed_model_id", "observed_model"),
+        (ModelRsdModelArtifactProvenance, "model_id", "artifact_model"),
+        (ModelRsdModelArtifactProvenance, "base_model_id", "base_model"),
+        (ModelRsdModelArtifactProvenance, "artifact_id", "artifact_ref"),
+        (ModelRsdModelArtifactProvenance, "architecture", "architecture"),
+        (ModelRsdModelArtifactProvenance, "served_model_id", "served_model"),
+        (ModelRsdModelArtifactProvenance, "launch_profile_id", "launch_profile"),
+    ],
+)
+def test_authority_overlay_and_provenance_refuse_each_substituted_pin(
+    model: type[BaseModel], field: str, pin_field: str
+) -> None:
+    if model is ModelRsdModelArtifactProvenance:
+        payload = yaml.safe_load(_EXAMPLE_TEXT)
+    else:
+        payload = yaml.safe_load(_OVERLAY_TEXT)
+        if model is ModelRsdLiveDelegationAuthorityEnvelope:
+            payload = payload["authority_envelope"]
+
+    expected = getattr(ModelRsdPinnedModelIdentity.from_contract(), pin_field)
+    accepted = model.model_validate(payload)
+    assert getattr(accepted, field) == expected
+    payload[field] = expected + "-substituted"
+    with pytest.raises(ValidationError) as error:
+        model.model_validate(payload)
+    assert any(
+        detail["loc"] == (field,) and "contract pin" in detail["msg"]
+        for detail in error.value.errors()
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        "[",
+        "",
+        "[]",
+        "{}",
+        "pinned_model_identity: {}",
+        "pinned_model_identity: 1",
+    ],
+)
+def test_contract_load_failures_are_configuration_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str | None
+) -> None:
+    contract = tmp_path / "rsd_pinned_model_identity.yaml"
+    if payload is not None:
+        contract.write_text(payload, encoding="utf-8")
+    monkeypatch.setattr(pin, "_CONTRACT_PATH", contract)
+    # Bypass only the success cache so the production loader reads the bad file.
+    with pytest.raises(
+        ProtocolConfigurationError, match="repair or reinstall"
+    ) as error:
+        ModelRsdPinnedModelIdentity.from_contract.__wrapped__(
+            ModelRsdPinnedModelIdentity
+        )
+    assert error.value.__cause__ is not None
+    assert not isinstance(error.value, ValidationError)
+
+
+def test_pin_is_loaded_when_defining_a_type_before_validating_a_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(
+        _cls: type[ModelRsdPinnedModelIdentity],
+    ) -> ModelRsdPinnedModelIdentity:
+        raise ProtocolConfigurationError("packaged pin unavailable")
+
+    monkeypatch.setattr(
+        ModelRsdPinnedModelIdentity, "from_contract", classmethod(unavailable)
+    )
+    with pytest.raises(ProtocolConfigurationError, match="packaged pin unavailable"):
+        pin._pinned("served_model")
+
+
+def test_payload_validation_uses_the_already_loaded_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pinned = ModelRsdPinnedModelIdentity.from_contract()
+
+    def unexpected_load(
+        _cls: type[ModelRsdPinnedModelIdentity],
+    ) -> ModelRsdPinnedModelIdentity:
+        raise AssertionError("payload validation must not load a contract")
+
+    monkeypatch.setattr(
+        ModelRsdPinnedModelIdentity, "from_contract", classmethod(unexpected_load)
+    )
+    assert (
+        _relation(pinned.base_model).artifact_declared_base_model_id
+        == pinned.base_model
+    )
+    with pytest.raises(ValidationError, match="contract pin"):
+        _relation(pinned.base_model + "-substituted")

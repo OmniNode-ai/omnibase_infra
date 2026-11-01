@@ -42,3 +42,10 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/rsd/model_rsd_pinned_model_identity.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'rsd_pinned_model_identity.yaml'"
+  - id: dod-004
+    description: "A built wheel contains the pin contract and the extracted package loads it and validates a real RSD observation outside the source tree. Missing package data or a broken installed loader fails this hosted-runner check; no live rollout is claimed."
+    source: generated
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/integration/runtime/test_rsd_pinned_model_identity_contract_omn21758.py -q -p no:cacheprovider'
