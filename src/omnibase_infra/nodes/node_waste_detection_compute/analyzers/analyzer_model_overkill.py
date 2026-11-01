@@ -18,18 +18,23 @@ from omnibase_infra.nodes.node_waste_detection_compute.models import (
 )
 
 RULE_ID = "model_overkill"
-PREMIUM_MODEL_MARKERS = ("opus", "gpt-4", "o3")
 SIMPLE_REQUEST_TYPES = {"classification", "embedding", "routing", "summarization"}
 
 
 def analyze_model_overkill(
-    calls: tuple[ModelWasteCall, ...], detected_at: datetime
+    calls: tuple[ModelWasteCall, ...],
+    detected_at: datetime,
+    premium_model_markers: tuple[str, ...],
 ) -> tuple[ModelWasteFinding, ...]:
-    """Detect premium model use on small/simple work."""
+    """Detect premium model use on small/simple work.
+
+    ``premium_model_markers`` are the lower-case identifier substrings the node
+    contract declares as premium models.
+    """
     overkill = tuple(
         call
         for call in sorted_calls(calls)
-        if any(marker in call.model_id.lower() for marker in PREMIUM_MODEL_MARKERS)
+        if any(marker in call.model_id.lower() for marker in premium_model_markers)
         and (
             call.request_type.lower() in SIMPLE_REQUEST_TYPES
             or call.total_tokens <= 600
