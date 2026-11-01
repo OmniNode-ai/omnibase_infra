@@ -11,21 +11,21 @@ requirements:
     statement: "The dedicated CI broker starts with a Seastar budget that recovers the production consumer-group log, and its consumer-group offsets expire within a day of the last member."
     acceptance:
       - id: AC1
-        statement: "AC1: the CI broker compose gives the broker a Seastar memory budget of at least 4 GiB and the partition-cap job sizes against the same dial -- falsifier: uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -k memory_budget fails when the default is 1G"
+        statement: "AC1: the CI broker compose gives the broker a Seastar memory budget of at least 4 GiB and the partition-cap job sizes against the same fixed budget -- falsifier: uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -k memory_budget fails when the default is 1G"
       - id: AC2
         statement: "AC2: the CI broker setup job declares a group offset retention of at most one day -- falsifier: uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -k expire fails when the retention line is removed"
 evidence_requirements:
   - kind: tests
-    description: "The broker's default memory dial and the setup job's retention are pinned by reading the compose file."
+    description: "The broker's fixed memory budget and the setup job's retention are pinned by reading the compose file."
     command: "uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py tests/unit/docker/test_ci_bus_broker_isolation_omn18691.py -q -p no:cacheprovider"
 dod_evidence:
   - id: dod-001
-    description: "The broker's default Seastar budget is at least 4 GiB and the partition-cap job follows the same dial."
+    description: "The broker and partition-cap job use the same fixed budget of at least 4 GiB; an old memory environment override cannot lower it."
     source: generated
     binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -q -p no:cacheprovider -k "covers_recovery or same_dial"'
+        check_value: 'uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -q -p no:cacheprovider -k "covers_recovery or same_dial or no_environment_override"'
   - id: dod-002
     description: "The setup job expires group offsets within a day."
     source: generated
@@ -33,3 +33,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -q -p no:cacheprovider -k expire'
+  - id: dod-003
+    description: "Render the deploy configuration with a stale 1G override and require 4G for both the broker and sizing job. This hosted check renders only; it starts no containers and uses placeholder credentials."
+    source: generated
+    scope: deploy
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: "env COMPOSE_PROJECT_NAME=omn21717-config-check CI_BUS_REDPANDA_MEMORY=1G CI_BUS_REDPANDA_ADVERTISE_HOST=broker.example.invalid CI_BUS_KAFKA_SASL_USERNAME=config-check CI_BUS_KAFKA_SASL_PASSWORD=config-check CI_BUS_LABWORK_SASL_USERNAME=config-check CI_BUS_LABWORK_SASL_PASSWORD=config-check docker compose -p omn21717-config-check -f docker/docker-compose.ci-b*.yml config --format json | python3 -c 'import json,sys; s=json.load(sys.stdin)[\"services\"]; assert \"--memory 4G\" in s[\"redpanda\"][\"command\"]; assert s[\"redpanda-partition-cap\"][\"environment\"][\"REDPANDA_PROFILE_MEMORY\"] == \"4G\"'"

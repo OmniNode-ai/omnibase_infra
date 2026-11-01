@@ -161,7 +161,9 @@ services:
       - --advertise-rpc-addr redpanda:33145
       - --mode dev-container
       - --smp 1
-      - --memory ${CI_BUS_REDPANDA_MEMORY:-4G}
+      # A stale operator .env must not restore the 1G crash loop (OMN-21717).
+      # Changing the recovery budget requires a measured replay and a code change.
+      - --memory 4G
       - --default-log-level=warn
     ports:
       - "${CI_BUS_REDPANDA_EXTERNAL_PORT:-21092}:21092"
@@ -197,7 +199,7 @@ services:
       service: redpanda-settings
     container_name: omninode-ci-bus-redpanda-partition-cap
     environment:
-      REDPANDA_PROFILE_MEMORY: ${CI_BUS_REDPANDA_MEMORY:-4G}
+      REDPANDA_PROFILE_MEMORY: 4G
       # OMN-21717: lab-run opens a fresh consumer group per call
       # (`lab_work_client.consume.v1.<12 hex>.cap.__t.<topic>`), so the
       # `__consumer_offsets` log held about 15,000 distinct group ids on
