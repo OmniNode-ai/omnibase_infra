@@ -293,6 +293,36 @@ async def test_dispatch_metadata_failure_bypasses_payload_fallback(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_pre_dispatch_guard_rejects_before_metadata_is_unwrapped() -> None:
+    handler = _RecordingHandler()
+
+    class _GuardRejectedError(Exception):
+        pass
+
+    def guard(_payload: object) -> None:
+        raise _GuardRejectedError
+
+    callback = _make_dispatch_callback(
+        cast("ProtocolHandleable", handler),
+        ModelHandlerRef(name="_Event", module=__name__),
+        pre_dispatch_guard=guard,
+    )
+    with pytest.raises(_GuardRejectedError):
+        await callback(
+            cast(
+                "ModelEventEnvelope[object]",
+                {
+                    "payload": {"value": "guarded"},
+                    "envelope_timestamp": "not-a-timestamp",
+                    "envelope_id": ENVELOPE_ID,
+                },
+            )
+        )
+    assert handler.received == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_engine_materialization_preserves_injected_identity_on_replay() -> None:
     handler = _RecordingHandler()
     engine = MessageDispatchEngine()

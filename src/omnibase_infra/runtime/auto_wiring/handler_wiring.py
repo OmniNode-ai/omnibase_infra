@@ -1098,7 +1098,10 @@ def _make_dispatch_callback(
             if failure_result is not None:
                 return failure_result
             raise
-        # Metadata failures belong to the dispatch boundary, not the domain
+        if pre_dispatch_guard is not None:
+            pre_dispatch_guard(typed_payload)
+        # Metadata failures belong to the dispatch boundary: they are raised
+        # after the guard has had its say on the payload and outside the domain
         # payload-validation fallback above.
         handler_arg: object = typed_payload
         if _injected_request_model is not None and not handler_takes_envelope:
@@ -1108,8 +1111,6 @@ def _make_dispatch_callback(
                 current_dispatch_envelope() or envelope,
                 cast("BaseModel", typed_payload),
             )
-        if pre_dispatch_guard is not None:
-            pre_dispatch_guard(typed_payload)
         if handler_takes_envelope:
             handler_arg = _materialize_typed_event_envelope(
                 envelope, cast("BaseModel", typed_payload), event_model.name
