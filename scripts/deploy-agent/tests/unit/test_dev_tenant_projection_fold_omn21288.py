@@ -79,8 +79,13 @@ def test_committed_policy_disables_every_folded_writer() -> None:
         folded = lane_folded_profiles(EnumRuntimeLane.DEV)
         config = lane_config_for(EnumRuntimeLane.DEV)
     assert set(RUNTIME_WRITERS) <= folded
+    # The gateway project's services are off too (OMN-21629), as the sibling test reads.
     assert config.disabled_services == frozenset(
-        {"tenant-projection-writer", *RUNTIME_WRITERS.values()}
+        {
+            "tenant-projection-writer",
+            *RUNTIME_WRITERS.values(),
+            *DEV_LANE_GATEWAY_SERVICES,
+        }
     )
     # The two writers that still run their own consume loop keep their containers.
     assert "projection-delegation-writer" not in config.disabled_services
