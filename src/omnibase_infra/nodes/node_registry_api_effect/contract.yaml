@@ -34,6 +34,10 @@ output_model:
   name: "ModelRegistryApiResponse"
   module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_response"
   description: "Output envelope for registry API effect operations."
+# The archetype the core no-io-outside-effects validator reads (OMN-21736).
+descriptor:
+  node_archetype: effect
+  purity: side_effect
 # ---------------------------------------------------------------------------
 # Contract-Driven Configuration
 # Replaces all hardcoded constants in services/registry_api/registry_discovery.py
@@ -70,9 +74,9 @@ config:
   # Cost API: topics whose latest projection snapshot backs the cost routes.
   # Injected into the route handlers through create_app (OMN-21736).
   cost_snapshot_topics:
-    summary: "onex.snapshot.projection.cost.summary.v1"
-    by_repo: "onex.snapshot.projection.cost.by_repo.v1"
-    token_usage: "onex.snapshot.projection.cost.token_usage.v1"
+    summary: onex.snapshot.projection.cost.summary.v1
+    by_repo: onex.snapshot.projection.cost.by_repo.v1
+    token_usage: onex.snapshot.projection.cost.token_usage.v1
 # ---------------------------------------------------------------------------
 # IO operations (EFFECT node specific)
 # ---------------------------------------------------------------------------
