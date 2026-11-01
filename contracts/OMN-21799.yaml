@@ -61,5 +61,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/nodes/test_scope_output_path_deploy_omn21799.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          set -eu;
+          model="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_scope_workflow_orchestrator/models/model_scope_check_command.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'min_length=1' <<<"$model"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
