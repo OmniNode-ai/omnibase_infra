@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21623
 title: omnibase_infra builds handlers at a binding site or not at all, declares model names in node contracts, and injects them into the LLM adapters (contracts_and_di burn-down, handler_hand_construction and literal_model_name slices)
 summary: >-
-  Two slices of the contracts_and_di burn-down (omnibase_core#2175) for omnibase_infra. The handler_hand_construction slice deletes 24 node registry factories that nothing called and moves the six handlers that composed a HandlerDb by hand onto one binding site, handlers/container/container_handler_db.py (133 findings to 103). The literal_model_name slice moves the savings estimation and waste detection model policy into their node contracts and makes the LLM adapters and the decision search client take the model from their caller.
+  Two slices of the contracts_and_di burn-down (omnibase_core#2175) for omnibase_infra. The handler_hand_construction slice deletes 24 node registry factories that nothing called and moves the six handlers that composed a HandlerDb by hand onto a binding site in each of their five nodes, nodes/<node>/container/container_handler_db.py (133 findings to 103). The literal_model_name slice moves the savings estimation and waste detection model policy into their node contracts and makes the LLM adapters and the decision search client take the model from their caller.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -82,7 +82,7 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_handler_db_binding_omn21623.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/container/container_handler_db.py?ref=omn-21623-cdi-handler-construction-slice" --jq .content | base64 -d | grep -q 'def bind_handler_db'
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_ledger_write_effect/container/container_handler_db.py?ref=omn-21623-cdi-handler-construction-slice" --jq .content | base64 -d | grep -q 'def bind_handler_db'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC42]
   - id: dod-omn21623-model-name-ac1-node-policy-tests

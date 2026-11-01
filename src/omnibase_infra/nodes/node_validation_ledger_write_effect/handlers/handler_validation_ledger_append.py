@@ -59,8 +59,10 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.handlers.container.container_handler_db import bind_handler_db
 from omnibase_infra.models.validation_ledger import ModelValidationLedgerAppendResult
+from omnibase_infra.nodes.node_validation_ledger_write_effect.container.container_handler_db import (
+    bind_handler_db,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer

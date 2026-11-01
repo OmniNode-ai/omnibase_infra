@@ -11,6 +11,8 @@ hold one.
 from __future__ import annotations
 
 import ast
+import importlib
+from collections.abc import Callable
 from importlib.util import resolve_name
 from pathlib import Path
 
@@ -20,7 +22,6 @@ from omnibase_core.container import ModelONEXContainer
 from omnibase_core.validation.validator_contracts_and_di import (
     ValidatorContractsAndDi,
 )
-from omnibase_infra.handlers.container.container_handler_db import bind_handler_db
 from omnibase_infra.handlers.handler_db import HandlerDb
 
 pytestmark = pytest.mark.unit
@@ -36,6 +37,14 @@ _DB_COMPOSING_HANDLERS: tuple[str, ...] = (
     "nodes/node_ledger_write_effect/handlers/handler_ledger_append.py",
     "nodes/node_ledger_write_effect/handlers/handler_ledger_query.py",
     "nodes/node_validation_ledger_write_effect/handlers/handler_validation_ledger_append.py",
+)
+
+_BINDING_NODES: tuple[str, ...] = (
+    "node_build_loop_write_effect",
+    "node_delegation_chain_ledger_effect",
+    "node_gateway_link_health_write_effect",
+    "node_ledger_write_effect",
+    "node_validation_ledger_write_effect",
 )
 
 _NODES_WITHOUT_REGISTRY_FACTORY: tuple[str, ...] = (
@@ -85,15 +94,34 @@ def test_the_check_reports_a_planted_construction(tmp_path: Path, method: str) -
     assert _RULE in _rules_reported(planted)
 
 
-def test_the_binding_site_builds_the_handler() -> None:
+def _binder(node: str) -> Callable[[ModelONEXContainer], HandlerDb]:
+    module = importlib.import_module(
+        f"omnibase_infra.nodes.{node}.container.container_handler_db"
+    )
+    binder: Callable[[ModelONEXContainer], HandlerDb] = module.bind_handler_db
+    return binder
+
+
+@pytest.mark.parametrize("node", _BINDING_NODES)
+def test_the_binding_site_builds_the_handler(node: str) -> None:
     container = ModelONEXContainer()
-    handler = bind_handler_db(container)
+    handler = _binder(node)(container)
     assert isinstance(handler, HandlerDb)
     assert handler._container is container
 
 
-def test_the_binding_site_is_not_reported() -> None:
-    site = _SRC / "handlers" / "container" / "container_handler_db.py"
+@pytest.mark.parametrize("node", _BINDING_NODES)
+def test_each_binding_is_owned_by_its_caller(node: str) -> None:
+    container = ModelONEXContainer()
+    first = _binder(node)(container)
+    second = _binder(node)(container)
+    assert first is not second
+    assert first._container is second._container is container
+
+
+@pytest.mark.parametrize("node", _BINDING_NODES)
+def test_the_binding_site_is_not_reported(node: str) -> None:
+    site = _SRC / "nodes" / node / "container" / "container_handler_db.py"
     rules = _rules_reported(site)
     assert _RULE not in rules
 

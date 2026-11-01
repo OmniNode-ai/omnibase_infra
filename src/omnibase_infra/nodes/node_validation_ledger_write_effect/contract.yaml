@@ -36,6 +36,8 @@ node_version:
   patch: 0
 # Node type
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 # Runtime lane (OMN-12957): "effects" is the consumer-attached profile that
 # drains EFFECT subscriptions -- mirrors node_gateway_link_health_write_effect (an
 # intent-routed write-effect node built on this same pattern).
@@ -43,7 +45,7 @@ runtime_profiles:
   - effects
 # Description
 description: >
-  Capability-oriented effect node for validation event ledger write operations. Handles appending cross-repo validation events to the PostgreSQL validation_event_ledger with idempotent write support via unique constraint on (kafka_topic, kafka_partition, kafka_offset). HandlerDb construction is delegated to bind_handler_db in omnibase_infra.handlers.container.container_handler_db; the binding retains the runtime container and leaves database initialization lazy.
+  Capability-oriented effect node for validation event ledger write operations. Handles appending cross-repo validation events to the PostgreSQL validation_event_ledger with idempotent write support via unique constraint on (kafka_topic, kafka_partition, kafka_offset). HandlerDb construction is delegated to bind_handler_db in omnibase_infra.nodes.node_validation_ledger_write_effect.container.container_handler_db; the binding retains the runtime container and leaves database initialization lazy.
 
 # Strongly typed I/O models
 input_model:

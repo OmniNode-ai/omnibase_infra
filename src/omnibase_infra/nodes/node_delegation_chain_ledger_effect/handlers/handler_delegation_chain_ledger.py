@@ -19,9 +19,11 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.handlers.container.container_handler_db import bind_handler_db
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.chain_replay import (
     assemble_replay_and_verify,
+)
+from omnibase_infra.nodes.node_delegation_chain_ledger_effect.container.container_handler_db import (
+    bind_handler_db,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
     EnumLedgerChainState,

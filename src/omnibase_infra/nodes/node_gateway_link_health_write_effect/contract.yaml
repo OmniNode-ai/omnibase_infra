@@ -13,6 +13,8 @@
 #   - OMN-15570: Gateway lift Phase 0, item G3 (link-health projection).
 name: "node_gateway_link_health_write_effect"
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 runtime_profiles:
   - effects
 contract_version:
@@ -21,7 +23,7 @@ contract_version:
   patch: 0
 node_version: "0.1.0"
 description: >
-  Capability-oriented EFFECT node for gateway_link_health persistence. Consumes ModelPayloadGatewayLinkHealthUpsert intents and UPSERTs one row per tenant_id into the omninode_internal.gateway_link_health latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently observed heartbeat per tenant edge and never drops a row on silence -- the gateway_link_health_status view (docker/migrations/forward/100_create_gateway_link_health.sql) evaluates staleness against the contract-declared liveness thresholds at read time. HandlerDb construction is delegated to bind_handler_db in omnibase_infra.handlers.container.container_handler_db; the binding retains the runtime container and leaves database initialization lazy.
+  Capability-oriented EFFECT node for gateway_link_health persistence. Consumes ModelPayloadGatewayLinkHealthUpsert intents and UPSERTs one row per tenant_id into the omninode_internal.gateway_link_health latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently observed heartbeat per tenant edge and never drops a row on silence -- the gateway_link_health_status view (docker/migrations/forward/100_create_gateway_link_health.sql) evaluates staleness against the contract-declared liveness thresholds at read time. HandlerDb construction is delegated to bind_handler_db in omnibase_infra.nodes.node_gateway_link_health_write_effect.container.container_handler_db; the binding retains the runtime container and leaves database initialization lazy.
 
 # Strongly typed I/O models
 input_model:

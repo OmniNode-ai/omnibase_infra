@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,7 +13,7 @@ import pytest
 import yaml
 
 from omnibase_core.container import ModelONEXContainer
-from omnibase_infra.handlers.container.container_handler_db import bind_handler_db
+from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.runtime.auto_wiring import (
     discover_contracts_from_paths,
     wire_from_manifest,
@@ -29,6 +30,14 @@ _HANDLERS = (
     ("node_ledger_write_effect", ("handler_ledger_append", "handler_ledger_query")),
     ("node_validation_ledger_write_effect", ("handler_validation_ledger_append",)),
 )
+
+
+def _binder(node: str) -> Callable[[ModelONEXContainer], HandlerDb]:
+    module = importlib.import_module(
+        f"omnibase_infra.nodes.{node}.container.container_handler_db"
+    )
+    binder: Callable[[ModelONEXContainer], HandlerDb] = module.bind_handler_db
+    return binder
 
 
 @pytest.mark.asyncio
@@ -71,7 +80,7 @@ def test_contract_handlers_bind_the_supplied_container(
         handler_cls = getattr(
             importlib.import_module(module_path), references[module_path]
         )
-        with patch(f"{module_path}.bind_handler_db", wraps=bind_handler_db) as binding:
+        with patch(f"{module_path}.bind_handler_db", wraps=_binder(node)) as binding:
             handler = handler_cls(container=container)
         binding.assert_called_once_with(container)
         assert handler._db_handler._container is container
