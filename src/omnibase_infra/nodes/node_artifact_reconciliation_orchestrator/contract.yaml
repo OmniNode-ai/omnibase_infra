@@ -132,6 +132,10 @@ dependencies:
   - name: "github_token"
     type: "environment"
     description: "GITHUB_TOKEN environment variable for GitHub API authentication"
+  - name: "third_party_endpoints"
+    type: "service"
+    description: "OMN-21623: The GitHub API base URL for PR comments. Read from the declared third_party_endpoints.yaml through load_third_party_endpoints(), not spelled in the handler."
+    required: true
 # Error Handling Configuration
 error_handling:
   retry_policy:

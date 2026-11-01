@@ -22,6 +22,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_session_state_effect.models import (
     RUN_ID_PATTERN,
     ModelRunContext,
+    ModelRunContextReadRequest,
     ModelSessionStateResult,
 )
 from omnibase_infra.utils import sanitize_error_string
@@ -74,14 +75,12 @@ class HandlerRunContextRead:
 
     async def handle(
         self,
-        run_id: str,
-        correlation_id: UUID,
+        request: ModelRunContextReadRequest,
     ) -> tuple[ModelRunContext | None, ModelSessionStateResult]:
         """Read runs/{run_id}.json and return the parsed context.
 
         Args:
-            run_id: The unique run identifier.
-            correlation_id: Correlation ID for distributed tracing.
+            request: Request with the run id and correlation ID.
 
         Returns:
             Tuple of (parsed context or None if not found, operation result).
@@ -91,24 +90,26 @@ class HandlerRunContextRead:
         # and null bytes in addition to the regex allowlist, since run_id is
         # used to construct filesystem paths. Mirrors handler_run_context_write.
         if (
-            not RUN_ID_PATTERN.match(run_id)
-            or ".." in run_id
-            or "/" in run_id
-            or "\\" in run_id
-            or "\x00" in run_id
+            not RUN_ID_PATTERN.match(request.run_id)
+            or ".." in request.run_id
+            or "/" in request.run_id
+            or "\\" in request.run_id
+            or "\x00" in request.run_id
         ):
             return (
                 None,
                 ModelSessionStateResult(
                     success=False,
                     operation="run_context_read",
-                    correlation_id=correlation_id,
+                    correlation_id=request.correlation_id,
                     error="Invalid run_id: contains disallowed characters",
                     error_code="RUN_CONTEXT_INVALID_ID",
                 ),
             )
 
-        return await asyncio.to_thread(self._read_sync, run_id, correlation_id)
+        return await asyncio.to_thread(
+            self._read_sync, request.run_id, request.correlation_id
+        )
 
     def _read_sync(
         self,

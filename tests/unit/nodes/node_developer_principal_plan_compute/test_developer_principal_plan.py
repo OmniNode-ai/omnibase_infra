@@ -397,3 +397,46 @@ def test_parity_with_lab_issuer_on_the_scoped_write_topics() -> None:
     assert (
         handler_developer_principal_plan.SCOPED_WRITE_TOPICS == lpi.SCOPED_WRITE_TOPICS
     )
+
+
+def test_machine_supplement_is_bound_to_digest_but_never_a_developer_plan() -> None:
+    documents = _derived_texts()
+    request = ModelDeveloperPrincipalPlanRequest(
+        declaration_yaml=LAB_DECLARATION.read_text(),
+        derived_documents=documents,
+        login=LOGIN,
+        device="mac",
+    )
+    handler = HandlerDeveloperPrincipalPlan()
+    plan = handler.handle(request)
+    assert plan.refusal_kind == ""
+    assert not any(
+        grant.name == "onex.evt.omnimarket.credential-registered.v1"
+        or (
+            grant.name.startswith("onex.evt.omnimarket.work-ledger-")
+            and "append" not in grant.name
+            and "query" not in grant.name
+        )
+        for grant in plan.grants
+    )
+    source = "machine-principal-derived-grants.json"
+    changed = handler.handle(
+        request.model_copy(
+            update={
+                "derived_documents": {**documents, source: documents[source] + "\n"},
+            }
+        )
+    )
+    assert changed.declaration_digest != plan.declaration_digest
+    assert changed.grants == plan.grants
+    missing = handler.handle(
+        request.model_copy(
+            update={
+                "derived_documents": {
+                    k: v for k, v in documents.items() if k != source
+                },
+            }
+        )
+    )
+    assert missing.refusal_kind == "declaration"
+    assert "derived document was not supplied" in missing.refusal

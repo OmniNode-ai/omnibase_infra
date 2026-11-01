@@ -22,12 +22,18 @@ next editor to remember.
 
 from __future__ import annotations
 
+import math
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+    _rotating_slice,
+    _rotation_tick,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
     ModelEvidenceAutocloseSweepRequest,
 )
@@ -125,4 +131,48 @@ def test_the_workflow_passes_no_rotation_override() -> None:
         "the workflow now overrides the rotation period; the cron/default "
         "pairing above no longer describes what a scheduled run uses, and this "
         "gate must be repointed at the override rather than left green"
+    )
+
+
+# OMN-21722 AC2: the sized width (40) drains a 133 pool in ceil(133/40) runs.
+_BACKFILL_POOL_SIZE = 133
+_SIZED_DRAIN_RUNS = math.ceil(_BACKFILL_POOL_SIZE / 40)
+
+
+def test_the_default_width_on_the_cron_cadence_does_not_partition_the_pool() -> None:
+    """OMN-21722 AC2: the wider slice, advanced by the real clock, covers the pool.
+
+    Fires consecutive scheduled runs exactly one cron interval apart, maps each
+    to its rotation tick the way the handler does (``_rotation_tick`` with the
+    model's default period), and slices the pool at the model's default width.
+    Consecutive runs must land on consecutive ticks, and ``ceil(133/40)`` runs
+    must cover every candidate: a rotation period shorter than the cron would
+    skip slices and partition the pool, and a narrower width would leave most
+    of it unexamined after those runs.
+    """
+    interval = _interval_minutes(_cron_expressions()[0])
+    fields = ModelEvidenceAutocloseSweepRequest.model_fields
+    rotation = fields["backfill_rotation_minutes"].default
+    width = fields["backfill_max_candidates"].default
+    assert isinstance(rotation, int)
+    assert isinstance(width, int)
+
+    pool = list(range(_BACKFILL_POOL_SIZE))
+    first_run = datetime(2026, 10, 30, 20, 10, tzinfo=UTC)
+    ticks = [
+        _rotation_tick(first_run + timedelta(minutes=interval * run), rotation)
+        for run in range(_SIZED_DRAIN_RUNS)
+    ]
+    assert ticks == list(range(ticks[0], ticks[0] + _SIZED_DRAIN_RUNS)), (
+        f"runs {interval} minutes apart landed on ticks {ticks} with a "
+        f"{rotation}-minute rotation period; consecutive runs must advance "
+        "exactly one slice"
+    )
+    covered: set[int] = set()
+    for tick in ticks:
+        covered |= set(_rotating_slice(pool, width, tick))
+    missing = len(pool) - len(covered)
+    assert missing == 0, (
+        f"{_SIZED_DRAIN_RUNS} scheduled runs at backfill_max_candidates={width} "
+        f"left {missing} of {len(pool)} backfill candidates unexamined"
     )
