@@ -16,7 +16,10 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: Each converted SUFFIX_* constant equals the generated enum member it names and is no longer assigned a string literal; the drift check extracts every SUFFIX_* name from the real registry.
-    command: uv run --frozen pytest tests/unit/topics -q
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_suffix_registry_enum_binding_omn21689.py tests/unit/topics/test_check_topic_drift.py tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov
+  - kind: manual
+    description: Hosted deploy validation loads the shipped node contracts and reads back all seven enum-bound suffixes through the real in-memory event bus. It requires no running lane or broker.
+    command: 'deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov'
 emergency_bypass:
   enabled: false
   justification: ''
@@ -27,7 +30,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/topics/test_suffix_registry_enum_binding_omn21689.py -q"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_suffix_registry_enum_binding_omn21689.py -q --no-cov"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
@@ -36,7 +39,15 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/topics -q"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_check_topic_drift.py tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn21689-deploy-contract-round-trip
+    description: Read the shipped node contracts and deliver messages from the seven public suffixes to subscribers of their contract topic names. The binding assertions fail on the merge base where the registry still uses literals.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2]
