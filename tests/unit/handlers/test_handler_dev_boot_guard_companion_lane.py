@@ -181,8 +181,8 @@ def test_companion_lane_failure_keeps_the_healthy_new_runtime(tmp_path: Path) ->
         c["Config"]["Labels"]["org.opencontainers.image.revision"]
         for c in host.containers
     } == {NEW_REVISION}
-    assert guard.point is not None
-    assert guard.point.revision == NEW_REVISION
+    assert guard.point.current is not None
+    assert guard.point.current.revision == NEW_REVISION
     incident = _incident(host, tmp_path)
     assert incident["status"] == "failed"
     assert incident["recovery_verified"] is True
@@ -209,8 +209,8 @@ def test_companion_lane_failure_restores_when_new_runtime_is_unhealthy_or_absent
             raise guard_mod.DevCompanionLaneFailedError(GATEWAY_FAILURE)
 
     assert host.restored
-    assert guard.point is not None
-    assert guard.point.revision == OLD_REVISION
+    assert guard.point.current is not None
+    assert guard.point.current.revision == OLD_REVISION
     assert {
         c["Config"]["Labels"]["com.docker.compose.service"] for c in host.containers
     } == set(guard_mod.DEV_BOOT_SERVICES)
@@ -236,8 +236,8 @@ def test_runtime_failure_still_restores_a_healthy_new_runtime(tmp_path: Path) ->
             )
 
     assert host.restored
-    assert guard.point is not None
-    assert guard.point.revision == OLD_REVISION
+    assert guard.point.current is not None
+    assert guard.point.current.revision == OLD_REVISION
 
 
 def test_companion_lane_failure_restores_when_capture_refuses_healthy_runtime(
@@ -263,8 +263,8 @@ def test_companion_lane_failure_restores_when_capture_refuses_healthy_runtime(
 
     assert capture_reads == [guard.services]
     assert host.restored
-    assert guard.point is not None
-    assert guard.point.revision == OLD_REVISION
+    assert guard.point.current is not None
+    assert guard.point.current.revision == OLD_REVISION
     assert {
         c["Config"]["Labels"]["org.opencontainers.image.revision"]
         for c in host.containers
