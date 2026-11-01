@@ -140,6 +140,7 @@ def adapter() -> AdapterDocumentationGeneration:
     latency manageable — we're verifying the adapter plumbing, not output quality.
     """
     return AdapterDocumentationGeneration(
+        model="mlx-community/DeepSeek-R1-Distill-Qwen-32B-bf16",
         base_url=_ENDPOINT_URL,
         max_tokens=256,
     )
