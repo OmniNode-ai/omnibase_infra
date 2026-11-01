@@ -84,6 +84,7 @@ def test_built_wheel_loads_defaults_and_runs_consumers(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        timeout=300,
     )
     (wheel,) = wheels.glob("*.whl")
     installed = tmp_path / "installed"
