@@ -23,6 +23,15 @@ from omnibase_infra.nodes.node_llm_embedding_effect.handlers import (
 from omnibase_infra.nodes.node_llm_embedding_effect.registry import (
     RegistryInfraLlmEmbeddingEffect,
 )
+from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
+    HandlerLlmOpenaiCompatible,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.registry import (
+    RegistryInfraLlmInferenceEffect,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_metrics_publisher import (
+    ServiceLlmMetricsPublisher,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -38,6 +47,22 @@ class _RecordingServiceRegistry:
 
     async def register_instance(self, **kwargs: Any) -> None:
         self.registered.append(kwargs)
+
+    def get_service(self, interface: type) -> Any:
+        for call in reversed(self.registered):
+            if call["interface"] is interface:
+                return call["instance"]
+        raise KeyError(interface)
+
+
+def _container(registry: _RecordingServiceRegistry | None) -> ModelONEXContainer:
+    return cast(
+        "ModelONEXContainer",
+        SimpleNamespace(
+            service_registry=registry,
+            get_service=registry.get_service if registry else None,
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -58,11 +83,52 @@ async def test_embedding_registry_registers_real_handler_instance() -> None:
 
 @pytest.mark.asyncio
 async def test_embedding_registry_without_service_registry_registers_nothing() -> None:
-    container = cast("ModelONEXContainer", SimpleNamespace(service_registry=None))
+    container = _container(None)
 
-    await RegistryInfraLlmEmbeddingEffect.register_openai_compatible(
-        container,
+    await RegistryInfraLlmEmbeddingEffect.register_openai_compatible(container)
+
+    assert container.service_registry is None
+
+
+@pytest.mark.asyncio
+async def test_inference_registry_registers_real_handler_and_transport() -> None:
+    registry = _RecordingServiceRegistry()
+
+    await RegistryInfraLlmInferenceEffect.register_openai_compatible(
+        _container(registry), target_name="omn21784-inference"
     )
+
+    interfaces = [call["interface"] for call in registry.registered]
+    assert HandlerLlmOpenaiCompatible in interfaces
+    handler = registry.get_service(HandlerLlmOpenaiCompatible)
+    assert isinstance(handler, HandlerLlmOpenaiCompatible)
+
+
+@pytest.mark.asyncio
+async def test_inference_registry_without_service_registry_registers_nothing() -> None:
+    container = _container(None)
+
+    await RegistryInfraLlmInferenceEffect.register_openai_compatible(container)
+
+    assert container.service_registry is None
+
+
+@pytest.mark.asyncio
+async def test_inference_metrics_registry_wraps_the_registered_handler() -> None:
+    registry = _RecordingServiceRegistry()
+
+    async def publisher(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    await RegistryInfraLlmInferenceEffect.register_openai_compatible_with_metrics(
+        _container(registry), publisher, target_name="omn21784-metrics"
+    )
+
+    handler = registry.get_service(HandlerLlmOpenaiCompatible)
+    service = registry.get_service(ServiceLlmMetricsPublisher)
+    assert isinstance(handler, HandlerLlmOpenaiCompatible)
+    assert isinstance(service, ServiceLlmMetricsPublisher)
+    assert service._handler is handler
 
 
 @pytest.mark.parametrize(
