@@ -368,17 +368,17 @@ def classify_boundary_failure(
     # OMN-17397: a raiser that KNOWS the record is refused identically on every
     # delivery says so explicitly. It can only lower the derivation, in the same
     # direction as the bias described above.
-    if getattr(exc, "retryable", None) is False:
-        retryable = False
-    specific = next(
+    retryable = retryable and getattr(exc, "retryable", None) is not False
+    attributed_class = next(
         (name for name in candidates if name not in _BOUNDARY_WRAPPER_CLASS_NAMES),
-        None,
+        type(exc).__name__,
     )
-    attributed_class = specific or type(exc).__name__
     return ModelBoundaryFailureTerminal(
         correlation_id=correlation_id,
         failure_class=attributed_class,
-        failure_code=_first_onex_code(exc) or failure_code,
+        failure_code=_first_onex_code(exc)
+        or failure_code
+        or EnumNonRetryableErrorCategory.undecodable_body_code(exc),
         retryable=retryable,
         failure_reason=_customer_facing_reason(
             exc, failure_class=attributed_class, fallback=failure_reason

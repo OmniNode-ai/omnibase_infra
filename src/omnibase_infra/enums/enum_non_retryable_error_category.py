@@ -27,7 +27,14 @@ Related:
     - docs/dlq/DLQ_ARCHITECTURE.md
 """
 
+import json
+import re
 from enum import Enum, unique
+
+_ERROR_CLASS_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9_])([A-Z][A-Za-z0-9_]*(?:Error|Exception))(?![A-Za-z0-9_])"
+)
+_UNDECODABLE_BODY_CODE = "ONEX_CORE_007_INVALID_INPUT"
 
 
 @unique
@@ -287,6 +294,34 @@ class EnumNonRetryableErrorCategory(str, Enum):
             ),
         }
         return descriptions.get(error_type, "Unknown error category")
+
+    @classmethod
+    def is_non_retryable_text(cls, text: str) -> bool:
+        """True when a flattened failure message names a non-retryable class.
+
+        A boundary DLQ record's ``error_type`` is the wrapper's class name, never
+        a member of this enum; the cause survives only as a class name inside
+        the message (OMN-21324).
+        """
+        return any(
+            cls.is_non_retryable(name) for name in _ERROR_CLASS_TOKEN.findall(text)
+        )
+
+    @staticmethod
+    def undecodable_body_code(exc: BaseException) -> str | None:
+        """Typed ONEX code when ``exc`` or its cause is a body decode failure.
+
+        ``json.JSONDecodeError`` and ``UnicodeDecodeError`` carry no ONEX code, so
+        an empty or non-JSON command body terminalized with no code (OMN-21324).
+        """
+        seen: set[int] = set()
+        item: BaseException | None = exc
+        while item is not None and id(item) not in seen:
+            if isinstance(item, json.JSONDecodeError | UnicodeDecodeError):
+                return _UNDECODABLE_BODY_CODE
+            seen.add(id(item))
+            item = item.__cause__ or item.__context__
+        return None
 
 
 __all__ = ["EnumNonRetryableErrorCategory"]

@@ -8105,7 +8105,9 @@ def _make_event_bus_callback(
                     raw_corr = (
                         data.get("correlation_id") if isinstance(data, dict) else None
                     )
-                    corr = _coerce_uuid_or_none(raw_corr) or uuid4()
+                    # OMN-21324: a body stating no id (a JSON array) keeps the
+                    # ingress header's id seeded above, never a minted one.
+                    corr = _coerce_uuid_or_none(raw_corr) or correlation_id
                     # OMN-18958: ADOPT the identity the wire states; do not
                     # mint a rival. `ModelEventEnvelope.envelope_id` defaults
                     # to uuid4, so omitting this argument silently produced a

@@ -1,0 +1,49 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21324"
+title: "Undecodable delegate-skill command bodies terminalize typed, array bodies keep the header correlation, non-retryable refusals are not replayed"
+summary: "The boundary types the failure code of an undecodable body, adopts the ingress correlation for a body that states none, and the DLQ replay predicate reads the non-retryable class from the failure reason."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-undecodable-code
+    statement: "An empty or non-JSON command body terminalizes with a typed failure code."
+    acceptance:
+      - id: AC1
+        statement: "An empty or non-JSON delegate-skill command body terminalizes with a typed failure_code, not None."
+  - id: req-header-correlation
+    statement: "A JSON-array command body terminalizes under its Kafka header correlation."
+    acceptance:
+      - id: AC2
+        statement: "A JSON-array command body terminalizes under the correlation_id of its Kafka header."
+  - id: req-single-terminal
+    statement: "A non-retryable refusal is not replayed from the DLQ."
+    acceptance:
+      - id: AC3
+        statement: "A command refused with retryable false terminalizes once, with no further copy on the failed topic."
+evidence_requirements:
+  - kind: tests
+    description: "Typed code, header correlation and replay eligibility."
+    command: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov"
+dod_evidence:
+  - id: dod-undecodable-code
+    description: "Empty and non-JSON bodies terminalize with a typed failure_code."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov -k delegate_skill_undecodable_body"
+  - id: dod-array-correlation
+    description: "A JSON-array body terminalizes under the header correlation."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov -k delegate_skill_array_body_correlation"
+  - id: dod-no-replay
+    description: "A DLQ record whose failure reason names a non-retryable class is not eligible for replay; a retryable one still is."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21324_delegate_skill_undecodable_body.py -q --no-cov -k 'non_retryable_refusal_is_not_replayed or retryable_failure_is_still_replayed'"
