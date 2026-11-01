@@ -108,3 +108,11 @@ def test_guard_names_version_and_module_when_mcp_lacks_module(
     assert "not installed" not in message
     assert "9.9.9" in message
     assert "mcp.server.mcpserver" in message
+
+
+def test_installed_mcp_satisfies_declared_floor() -> None:
+    """The resolved SDK is the 2.x line the declared range requires."""
+    version = importlib.metadata.version("mcp")
+    major, minor = (int(part) for part in version.split(".")[:2])
+    assert (major, minor) >= (2, 3), f"mcp {version} is below the declared floor 2.3"
+    assert "mcp.server.mcpserver" in _src_mcp_imports()

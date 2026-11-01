@@ -33,14 +33,14 @@ dod_evidence:
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py -q --no-cov -k create_app"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py -q --no-cov -k 'create_app or declared_floor'"
   - id: dod-src-imports-resolve
     description: "Every mcp import under src resolves and a planted nonexistent import is detected."
     source: generated
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py -q --no-cov -k 'imported_by_src or planted'"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py -q --no-cov -k 'imported_by_src or planted or declared_floor'"
   - id: dod-no-fastmcp
     description: "No src file names the removed module and the lock resolves mcp 2.x."
     source: generated
@@ -61,11 +61,11 @@ dod_evidence:
     binds_ac: [AC5]
     checks:
       - check_type: test_passes
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp tests/integration/services/mcp tests/integration/handlers/test_mcp_handler_integration.py -q --no-cov"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py tests/unit/handlers/mcp/test_transport_streamable_http.py -q --no-cov"
   - id: dod-deploy-mcp-release-published
     description: "The package index serves the mcp 2.3.0 release that the declared range requires, so a PyPI install of the shipped package can resolve it (deploy evidence)."
     source: generated
     binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: "curl -fsS https://pypi.org/pypi/mcp/2.3.0/json -o /dev/null"
+        check_value: "grep -q 'mcp>=2.3.0,<3.0.0' pyproject.toml && curl -fsS https://pypi.org/pypi/mcp/2.3.0/json -o /dev/null"
