@@ -2,9 +2,7 @@
 # SPDX-License-Identifier: MIT
 """GitHub REST binding of ProtocolMergeGroupRunReader (OMN-19927).
 
-The EFFECT handler that owns this node's only external I/O.
-
-Two reads, both paginated to their ``total_count``:
+The EFFECT handler owning the node's only external I/O, two paged reads:
 
 * ``GET /repos/{repo}/actions/runs?head_sha={sha}&event=merge_group``
 * ``GET /repos/{repo}/actions/runs/{run_id}/jobs?filter=latest``
@@ -23,6 +21,7 @@ import urllib.request
 from collections.abc import Callable
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_merge_provenance_observe_effect import contract_api
 from omnibase_infra.nodes.node_merge_provenance_observe_effect.models.model_workflow_job_fact import (
     ModelWorkflowJobFact,
 )
@@ -62,14 +61,14 @@ class HandlerMergeGroupRunReadGithub:
         self,
         token: str,
         *,
-        api_url: str = "https://api.github.com",  # url-authority-ok: the public GitHub REST API base; GitHub Enterprise callers pass their own
+        api_url: str = "",  # empty binds the node contract's github_api.base_url
         timeout_seconds: float = 30.0,
         fetch: Fetch | None = None,
     ) -> None:
         if not token:
             raise MergeGroupReadError("no GitHub token supplied")
         self._token = token
-        self._api_url = api_url.rstrip("/")
+        self._api_url = (api_url or contract_api.github_api_url()).rstrip("/")
         self._timeout = timeout_seconds
         self._fetch: Fetch = fetch or self._http_get
 
