@@ -20,7 +20,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The mock handlers keep their behaviour while holding state in an injected store.
-    command: uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/unit/handlers/test_registration_storage_protocol_compliance.py tests/unit/nodes/test_registry_infra_service_discovery.py tests/unit/nodes/test_registry_infra_registration_storage.py -q -n 0 -p no:cacheprovider
+    command: uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/unit/handlers/test_registration_storage_protocol_compliance.py tests/integration/handlers/test_mock_handler_shared_store_omn21536.py tests/unit/nodes/test_registry_infra_service_discovery.py tests/unit/nodes/test_registry_infra_registration_storage.py -q -n 0 -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -32,7 +32,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/unit/handlers/test_registration_storage_protocol_compliance.py tests/integration/handlers/test_mock_handler_shared_store_omn21536.py tests/integration/handlers/test_registration_storage_handler_swapping.py tests/integration/handlers/test_service_discovery_handler_swapping.py tests/integration/handlers/test_mock_handler_shared_store_omn21536.py -q -n 0 -p no:cacheprovider
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/unit/handlers/test_registration_storage_protocol_compliance.py tests/integration/handlers/test_registration_storage_handler_swapping.py tests/integration/handlers/test_service_discovery_handler_swapping.py tests/integration/handlers/test_mock_handler_shared_store_omn21536.py -q -n 0 -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC8]
   - id: dod-omn21536-ac9-validator-clean
