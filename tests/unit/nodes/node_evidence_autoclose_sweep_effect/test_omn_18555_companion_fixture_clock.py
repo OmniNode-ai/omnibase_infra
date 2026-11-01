@@ -189,6 +189,7 @@ def _default_request() -> ModelEvidenceAutocloseSweepRequest:
     this move with it instead of silently disagreeing.
     """
     return ModelEvidenceAutocloseSweepRequest(
+        demotion_window_hours=0,
         correlation_id=uuid4(),
         evidence_repo="OmniNode-ai/onex_change_control",
     )
