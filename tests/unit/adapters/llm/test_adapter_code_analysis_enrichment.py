@@ -38,10 +38,13 @@ from omnibase_spi.contracts.enrichment.contract_enrichment_result import (
 # ---------------------------------------------------------------------------
 
 
-def _make_adapter(**kwargs: object) -> AdapterCodeAnalysisEnrichment:
+def _make_adapter(
+    model: str = "qwen2.5-coder-14b", **kwargs: object
+) -> AdapterCodeAnalysisEnrichment:
     """Build an AdapterCodeAnalysisEnrichment with a mocked transport."""
     adapter = AdapterCodeAnalysisEnrichment(
         base_url="http://localhost:8000",
+        model=model,
         **kwargs,  # type: ignore[arg-type]
     )
     # Replace the real transport and inner handler with mocks so tests do not
@@ -359,3 +362,10 @@ class TestProtocolContextEnrichmentCompliance:
         """enrich() is callable on the adapter."""
         adapter = _make_adapter()
         assert callable(getattr(adapter, "enrich", None))
+
+
+@pytest.mark.unit
+def test_model_is_required() -> None:
+    """The caller must supply the model from the model-routing policy."""
+    with pytest.raises(TypeError, match="model"):
+        AdapterCodeAnalysisEnrichment(base_url="http://localhost:8000")

@@ -104,12 +104,6 @@ gaps:
     validator: enum-governance
     kind: MISSING_PRE_COMMIT
   - repo: omnibase_infra
-    validator: hardcoded-local-paths
-    kind: MISSING_CI_WORKFLOW
-  - repo: omnibase_infra
-    validator: hardcoded-local-paths
-    kind: MISSING_PRE_COMMIT
-  - repo: omnibase_infra
     validator: naming-conventions
     kind: MISSING_CI_WORKFLOW
   - repo: omnibase_infra
