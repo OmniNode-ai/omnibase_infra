@@ -120,8 +120,8 @@ case "$sync_window_seconds" in
     "sync_window_seconds must be a whole number of seconds" ;;
 esac
 case "$sync_exempt_group_suffixes" in
-  ,*|*,|*,,*) not_ready declaration_invalid_value \
-    "sync_exempt_group_suffixes must contain only non-empty suffixes" ;;
+  ,*|*,|*,,*|*[[:space:]]*) not_ready declaration_invalid_value \
+    "sync_exempt_group_suffixes must contain only non-empty suffixes with no whitespace" ;;
 esac
 
 [ -n "$NOW" ] || NOW="$(date +%s)"

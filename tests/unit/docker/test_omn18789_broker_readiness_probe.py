@@ -621,6 +621,25 @@ def test_probe_rejects_empty_suffix_elements(
     assert "sync_exempt_group_suffixes" in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    "suffixes", [" ", "-a, -b", "-a ,-b", "-a,-b ", "x\r", "-a,\t-b"]
+)
+def test_probe_rejects_whitespace_in_suffixes(
+    probe_env: ProbeRunner, tmp_path: Path, suffixes: str
+) -> None:
+    declaration = tmp_path / "declaration.conf"
+    declaration.write_text(
+        DECLARATION.read_text().replace(
+            "sync_exempt_group_suffixes=-gateway-forwarder-outbound",
+            f"sync_exempt_group_suffixes={suffixes}",
+        )
+    )
+    result = probe_env(STUB_FROZEN_GROUP, now=1_000_000, declaration=declaration)
+    assert result.returncode != 0
+    assert "declaration_invalid_value" in result.stdout + result.stderr
+    assert "whitespace" in result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("suffix", [".", ".*", "[", "a|b", "$", "(x)", r"\n"])
 def test_suffix_metacharacters_are_literal_and_match_only_at_the_end(
     probe_env: ProbeRunner, tmp_path: Path, suffix: str
