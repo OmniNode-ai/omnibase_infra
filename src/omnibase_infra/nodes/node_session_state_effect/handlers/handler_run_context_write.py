@@ -23,6 +23,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_session_state_effect.models import (
     RUN_ID_PATTERN,
     ModelRunContext,
+    ModelRunContextWriteRequest,
     ModelSessionStateResult,
 )
 from omnibase_infra.utils import sanitize_error_string
@@ -76,19 +77,19 @@ class HandlerRunContextWrite:
 
     async def handle(
         self,
-        context: ModelRunContext,
-        correlation_id: UUID,
+        request: ModelRunContextWriteRequest,
     ) -> ModelSessionStateResult:
         """Atomically write runs/{run_id}.json.
 
         Args:
-            context: The run context to persist.
-            correlation_id: Correlation ID for distributed tracing.
+            request: Request with the context and correlation ID.
 
         Returns:
             Operation result indicating success or failure.
         """
-        return await asyncio.to_thread(self._write_sync, context, correlation_id)
+        return await asyncio.to_thread(
+            self._write_sync, request.context, request.correlation_id
+        )
 
     def _write_sync(
         self,
