@@ -11,7 +11,7 @@ requirements:
     statement: "The parity manifest declares both OmniUI gates as direct required contexts on main, and the manifest still evaluates."
     acceptance:
       - id: AC1
-        statement: "AC1: the manifest lists kb-doc-gate / kb-doc-gate and public-repo-hygiene / public-repo-hygiene under omniui main -- falsifier: grep -c 'context: \"kb-doc-gate / kb-doc-gate\"' scripts/enforcement_parity_manifest.yaml prints 0 at origin/dev"
+        statement: "AC1: the manifest lists kb-doc-gate / kb-doc-gate and public-repo-hygiene / public-repo-hygiene under omniui main -- falsifier: at the PR head, loading scripts/enforcement_parity_manifest.yaml and reading repos.omniui.main.load_bearing_gates yields anything other than exactly those two contexts, each with coverage direct"
       - id: AC2
         statement: "AC2: the parity library tests pass with the new entry -- falsifier: uv run pytest tests/ci/test_required_context_parity.py -q fails"
 evidence_requirements:
@@ -25,7 +25,7 @@ dod_evidence:
     binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: 'grep -c "public-repo-hygiene / public-repo-hygiene" scripts/enforcement_parity_manifest.yaml'
+        check_value: 'python3 -c "import yaml; m=yaml.safe_load(open(\"scripts/enforcement_parity_manifest.yaml\")); g=m[\"repos\"][\"omniui\"][\"main\"][\"load_bearing_gates\"]; assert [(x[\"context\"],x[\"coverage\"]) for x in g]==[(\"kb-doc-gate / kb-doc-gate\",\"direct\"),(\"public-repo-hygiene / public-repo-hygiene\",\"direct\")], g"'
   - id: dod-002
     description: "The parity library tests pass over the changed manifest."
     source: generated
