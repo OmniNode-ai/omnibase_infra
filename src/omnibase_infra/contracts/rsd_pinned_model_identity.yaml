@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Pinned model identity for the inert RSD live-delegation binding (OMN-21758).
+# The RSD authority, overlay and provenance models refuse any model id that
+# differs from the value declared here; code names no model.
+schema_version: "1.0.0"
+contract_name: rsd_pinned_model_identity
+pinned_model_identity:
+  served_model: "Qwen/Qwen3.8-27B"
+  base_model: "Qwen/Qwen3.8-27B"
+  artifact_model: "qwen/qwen3.8-27b"
+  artifact_ref: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"
+  architecture: "Qwen3_5ForConditionalGeneration"
+  launch_profile: "qwen38-nvfp4-rtx5090-v1"
+  observed_model: "Qwen3.6-35B-A3B"

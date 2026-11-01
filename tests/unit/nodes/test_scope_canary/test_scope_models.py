@@ -36,15 +36,18 @@ class TestScopeModels:
         cmd = ModelScopeCheckCommand(
             correlation_id=cid,
             plan_file_path="/var/data/plan.md",
+            output_path="/var/data/manifest.json",
         )
         assert cmd.correlation_id == cid
-        assert cmd.output_path == "~/.claude/scope-manifest.json"
+        assert cmd.output_path == "/var/data/manifest.json"
         assert cmd.auto_confirm is False
 
     def test_scope_check_command_frozen(self):
         """ModelScopeCheckCommand is immutable."""
         cmd = ModelScopeCheckCommand(
-            correlation_id=uuid4(), plan_file_path="/var/data/plan.md"
+            correlation_id=uuid4(),
+            plan_file_path="/var/data/plan.md",
+            output_path="/var/data/manifest.json",
         )
         with pytest.raises(ValidationError):
             cmd.plan_file_path = "/other"  # type: ignore[misc]
@@ -55,6 +58,7 @@ class TestScopeModels:
             ModelScopeCheckCommand(
                 correlation_id=uuid4(),
                 plan_file_path="/var/data/plan.md",
+                output_path="/var/data/manifest.json",
                 unknown_field="bad",  # type: ignore[call-arg]
             )
 
@@ -65,6 +69,7 @@ class TestScopeModels:
             correlation_id=cid,
             file_path="/var/data/plan.md",
             content="hello",
+            output_path="/var/data/manifest.json",
         )
         assert result.success is True
         assert result.error_message == ""
@@ -75,6 +80,7 @@ class TestScopeModels:
         extracted = ModelScopeExtracted(
             correlation_id=cid,
             plan_file_path="plan.md",
+            output_path="/var/data/manifest.json",
             files=("a.py", "b.py"),
             repos=("omniclaude",),
         )

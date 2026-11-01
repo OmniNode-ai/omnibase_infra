@@ -29,6 +29,7 @@ functions and a recording ``ssh``.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -257,7 +258,8 @@ def _roll_harness(
     bindir.mkdir()
     ssh_stub = bindir / "ssh"
     ssh_stub.write_text(
-        f'#!/usr/bin/env bash\nprintf "%s\\n---\\n" "$2" >> "{record}"\nexit 0\n'
+        f'#!/usr/bin/env bash\nprintf "%s\\n---\\n" "$2" >> "{record}"\n'
+        f'cat >> "{record}.stdin"\nexit 0\n'
     )
     ssh_stub.chmod(ssh_stub.stat().st_mode | stat.S_IEXEC)
     stubs = "\n".join(
@@ -265,7 +267,6 @@ def _roll_harness(
             'log() { echo "[log] $*"; }',
             'warn() { echo "[warn] $*" >&2; }',
             'err() { echo "[err] $*" >&2; exit 1; }',
-            'encode_token() { printf "%s" "$1" | base64; }',
             "runner_is_idle() { return 0; }",
             f'runner_container_state() {{ echo "{container_state}"; }}',
             'github_runner_state() { echo "unknown unknown"; }',
@@ -277,11 +278,15 @@ def _roll_harness(
         ]
     )
     fn = _extract_function(script_text, "roll_one_runner")
+    helper = _extract_function(script_text, "ssh_token_stdin")
+    read_token = re.search(r"^REMOTE_READ_TOKEN='.*'$", script_text, flags=re.MULTILINE)
+    assert read_token, "REMOTE_READ_TOKEN= is not defined in deploy-runners.sh"
     script = (
         "set -euo pipefail\n"
         'RUNNER_HOST_DIR="/fake/runners"\n'
         "DRY_RUN=false\n"
         f'TOKEN_FILE="{token_file}"\n'
+        f"{read_token.group(0)}\n{helper}\n"
         f"{stubs}\n{fn}\n"
         'rc=0; roll_one_runner "omninode-runner-41" || rc=$?; echo "rc=${rc}"\n'
     )
@@ -309,8 +314,11 @@ def test_a_retired_runner_with_a_token_file_is_created_with_the_token(
     result, ssh_calls = _roll_harness(script_text, tmp_path, "absent", str(token))
     assert "rc=0" in result.stdout, (result.stdout, result.stderr)
     assert "up -d --force-recreate --no-deps --no-build omninode-runner-41" in ssh_calls
-    assert "RUNNER_TOKEN=$(echo" in ssh_calls
-    assert "AAAFAKETOKEN" not in ssh_calls, "the token must cross ssh base64-encoded"
+    assert "RUNNER_TOKEN=$(cat)" in ssh_calls
+    assert "AAAFAKETOKEN" not in ssh_calls, "the token must not be in the ssh argv"
+    assert "AAAFAKETOKEN" in (tmp_path / "ssh.log.stdin").read_text(), (
+        "the token must cross ssh on stdin"
+    )
     assert "AAAFAKETOKEN" not in result.stdout + result.stderr
 
 

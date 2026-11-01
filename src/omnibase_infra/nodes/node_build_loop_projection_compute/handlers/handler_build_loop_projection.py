@@ -31,6 +31,7 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.intent_target_uris import load_intent_target_uris
 from omnibase_infra.nodes.node_build_loop_projection_compute.models.model_payload_build_loop_append import (
     ModelPayloadBuildLoopAppend,
 )
@@ -75,7 +76,9 @@ class HandlerBuildLoopProjection:
         payload = self._extract_payload(message)
         return ModelIntent(
             intent_type=payload.intent_type,
-            target=f"postgres://build_loop_runs/{payload.id}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().build_loop_runs, payload.id
+            ),
             payload=payload,
         )
 

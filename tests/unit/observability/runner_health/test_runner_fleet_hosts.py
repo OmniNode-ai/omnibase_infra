@@ -52,6 +52,8 @@ EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
     ("stickybeatz-2.tail75df5e.ts.net", "arm64", 1),
     ("192.168.86.202", "amd64", 1),
     ("stickybeatz-studio.tail75df5e.ts.net", "arm64", 1),
+    # OMN-17232: the HP DL560 Gen8 (h051) pool, four `omnibase-ci-multiarch` runners.
+    ("h051", "amd64", 4),
 )
 
 
