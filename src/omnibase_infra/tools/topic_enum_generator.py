@@ -70,27 +70,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from omnibase_infra.enums.contract_topic_value import render_contract_topic_member
+from omnibase_infra.enums.contract_topic_value import (
+    contract_topic_member_key,
+    render_contract_topic_member,
+)
 from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
-
-# ---------------------------------------------------------------------------
-# Kind prefix map
-# ---------------------------------------------------------------------------
-
-# OMN-17557: "snapshot" completes this map against the extractor's own
-# ``_VALID_KINDS``, which has admitted it since OMN-15832. The two had drifted:
-# a ``kind="snapshot"`` entry reaching ``_normalize_key`` raised KeyError, and
-# the only reason it never did was that every snapshot topic in this repo's own
-# node contracts also carried a dotted event name and was being skipped one
-# layer earlier for the wrong reason. Fixing that arity bug exposed this one,
-# so both are closed here rather than leaving a latent crash behind the fix.
-_KIND_PREFIX: dict[str, str] = {
-    "evt": "EVT_",
-    "cmd": "CMD_",
-    "intent": "INTENT_",
-    "dlq": "DLQ_",
-    "snapshot": "SNAPSHOT_",
-}
 
 # File header template (filled per producer)
 _FILE_HEADER = """\
@@ -150,10 +134,7 @@ def _normalize_key(entry: ModelContractTopicEntry) -> str:
       3. Prepend kind prefix (EVT_ / CMD_ / INTENT_)
       4. Append _V{N} from version field
     """
-    base_key = entry.event_name.replace("-", "_").replace(".", "_").upper()
-    prefix = _KIND_PREFIX[entry.kind]
-    version_suffix = "_V" + entry.version[1:]  # "v1" → "_V1"
-    return f"{prefix}{base_key}{version_suffix}"
+    return contract_topic_member_key(entry.kind, entry.event_name, entry.version)
 
 
 def _producer_to_class_name(producer: str) -> str:

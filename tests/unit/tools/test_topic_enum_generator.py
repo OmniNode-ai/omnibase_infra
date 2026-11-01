@@ -730,3 +730,21 @@ def test_generated_init_file_spdx_skip_is_line_1() -> None:
     assert first_line.startswith("# spdx-skip:"), (
         f"_INIT_HEADER first line must start with '# spdx-skip:'; got: {first_line!r}"
     )
+
+
+@pytest.mark.unit
+def test_render_binding_keeps_nested_package_named_directory(tmp_path: Path) -> None:
+    entry = _entry(
+        "onex.evt.platform.intent-classified.v1",
+        "evt",
+        "platform",
+        "intent-classified",
+        "v1",
+        source="/checkout/src/omnibase_infra/nodes/omnibase_infra/contract.yaml",
+    )
+    rendered = TopicEnumGenerator().render([entry], output_dir=tmp_path)
+    assert (
+        "contract_topic_value('nodes/omnibase_infra/contract.yaml', "
+        "'platform', 'EVT_INTENT_CLASSIFIED_V1')"
+        in rendered[tmp_path / "enum_platform_topic.py"]
+    )

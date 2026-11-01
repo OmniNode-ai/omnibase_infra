@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from functools import cache
+from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,6 +13,7 @@ import yaml
 
 from omnibase_infra.tools.contract_topic_extractor import (
     _extract_raw_topics_from_contract,
+    _parse_topic,
 )
 
 if TYPE_CHECKING:
@@ -24,10 +25,14 @@ def render_contract_topic_member(
 ) -> str:
     """Render a member with a relocatable source binding and no fallback value."""
     source = entry.source_contracts[0]
-    # Hosted checkouts can have package-named ancestors. Use the nearest
-    # package directory so checkout names cannot enter generated bindings.
+    # Anchor to the source layout, not a directory name that can also occur
+    # inside a package or in a hosted checkout path.
     package_root = next(
-        (parent for parent in source.parents if parent.name == "omnibase_infra"),
+        (
+            parent
+            for parent in source.parents
+            if parent.name == "omnibase_infra" and parent.parent.name == "src"
+        ),
         None,
     )
     if package_root is not None:
@@ -36,7 +41,6 @@ def render_contract_topic_member(
     return template.format(key=key, args=args, topic=entry.topic)
 
 
-@cache
 def _contract_topics(source: str) -> frozenset[str]:
     """Read a package-relative contract, or an explicitly supplied source file."""
     resource = (
@@ -45,8 +49,20 @@ def _contract_topics(source: str) -> frozenset[str]:
         else files("omnibase_infra").joinpath(source)
     )
     try:
-        document = yaml.safe_load(resource.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
+        text = resource.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ValueError(
+            f"{source}: cannot read contract ({type(error).__name__})"
+        ) from error
+    return _parse_contract_topics(source, text)
+
+
+@lru_cache(maxsize=128)
+def _parse_contract_topics(source: str, text: str) -> frozenset[str]:
+    """Cache parsing by content so edits never leave stale file-path entries."""
+    try:
+        document = yaml.safe_load(text)
+    except yaml.YAMLError as error:
         raise ValueError(
             f"{source}: cannot read contract ({type(error).__name__})"
         ) from error
@@ -65,6 +81,19 @@ def _contract_topics(source: str) -> frozenset[str]:
     )
 
 
+def contract_topic_member_key(kind: str, event_name: str, version: str) -> str:
+    """Use the same member spelling in the generator and runtime resolver."""
+    prefix = {
+        "evt": "EVT_",
+        "cmd": "CMD_",
+        "intent": "INTENT_",
+        "dlq": "DLQ_",
+        "snapshot": "SNAPSHOT_",
+    }[kind]
+    base_key = event_name.replace("-", "_").replace(".", "_").upper()
+    return f"{prefix}{base_key}_V{version[1:]}"
+
+
 def contract_topic_value(source: str, producer: str, member: str) -> str:
     """Bind an enum member to exactly one topic declared by its source contract.
 
@@ -72,13 +101,15 @@ def contract_topic_value(source: str, producer: str, member: str) -> str:
     Missing or ambiguous declarations fail at import instead of retaining stale values.
     """
     matches = []
-    for topic in _contract_topics(source):
-        parts = topic.split(".")
-        if len(parts) < 5 or parts[2] != producer:
+    try:
+        topics = _contract_topics(source)
+    except ValueError as error:
+        raise ValueError(f"{producer}.{member}: {error}") from error
+    for topic in sorted(topics):
+        entry = _parse_topic(topic, Path(source))
+        if entry is None or entry.producer != producer:
             continue
-        key = "_".join(
-            (parts[1], "_".join(parts[3:-1]).replace("-", "_"), parts[-1])
-        ).upper()
+        key = contract_topic_member_key(entry.kind, entry.event_name, entry.version)
         if key == member:
             matches.append(topic)
     if len(matches) != 1:
