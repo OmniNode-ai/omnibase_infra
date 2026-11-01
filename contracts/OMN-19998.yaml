@@ -631,7 +631,7 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC33
-  - id: dod-omn19998-ac33-candidate-dev-merge-tags-deploy-probe
+  - id: dod-omn19998-ac33-dev-tags-deploy-probe
     description: Hosted-runner deployment artifact check for AC33. Runs the candidate workflow's tag fetch step against a local origin and fails when the build context would reach staging with no dev-merge tag at HEAD.
     source: manual
     checks:
