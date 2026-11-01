@@ -97,6 +97,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/test_kernel_consumer_group_collision_omn18087.py -q --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/event_bus/test_kernel_group_ownership_omn18087.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn18087-deploy-probe
     description: >-
       Post-deploy probe: the running dev runtime imports the demand source and reports the in_use boot split in its log. It reads the runtime container after the deploy agent rolls it, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion; AC2 stays bound by dod-omn18087-ac2-ac3-in-use-boot-set.
