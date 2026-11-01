@@ -2,7 +2,10 @@
 # Existing entries are the approved omnibase_infra handler baseline as of
 # 2026-05-15. This file is not a migration-complete ownership claim: new
 # business-domain node handlers belong in omnimarket, and deleted/migrated
-# handlers must be removed from this allowlist in the same PR.
+# handlers must be removed from this allowlist in the same PR. An infra-owned
+# handler is bound from the node contract and lives in
+# src/omnibase_infra/handlers/ (the OMN-20821 pattern, precedents
+# omnibase_infra#4565 and #5405); this list only shrinks and never gains an entry.
 #
 src/omnibase_infra/nodes/node_architecture_validator/handlers/__init__.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.
 src/omnibase_infra/nodes/node_architecture_validator/handlers/handler_architecture_validation.py  # approved existing infra handler path; new business-domain handlers belong in omnimarket.

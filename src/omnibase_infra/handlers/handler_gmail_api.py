@@ -45,14 +45,12 @@ import httpx
 
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 
 logger = logging.getLogger(__name__)
 
-# Gmail OAuth2 token endpoint
-_GMAIL_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
-
 # Gmail REST API base URL
-_GMAIL_API_BASE: str = "https://gmail.googleapis.com/gmail/v1/users/me"
+_GMAIL_API_BASE: str = load_third_party_endpoints().gmail_api_base_url
 
 # Refresh token when expiry is within this many seconds
 _TOKEN_REFRESH_BUFFER_SECONDS: int = 100
@@ -211,7 +209,7 @@ class HandlerGmailApi:
 
             try:
                 response = await client.post(
-                    _GMAIL_TOKEN_URL,
+                    load_third_party_endpoints().gmail_oauth_token_url,
                     data={
                         "client_id": self._client_id,
                         "client_secret": self._client_secret,

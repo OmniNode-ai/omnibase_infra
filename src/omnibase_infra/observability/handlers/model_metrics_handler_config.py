@@ -45,6 +45,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
+
 
 class ModelMetricsHandlerConfig(BaseModel):
     """Configuration model for Prometheus metrics handler.
@@ -105,12 +107,8 @@ class ModelMetricsHandlerConfig(BaseModel):
     """
 
     host: str = Field(
-        default="127.0.0.1",  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
-        description=(
-            "Bind address for the HTTP metrics server. "
-            "Default is localhost (127.0.0.1) for security. "
-            "Use 0.0.0.0 only with reverse proxy protection."
-        ),
+        default=load_endpoint_defaults().loopback_address,  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
+        description="Bind address for the HTTP metrics server. Loopback by default for security; bind every interface only behind reverse proxy protection.",
     )
     port: int = Field(
         default=9090,

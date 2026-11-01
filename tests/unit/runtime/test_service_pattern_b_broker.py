@@ -1094,7 +1094,10 @@ async def test_runtime_host_process_reuses_local_ingress_routes_for_pattern_b_br
             "node_name": "test-node",
             "env": "test",
             "version": "v1",
-            "local_ingress": {"enabled": True},
+            "local_ingress": {
+                "enabled": True,
+                "socket_path": "/var/run/onex-test/runtime.sock",
+            },
             "pattern_b_broker": {"enabled": True},
         },
         dispatch_engine=AsyncMock(),
@@ -1117,7 +1120,10 @@ async def test_runtime_host_process_rejects_enabled_ingress_without_pattern_b_br
             "node_name": "test-node",
             "env": "test",
             "version": "v1",
-            "local_ingress": {"enabled": True},
+            "local_ingress": {
+                "enabled": True,
+                "socket_path": "/var/run/onex-test/runtime.sock",
+            },
             "pattern_b_broker": {"enabled": False},
         },
         dispatch_engine=AsyncMock(),
