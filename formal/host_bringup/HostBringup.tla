@@ -44,7 +44,9 @@
 (*                                        emits its terminal)               *)
 (* NoLandAfterSuccessorVerify  invariant  mut_grace_le_timeout (the lease   *)
 (*                                        grace is not above the action     *)
-(*                                        timeout)                          *)
+(*                                        timeout), mut_ext_no_renew (an    *)
+(*                                        external action does not extend   *)
+(*                                        the lease when it starts)         *)
 (* StaleHolderRefused          invariant  mut_cmp_before_lock (the fence is *)
 (*                                        compared before the lock is taken)*)
 (* NoActionOutsideLock         invariant  mut_no_lock (a host action runs   *)
@@ -53,6 +55,12 @@
 (*                                        values; its violation shows a     *)
 (*                                        stale holder refused at the       *)
 (*                                        comparison inside the lock)       *)
+(* AbandonedWitness            witness    wit_abandoned_emitted (a run is   *)
+(*                                        closed by another run)            *)
+(* ExtLandsWitness             witness    wit_ext_lands (an external action *)
+(*                                        lands)                            *)
+(* WaitPassesWitness           witness    wit_wait_passes (a wait passes    *)
+(*                                        on its check reading true)        *)
 (*                                                                            *)
 (* Bounds: 3 runs, 3 targets, time 0..4, lease grace 2, action timeout 1,   *)
 (* 2 kills, 1 regression. results/ holds TLC output for every cfg and       *)
@@ -99,11 +107,12 @@ VARIABLES now,        \* global time
           hostStale,  \* ghost: a host action landed for a holder whose fence was not current
           hostUnlocked, \* ghost: a host action landed without its run holding the flock
           lateLanded, \* ghost: an external action landed after a successor's verify
-          staleRefused \* ghost: a host action of a stale holder was refused
+          staleRefused, \* ghost: a host action of a stale holder was refused
+          abandonEmitted \* ghost: a run was closed abandoned by another run
 
 vars == <<now, rev, lease, lock, world, ext, term, pc, fence, tgt, passRead,
           credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-          hostStale, hostUnlocked, lateLanded, staleRefused>>
+          hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 Phases == {"new", "abandon", "probe", "plan", "cmp", "hostlock", "hostapply",
            "extstart", "extwait", "waiting", "waitpassed", "fin1", "fin2",
@@ -139,6 +148,7 @@ TypeOK ==
   /\ hostUnlocked \in BOOLEAN
   /\ lateLanded \in BOOLEAN
   /\ staleRefused \in BOOLEAN
+  /\ abandonEmitted \in BOOLEAN
 
 Init ==
   /\ now = 0
@@ -162,6 +172,7 @@ Init ==
   /\ hostUnlocked = FALSE
   /\ lateLanded = FALSE
   /\ staleRefused = FALSE
+  /\ abandonEmitted = FALSE
 
 \* ---- helpers
 Holds(r) == lease.holder = r /\ lease.fence = fence[r]
@@ -185,7 +196,7 @@ Tick ==
   /\ now' = now + 1
   /\ UNCHANGED <<rev, lease, lock, world, ext, term, pc, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* ---- the world changes under the run
 Regress(t) ==
@@ -195,7 +206,7 @@ Regress(t) ==
   /\ regressLeft' = regressLeft - 1
   /\ UNCHANGED <<now, rev, lease, lock, ext, term, pc, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* The person does what the wait target asks.
 PersonDone ==
@@ -203,7 +214,7 @@ PersonDone ==
   /\ world' = [world EXCEPT !["c"] = TRUE]
   /\ UNCHANGED <<now, rev, lease, lock, ext, term, pc, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 Kill(r) ==
   /\ killsLeft > 0
@@ -213,7 +224,7 @@ Kill(r) ==
   /\ killsLeft' = killsLeft - 1
   /\ UNCHANGED <<now, rev, lease, world, ext, term, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* ---- the lease
 \* One atomic step under the flock: take the free or expired lease with a
@@ -231,7 +242,7 @@ Acquire(r) ==
   /\ pc' = [pc EXCEPT ![r] = "abandon"]
   /\ UNCHANGED <<now, lock, world, ext, term, tgt, passRead, credit, waitRead,
                  cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* The holder renews on its own fence; the fence stays.
 Renew(r) ==
@@ -240,7 +251,7 @@ Renew(r) ==
   /\ lease' = [lease EXCEPT !.exp = IF now + Grace > @ THEN now + Grace ELSE @]
   /\ UNCHANGED <<now, rev, lock, world, ext, term, pc, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* A run that stops emits a terminal of its own and frees the lease if it holds it.
 Stop(r) ==
@@ -255,7 +266,7 @@ RenewRefused(r) ==
   /\ Stop(r)
   /\ UNCHANGED <<now, rev, world, ext, fence, tgt, passRead, credit,
                  waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* ---- the abandoned terminals
 \* The new holder closes, once and keyed on the run id, each run the lease owes.
@@ -265,6 +276,7 @@ EmitAbandoned(r, x) ==
   /\ MUT # "no_abandon"
   /\ x \in lease.owed
   /\ term' = EmitTerm(x)
+  /\ abandonEmitted' = (abandonEmitted \/ term[x] = 0)
   /\ lease' = [lease EXCEPT !.owed = @ \ {x}]
   /\ UNCHANGED <<now, rev, lock, world, ext, pc, fence, tgt, passRead, credit,
                  waitRead, cmpOk, verified, killsLeft, regressLeft,
@@ -279,7 +291,7 @@ EndAbandon(r) ==
   /\ pc' = [pc EXCEPT ![r] = "probe"]
   /\ UNCHANGED <<now, rev, lock, world, ext, term, fence, tgt, passRead, credit,
                  waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* ---- one pass: probe, plan, one action
 Probe(r) ==
@@ -292,7 +304,7 @@ Probe(r) ==
   /\ pc' = [pc EXCEPT ![r] = "plan"]
   /\ UNCHANGED <<now, rev, lease, lock, world, ext, term, fence, tgt, waitRead,
                  cmpOk, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* The plan picks a target that read unsatisfied whose needs read satisfied.
 Seen(r) == IF MUT = "sticky_reads" THEN credit[r] ELSE passRead[r]
@@ -312,7 +324,7 @@ Plan(r) ==
        /\ pc' = [pc EXCEPT ![r] = NextPhase(t)]
   /\ UNCHANGED <<now, rev, lease, lock, world, ext, term, fence, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 AllSatisfied(r) ==
   /\ pc[r] = "plan"
@@ -320,7 +332,7 @@ AllSatisfied(r) ==
   /\ pc' = [pc EXCEPT ![r] = "fin1"]
   /\ UNCHANGED <<now, rev, lease, lock, world, ext, term, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* ---- a host action: the whole script under the flock, the fence compared inside
 \* mut_cmp_before_lock compares first, outside the lock, and trusts it later.
@@ -330,7 +342,7 @@ Cmp(r) ==
   /\ pc' = [pc EXCEPT ![r] = "hostlock"]
   /\ UNCHANGED <<now, rev, lease, lock, world, ext, term, fence, tgt, passRead,
                  credit, waitRead, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 TakeLock(r) ==
   /\ pc[r] = "hostlock"
@@ -339,7 +351,7 @@ TakeLock(r) ==
   /\ pc' = [pc EXCEPT ![r] = "hostapply"]
   /\ UNCHANGED <<now, rev, lease, world, ext, term, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 HostPasses(r) == IF MUT = "cmp_before_lock" THEN cmpOk[r] ELSE Holds(r)
 
@@ -358,13 +370,14 @@ HostApply(r) ==
             /\ staleRefused' = (staleRefused \/ ~Holds(r))
             /\ UNCHANGED <<world, hostStale, hostUnlocked>>
   /\ UNCHANGED <<now, rev, ext, fence, tgt, passRead, credit, waitRead,
-                 cmpOk, verified, killsLeft, regressLeft, lateLanded>>
+                 cmpOk, verified, killsLeft, regressLeft, lateLanded, abandonEmitted>>
 
 \* ---- an external action: outside the lock, a hard timeout
 ExtStart(r) ==
   /\ pc[r] = "extstart"
   /\ IF Holds(r)
-       THEN /\ lease' = [lease EXCEPT !.exp = IF now + Grace > @ THEN now + Grace ELSE @]
+       THEN /\ lease' = IF MUT = "ext_no_renew" THEN lease
+                          ELSE [lease EXCEPT !.exp = IF now + Grace > @ THEN now + Grace ELSE @]
             /\ ext' = ext \cup {[run |-> r, t |-> tgt[r], fence |-> fence[r],
                                  deadline |-> now + ActTimeout]}
             /\ pc' = [pc EXCEPT ![r] = "extwait"]
@@ -373,7 +386,7 @@ ExtStart(r) ==
             /\ UNCHANGED ext
   /\ UNCHANGED <<now, rev, world, fence, tgt, passRead, credit, waitRead, cmpOk,
                  verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* The action lands at the service, or the timeout kills it. A run that was
 \* killed or paused does not stop its action.
@@ -385,7 +398,7 @@ ExtLand(e) ==
   /\ lateLanded' = (lateLanded \/ \E y \in verified : fence[y] > e.fence)
   /\ UNCHANGED <<now, rev, lease, lock, term, pc, fence, tgt, passRead, credit,
                  waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, staleRefused>>
+                 hostStale, hostUnlocked, staleRefused, abandonEmitted>>
 
 ExtExpire(e) ==
   /\ e \in ext
@@ -393,7 +406,7 @@ ExtExpire(e) ==
   /\ ext' = ext \ {e}
   /\ UNCHANGED <<now, rev, lease, lock, world, term, pc, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 ExtDone(r) ==
   /\ pc[r] = "extwait"
@@ -401,7 +414,7 @@ ExtDone(r) ==
   /\ pc' = [pc EXCEPT ![r] = "probe"]
   /\ UNCHANGED <<now, rev, lease, lock, world, ext, term, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* ---- a wait: passes only when its check reads true
 WaitCheck(r) ==
@@ -410,7 +423,7 @@ WaitCheck(r) ==
   /\ pc' = [pc EXCEPT ![r] = IF world[tgt[r]] THEN "waitpassed" ELSE "waiting"]
   /\ UNCHANGED <<now, rev, lease, lock, world, ext, term, fence, tgt, passRead,
                  credit, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* wait_timeout_s: the run stops and prints the person line. The mutation
 \* carries on as if the check had read true.
@@ -424,14 +437,14 @@ WaitTimeout(r) ==
             /\ UNCHANGED waitRead
   /\ UNCHANGED <<now, rev, world, ext, fence, tgt, passRead, credit,
                  cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 WaitPassed(r) ==
   /\ pc[r] = "waitpassed"
   /\ pc' = [pc EXCEPT ![r] = "probe"]
   /\ UNCHANGED <<now, rev, lease, lock, world, ext, term, fence, tgt, passRead,
                  credit, waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 \* ---- the end: one terminal for the run, and the lease freed
 \* The correct order is terminal first, then release. mut_release_before_terminal
@@ -446,7 +459,7 @@ Fin1(r) ==
   /\ pc' = [pc EXCEPT ![r] = "fin2"]
   /\ UNCHANGED <<now, rev, lock, world, ext, fence, tgt, passRead, credit,
                  waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 Fin2(r) ==
   /\ pc[r] = "fin2"
@@ -458,7 +471,7 @@ Fin2(r) ==
   /\ pc' = [pc EXCEPT ![r] = "done"]
   /\ UNCHANGED <<now, rev, lock, world, ext, fence, tgt, passRead, credit,
                  waitRead, cmpOk, verified, killsLeft, regressLeft,
-                 hostStale, hostUnlocked, lateLanded, staleRefused>>
+                 hostStale, hostUnlocked, lateLanded, staleRefused, abandonEmitted>>
 
 Next ==
   \/ Tick
@@ -516,4 +529,13 @@ NoActionOutsideLock == ~hostUnlocked
 \* A stale holder's host action reaches the comparison inside the lock and is
 \* refused: the race the fence and the lock exist for occurs.
 StaleWitness == ~staleRefused
+
+\* The next holder emits the abandoned terminal of a run.
+AbandonedWitness == ~abandonEmitted
+
+\* An external action lands at its service.
+ExtLandsWitness == ~world["b"]
+
+\* A wait passes because its check read true.
+WaitPassesWitness == ~(\E r \in Runs : pc[r] = "waitpassed")
 =============================================================================

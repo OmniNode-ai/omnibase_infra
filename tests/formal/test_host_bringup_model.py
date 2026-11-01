@@ -47,9 +47,13 @@ EXPECTED_VIOLATIONS = {
     "mut_owed_not_chained": "Invariant AbandonedClosed is violated.",
     "mut_release_before_terminal": "Invariant AbandonedClosed is violated.",
     "mut_grace_le_timeout": "Invariant NoLandAfterSuccessorVerify is violated.",
+    "mut_ext_no_renew": "Invariant NoLandAfterSuccessorVerify is violated.",
     "mut_cmp_before_lock": "Invariant StaleHolderRefused is violated.",
     "mut_no_lock": "Invariant NoActionOutsideLock is violated.",
     "wit_stale_refused": "Invariant StaleWitness is violated.",
+    "wit_abandoned_emitted": "Invariant AbandonedWitness is violated.",
+    "wit_ext_lands": "Invariant ExtLandsWitness is violated.",
+    "wit_wait_passes": "Invariant WaitPassesWitness is violated.",
 }
 
 #: The invariants the plan's T0 names, each with the mutant that must break it.
@@ -81,7 +85,10 @@ def _jar() -> str | None:
 
 
 def _run_tlc(jar: str, cfg_stem: str) -> str:
-    with tempfile.TemporaryDirectory() as meta:
+    """Run TLC on a copy of the model, so its trace files never land in the tree."""
+    with tempfile.TemporaryDirectory() as work:
+        for src in [MODEL_DIR / SPEC, *MODEL_DIR.glob("*.cfg")]:
+            shutil.copy(src, work)
         proc = subprocess.run(
             [
                 "java",
@@ -89,15 +96,16 @@ def _run_tlc(jar: str, cfg_stem: str) -> str:
                 "-cp",
                 jar,
                 "tlc2.TLC",
+                "-noGenerateSpecTE",
                 "-config",
                 f"{cfg_stem}.cfg",
                 "-workers",
                 "4",
                 "-metadir",
-                meta,
+                str(Path(work) / "states"),
                 SPEC,
             ],
-            cwd=MODEL_DIR,
+            cwd=work,
             capture_output=True,
             text=True,
             check=False,
@@ -161,7 +169,7 @@ def test_model_states_every_invariant_with_a_mutant_that_breaks_it() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "mutant", sorted(set(EXPECTED_VIOLATIONS) - {"wit_stale_refused"})
+    "mutant", sorted(n for n in EXPECTED_VIOLATIONS if n.startswith("mut_"))
 )
 def test_mutant_keeps_every_invariant_checked(mutant: str) -> None:
     assert _cfg_invariants(mutant) == _cfg_invariants("Model")
