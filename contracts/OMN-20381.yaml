@@ -55,11 +55,11 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn20381-ac3-core-pin-bump
-    description: The pin test asserts the new omnibase-core tag, commit and locked version; it fails at the merge base, where pyproject.toml and uv.lock carry the previous tag.
+    description: The pin test asserts the new omnibase-core tag, commit and locked version, while the runner identity tests require both recorded digests to match those dependency inputs. The pin test fails at the merge base and the runner identity tests fail at the parent before regeneration.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_runner_image_identity.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
@@ -71,3 +71,12 @@ dod_evidence:
         check_value: >-
           curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/docker/migrations/forward/nodes/node_projection_tenant_credentials/0008_tenant_credentials_workspace_id.sql" | python3 -c 'import hashlib, sys; assert hashlib.sha256(sys.stdin.buffer.read()).hexdigest() == "688d94ce82f950d757a5658dfeac55d018c5d70424b91585cb3018eaea2dc79e"'
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20381-ac3-core-pin-runner-deploy
+    description: Hosted-runner artifact check requires the new core pin and verifies the recorded runner identity against this checkout. It fails for the old pin or stale digests and requires no Docker daemon, private runtime or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_runner_image_identity.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
