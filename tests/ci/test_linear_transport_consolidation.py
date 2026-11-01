@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,7 @@ from omnibase_infra.handlers.handler_linear_db_error_reporter import (
 )
 from omnibase_infra.handlers.models.model_db_error_event import ModelDbErrorEvent
 from omnibase_infra.models.github.model_pr_merged_event import ModelPRMergedEvent
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     _LinearClient,
 )
@@ -85,11 +87,26 @@ def test_graphql_endpoint_has_one_transport_owner() -> None:
     assert owners == {}, owners
     declared = (_ROOT / _ENDPOINTS_FILE).read_text().splitlines()
     assert len([line for line in declared if "api.linear.app/graphql" in line]) == 1
-    # Positive control: the owning transport was scanned and reads the declared value.
-    assert (
-        "load_third_party_endpoints().linear_graphql_url"
-        in (_ROOT / _OWNER).read_text()
-    )
+    # Positive control: the owning module was scanned, and its transport posts to the
+    # declared endpoint on the wire.
+    assert (_ROOT / _OWNER).is_file()
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"data": {}})
+
+    async def post_once() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                api_key="k", timeout_seconds=1.0, client=client
+            ) as transport:
+                await transport.post_graphql("query Q { ok }", None)
+
+    asyncio.run(post_once())
+    assert [str(r.url) for r in requests] == [
+        load_third_party_endpoints().linear_graphql_url
+    ]
 
 
 def test_endpoint_guard_detects_a_reintroduced_caller() -> None:
