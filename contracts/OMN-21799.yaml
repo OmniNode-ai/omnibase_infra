@@ -52,7 +52,7 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn21799-ac3-cloud-ci
-    description: The required-output_path tests and filesystem integration readback run on lab host h051 and remain runnable on a hosted runner.
+    description: The required-output_path test for all five scope models and the filesystem integration readback run from the checkout with no network access and no pushed-commit dependency, so they hold locally, on the lab and on a hosted runner.
     source: manual
     checks:
       - check_type: test_passes
@@ -60,12 +60,6 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/nodes/test_scope_output_path_deploy_omn21799.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: |-
-          set -eu;
-          model="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_scope_workflow_orchestrator/models/model_scope_check_command.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
-          grep -q 'min_length=1' <<<"$model"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
