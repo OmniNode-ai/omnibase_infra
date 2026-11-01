@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumOmniclaudeTopic(str, Enum):
     """Kafka topic enum for producer: omniclaude.
@@ -18,8 +20,8 @@ class EnumOmniclaudeTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_CONTEXT_AUDIT_DLQ_V1 = "onex.evt.omniclaude.context-audit-dlq.v1"  # onex.evt.omniclaude.context-audit-dlq.v1
-    EVT_NOTIFICATION_BLOCKED_V1 = "onex.evt.omniclaude.notification-blocked.v1"  # onex.evt.omniclaude.notification-blocked.v1
-    EVT_NOTIFICATION_COMPLETED_V1 = "onex.evt.omniclaude.notification-completed.v1"  # onex.evt.omniclaude.notification-completed.v1
-    EVT_PHASE_METRICS_V1 = "onex.evt.omniclaude.phase-metrics.v1"  # onex.evt.omniclaude.phase-metrics.v1
-    EVT_SESSION_COORDINATION_SIGNAL_V1 = "onex.evt.omniclaude.session-coordination-signal.v1"  # onex.evt.omniclaude.session-coordination-signal.v1
+    EVT_CONTEXT_AUDIT_DLQ_V1 = contract_topic_value('nodes/node_context_audit_dlq_effect/contract.yaml', 'omniclaude', 'EVT_CONTEXT_AUDIT_DLQ_V1')  # onex.evt.omniclaude.context-audit-dlq.v1
+    EVT_NOTIFICATION_BLOCKED_V1 = contract_topic_value('nodes/node_emit_daemon_runtime/contract.yaml', 'omniclaude', 'EVT_NOTIFICATION_BLOCKED_V1')  # onex.evt.omniclaude.notification-blocked.v1
+    EVT_NOTIFICATION_COMPLETED_V1 = contract_topic_value('nodes/node_emit_daemon_runtime/contract.yaml', 'omniclaude', 'EVT_NOTIFICATION_COMPLETED_V1')  # onex.evt.omniclaude.notification-completed.v1
+    EVT_PHASE_METRICS_V1 = contract_topic_value('nodes/node_emit_daemon_runtime/contract.yaml', 'omniclaude', 'EVT_PHASE_METRICS_V1')  # onex.evt.omniclaude.phase-metrics.v1
+    EVT_SESSION_COORDINATION_SIGNAL_V1 = contract_topic_value('runtime/topics.yaml', 'omniclaude', 'EVT_SESSION_COORDINATION_SIGNAL_V1')  # onex.evt.omniclaude.session-coordination-signal.v1

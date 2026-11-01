@@ -70,6 +70,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from omnibase_infra.enums.contract_topic_value import render_contract_topic_member
 from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
 
 # ---------------------------------------------------------------------------
@@ -106,6 +107,8 @@ _FILE_HEADER = """\
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class {class_name}(str, Enum):
     \"\"\"Kafka topic enum for producer: {producer}.
@@ -115,7 +118,7 @@ class {class_name}(str, Enum):
     \"\"\"
 """
 
-_MEMBER_TEMPLATE = '    {key} = "{value}"  # {topic}'
+_MEMBER_TEMPLATE = "    {key} = contract_topic_value({args})  # {topic}\n"
 
 _INIT_HEADER = """\
 # spdx-skip: auto-generated — do not edit manually
@@ -237,27 +240,24 @@ class TopicEnumGenerator:
             file_path = output_dir / filename
 
             # Collision detection on normalized keys
-            seen_keys: dict[str, str] = {}  # key → first topic that claimed it
-            members: list[tuple[str, str]] = []  # (key, topic_value)
+            members: dict[str, ModelContractTopicEntry] = {}
             for entry in producer_entries:
                 key = _normalize_key(entry)
-                if key in seen_keys:
+                if key in members:
                     raise RuntimeError(
                         f"Enum key collision for producer {producer!r}: "
                         f"normalized key {key!r} is claimed by both "
-                        f"{seen_keys[key]!r} and {entry.topic!r}. "
+                        f"{members[key].topic!r} and {entry.topic!r}. "
                         f"Rename one topic's event-name to resolve."
                     )
-                seen_keys[key] = entry.topic
-                members.append((key, entry.topic))
+                members[key] = entry
 
             # Render file content
             content = _FILE_HEADER.format(class_name=class_name, producer=producer)
-            for key, topic_value in members:
-                content += _MEMBER_TEMPLATE.format(
-                    key=key, value=topic_value, topic=topic_value
-                )
-                content += "\n"
+            content += "".join(
+                render_contract_topic_member(key, entry, _MEMBER_TEMPLATE)
+                for key, entry in members.items()
+            )
 
             result[file_path] = content
             class_exports.append((filename[:-3], class_name))  # strip .py

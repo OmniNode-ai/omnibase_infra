@@ -1,7 +1,7 @@
-schema_version: "1.0.0"
+schema_version: 1.0.0
 ticket_id: OMN-21689
 title: omnibase_infra contracts_and_di literal_topic burn-down, slice rf1135-c2
-summary: The contracts_and_di check reported 556 literal_topic findings in src at the dev tip aceff4fb1 (topics/platform_topic_suffixes.py 380, enums/generated 165, 11 elsewhere). This slice removes 7. Seven SUFFIX_* constants in topics/platform_topic_suffixes.py (omniintelligence 1, omnimemory 1, validation 3, omniclaude 2) now read their value from the per-producer topic enums generated from contract YAML instead of holding a topic string, and scripts/check_topic_drift.py resolves enum-valued suffixes so its orphan check sees the same values.
+summary: The contracts_and_di check reported 556 literal_topic findings in src at the dev tip aceff4fb1 (topics/platform_topic_suffixes.py 380, enums/generated 165, 11 elsewhere). This slice removes 7. Seven SUFFIX_* constants in topics/platform_topic_suffixes.py (omniintelligence 1, omnimemory 1, validation 3, omniclaude 2) now read their value from the per-producer topic enums generated from contract YAML instead of holding a topic string, and scripts/check_topic_drift.py resolves enum-valued suffixes so its orphan check sees the same values. Generated enum members now resolve their values from the packaged declaring YAML contract using explicit source, producer, and member parameters; no fallback topic literal remains in the generated Python.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -18,8 +18,8 @@ evidence_requirements:
     description: Each converted SUFFIX_* constant equals the generated enum member it names and is no longer assigned a string literal; the drift check extracts every SUFFIX_* name from the real registry.
     command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_suffix_registry_enum_binding_omn21689.py tests/unit/topics/test_check_topic_drift.py tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov
   - kind: manual
-    description: Hosted deploy validation loads the shipped node contracts and reads back all seven enum-bound suffixes through the real in-memory event bus. It requires no running lane or broker.
-    command: 'deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov'
+    description: Hosted deploy validation builds a wheel, imports its registry from the wheel archive, and reads back seven suffix bindings. Importing the generated enums loads packaged contract YAML and refuses missing or ambiguous declarations. No running broker or lane is required.
+    command: 'deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c ''import pathlib,subprocess,sys,tempfile; d=tempfile.TemporaryDirectory(); subprocess.run(["uv","build","--wheel","--out-dir",d.name],check=True); wheel=next(pathlib.Path(d.name).glob("*.whl")); subprocess.run([sys.executable,"-c",''"''"''import sys; sys.path.insert(0, sys.argv[1]); from omnibase_infra.enums import generated as g; from omnibase_infra.topics import platform_topic_suffixes as r; assert r.__file__.startswith(sys.argv[1]); pairs=((r.SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED,g.EnumOmniintelligenceTopic.EVT_LLM_CALL_COMPLETED_V1.value),(r.SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,g.EnumOmnimemoryTopic.EVT_POLICY_STATE_UPDATED_V1.value),(r.SUFFIX_VALIDATION_CROSS_REPO_RUN_STARTED,g.EnumValidationTopic.EVT_CROSS_REPO_RUN_STARTED_V1.value),(r.SUFFIX_VALIDATION_CROSS_REPO_VIOLATIONS_BATCH,g.EnumValidationTopic.EVT_CROSS_REPO_VIOLATIONS_BATCH_V1.value),(r.SUFFIX_VALIDATION_CROSS_REPO_RUN_COMPLETED,g.EnumValidationTopic.EVT_CROSS_REPO_RUN_COMPLETED_V1.value),(r.SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,g.EnumOmniclaudeTopic.EVT_NOTIFICATION_BLOCKED_V1.value),(r.SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,g.EnumOmniclaudeTopic.EVT_NOTIFICATION_COMPLETED_V1.value),); assert all(type(a) is str and a==b for a,b in pairs); print("packaged_contract_suffix_readback="+str(len(pairs)))''"''"'',str(wheel)],check=True)'''
 emergency_bypass:
   enabled: false
   justification: ''
@@ -30,7 +30,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_suffix_registry_enum_binding_omn21689.py -q --no-cov"
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_suffix_registry_enum_binding_omn21689.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
@@ -39,15 +39,27 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_check_topic_drift.py tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov"
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_check_topic_drift.py tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
   - id: dod-omn21689-deploy-contract-round-trip
-    description: Read the shipped node contracts and deliver messages from the seven public suffixes to subscribers of their contract topic names. The binding assertions fail on the merge base where the registry still uses literals.
+    description: Build a wheel and read seven suffixes through its registry and contract-backed enum members. Missing packaged YAML or an unresolved binding fails the probe.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_suffix_contract_round_trip_omn21689.py -q --no-cov"
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c 'import pathlib,subprocess,sys,tempfile; d=tempfile.TemporaryDirectory(); subprocess.run(["uv","build","--wheel","--out-dir",d.name],check=True); wheel=next(pathlib.Path(d.name).glob("*.whl")); subprocess.run([sys.executable,"-c",'"'"'import sys; sys.path.insert(0, sys.argv[1]); from omnibase_infra.enums import generated as g; from omnibase_infra.topics import platform_topic_suffixes as r; assert r.__file__.startswith(sys.argv[1]); pairs=((r.SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED,g.EnumOmniintelligenceTopic.EVT_LLM_CALL_COMPLETED_V1.value),(r.SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED,g.EnumOmnimemoryTopic.EVT_POLICY_STATE_UPDATED_V1.value),(r.SUFFIX_VALIDATION_CROSS_REPO_RUN_STARTED,g.EnumValidationTopic.EVT_CROSS_REPO_RUN_STARTED_V1.value),(r.SUFFIX_VALIDATION_CROSS_REPO_VIOLATIONS_BATCH,g.EnumValidationTopic.EVT_CROSS_REPO_VIOLATIONS_BATCH_V1.value),(r.SUFFIX_VALIDATION_CROSS_REPO_RUN_COMPLETED,g.EnumValidationTopic.EVT_CROSS_REPO_RUN_COMPLETED_V1.value),(r.SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED,g.EnumOmniclaudeTopic.EVT_NOTIFICATION_BLOCKED_V1.value),(r.SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED,g.EnumOmniclaudeTopic.EVT_NOTIFICATION_COMPLETED_V1.value),); assert all(type(a) is str and a==b for a,b in pairs); print("packaged_contract_suffix_readback="+str(len(pairs)))'"'"',str(wheel)],check=True)'
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC1, AC2]
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-omn21689-runtime-contract-values
+    description: The runtime resolver uses the injected source, rejects absent or ambiguous declarations and prose-only topics, and both fresh import orders work. The core guard admits the clean tree and refuses a planted live transport.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topics/test_contract_topic_value_omn21689.py tests/ci/test_imperative_contract_guard_caller_omn21004.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2

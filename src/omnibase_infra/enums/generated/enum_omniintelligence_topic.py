@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumOmniintelligenceTopic(str, Enum):
     """Kafka topic enum for producer: omniintelligence.
@@ -18,5 +20,5 @@ class EnumOmniintelligenceTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omniintelligence.llm-call-completed.v1"  # onex.evt.omniintelligence.llm-call-completed.v1
-    EVT_WASTE_DETECTED_V1 = "onex.evt.omniintelligence.waste-detected.v1"  # onex.evt.omniintelligence.waste-detected.v1
+    EVT_LLM_CALL_COMPLETED_V1 = contract_topic_value('nodes/node_llm_inference_effect/contract.yaml', 'omniintelligence', 'EVT_LLM_CALL_COMPLETED_V1')  # onex.evt.omniintelligence.llm-call-completed.v1
+    EVT_WASTE_DETECTED_V1 = contract_topic_value('nodes/node_waste_detection_compute/contract.yaml', 'omniintelligence', 'EVT_WASTE_DETECTED_V1')  # onex.evt.omniintelligence.waste-detected.v1

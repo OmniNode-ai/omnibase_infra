@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumOmnimarketTopic(str, Enum):
     """Kafka topic enum for producer: omnimarket.
@@ -18,9 +20,9 @@ class EnumOmnimarketTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    CMD_DELEGATE_SKILL_V1 = "onex.cmd.omnimarket.delegate-skill.v1"  # onex.cmd.omnimarket.delegate-skill.v1
-    CMD_REDEPLOY_START_V1 = "onex.cmd.omnimarket.redeploy-start.v1"  # onex.cmd.omnimarket.redeploy-start.v1
-    EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1 = "onex.evt.omnimarket.build-loop-orchestrator-completed.v1"  # onex.evt.omnimarket.build-loop-orchestrator-completed.v1
-    EVT_DELEGATE_SKILL_COMPLETED_V1 = "onex.evt.omnimarket.delegate-skill-completed.v1"  # onex.evt.omnimarket.delegate-skill-completed.v1
-    EVT_DELEGATE_SKILL_FAILED_V1 = "onex.evt.omnimarket.delegate-skill-failed.v1"  # onex.evt.omnimarket.delegate-skill-failed.v1
-    EVT_RUNTIME_DEPLOYMENT_PROOF_V1 = "onex.evt.omnimarket.runtime-deployment-proof.v1"  # onex.evt.omnimarket.runtime-deployment-proof.v1
+    CMD_DELEGATE_SKILL_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnimarket', 'CMD_DELEGATE_SKILL_V1')  # onex.cmd.omnimarket.delegate-skill.v1
+    CMD_REDEPLOY_START_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnimarket', 'CMD_REDEPLOY_START_V1')  # onex.cmd.omnimarket.redeploy-start.v1
+    EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1 = contract_topic_value('nodes/node_build_loop_projection_compute/contract.yaml', 'omnimarket', 'EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1')  # onex.evt.omnimarket.build-loop-orchestrator-completed.v1
+    EVT_DELEGATE_SKILL_COMPLETED_V1 = contract_topic_value('nodes/node_delegation_chain_ledger_effect/contract.yaml', 'omnimarket', 'EVT_DELEGATE_SKILL_COMPLETED_V1')  # onex.evt.omnimarket.delegate-skill-completed.v1
+    EVT_DELEGATE_SKILL_FAILED_V1 = contract_topic_value('nodes/node_delegation_chain_ledger_effect/contract.yaml', 'omnimarket', 'EVT_DELEGATE_SKILL_FAILED_V1')  # onex.evt.omnimarket.delegate-skill-failed.v1
+    EVT_RUNTIME_DEPLOYMENT_PROOF_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnimarket', 'EVT_RUNTIME_DEPLOYMENT_PROOF_V1')  # onex.evt.omnimarket.runtime-deployment-proof.v1

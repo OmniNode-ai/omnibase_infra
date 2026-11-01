@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumOmninodeTopic(str, Enum):
     """Kafka topic enum for producer: omninode.
@@ -18,4 +20,4 @@ class EnumOmninodeTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_RUNNER_USAGE_RECORDED_V1 = "onex.evt.omninode.runner-usage-recorded.v1"  # onex.evt.omninode.runner-usage-recorded.v1
+    EVT_RUNNER_USAGE_RECORDED_V1 = contract_topic_value('nodes/node_runner_usage_effect/contract.yaml', 'omninode', 'EVT_RUNNER_USAGE_RECORDED_V1')  # onex.evt.omninode.runner-usage-recorded.v1

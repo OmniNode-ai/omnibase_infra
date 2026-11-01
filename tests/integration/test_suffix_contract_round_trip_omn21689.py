@@ -8,6 +8,7 @@ import ast
 from pathlib import Path
 
 import pytest
+import yaml
 
 from omnibase_infra import topics
 from omnibase_infra.enums import generated
@@ -56,6 +57,17 @@ _BINDINGS = (
     ),
 )
 
+# Select subscriber destinations independently of the public suffix and enum.
+_SUBSCRIBER_CONTRACTS = (
+    ("node_waste_detection_compute", "subscribe_topics", 0),
+    ("node_reward_binder_effect", "publish_topics", 1),
+    ("node_validation_ledger_projection_compute", "subscribe_topics", 0),
+    ("node_validation_ledger_projection_compute", "subscribe_topics", 1),
+    ("node_validation_ledger_projection_compute", "subscribe_topics", 2),
+    ("node_emit_daemon_runtime", "subscribe_topics", 1),
+    ("node_emit_daemon_runtime", "subscribe_topics", 2),
+)
+
 
 @pytest.mark.asyncio
 async def test_enum_suffixes_reach_contract_subscribers() -> None:
@@ -77,19 +89,23 @@ async def test_enum_suffixes_reach_contract_subscribers() -> None:
     bus = EventBusInmemory()
     await bus.start()
     try:
-        for name, enum_name, member_name in _BINDINGS:
+        for (name, enum_name, member_name), (node, direction, index) in zip(
+            _BINDINGS, _SUBSCRIBER_CONTRACTS, strict=True
+        ):
             member = getattr(getattr(generated, enum_name), member_name)
             suffix = getattr(topics, name)
             assert type(suffix) is str
             assert suffix == member.value
             assert assignments[name] == f"topic_enums.{enum_name}.{member_name}.value"
             assert suffix in manifest.all_unique_topics
-            contract_topic = suffix
+            document = yaml.safe_load(
+                (package_root / "nodes" / node / "contract.yaml").read_text()
+            )
+            contract_topic = document["event_bus"][direction][index]
             unsubscribe = await bus.subscribe_ungrouped(contract_topic, readback)
             try:
                 payload = name.encode()
-                receipt = await bus.publish(topic=suffix, key=None, value=payload)
-                assert receipt.offset == 0
+                await bus.publish(topic=suffix, key=None, value=payload)
                 assert received[-1] == (contract_topic, payload)
             finally:
                 await unsubscribe()

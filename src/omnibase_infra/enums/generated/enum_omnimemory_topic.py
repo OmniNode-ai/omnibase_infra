@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumOmnimemoryTopic(str, Enum):
     """Kafka topic enum for producer: omnimemory.
@@ -18,5 +20,5 @@ class EnumOmnimemoryTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_POLICY_STATE_UPDATED_V1 = "onex.evt.omnimemory.policy-state-updated.v1"  # onex.evt.omnimemory.policy-state-updated.v1
-    EVT_REWARD_ASSIGNED_V1 = "onex.evt.omnimemory.reward-assigned.v1"  # onex.evt.omnimemory.reward-assigned.v1
+    EVT_POLICY_STATE_UPDATED_V1 = contract_topic_value('nodes/node_reward_binder_effect/contract.yaml', 'omnimemory', 'EVT_POLICY_STATE_UPDATED_V1')  # onex.evt.omnimemory.policy-state-updated.v1
+    EVT_REWARD_ASSIGNED_V1 = contract_topic_value('nodes/node_reward_binder_effect/contract.yaml', 'omnimemory', 'EVT_REWARD_ASSIGNED_V1')  # onex.evt.omnimemory.reward-assigned.v1

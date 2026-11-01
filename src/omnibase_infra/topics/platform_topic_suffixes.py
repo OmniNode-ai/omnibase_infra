@@ -54,6 +54,8 @@ See Also:
     model_topic_spec.ModelTopicSpec - Per-topic creation spec
 """
 
+from __future__ import annotations
+
 import os
 
 from omnibase_core.errors import OnexError
@@ -2574,8 +2576,7 @@ def _validate_all_suffixes() -> None:
             suffix failed and why.
     """
     for suffix in ALL_PROVISIONED_SUFFIXES:
-        result = validate_topic_suffix(suffix)
-        if not result.is_valid:
+        if not (result := validate_topic_suffix(suffix)).is_valid:
             raise OnexError(f"Invalid topic suffix '{suffix}': {result.error}")
 
 
