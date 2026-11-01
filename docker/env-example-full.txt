@@ -160,7 +160,7 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # the way the x-runtime-env anchor does. So a lane that deploys those services
 # MUST set ONEX_TENANT_DB_URL in the host .env as well:
 # ONEX_TENANT_DB_URL=postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD}@postgres:5432/omnidash_analytics
-# A lane that does not deploy them (the `.201` dev lane as of 2026-08-29 runs
+# A lane that does not deploy them (the dev lane as of 2026-08-29 runs
 # none of the four) needs only TENANT_PROJECTION_WRITER_PASSWORD — the runtime
 # worker that hosts node_projection_delegation_inference_response consumes the
 # rendered anchor value.
@@ -172,7 +172,7 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # INFISICAL_ADDR=http://infisical:8080
 
 # Infisical site URL (for redirects)
-# INFISICAL_SITE_URL=http://localhost:8880
+# INFISICAL_SITE_URL=http://localhost:8881
 
 # =============================================================================
 # Valkey Cache Configuration
@@ -375,8 +375,8 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # REDPANDA_EXTERNAL_PORT=19092
 # REDPANDA_PANDAPROXY_PORT=18082
 # REDPANDA_SCHEMA_REGISTRY_PORT=18081
-# Stability-test Redpanda advertised identity is contract-owned in
-# docker-compose.stability-test.yml, not environment-owned.
+# The second lane's Redpanda advertised identity is contract-owned in its
+# own compose file, not environment-owned.
 # PROD_REDPANDA_ADVERTISE_HOST=<onex-host>
 # VALKEY_EXTERNAL_PORT=16379
 # CONSUL_EXTERNAL_PORT=28500
@@ -406,7 +406,7 @@ INFISICAL_AUTH_SECRET=<REPLACE_BEFORE_USE_openssl_rand_hex_32>
 
 # Site URL for Infisical web interface
 # Default is localhost, update for production deployments
-# INFISICAL_SITE_URL=http://localhost:8880
+# INFISICAL_SITE_URL=http://localhost:8881
 
 # Redis URL for Infisical connection to Valkey
 # Default: redis://valkey:6379 (no password)
