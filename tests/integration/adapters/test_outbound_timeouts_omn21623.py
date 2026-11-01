@@ -17,6 +17,9 @@ from omnibase_infra.adapters.llm.adapter_documentation_generation import (
 from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
     TransportHolderLlmHttp,
 )
+from omnibase_infra.adapters.llm.adapter_test_boilerplate_generation import (
+    AdapterTestBoilerplateGeneration,
+)
 from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
     AdapterLinearGraphQLProjectTracker,
 )
@@ -65,11 +68,9 @@ async def test_tracker_timeout_reaches_a_real_graphql_request(
     httpserver.check_assertions()
 
 
-@pytest.mark.parametrize(
-    "documentation", [False, True], ids=["review", "documentation"]
-)
+@pytest.mark.parametrize("kind", ["review", "documentation", "boilerplate"])
 async def test_llm_timeout_reaches_the_http_transport(
-    httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch, documentation: bool
+    httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     monkeypatch.setenv("LLM_ENDPOINT_CIDR_ALLOWLIST", "127.0.0.0/8")
     monkeypatch.setenv("LOCAL_LLM_SHARED_SECRET", "loopback-timeout-probe")
@@ -89,11 +90,17 @@ async def test_llm_timeout_reaches_the_http_transport(
         }
     )
     endpoint = httpserver.url_for("/completion")
-    adapter = (
-        AdapterDocumentationGeneration(base_url=endpoint)
-        if documentation
-        else AdapterCodeReviewAnalysis(base_url=endpoint)
+    adapter: (
+        AdapterDocumentationGeneration
+        | AdapterCodeReviewAnalysis
+        | AdapterTestBoilerplateGeneration
     )
+    if kind == "documentation":
+        adapter = AdapterDocumentationGeneration(base_url=endpoint)
+    elif kind == "boilerplate":
+        adapter = AdapterTestBoilerplateGeneration(base_url=endpoint)
+    else:
+        adapter = AdapterCodeReviewAnalysis(base_url=endpoint)
     observed: list[object] = []
 
     async def record_timeout(request: httpx.Request) -> None:
@@ -102,7 +109,11 @@ async def test_llm_timeout_reaches_the_http_transport(
     client = await adapter._transport._get_http_client()
     client.event_hooks["request"].append(record_timeout)
     try:
-        if isinstance(adapter, AdapterDocumentationGeneration):
+        if isinstance(adapter, AdapterTestBoilerplateGeneration):
+            result = await adapter.generate(
+                task_type="test_module", source="def probe(): pass"
+            )
+        elif isinstance(adapter, AdapterDocumentationGeneration):
             result = await adapter.generate(
                 task_type="docstring", source="def probe(): pass"
             )
@@ -117,7 +128,7 @@ async def test_llm_timeout_reaches_the_http_transport(
     timeouts = load_outbound_timeouts()
     expected = (
         timeouts.llm_documentation_request_seconds
-        if documentation
+        if kind == "documentation"
         else timeouts.llm_request_seconds
     )
     assert observed == [httpx.Timeout(expected).as_dict()]
