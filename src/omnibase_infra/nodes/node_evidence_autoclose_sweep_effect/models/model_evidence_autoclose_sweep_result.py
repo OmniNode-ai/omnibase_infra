@@ -71,6 +71,11 @@ class ModelEvidenceAutocloseSweepResult(BaseModel):
     # did not run.
     backfill_pool_size: int = Field(default=0, ge=0)
     backfill_candidates_selected: int = Field(default=0, ge=0)
+    # OMN-21731. The ticket-contract arm's two counters, read the same way:
+    # `contract_pool_size` is how many open tickets with a merged contract the
+    # arm ranked, `contract_candidates_selected` how many of them this run asked.
+    contract_pool_size: int = Field(default=0, ge=0)
+    contract_candidates_selected: int = Field(default=0, ge=0)
     bindings_extracted: int = Field(default=0, ge=0)
     tickets_flipped: int = Field(default=0, ge=0)
     tickets_gap_posted: int = Field(default=0, ge=0)
