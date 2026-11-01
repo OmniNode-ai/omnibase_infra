@@ -1,0 +1,47 @@
+# OMN-21595 contract file for omnibase_infra: the omnibase_core pin moves to a core dev tag that contains omnibase_core#2219.
+schema_version: "1.0.0"
+ticket_id: "OMN-21595"
+title: "omnibase_infra pins omnibase_core at the newest core dev tag that contains omnibase_core#2219"
+summary: "The omnibase_core git pin in pyproject.toml moves from dev-20261031202655-5bb91ae7e720 to dev-20261101152344-a22c8c0a1df0, the newest core dev tag, which contains merge commit a22c8c0a1 (omnibase_core#2219). uv.lock is regenerated with uv lock and records omnibase-core 0.47.62 at that tag's commit. The range omnibase-core>=0.47.58,<0.48.0 is unchanged. This is the infra half of OMN-21595; the omnimarket half and the remaining acceptance criteria of the ticket belong to a later lane."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21595-infra-core-pin
+    statement: "omnibase_infra pins omnibase_core by tag to a core dev tag that contains omnibase_core#2219, with a lock that matches."
+    acceptance:
+      - id: PIN1
+        statement: "PIN1: pyproject.toml on the PR head pins omnibase_core by tag = dev-... to a core tag that contains a22c8c0a1, and no rev or sha form appears for omnibase_core -- falsifier: git merge-base --is-ancestor a22c8c0a1 <tag> in the core clone exits non-zero, or grep -n 'omnibase-core = ' pyproject.toml shows a rev"
+      - id: PIN2
+        statement: "PIN2: uv.lock on the PR head records omnibase-core at the same tag's commit and uv lock --check passes -- falsifier: uv lock --check exits non-zero in the lane worktree on the lab"
+      - id: PIN3
+        statement: "PIN3: the unit tests, mypy and ruff pass on the PR head on the lab, and every fix-forward edit is explained by a core change -- falsifier: uv run pytest tests/ -m unit -n auto, uv run mypy src/omnibase_infra/ or uv run ruff check src/ tests/ exits non-zero on the lab"
+evidence_requirements:
+  - kind: command
+    description: "The lock matches the pin."
+    command: "uv lock --check"
+dod_evidence:
+  - id: dod-omn21595-pin1-tag-form
+    description: "pyproject.toml pins omnibase_core by the dev tag dev-20261101152344-a22c8c0a1df0 and holds no rev form for it."
+    source: manual
+    binds_ac: [PIN1]
+    checks:
+      - check_type: command
+        check_value: "grep -q 'omnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261101152344-a22c8c0a1df0\" }' pyproject.toml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21595-pin2-lock
+    description: "uv.lock records omnibase-core at the tagged commit and uv lock --check passes."
+    source: manual
+    binds_ac: [PIN2]
+    checks:
+      - check_type: command
+        check_value: "uv lock --check"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21595-pin3-unit
+    description: "The unit tests pass at the PR head; the lab receipt (host, sha, exit code) is in the PR body, mypy and ruff results beside it."
+    source: manual
+    binds_ac: [PIN3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ -m unit -n auto -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra

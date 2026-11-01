@@ -16,11 +16,11 @@ from packaging.requirements import Requirement
 from scripts.ci.check_sibling_compatible_range import violations
 
 ROOT = Path(__file__).resolve().parents[2]
-TAG = "dev-20261031202655-5bb91ae7e720"
-COMMIT = "5bb91ae7e72094a62a1198dbc92803448a05ec67"
+TAG = "dev-20261101152344-a22c8c0a1df0"
+COMMIT = "a22c8c0a1df0673ba77f2a28347bccaeb0d70d19"
 # The published floor stays where the moved node APIs need it; the lock moves on.
 VERSION = "0.47.58"
-LOCKED_VERSION = "0.47.61"
+LOCKED_VERSION = "0.47.62"
 GIT_URL = "https://github.com/OmniNode-ai/omnibase_core.git"
 
 
