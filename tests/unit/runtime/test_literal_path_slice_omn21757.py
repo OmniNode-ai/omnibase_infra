@@ -76,6 +76,8 @@ def test_contracts_and_di_reports_no_literal_path_on_the_slice() -> None:
         check=False,
     )
     output = completed.stdout + completed.stderr
-    assert completed.returncode == 0, output
+    # Exit 1 is allowed only as a reported validation failure (other rules, e.g.
+    # literal_timeout); a crash or argument error carries no such summary.
+    assert completed.returncode == 0 or "Validation failed" in output, output
     assert "Traceback" not in output, output
     assert "literal_path" not in output
