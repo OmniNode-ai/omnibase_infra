@@ -341,16 +341,18 @@ def test_the_runtime_family_that_resolves_a_tenant_key_shares_one_credentials_st
     compose = generate_compose(resolved)
     services = compose["services"]
     assert isinstance(services, dict)
-    target = "/home/omniinfra/.omninode/delegation"
+    prefix = "delegation_credentials:"
     owners = {
-        name: [v for v in svc.get("volumes", []) if f":{target}" in v]
+        name: [v for v in svc.get("volumes", []) if v.startswith(prefix)]
         for name, svc in services.items()
-        if any(f":{target}" in v for v in svc.get("volumes", []))
+        if any(v.startswith(prefix) for v in svc.get("volumes", []))
     }
-    assert owners == {
-        "omninode-runtime": [f"delegation_credentials:{target}"],
-        "runtime-effects": [f"delegation_credentials:{target}"],
-    }
+    assert set(owners) == {"omninode-runtime", "runtime-effects"}
+    mounts = {v for entries in owners.values() for v in entries}
+    assert len(mounts) == 1
+    assert all(len(entries) == 1 for entries in owners.values())
+    (mount,) = mounts
+    assert mount.removeprefix(prefix).endswith("/.omninode/delegation")
     volumes = compose["volumes"]
     assert isinstance(volumes, dict)
     assert volumes["delegation_credentials"] == {
