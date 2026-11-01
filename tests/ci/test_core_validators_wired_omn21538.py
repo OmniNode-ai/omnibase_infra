@@ -36,6 +36,23 @@ WIRED_HOOK_IDS = (
     "handler-di-gate",
 )
 
+# Hooks the CI positive control plants a defect for. check-no-io-outside-effects
+# and handler-di-gate judge a module by its place in the package (node, handler),
+# which one planted file at the root does not reproduce.
+PLANTED_CONTROL_HOOK_IDS = (
+    "check-no-raw-sqlite3",
+    "check-local-paths-compute",
+    "check-hardcoded-topic-compute",
+    "check-hardcoded-model-config-compute",
+)
+
+HANDLER_DI_BASELINE = ".onex_ratchets/handler_di_baseline.txt"
+MODEL_CONFIG_BASELINE = "config/hardcoded_model_config_baseline.yaml"
+SHA1 = re.compile(r"[0-9a-f]{40}")
+SUPPRESSION_MARKER = re.compile(
+    r"#\s*(noqa|nosec|di-ok|io-ok|local-path-ok|onex-allow-topic-literal)\b"
+)
+
 # Files that findings F44 to F47 (omnibase_infra#5426 and #5425) name. A baseline
 # for a wired hook never lists one: the file is fixed or the hook fails.
 FINDING_FILES = (
@@ -127,12 +144,33 @@ def test_ci_job_executes_exactly_the_wired_hook_ids() -> None:
     assert "--to-ref HEAD" in invocation[0]
 
 
-def test_ci_run_loop_does_not_mask_a_hook_failure() -> None:
-    """No ``|| true``, no unset-e masking, and no ``set +e`` in the validator step."""
-    text = _joined(_step_script("Run the core validators"))
+@pytest.mark.parametrize("step", ["Positive control", "Run the core validators"])
+def test_ci_step_fails_on_the_first_failing_command(step: str) -> None:
+    """Each step opens with ``set -euo pipefail``: a failing hook in the loop stops it.
+
+    The run loop has no ``|| true``, no ``set +e`` and no ``continue-on-error``, so
+    the step's exit status is the first failing hook's.
+    """
+    lines = _step_script(step)
+    assert lines[0] == "set -euo pipefail", lines[0]
+    text = _joined(lines)
     assert "|| true" not in text
+    assert "|| :" not in text
     assert "set +e" not in text
     assert "continue-on-error" not in yaml.safe_dump(_workflow_jobs()[CORE_JOB])
+
+
+def test_ci_job_runs_the_hooks_of_the_core_block() -> None:
+    """The job runs pre-commit against the repository config, so the hook ids and
+    the core rev it runs are the ones the omnibase_core block declares."""
+    (invocation,) = [
+        line for line in _step_script("Run the core validators") if "pre-commit" in line
+    ]
+    assert "--config" not in invocation
+    assert " -c " not in invocation
+    assert not DEV_MERGE_TAG.search(invocation)
+    core_ids = {hook["id"] for hook in _core_hooks()}
+    assert set(WIRED_HOOK_IDS) <= core_ids
 
 
 def test_ci_run_step_derives_the_base_before_judging() -> None:
@@ -155,10 +193,7 @@ def test_ci_job_has_a_positive_control_for_each_planted_hook() -> None:
     """Each control pair names a wired hook, plants a file, and fails closed on acceptance."""
     lines = _step_script("Positive control")
     pairs = [word.split(":") for word in _loop_words(lines, "pair")]
-    assert sorted(hook for hook, _ in pairs) == [
-        "check-local-paths-compute",
-        "check-no-raw-sqlite3",
-    ]
+    assert sorted(hook for hook, _ in pairs) == sorted(PLANTED_CONTROL_HOOK_IDS)
     text = _joined(lines)
     for hook, planted in pairs:
         assert hook in WIRED_HOOK_IDS
@@ -172,7 +207,7 @@ def test_ci_job_has_a_positive_control_for_each_planted_hook() -> None:
     assert accepted, "the control does not branch on the hook accepting the plant"
     assert "POSITIVE CONTROL FAILED" in accepted.group(1)
     assert "exit 1" in accepted.group(1)
-    assert "set -u" in lines[0]
+    assert lines[0] == "set -euo pipefail"
     assert "set +e" not in text
 
 
@@ -191,24 +226,58 @@ def test_the_tag_has_one_home() -> None:
     assert DEV_MERGE_TAG.fullmatch(block["rev"])
 
 
-def _baseline_paths() -> list[Path]:
-    """Every baseline file a wired hook reads, from the hook args in the config."""
-    paths = [ROOT / "config/hardcoded_model_config_baseline.yaml"]
-    for hook in _core_hooks():
-        if hook["id"] not in WIRED_HOOK_IDS:
+def _handler_di_entries() -> dict[str, int]:
+    """``path count`` lines of the handler-DI baseline, one per file."""
+    entries: dict[str, int] = {}
+    for line in (ROOT / HANDLER_DI_BASELINE).read_text("utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
             continue
-        args: list[str] = list(hook.get("args", []))
-        if "--baseline" in args:
-            paths.append(ROOT / args[args.index("--baseline") + 1])
-    return [path for path in paths if path.is_file()]
+        path, count = line.split()
+        assert path not in entries, f"{path} is listed twice"
+        assert int(count) > 0, line
+        entries[path] = int(count)
+    return entries
+
+
+def _model_config_entries() -> list[dict[str, Any]]:
+    loaded = yaml.safe_load((ROOT / MODEL_CONFIG_BASELINE).read_text("utf-8"))
+    assert loaded["schema_version"] == 1
+    entries: list[dict[str, Any]] = loaded["entries"]
+    return entries
+
+
+def test_handler_di_gate_reads_its_baseline() -> None:
+    (hook,) = [hook for hook in _core_hooks() if hook["id"] == "handler-di-gate"]
+    assert hook["args"] == ["--baseline", HANDLER_DI_BASELINE]
+
+
+def test_baselines_are_per_file() -> None:
+    """Each entry names one repository file; none is a glob, directory or blanket."""
+    di_paths = set(_handler_di_entries())
+    model_entries = _model_config_entries()
+    for entry in model_entries:
+        assert set(entry) == {"path", "family", "content_sha1"}, entry
+        assert SHA1.fullmatch(entry["content_sha1"]), entry
+    model_paths = {entry["path"] for entry in model_entries}
+    assert di_paths and model_paths
+    for path in di_paths | model_paths:
+        assert "*" not in path and not path.endswith("/"), path
+        assert (ROOT / path).is_file(), f"{path} is not a file in the repository"
 
 
 def test_baselines_name_no_finding_file_and_carry_no_suppression_marker() -> None:
-    baselines = _baseline_paths()
-    assert baselines, "no baseline of a wired hook is on disk"
-    for baseline in baselines:
-        text = baseline.read_text("utf-8")
-        assert [name for name in FINDING_FILES if name in text] == [], baseline.name
-        assert not re.search(r"#\s*(noqa|nosec|di-ok|io-ok|local-path-ok)\b", text), (
-            baseline.name
-        )
+    listed = set(_handler_di_entries()) | {
+        entry["path"] for entry in _model_config_entries()
+    }
+    assert sorted(listed & set(FINDING_FILES)) == []
+    for name in (HANDLER_DI_BASELINE, MODEL_CONFIG_BASELINE):
+        text = (ROOT / name).read_text("utf-8")
+        # Substring check as well: it also catches a path written another way.
+        assert [f for f in FINDING_FILES if f in text] == [], name
+        assert not SUPPRESSION_MARKER.search(text), name
+
+
+def test_model_config_baseline_names_its_zero_date() -> None:
+    """The non-empty model-config baseline names the date it reaches zero."""
+    header = (ROOT / MODEL_CONFIG_BASELINE).read_text("utf-8").split("entries:")[0]
+    assert re.search(r"Target zero: \d{4}-\d{2}-\d{2}\b", header), header

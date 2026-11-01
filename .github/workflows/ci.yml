@@ -4261,7 +4261,7 @@ jobs:
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          set -u
+          set -euo pipefail
           base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
             base="$(git merge-base "$base" HEAD)"
@@ -4382,7 +4382,7 @@ jobs:
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          set -u
+          set -euo pipefail
           base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
           args=(--repo omnibase_infra --visibility public)
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
@@ -4415,12 +4415,21 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: "0.8.3"
+      # The literals are split through printf so this workflow file holds none of
+      # the defects it plants. check-no-io-outside-effects and handler-di-gate have no
+      # planted control: their findings depend on a node or handler module's place in
+      # the package, which a single planted file at the root does not reproduce.
       - name: Positive control (planted defects refused)
         run: |
-          set -u
+          set -euo pipefail
           printf 'import sqlite3\n\nCONNECTION = sqlite3.connect(":memory:")\n' > zz_planted_sqlite3.py
           printf 'ROOT = "/%s/planted/project"\n' Users > zz_planted_local_path.py
-          for pair in check-no-raw-sqlite3:zz_planted_sqlite3.py check-local-paths-compute:zz_planted_local_path.py; do
+          printf 'TOPIC = "%s.evt.planted.thing.v1"\n' onex > zz_planted_topic.py
+          printf 'MODEL = "%s-%s-opus-20240229"\n' claude 3 > zz_planted_model_config.py
+          for pair in check-no-raw-sqlite3:zz_planted_sqlite3.py \
+            check-local-paths-compute:zz_planted_local_path.py \
+            check-hardcoded-topic-compute:zz_planted_topic.py \
+            check-hardcoded-model-config-compute:zz_planted_model_config.py; do
             hook="${pair%%:*}"
             planted="${pair#*:}"
             if uvx pre-commit@4.5.1 run "$hook" --files "$planted"; then
@@ -4429,7 +4438,8 @@ jobs:
             fi
             echo "positive control: $hook refused $planted"
           done
-          rm zz_planted_sqlite3.py zz_planted_local_path.py
+          rm zz_planted_sqlite3.py zz_planted_local_path.py zz_planted_topic.py \
+            zz_planted_model_config.py
       # check-no-raw-sqlite3, check-local-paths-compute, check-hardcoded-topic-compute
       # and check-no-io-outside-effects have no baseline, and the two baselines omit
       # the files that findings F44 to F47 name, so each hook judges the files this
@@ -4440,7 +4450,7 @@ jobs:
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          set -u
+          set -euo pipefail
           base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
           if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             base="HEAD^"

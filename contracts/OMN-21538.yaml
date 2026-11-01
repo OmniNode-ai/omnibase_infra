@@ -35,34 +35,34 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "resolves_to_the_core_repository or not_defined_locally or ci_job_runs_the_hook_id"
+        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "resolves_to_the_core_repository or not_defined_locally or executes_exactly_the_wired_hook_ids or runs_the_hooks_of_the_core_block"
     binds_ac:
       - AC1
   - id: dod-omn21538-ac2-planted-defects-refused
     description: >-
-      AC2. The core-validators job carries a positive control that plants a raw sqlite3 call and an absolute local path and fails unless check-no-raw-sqlite3 and check-local-paths-compute refuse them; the test asserts the job and its control.
+      AC2. The core-validators job carries a positive control that plants a raw sqlite3 call, an absolute local path, a hardcoded onex topic and a hardcoded model id, and fails unless check-no-raw-sqlite3, check-local-paths-compute, check-hardcoded-topic-compute and check-hardcoded-model-config-compute refuse them; both steps run under set -euo pipefail. The test parses the step scripts for the control pairs, the fail-closed branch and the shell options.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "positive_control or unconditional_and_hosted"
+        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "positive_control or unconditional_and_hosted or fails_on_the_first_failing_command"
     binds_ac:
       - AC2
   - id: dod-omn21538-ac3-baselines-name-no-finding-file
     description: >-
-      AC3. Every baseline a wired hook reads is searched for the files findings F44 to F47 name and for suppression markers.
+      AC3. Both baselines are parsed entry by entry: each entry names one repository file (no glob, directory or blanket), the handler-DI baseline lists each file once with a positive count, and no entry names a file findings F44 to F47 name; neither file carries a suppression marker.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "baselines_name_no_finding_file"
+        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "baselines_name_no_finding_file or baselines_are_per_file or reads_its_baseline"
     binds_ac:
       - AC3
   - id: dod-omn21538-ac4-baselines-to-burn-down
     description: >-
-      AC4. The two non-empty baselines (.onex_ratchets/handler_di_baseline.txt and config/hardcoded_model_config_baseline.yaml) are on disk and read by their hooks; the burn-down tickets and zero dates are minted by the orchestrator from the PR report, so this item proves the baselines to burn down, not the tickets.
+      AC4, partial. The check proves the part a file can carry: both non-empty baselines (.onex_ratchets/handler_di_baseline.txt and config/hardcoded_model_config_baseline.yaml) parse per file and are read by their hooks, and the model-config baseline names its zero date in its header. It does not prove that the burn-down tickets exist: that needs a Linear read, which hosted CI has no credential for, and the tickets are minted by the orchestrator from the PR report. The handler-DI baseline names no zero date yet; AC4 stays open on the ticket until each burn-down ticket exists and both baselines name its date.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "baselines_name_no_finding_file"
+        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "names_its_zero_date or baselines_are_per_file or reads_its_baseline"
     binds_ac:
       - AC4
   - id: dod-omn21538-ac5-tag-has-one-home
