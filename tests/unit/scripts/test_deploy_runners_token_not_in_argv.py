@@ -44,6 +44,9 @@ SCRIPT = REPO_ROOT / "scripts" / "deploy-runners.sh"
 # a real hit.
 TOKEN = "AAAFAKEREGTOKENOMN21765MARKER0123456789"
 TOKEN_B64 = base64.b64encode(TOKEN.encode()).decode()
+# The positive control runs a command line holding its own marker, so a sibling
+# xdist worker's host-wide ps listing never sees the real TOKEN from this test.
+CONTROL_TOKEN_B64 = base64.b64encode(b"CONTROLONLYMARKEROMN21765").decode()
 SERVICE = "omninode-verify-runner-1"
 
 FAKE_SSH = """\
@@ -60,7 +63,8 @@ strip='/usr/local/bin:/opt/homebrew/bin:'
 script="${script//"${strip}"/}"
 # The script's default host dir lives under /home/jonah, which only exists on
 # the real host; point it at the harness dir so the remote cd succeeds.
-script="${script//"/home/jonah/.omnibase/runners"/"${FAKE_HOST_DIR}"}"
+default_host_dir="/home""/jonah/.omnibase/runners"
+script="${script//"${default_host_dir}"/"${FAKE_HOST_DIR}"}"
 if [[ "${script}" == *'$(cat)'* ]]; then
     stdin_copy="$(cat)"
     printf '%s' "${stdin_copy}" >> "${log_dir}/ssh_stdin.log"
@@ -196,11 +200,11 @@ def test_the_ps_check_catches_the_old_command_string(tmp_path: Path) -> None:
         pytest.skip("bash not available")
     listing = tmp_path / "ps.log"
     old_remote_script = (
-        f"RUNNER_TOKEN=$(echo '{TOKEN_B64}' | base64 -d); export RUNNER_TOKEN; "
+        f"RUNNER_TOKEN=$(echo '{CONTROL_TOKEN_B64}' | base64 -d); export RUNNER_TOKEN; "
         f"ps -A -ww -o args= > {listing}"
     )
     subprocess.run(["bash", "-c", old_remote_script], check=True, timeout=30)
-    assert TOKEN_B64 in listing.read_text(encoding="utf-8")
+    assert CONTROL_TOKEN_B64 in listing.read_text(encoding="utf-8")
 
 
 # --- the four ssh sites -------------------------------------------------------
