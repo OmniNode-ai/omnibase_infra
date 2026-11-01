@@ -18,6 +18,8 @@ requirements:
     acceptance:
       - id: AC32
         statement: 'AC32: the contracts_and_di literal_path rule reports no finding in unit_drift.py and check_claudemd_references.py, and reports the planted literal in the positive control -- falsifier: any literal_path issue from those files, or none from the planted file'
+      - id: AC33
+        statement: 'AC33: both path resolvers expand bare and nested home-relative paths, preserve absolute paths and handle non-tilde inputs; reference paths prefer the repository before the workspace root and return None when absent, and installed registry paths obey resolve_registry -- falsifier: any returned path differs from the expected path in the behavioral tests'
 evidence_requirements:
   - kind: tests
     description: The loaded endpoints equal the declared file, each omitted value fails to load, the URL builders derive from the declared bases, and every consumer module is free of literal_url.
@@ -28,6 +30,9 @@ evidence_requirements:
   - kind: tests
     description: The literal_path rule finds nothing in the two cleared files and one issue in the planted control.
     command: uv run --frozen pytest tests/unit/scripts/test_literal_path_slice_omn21623.py -q
+  - kind: tests
+    description: Both resolvers return the expected paths for home, absolute, relative and registry inputs, including missing references and repository precedence.
+    command: uv run --frozen pytest tests/unit/scripts/test_literal_path_slice_omn21623.py -q -k 'resolvers or installed_path or reference_path or installed_registry'
 emergency_bypass:
   enabled: false
   justification: ''
@@ -78,3 +83,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC32
+  - id: dod-omn21623-ac33-path-behavior
+    description: 'Hosted post-deploy smoke: imports the two path resolvers and asserts returned paths for bare tilde, nested home paths, absolute paths, relative paths, missing references, repository precedence and registry resolution. Runs without containers or external services.'
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_literal_path_slice_omn21623.py -q -k 'resolvers or installed_path or reference_path or installed_registry'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC33
