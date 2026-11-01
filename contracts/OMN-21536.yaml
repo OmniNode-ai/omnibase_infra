@@ -1,0 +1,57 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21536
+title: "Handler shape burn-down in omnibase_infra: delta, merge gate, decision store, chain and contract loader handlers take one typed request"
+summary: >-
+  Core's handler-shape validator (omnibase_core.validation.validator_handler_shape, plan task T2.4a) found noncanonical_handle in five omnibase_infra effect nodes whose names start with a letter from c to m, seven handlers in all. The delta metrics, delta bundle (two), decision store (two) and merge gate handlers took a payload that already carries correlation_id next to a second correlation_id argument; each handle is now handle(payload) and reads the correlation id from the payload (the merge gate, whose payload id is optional, generates one when absent). The chain retrieval handler took four scalars and now takes the new frozen ModelChainRetrievalRequest. Each of the five nodes flips to canonical shape for the legacy ratchet with an adequacy receipt and a hand-flip proof. Not in this slice: build_loop_write, bus_forwarder and ledger_write (handle takes the event envelope), chain_store (its request model lives in node_chain_orchestrator, and the node boundary import gate refuses a new node-to-node import), llm_inference (wide caller surface, request model without a correlation id) and contract_loader (its contract declares no handler binding and carries a content fingerprint, so it cannot satisfy the ratchet and the flip-bundle gate together).
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn21536-effects-c-m-handle-shape
+    statement: >-
+      Every handler of node_delta_metrics_effect, node_merge_gate_effect, node_delta_bundle_effect, node_decision_store_effect, node_chain_retrieval_effect takes one typed request, and core's handler-shape validator reports no noncanonical_handle finding for those five node directories.
+    acceptance:
+      - id: AC6
+        statement: >-
+          AC6: the seven handlers answer one typed request and read the correlation id from it -- falsifier: uv run pytest on the five test_handle_typed_request_omn21536.py modules under tests/unit/nodes on a lab host; a handler still taking two arguments or scalars fails those calls with a TypeError turned into a test failure.
+      - id: AC7
+        statement: >-
+          AC7: the validator reports no finding under the five node directories -- falsifier: uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape over the five node directories exits 0; any restored two-parameter handle makes it exit 1.
+evidence_requirements:
+  - kind: tests
+    description: The seven handlers answer typed requests and the node tests still hold.
+    command: uv run pytest tests/unit/nodes/node_delta_metrics_effect tests/unit/nodes/node_merge_gate_effect tests/unit/nodes/node_delta_bundle_effect tests/unit/nodes/node_decision_store_effect tests/unit/nodes/node_chain_retrieval_effect tests/unit/nodes/node_chain_learning tests/integration/nodes/test_typed_request_handlers_effects_omn21536.py -q -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21536-ac6-effects-typed-request
+    description: >-
+      The seven handlers take one request and echo its correlation id; the parity scenarios fail against the merge-base two-argument handlers.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/nodes/node_delta_metrics_effect/test_handle_typed_request_omn21536.py tests/unit/nodes/node_merge_gate_effect/test_handle_typed_request_omn21536.py tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py tests/unit/nodes/node_decision_store_effect/test_handle_typed_request_omn21536.py tests/unit/nodes/node_chain_retrieval_effect/test_handle_typed_request_omn21536.py tests/integration/nodes/test_typed_request_handlers_effects_omn21536.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-omn21536-ac7-effects-validator-clean
+    description: >-
+      Core's handler-shape validator reports nothing for the five node directories.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_delta_metrics_effect src/omnibase_infra/nodes/node_merge_gate_effect src/omnibase_infra/nodes/node_delta_bundle_effect src/omnibase_infra/nodes/node_decision_store_effect src/omnibase_infra/nodes/node_chain_retrieval_effect --report-json /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]
+  - id: dod-omn21536-deploy-effects-handle-signature
+    description: >-
+      Post-deploy probe: the running runtime image carries the one-argument handle on the delta metrics and merge gate handlers. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c "import inspect; from omnibase_infra.nodes.node_delta_metrics_effect.handlers.handler_upsert_metrics import HandlerUpsertMetrics as M; from omnibase_infra.nodes.node_merge_gate_effect.handlers.handler_upsert_merge_gate import HandlerUpsertMergeGate as G; assert list(inspect.signature(M.handle).parameters) == ['self', 'payload']; assert list(inspect.signature(G.handle).parameters) == ['self', 'payload']"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

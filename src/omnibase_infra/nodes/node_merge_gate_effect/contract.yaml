@@ -53,6 +53,8 @@ output_model:
 # =============================================================================
 # HANDLER ROUTING (Declarative Handler Dispatch)
 # =============================================================================
+# OMN-21536: handlers take the typed payload alone.
+# The payload carries correlation_id for database operations and tracing.
 handler_routing:
   routing_strategy: "operation_match"
   handlers:

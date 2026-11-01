@@ -101,7 +101,7 @@ class HandlerWriteBundle(MixinPostgresOpExecutor):
     Example:
         >>> pool = await asyncpg.create_pool(dsn="...")
         >>> handler = HandlerWriteBundle(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
     """
@@ -127,19 +127,18 @@ class HandlerWriteBundle(MixinPostgresOpExecutor):
     async def handle(
         self,
         payload: ModelPayloadWriteBundle,
-        correlation_id: UUID,
     ) -> ModelBackendResult:
         """Insert a delta bundle idempotently into delta_bundles.
 
         Args:
             payload: Bundle write payload from merge-gate-decision event.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with success=True on successful insert or
             idempotent skip (ON CONFLICT DO NOTHING). Returns success=False
             only on infrastructure errors.
         """
+        correlation_id = payload.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             correlation_id=correlation_id,

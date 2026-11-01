@@ -1,0 +1,25 @@
+{
+  "base_ref": "a9ffea9a3321b7944278557dbb00079accf5eec4",
+  "canonical_handler_module": "omnibase_infra.nodes.node_delta_metrics_effect.handlers.handler_upsert_metrics",
+  "legacy_handler_module": "omnibase_infra.nodes.node_delta_metrics_effect.handlers.handler_upsert_metrics",
+  "node_id": "omnibase_infra.nodes.node_delta_metrics_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:83e9c59aa32cd8b44fe5772259fcf92d5f3c79fa9a4ab66e002243c9ed7e2094",
+      "sha256:51e95f93cd23d05ec0f4cc0eea190743a6618138b486a4ba07a0e2f83dd9432e"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_delta_metrics_effect/test_handle_typed_request_omn21536.py::TestUpsertMetricsHandleTypedRequest::test_merged_contribution_succeeds",
+      "tests/unit/nodes/node_delta_metrics_effect/test_handle_typed_request_omn21536.py::TestUpsertMetricsHandleTypedRequest::test_quarantined_reverted_fix_preserves_counters",
+      "tests/unit/nodes/node_delta_metrics_effect/test_handle_typed_request_omn21536.py::TestUpsertMetricsHandleTypedRequest::test_closed_warn_with_zero_violations_succeeds",
+      "tests/unit/nodes/node_delta_metrics_effect/test_handle_typed_request_omn21536.py::TestUpsertMetricsHandleTypedRequest::test_timeout_returns_timeout_error",
+      "tests/unit/nodes/node_delta_metrics_effect/test_handle_typed_request_omn21536.py::TestUpsertMetricsHandleTypedRequest::test_connection_failure_returns_connection_error",
+      "tests/unit/nodes/node_delta_metrics_effect/test_handle_typed_request_omn21536.py::TestUpsertMetricsHandleTypedRequest::test_query_failure_returns_upsert_error"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerUpsertMetrics._execute_upsert"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

@@ -1,0 +1,23 @@
+{
+  "branch_coverage_pct": 46.51,
+  "candidate_count": 6,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_delta_bundle_effect.handlers.handler_write_bundle",
+  "handler_module_sha256": "sha256:78573dec3580ba8c1f6516d5129d28e059bf0936b737471b339d3376e344938f",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_delta_bundle_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-31T09:12:17.746518+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 3,
+  "selected_input_hashes": [
+    "sha256:8cc9353c3bf77d820d05e3fd0baae9afd94e1aa847151a43aa5685a4383da681",
+    "sha256:8fc70dc8813572d41081a3b6197480f675ad4ac10221f49ec62b8d326c32bfd0",
+    "sha256:bbb676e2bc358f734a3bc08e5313f43f0c7c0855206093a53b5079f7963bc6d5"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21536 flips the node to canonical def-B by changing handle() to take one typed request (correlation id read from the request); the private helpers that hold the business logic are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence rests on that git-verbatim preservation plus the executed parity tests, not on a broad branch-coverage claim: the scenario pool drives this node's representative handler only.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

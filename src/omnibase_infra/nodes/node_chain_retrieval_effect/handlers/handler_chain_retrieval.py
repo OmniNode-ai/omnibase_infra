@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
@@ -22,6 +21,9 @@ from omnibase_infra.nodes.node_chain_orchestrator.models.protocol_chain_embeddin
 )
 from omnibase_infra.nodes.node_chain_orchestrator.models.protocol_chain_vector_client import (
     ProtocolChainVectorClient,
+)
+from omnibase_infra.nodes.node_chain_retrieval_effect.models import (
+    ModelChainRetrievalRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,23 +53,13 @@ class HandlerChainRetrieval:
         return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
-        self,
-        prompt_text: str,
-        correlation_id: UUID,
-        similarity_threshold: float = 0.85,
-        limit: int = 5,
+        self, request: ModelChainRetrievalRequest
     ) -> ModelChainRetrievalResult:
-        """Embed prompt and search Qdrant for similar chains.
-
-        Args:
-            prompt_text: The prompt to embed and search for.
-            correlation_id: Workflow correlation ID.
-            similarity_threshold: Minimum cosine similarity for a hit.
-            limit: Maximum number of results to return.
-
-        Returns:
-            ModelChainRetrievalResult with matches and hit/miss flag.
-        """
+        """Embed the request prompt and search Qdrant for similar chains."""
+        correlation_id = request.correlation_id
+        prompt_text = request.prompt_text
+        similarity_threshold = request.similarity_threshold
+        limit = request.limit
         logger.info(
             "Retrieving chains for prompt (correlation_id=%s, threshold=%.2f)",
             correlation_id,
