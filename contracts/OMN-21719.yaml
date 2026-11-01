@@ -19,7 +19,7 @@ evidence_requirements:
   - kind: tests
     description: The loaded timeouts equal the declared file, each omitted value fails to load, and every edited call site carries the declared value.
     command: uv run --frozen pytest tests/unit/models/runtime_timeouts -q
-  - kind: command
+  - kind: ci
     description: The contracts_and_di check reports no literal_timeout finding over the seven edited files and the settings model; at the merge base the same run reports 29.
     command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/probes/capability_probe.py src/omnibase_infra/runtime/protocol_lifecycle_executor.py src/omnibase_infra/runtime/request_response_wiring.py src/omnibase_infra/runtime/node_invocation_adapter.py src/omnibase_infra/projectors/snapshot_publisher_registration.py src/omnibase_infra/mixins/mixin_llm_http_transport.py src/omnibase_infra/mixins/mixin_node_introspection.py src/omnibase_infra/models/runtime_timeouts
 emergency_bypass:
