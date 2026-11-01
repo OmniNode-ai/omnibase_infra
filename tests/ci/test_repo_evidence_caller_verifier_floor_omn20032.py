@@ -35,7 +35,10 @@ _VERIFIER_TAG_SHAPE = r"dev-(\d{14})-[0-9a-f]{12}"
 # pinned sha resolves the real ancestry from the floor commit at run time (it refuses
 # a moved tag, a tag off omnimarket dev, or one that does not descend from
 # e565ba5ba00c); this holds the caller to every capability's first tag before a push,
-# which a regex on the tag shape alone does not.
+# which a regex on the tag shape alone does not. The comparison is of the creation time
+# the tag name embeds, an ordering heuristic and not an ancestry proof: a tag named with a
+# later time but cut from an older commit passes here and is refused by the reusable at
+# run time, which is the only place ancestry is checked.
 _CAPABILITY_FIRST_TAG = {
     # omnimarket#3511 (e565ba5ba00c): refuses a contract leaving a criterion unbound.
     "unbound-criterion refusal": "dev-20261016123308-0a385ce46cdf",
