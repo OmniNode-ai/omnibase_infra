@@ -206,12 +206,14 @@ class TestLabelResolution:
         """Known label names are resolved to IDs."""
         handler = _make_handler()
         # Seed cache directly
-        handler._label_cache = {
-            "INBOX": "INBOX",
-            "UNREAD": "UNREAD",
-            "MyLabel": "Label_12345",
-        }
-        handler._label_cache_expires_at = time.monotonic() + 300
+        handler._label_cache.store(
+            {
+                "INBOX": "INBOX",
+                "UNREAD": "UNREAD",
+                "MyLabel": "Label_12345",
+            },
+            time.monotonic(),
+        )
 
         result = await handler.resolve_label_ids(["INBOX", "MyLabel"])
 
@@ -221,8 +223,7 @@ class TestLabelResolution:
     async def test_unknown_labels_omitted(self) -> None:
         """Label names not in cache are omitted from the result."""
         handler = _make_handler()
-        handler._label_cache = {"INBOX": "INBOX"}
-        handler._label_cache_expires_at = time.monotonic() + 300
+        handler._label_cache.store({"INBOX": "INBOX"}, time.monotonic())
 
         result = await handler.resolve_label_ids(["INBOX", "NonExistent"])
 
@@ -234,8 +235,7 @@ class TestLabelResolution:
         """Label cache is refreshed when TTL expires."""
         handler = _make_handler()
         # Seed expired cache
-        handler._label_cache = {"OldLabel": "old_id"}
-        handler._label_cache_expires_at = time.monotonic() - 1.0
+        handler._label_cache.store({"OldLabel": "old_id"}, time.monotonic() - 301.0)
 
         # Mock list_labels to return new labels
         handler.list_labels = AsyncMock(  # type: ignore[method-assign]
@@ -254,8 +254,7 @@ class TestLabelResolution:
     async def test_cache_not_refreshed_within_ttl(self) -> None:
         """Label cache is NOT refreshed when TTL has not expired."""
         handler = _make_handler()
-        handler._label_cache = {"INBOX": "INBOX"}
-        handler._label_cache_expires_at = time.monotonic() + 200
+        handler._label_cache.store({"INBOX": "INBOX"}, time.monotonic() - 100)
 
         handler.list_labels = AsyncMock(return_value=[])  # type: ignore[method-assign]
 
@@ -267,9 +266,7 @@ class TestLabelResolution:
     async def test_empty_cache_triggers_refresh(self) -> None:
         """Empty cache always triggers a refresh regardless of TTL."""
         handler = _make_handler()
-        handler._label_cache = {}
-        # TTL not expired, but cache is empty
-        handler._label_cache_expires_at = time.monotonic() + 300
+        handler._label_cache.store({}, time.monotonic())
 
         handler.list_labels = AsyncMock(  # type: ignore[method-assign]
             return_value=[{"id": "INBOX", "name": "INBOX"}]
