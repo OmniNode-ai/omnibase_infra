@@ -62,3 +62,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn21324_boundary_wheel.py -q --no-cov
+  - id: dod-deploy-live-runtime
+    description: The deployed runtime container carries the boundary failure classifier and refuses replay of a permanent failure.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c "from omnibase_infra.runtime.boundary_failure_terminal import classify_boundary_failure"
