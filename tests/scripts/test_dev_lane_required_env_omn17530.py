@@ -50,6 +50,8 @@ _BASE_COMPOSE = _REPO_ROOT / "docker" / "docker-compose.infra.yml"
 _DEV_LANE_COMPOSE = _REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
 _BASE_MANIFEST = _REPO_ROOT / "docker" / "required-env-vars.manifest.txt"
 _DEV_LANE_MANIFEST = _REPO_ROOT / "docker" / "dev-lane-required-env.manifest.txt"
+_DEV_FOLD_COMPOSE = _REPO_ROOT / "docker" / "docker-compose.dev-fold.yml"
+_DEV_FOLD_MANIFEST = _REPO_ROOT / "docker" / "dev-fold-required-env.manifest.txt"
 
 _CHECK_SCRIPT = _REPO_ROOT / "scripts" / "check_required_env_vars.py"
 _PREFLIGHT_SCRIPT = _REPO_ROOT / "scripts" / "preflight_required_compose_env.py"
@@ -158,9 +160,17 @@ def test_every_dev_lane_required_var_is_declared() -> None:
 
 @pytest.mark.unit
 def test_union_of_dev_lane_compose_files_is_fully_declared() -> None:
-    """Both files the dev lane loads are covered, across both manifests."""
-    required = _required_names(_BASE_COMPOSE) | _required_names(_DEV_LANE_COMPOSE)
-    declared = _declared_names(_BASE_MANIFEST) | _declared_names(_DEV_LANE_MANIFEST)
+    """All three files the primary dev lane loads are covered by their manifests."""
+    required = (
+        _required_names(_BASE_COMPOSE)
+        | _required_names(_DEV_LANE_COMPOSE)
+        | _required_names(_DEV_FOLD_COMPOSE)
+    )
+    declared = (
+        _declared_names(_BASE_MANIFEST)
+        | _declared_names(_DEV_LANE_MANIFEST)
+        | _declared_names(_DEV_FOLD_MANIFEST)
+    )
 
     undeclared = sorted(required - declared)
     assert not undeclared, (
@@ -456,6 +466,11 @@ def test_refresh_dev_lane_runs_the_preflight() -> None:
         "the preflight must be handed the OVERLAY as well as the base — the "
         "overlay is where both variables that killed a deploy live."
     )
+    preflight = source.split("run_preflight_required_env() {", 1)[1].split("\n}", 1)[0]
+    assert (
+        '--compose-file "${INFRA_CLONE}/docker/docker-compose.dev-fold.yml"'
+        in preflight
+    )
     call_index = source.index("if ! run_preflight_required_env; then")
     # The refresh's own lock, not the one `--census-gate` takes (OMN-20876): that
     # mode starts nothing and rebuilds nothing, so it has no compose env to check.
@@ -502,16 +517,26 @@ def test_dev_lane_compose_file_set_matches_both_deploy_paths() -> None:
     assert "_DEV_LANE_OVERLAY = " in executor
     assert "docker-compose.dev-lane.yml" in executor
     dev_config = executor.split("EnumRuntimeLane.DEV: ModelLaneConfig(", 1)[1][:400]
-    assert (
-        "compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_TENANT_FOLD_OVERLAY)"
-        in dev_config
-    ), (
-        "the deploy agent's DEV lane no longer loads exactly "
-        "(base, dev-lane overlay, tenant fold). Update this test and the manifest set together."
+    composition = re.search(r"compose_files=\(([^)]*)\)", dev_config)
+    assert composition is not None
+    assert [name.strip() for name in composition[1].split(",") if name.strip()] == [
+        "COMPOSE_FILE",
+        "_DEV_LANE_OVERLAY",
+        "_DEV_FOLD_OVERLAY",
+        "_DEV_TENANT_FOLD_OVERLAY",
+    ], (
+        "the deploy agent's DEV lane must load base, dev-lane, worker fold and tenant fold "
+        "in order. Update this test and the manifest set together."
     )
 
 
 @pytest.mark.unit
+def test_primary_dev_fold_required_variable_is_declared() -> None:
+    result = _run_check(_DEV_FOLD_COMPOSE, _DEV_FOLD_MANIFEST)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _required_names(_DEV_FOLD_COMPOSE) == _declared_names(_DEV_FOLD_MANIFEST)
+
+
 def test_tenant_fold_required_names_match_its_manifest() -> None:
     required = _required_names(_REPO_ROOT / "docker/docker-compose.dev-tenant-fold.yml")
     declared = _declared_names(
@@ -521,3 +546,38 @@ def test_tenant_fold_required_names_match_its_manifest() -> None:
     assert "docker-compose.dev-tenant-fold.yml" in _REFRESH_DEV_LANE.read_text()
     hooks = (_REPO_ROOT / ".pre-commit-config.yaml").read_text()
     assert "--manifest-file docker/dev-tenant-fold-required-env.manifest.txt" in hooks
+
+
+@pytest.mark.unit
+def test_refresh_preflight_receives_both_fold_overlays() -> None:
+    source = _REFRESH_DEV_LANE.read_text(encoding="utf-8")
+    function = (
+        "run_preflight_required_env() {"
+        + source.split("run_preflight_required_env() {", 1)[1].split("\n}", 1)[0]
+        + "\n}"
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            "PYTHON_BIN=record_args; PREFLIGHT_REQUIRED_ENV_SCRIPT=/preflight; "
+            "LANE=dev; REPO_ROOT=/repo; INFRA_CLONE=/infra\n"
+            'record_args() { printf "%s\\n" "$@"; }\n'
+            + function
+            + "\nrun_preflight_required_env",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    args = result.stdout.splitlines()
+    assert [
+        args[i + 1] for i, value in enumerate(args) if value == "--compose-file"
+    ] == [
+        "/infra/docker/docker-compose.infra.yml",
+        "/infra/docker/docker-compose.dev-lane.yml",
+        "/infra/docker/docker-compose.dev-fold.yml",
+        "/infra/docker/docker-compose.dev-tenant-fold.yml",
+    ]

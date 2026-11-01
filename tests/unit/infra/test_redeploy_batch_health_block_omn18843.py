@@ -71,6 +71,8 @@ def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object
     if isinstance(node, yaml.SequenceNode):
         return loader.construct_sequence(node)
     assert isinstance(node, yaml.ScalarNode)
+    if node.tag == "!reset" and node.value in {"null", "~", ""}:
+        return None
     return loader.construct_scalar(node)
 
 
@@ -130,14 +132,14 @@ def _batch_services() -> set[str]:
     return names
 
 
-def _depends_on(service_config: dict) -> dict[str, str]:
+def _depends_on(service_config: dict | None) -> dict[str, str]:
     """Return ``{dependency: condition}`` for one service.
 
     Compose accepts both the short list form (implicitly ``service_started``)
     and the long mapping form. Both are normalised here so a future edge added
     in the short form cannot slip past the assertion below.
     """
-    raw = service_config.get("depends_on") or {}
+    raw = (service_config or {}).get("depends_on") or {}
     if isinstance(raw, list):
         return {str(dep): "service_started" for dep in raw}
     assert isinstance(raw, dict)
@@ -294,3 +296,12 @@ def test_catalog_agrees_with_the_hand_written_compose() -> None:
         "so the generated compose file carries a different startup graph than "
         "the dev lane does (OMN-18843). Mismatches: " + "; ".join(mismatches)
     )
+
+
+@pytest.mark.unit
+def test_reset_service_has_no_health_dependencies(tmp_path: Path) -> None:
+    overlay = tmp_path / "reset.yml"
+    overlay.write_text("services:\n  retired-worker: !reset null\n")
+    services = _load_services(overlay)
+    assert services["retired-worker"] is None
+    assert _depends_on(services["retired-worker"]) == {}

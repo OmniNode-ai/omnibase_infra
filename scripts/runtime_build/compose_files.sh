@@ -225,6 +225,7 @@ resolve_compose_file_args() {
         # separate file precisely so no non-dev lane can inherit it from the
         # base: see the header of docker/docker-compose.dev-lane.yml.
         eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-lane.yml") )"
+        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-fold.yml") )"
         eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-tenant-fold.yml") )"
     fi
 }

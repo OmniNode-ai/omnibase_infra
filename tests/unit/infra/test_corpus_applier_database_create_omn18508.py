@@ -89,8 +89,10 @@ MIGRATION_ENTRYPOINT_RE = re.compile(r"run-[a-z0-9-]+-migrations\.sh")
 
 
 def _load_compose(path: Path) -> dict[str, Any]:
-    """Parse a compose file, tolerating compose's ``!override`` tag."""
-    text = path.read_text(encoding="utf-8").replace("!override", "")
+    """Parse a compose file, tolerating compose's ``!override``/``!reset`` tags."""
+    text = (
+        path.read_text(encoding="utf-8").replace("!override", "").replace("!reset", "")
+    )
     return yaml.safe_load(text) or {}
 
 

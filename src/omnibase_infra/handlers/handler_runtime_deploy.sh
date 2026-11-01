@@ -354,11 +354,12 @@ resolve_lane_folded_services() {
     local filter_name="${2:-}"
     local -A folded_profile_services=(
         [effects]=runtime-effects
+        [worker]=runtime-worker
         [workers]=runtime-worker
         [tenant-projection]=tenant-projection-writer
     )
     LANE_FOLDED_SERVICES=()
-    # Each folding lane is selected by its declared project and policy.
+    # Resolve each folding lane from policy, preserving other lanes' scopes.
     local folded_profiles=""
     if [[ -n "${DEV_COMPOSE_PROJECT:-}" && "${compose_project}" == "${DEV_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}"

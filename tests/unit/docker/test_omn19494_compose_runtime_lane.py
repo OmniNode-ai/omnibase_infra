@@ -81,6 +81,7 @@ STACKS: dict[str, _Stack] = {
         files=(
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",
+            "docker-compose.dev-fold.yml",
             "docker-compose.dev-tenant-fold.yml",
         ),
         lane="compose-dev",

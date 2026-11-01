@@ -99,7 +99,6 @@ DEFAULT_BROKER_ADDRESS = os.environ.get("OMNIBASE_DEV_BROKER_ADDRESS", "redpanda
 CORE_SERVICE_NAMES = (
     "omninode-runtime",
     "runtime-effects",
-    "runtime-worker",
     "projection-api",
 )
 

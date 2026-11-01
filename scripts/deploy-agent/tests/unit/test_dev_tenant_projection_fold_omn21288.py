@@ -99,7 +99,13 @@ def test_retirement_is_inert_on_other_lanes() -> None:
     run.assert_not_called()
 
 
-def test_only_folded_tenant_carrier_request_does_not_start_the_whole_profile() -> None:
+def test_only_folded_tenant_carrier_request_does_not_start_the_whole_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "deploy_agent.executor._load_runtime_policy_env",
+        lambda: {"DEV_RUNTIME_MAIN_FOLDED_PROFILES": "tenant-projection"},
+    )
     updates: list[tuple[Phase, PhaseStatus]] = []
     with (
         patch("deploy_agent.executor._requested_services_for_up", return_value=[]),
@@ -136,7 +142,10 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         return subprocess.CompletedProcess(
             cmd,
             0,
-            stdout="tenant-projection-writer-a\n" if cmd[1] == "ps" else "",
+            stdout="tenant-projection-writer-a\n"
+            if cmd[1] == "ps"
+            and "label=com.docker.compose.service=tenant-projection-writer" in cmd
+            else "",
             stderr="",
         )
 
@@ -163,7 +172,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
             lambda *args: None,
             lane=EnumRuntimeLane.DEV,
         )
-    assert [c[1] for c in calls] == ["ps", "stop", "rm", "compose"]
+    assert [c[1] for c in calls] == ["ps", "ps", "stop", "rm", "compose"]
     assert "omninode-runtime" in calls[-1]
     assert "tenant-projection-writer" not in calls[-1]
     assert "tenant-projection-writer" not in verify.call_args.args[0]
