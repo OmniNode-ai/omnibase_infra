@@ -23,6 +23,16 @@ output_model:
   name: "ModelWasteFinding"
   module: "omnibase_infra.nodes.node_waste_detection_compute.models"
   description: "Deterministic waste finding."
+config:
+  name: "ModelWastePremiumModelPolicy"
+  module: "omnibase_infra.nodes.node_waste_detection_compute.models"
+  description: "Premium-model identifier markers read by HandlerWasteDetection for the model_overkill rule (OMN-21623)."
+  premium_model_policy:
+    # Lower-case substrings of a model identifier that mark a premium model.
+    markers:
+      - "opus"
+      - "gpt-4"
+      - "o3"
 capabilities:
   - name: "waste.detect"
     description: "Detect LLM cost waste in a session window"

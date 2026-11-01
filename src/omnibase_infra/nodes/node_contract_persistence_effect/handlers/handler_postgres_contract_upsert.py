@@ -95,7 +95,7 @@ class HandlerPostgresContractUpsert(MixinPostgresOpExecutor):
         >>> import asyncpg
         >>> pool = await asyncpg.create_pool(dsn="...")
         >>> handler = HandlerPostgresContractUpsert(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
 
@@ -126,8 +126,7 @@ class HandlerPostgresContractUpsert(MixinPostgresOpExecutor):
 
     async def handle(
         self,
-        payload: ModelPayloadUpsertContract,
-        correlation_id: UUID,
+        request: ModelPayloadUpsertContract,
     ) -> ModelBackendResult:
         """Execute PostgreSQL contract record upsert.
 
@@ -136,10 +135,9 @@ class HandlerPostgresContractUpsert(MixinPostgresOpExecutor):
         - Parameterized SQL for injection prevention
 
         Args:
-            payload: Upsert contract payload containing all contract fields
+            request: Upsert contract request containing all contract fields
                 including contract_id, node_name, version components,
                 contract_hash, contract_yaml, and timestamps.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with:
@@ -150,14 +148,15 @@ class HandlerPostgresContractUpsert(MixinPostgresOpExecutor):
                 - backend_id: Set to "postgres"
                 - correlation_id: Passed through for tracing
         """
+        correlation_id = request.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             correlation_id=correlation_id,
             log_context={
-                "contract_id": payload.contract_id,
-                "node_name": payload.node_name,
+                "contract_id": request.contract_id,
+                "node_name": request.node_name,
             },
-            fn=lambda: self._execute_upsert(payload, correlation_id),
+            fn=lambda: self._execute_upsert(request, correlation_id),
         )
 
     async def _execute_upsert(
