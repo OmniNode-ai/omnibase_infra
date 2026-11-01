@@ -209,11 +209,17 @@ repos:
         args: [--rules, file-shape]
         require_serial: true
       - id: check-no-raw-sqlite3
+        require_serial: true
       - id: check-local-paths-compute
+        require_serial: true
       - id: check-hardcoded-topic-compute
+        require_serial: true
       - id: check-hardcoded-model-config-compute
+        require_serial: true
       - id: check-no-io-outside-effects
+        require_serial: true
       - id: handler-di-gate
+        require_serial: true
         args: [--baseline, .onex_ratchets/handler_di_baseline.txt]
   # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
   # "Ci runners should be for private repos only"). Refuses a staged workflow job
