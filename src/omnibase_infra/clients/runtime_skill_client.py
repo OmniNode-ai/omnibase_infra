@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Literal
 
 from omnibase_core.models.runtime import (
@@ -17,16 +16,6 @@ from omnibase_core.models.runtime import (
 )
 from omnibase_core.protocols.runtime import ProtocolRuntimeSkillClient
 
-_DEFAULT_RUNTIME_SOCKET_PATH = "/tmp/onex-runtime.sock"  # noqa: S108
-
-
-def default_runtime_socket_path() -> str:
-    """Resolve the local runtime ingress socket path."""
-
-    return os.environ.get(
-        "ONEX_LOCAL_RUNTIME_SOCKET_PATH", _DEFAULT_RUNTIME_SOCKET_PATH
-    )
-
 
 class LocalRuntimeSkillClient(ProtocolRuntimeSkillClient):
     """Unix-socket client for the canonical host-local runtime skill path."""
@@ -34,10 +23,10 @@ class LocalRuntimeSkillClient(ProtocolRuntimeSkillClient):
     def __init__(
         self,
         *,
-        socket_path: str | None = None,
+        socket_path: str,
         connect_timeout_seconds: float = 5.0,
     ) -> None:
-        self._socket_path = socket_path or default_runtime_socket_path()
+        self._socket_path = socket_path
         self._connect_timeout_seconds = connect_timeout_seconds
 
     async def dispatch_async(
@@ -120,4 +109,4 @@ def _transport_error_response(
     )
 
 
-__all__ = ["LocalRuntimeSkillClient", "default_runtime_socket_path"]
+__all__ = ["LocalRuntimeSkillClient"]
