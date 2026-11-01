@@ -22,7 +22,7 @@ evidence_requirements:
     command: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py -q -p no:cacheprovider --no-cov"
   - kind: tests
     description: "Unit tests of the touched wiring and registries pass."
-    command: "uv run --frozen pytest tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/node_registration_orchestrator tests/unit/nodes/test_node_auth_gate_compute.py tests/unit/nodes/node_contract_resolver_bridge tests/unit/nodes/node_registry_api_effect tests/unit/nodes/node_registration_reducer tests/unit/nodes/test_llm_completion_registry.py -q -p no:cacheprovider --no-cov"
+    command: "uv run --frozen pytest tests/integration/runtime/test_registration_wiring_identity_omn21683.py tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/test_node_auth_gate_compute.py tests/unit/nodes/node_contract_resolver_bridge/test_node_contract_resolver_bridge.py tests/unit/nodes/test_llm_completion_registry.py -q -p no:cacheprovider --no-cov"
 dod_evidence:
   - id: dod-001
     description: "The contracts_and_di validator, run per slice path, reports zero handler_hand_construction findings, and the rule still reports a hand-built handler in a probe file."
@@ -37,11 +37,35 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/node_registration_orchestrator tests/unit/nodes/test_node_auth_gate_compute.py tests/unit/nodes/node_contract_resolver_bridge tests/unit/nodes/node_registry_api_effect tests/unit/nodes/node_registration_reducer tests/unit/nodes/test_llm_completion_registry.py -q -p no:cacheprovider --no-cov"
+        check_value: "uv run --frozen pytest tests/integration/runtime/test_registration_wiring_identity_omn21683.py tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/test_node_auth_gate_compute.py tests/unit/nodes/node_contract_resolver_bridge/test_node_contract_resolver_bridge.py tests/unit/nodes/test_llm_completion_registry.py -q -p no:cacheprovider --no-cov"
   - id: dod-003
     description: "The slice regression and the touched modules' unit tests pass together at the PR head."
     source: generated
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py -q -p no:cacheprovider --no-cov tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/node_registration_orchestrator"
+        check_value: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py tests/integration/runtime/test_registration_wiring_identity_omn21683.py -q -p no:cacheprovider --no-cov"
+  - id: dod-004-deploy-artifact-readback
+    description: >-
+      Hosted-runner deploy artifact probe reads the registration wiring source at the checked-out commit from GitHub and requires exactly one shared topic store and one introspection registration. It fails against the merge-base artifact, which creates the store and registers the introspection handler twice. Runtime behavior is exercised by test_registration_wiring_identity_omn21683.py on the lab.
+    source: manual
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          artifact="$(mktemp)";
+          trap 'rm -f "$artifact"' EXIT;
+          curl --fail --silent --show-error --location "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/nodes/node_registration_orchestrator/wiring.py" --output "$artifact";
+          python3 - "$artifact" <<'PYPROBE'
+          import ast
+          import sys
+          from pathlib import Path
+          tree = ast.parse(Path(sys.argv[1]).read_text())
+          wiring = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "wire_registration_handlers")
+          calls = [node for node in ast.walk(wiring) if isinstance(node, ast.Call)]
+          for name in ("ServiceIntrospectionTopicStore", "HandlerNodeIntrospected"):
+              count = sum(isinstance(call.func, ast.Name) and call.func.id == name for call in calls)
+              assert count == 1, (name, count)
+          print("registration deploy artifact: one topic store and one introspection handler")
+          PYPROBE
