@@ -150,6 +150,11 @@ requirements:
     acceptance:
       - id: AC32
         statement: 'AC32: call-repo-evidence-gate.yml pins verifier-version 0.4.310 or newer, the first omnimarket release with omnimarket#3694, and pyproject.toml pins omnibase-core by its dev-merge tag alone in tool.uv.sources -- falsifier: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0 fails test_caller_verifier_admits_override_dependency_pins against the merge-base caller, which pins 0.4.305'
+  - id: req-omn19998-candidate-build-dev-merge-tags
+    statement: "The workspace stability-candidate build stages every unpinned sibling at its newest dev-merge tag and fetches the build context's own dev-merge tag before staging, because since #5472 the image's first-party source audit refused every push build: delivery run 41185042263 (dev a9ffea9a3) failed with omnibase-core and omnibase-spi staged at a commit with no dev-merge tag and omnibase-infra staged from branch dev."
+    acceptance:
+      - id: AC34
+        statement: 'AC34: build-workspace-candidate-runtime.yml arms RT-1 with origin/<sibling_ref> when no sibling is pinned, so deploy_source_ref.py follows each sibling''s newest dev-* tag, and a step before the staging step fetches the dev-* tag naming HEAD from origin into the checkout, which checker_first_party_sources reads as the build context''s dev-merge tag -- falsifier: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py -q -n 0 fails against the merge-base workflow, which arms RT-1 with the bare branch name and has no tag fetch step'
   - id: req-omn19998-node-refusal-reason
     statement: When a handler refuses with a typed result (success false) and the runtime records no error of its own, the SkillRoutingError envelope that onex node prints carries the handler's error_message or reason, so the ci-live-contact pre-commit hook names its fix on the console instead of printing only run did not complete (result=failed).
     acceptance:
@@ -228,6 +233,9 @@ evidence_requirements:
   - kind: tests
     description: The override-pin tests read the repo-evidence caller's verifier-version and pyproject.toml's omnibase-core tag source.
     command: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0
+  - kind: tests
+    description: The dev-merge-tag build tests read the candidate workflow's staging env and step order, and run the tag fetch step against a local bare origin and the first-party checker's build-context reader.
+    command: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py -q -n 0
   - kind: tests
     description: The refusal-reason tests run the packaged node_ci_live_contact_effect through the onex node command on a temporary git repository with a staged change and read the printed envelope.
     command: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q
@@ -622,6 +630,24 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC32
+  - id: dod-omn19998-ac34-candidate-dev-merge-tags
+    description: AC34 tests check candidate wiring, execute RT-1 against real origins for remote, bare, explicit SHA and pinned fallback refs, and run the workflow tag fetch through late tags, multiple tags and transient listing or fetch failures. The public stamp API writes the fetched build-context tag into provenance.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC34
+  - id: dod-omn19998-ac34-dev-tags-deploy-probe
+    description: Hosted-runner deployment artifact check for AC34 using disposable local origins. First runs the candidate workflow tag fetch and public stamp API, accepting only a tag pointing at the build checkout HEAD. Then runs the full staging path, builds and installs wheels, and audits provenance and content, rejecting a mismatched tag and a stale installed wheel. The candidate fetch control fails against the merge-base workflow, which has no fetch step. This checks candidate artifacts without claiming live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py::test_the_checker_reads_the_fetched_tag_as_a_dev_merge_tag tests/integration/runtime/test_first_party_tag_sources_omn17427.py::test_staged_wheels_have_tag_identity_and_content_parity -q -n 0
+        cwd: .
+    binds_ac:
+      - AC34
   - id: dod-omn19998-ac33-node-refusal-reason
     description: AC33 runs the packaged ci-live-contact node through onex node on a temporary repository with a staged scripts/ci change and a staged non-tooling change and reads the SkillRoutingError envelope on stdout.
     source: manual

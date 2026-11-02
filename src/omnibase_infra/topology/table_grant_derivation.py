@@ -179,6 +179,29 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="state",
         ),
     ),
+    # OMN-21935. The omnibase_infra database's grants are derived from this
+    # manifest alone, and omnimarket's node_projection_infra_routing_decisions
+    # declares a db_io write on public.infra_routing_decisions there: the
+    # relation migration 080 already creates. The runtime refuses to wire a
+    # projection whose binding principal (role_omnibase_infra) lacks SELECT,
+    # INSERT and UPDATE on it. No new migration; the grant is provisioned from
+    # the topology. Once the pinned omnimarket contracts carry the node the
+    # same relation derives from the contract too, and the derivation is
+    # idempotent per relation, so this entry may then be deleted.
+    ContractTableDeclaration(
+        node="state_io:infra_routing_decisions",
+        contract_path=Path(
+            "docker/migrations/forward/080_create_infra_routing_decisions.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="infra_routing_decisions",
+            database_ref="omnibase_infra",
+            schema="public",
+            migration="docker/migrations/forward/080_create_infra_routing_decisions.sql",
+            access="read_write",
+            role="state",
+        ),
+    ),
 )
 
 
@@ -190,6 +213,7 @@ def _vendored_read_write(
     node: str | None = None,
     schema: str = "omninode_internal",
     access: Literal["read", "write", "read_write"] = "read_write",
+    role: str | None = None,
 ) -> ContractTableDeclaration:
     """A vendored relation whose role is named for the table."""
     migration = f"docker/migrations/forward/nodes/{node_dir}/{create_file}"
@@ -202,7 +226,7 @@ def _vendored_read_write(
             schema=schema,
             migration=migration,
             access=access,
-            role=table,
+            role=role or table,
         ),
     )
 
@@ -248,69 +272,16 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # PR and the contract declares the same four relations; removing them
     # then is the follow-up, and leaving them is inert rather than wrong --
     # the derivation is idempotent per relation.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_model_routing",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_model_routing",
-            database_ref="application",
+    *(
+        _vendored_read_write(
+            f"projection_delegation_{name}",
+            "node_projection_delegation",
+            "0039_delegation_aggregate_views_per_tenant.sql",
             schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
             access="read",
-            role="aggregate_model_routing",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_quality_gate",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_quality_gate",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_quality_gate",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_summary",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_summary",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_summary",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_token_usage",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_token_usage",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_token_usage",
-        ),
+            role=f"aggregate_{name}",
+        )
+        for name in ("model_routing", "quality_gate", "summary", "token_usage")
     ),
     # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
     # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
