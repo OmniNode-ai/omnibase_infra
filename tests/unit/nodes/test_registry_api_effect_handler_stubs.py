@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_registry_api_effect.models import ModelRegistryApiRequest
 
 # All 10 handler modules that must be importable and have correct type properties.
 HANDLER_CASES = [
@@ -168,7 +169,9 @@ async def test_handler_raises_not_implemented(
     correlation_id = uuid.uuid4()
 
     with pytest.raises(NotImplementedError, match=class_name):
-        await instance.handle(request=object(), correlation_id=correlation_id)
+        await instance.handle(
+            ModelRegistryApiRequest(operation=operation, correlation_id=correlation_id)
+        )
 
 
 @pytest.mark.unit
