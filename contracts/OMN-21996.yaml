@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21996
+title: The delegate timing bus offers the group-less read, so an onex delegate run leaves no consumer group on the broker
+summary: >-
+  DelegatePhaseTimedBus wraps the bus of every `onex delegate` run and hid the bus's subscribe_ungrouped, so RuntimeLocal fell back to a run-scoped consumer group per terminal topic (runtime_local_terminal_t1_run_<id>) and left it Empty on the dev broker. The wrapper now offers the group-less read exactly when the wrapped bus has it, timed as the reply subscription.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21996-timed-bus-ungrouped
+    statement: A delegation through the phase-timing bus reads its terminals with no consumer group whenever the underlying bus can, and a bus that cannot keeps the grouped read it always had.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the Empty groups in the guard census are grouped by name prefix and the prefix whose count grows is named with its owning code path -- falsifier: rpk group list read-only on the dev bus counted by prefix at two times 15 minutes apart'
+      - id: AC2
+        statement: 'AC2: the producer uses a stable group id or deletes its group on exit, and a test fails on the unfixed code and passes on the fix -- falsifier: uv run pytest -k groups_per_call in the owning repository'
+      - id: AC3
+        statement: 'AC3: after the fix runs on the lab, the Empty group count of that prefix stops growing over 15 minutes -- falsifier: rpk group list read-only on the dev bus counted by prefix before and after a 15 minute window'
+evidence_requirements:
+  - kind: tests
+    description: A hundred armed runs through the timing bus over a bus with the group-less read leave no consumer group; at the merge base each leaves a runtime_local_terminal_t1_run_<id> group.
+    command: uv run pytest tests/unit/cli/test_delegate_timed_bus_groups_per_call_omn21996.py -q --no-cov -k groups_per_call
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21996-ac1-producer-named
+    description: >-
+      The producer is DelegatePhaseTimedBus in src/omnibase_infra/cli/receipt_mode.py: the test builds the exact census group name runtime_local_terminal_t1_run_<id>.consume.v1 from it at the merge base. The two dev-bus readings by prefix are recorded in the PR body.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_timed_bus_groups_per_call_omn21996.py -q --no-cov -k groups_per_call_a_hundred
+    binds_ac: ["AC1"]
+  - id: dod-omn21996-ac2-groups-per-call
+    description: >-
+      Fails at the merge base (100 run-scoped groups left), passes on the fix (none), and a bus with no group-less read is not given the method.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_timed_bus_groups_per_call_omn21996.py -q --no-cov -k groups_per_call
+    binds_ac: ["AC2"]
+  - id: dod-omn21996-ac3-lab-count
+    description: >-
+      The hosted runner proves the mechanism with a broker double (no group per run, group-less read taken). The dev-bus count of runtime_local_terminal_t1_run_ groups over 15 minutes after the fix runs on the lab is recorded in the PR Lab line.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_timed_bus_groups_per_call_omn21996.py -q --no-cov -k groups_per_call_a_hundred
+      - check_type: command
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/delegation/model_delegate_phase_timed_bus.py?ref=omn-21996-delegate-timed-bus-ungrouped' --jq .content | base64 -d | grep -q 'class DelegatePhaseTimedUngroupedBus'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: ["AC3"]
