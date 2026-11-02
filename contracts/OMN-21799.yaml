@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21799
 title: "omnibase_infra contracts_and_di literal_path and literal_model_name burn-down, slice rf1540-c8"
 summary: >-
-  The scope-check workflow models (ModelScopeCheckCommand, ModelScopeFileReadRequest, ModelScopeFileReadResult, ModelScopeExtractInput, ModelScopeExtracted) and HandlerScopeFileRead.handle carried a home-relative manifest location as a code default, six literal_path findings of the contracts_and_di validator. The field is now required and non-empty on every hop: the command producer (node_scope_workflow_orchestrator/bin/scope_check.sh, from SCOPE_MANIFEST_PATH) supplies it and each handler carries it forward. No baseline entry or suppression is added. Repo literal_path count over src drops from 12 to 6; literal_model_name is unchanged at 36 (no model name was in the slice); total findings 1228 to 1222.
+  The scope-check workflow models (ModelScopeCheckCommand, ModelScopeFileReadRequest, ModelScopeFileReadResult, ModelScopeExtractInput, ModelScopeExtracted) and HandlerScopeFileRead.handle carried a home-relative manifest location as a code default, six literal_path findings of the contracts_and_di validator. The field is now required and non-empty on every hop: the command producer (node_scope_workflow_orchestrator/bin/scope_check.sh, from SCOPE_MANIFEST_PATH) supplies it and each handler carries it forward. No baseline entry or suppression is added. The repo-wide validator run over src at this head reports no literal_path finding; the evidence below runs that count and fails if one appears.
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
@@ -13,7 +13,7 @@ requirements:
     statement: The scope-check workflow holds no manifest location in code; the location arrives in the command and is carried through every hop.
     acceptance:
       - id: AC1
-        statement: "AC1: the contracts_and_di count for literal_path and literal_model_name over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
+        statement: "AC1: the contracts_and_di count for literal_path and literal_model_name over the slice paths is zero over the slice and the repo-wide literal_path count over src is zero, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
       - id: AC2
         statement: "AC2: every path and model name comes from the owning node contract or overlay and is injected, none hard-coded in the touched code -- falsifier: the focused scope model and workflow tests plus the checker re-run on the slice paths"
       - id: AC3
@@ -34,16 +34,19 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn21799-ac1-slice-checker-clean
-    description: The contracts_and_di validator over the slice node directories exits 0; at the merge base the same run reports six literal_path findings there.
+    description: The contracts_and_di validator over the slice node directories exits 0.
     source: manual
     checks:
       - check_type: command
         check_value: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/nodes/node_scope_extract_compute src/omnibase_infra/nodes/node_scope_file_read_effect src/omnibase_infra/nodes/node_scope_workflow_orchestrator
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "cd ${OMNI_HOME}/omnibase_infra && uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra > /tmp/omn21799-repo-validator.out 2>&1; test -s /tmp/omn21799-repo-validator.out && ! grep -q ': literal_path:' /tmp/omn21799-repo-validator.out"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
   - id: dod-omn21799-ac2-output-path-required
-    description: Every scope model refuses a missing or empty output_path and keeps a supplied one; the workflow test carries the command's path to the manifest writer. The required-field test fails against the merge-base models.
+    description: Every scope model refuses a missing or empty output_path and keeps a supplied one; the workflow test carries the command's path to the manifest writer. The required-field tests assert a validation error for a missing output_path, which the pre-change default value did not raise.
     source: manual
     checks:
       - check_type: test_passes
