@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
 
+from omnibase_infra.models.model_cost_snapshot_topics import ModelCostSnapshotTopics
 from omnibase_infra.services.cost_api.models import (
     AggregationWindow,
     ModelCostBreakdown,
@@ -21,12 +22,7 @@ from omnibase_infra.services.cost_api.models import (
     ModelTokenUsage,
     TrendBucket,
 )
-from omnibase_infra.services.cost_api.snapshot_cache import (
-    TOPIC_COST_BY_REPO,
-    TOPIC_COST_SUMMARY,
-    TOPIC_COST_TOKEN_USAGE,
-    get_latest_snapshot,
-)
+from omnibase_infra.services.cost_api.snapshot_cache import get_latest_snapshot
 
 if TYPE_CHECKING:
     import asyncpg
@@ -72,9 +68,10 @@ async def fetch_cost_summary(
     pool: asyncpg.Pool,
     *,
     window: AggregationWindow,
+    snapshot_topics: ModelCostSnapshotTopics,
 ) -> ModelCostSummary:
     """Fetch totals from canonical session aggregate rows or projection snapshots."""
-    snapshot = get_latest_snapshot(TOPIC_COST_SUMMARY, window)
+    snapshot = get_latest_snapshot(snapshot_topics.summary, window)
     if snapshot is not None:
         return ModelCostSummary(
             window=window,
@@ -209,9 +206,10 @@ async def fetch_cost_by_repo(
     pool: asyncpg.Pool,
     *,
     window: AggregationWindow,
+    snapshot_topics: ModelCostSnapshotTopics,
 ) -> ModelCostBreakdown:
     """Fetch repo cost groups from composite session keys or legacy repo keys."""
-    snapshot = get_latest_snapshot(TOPIC_COST_BY_REPO, window)
+    snapshot = get_latest_snapshot(snapshot_topics.by_repo, window)
     if snapshot is not None:
         raw_rows = snapshot.get("rows")
         rows = raw_rows if isinstance(raw_rows, list) else []
@@ -271,9 +269,10 @@ async def fetch_token_usage(
     pool: asyncpg.Pool,
     *,
     window: AggregationWindow,
+    snapshot_topics: ModelCostSnapshotTopics,
 ) -> ModelTokenUsage:
     """Fetch token totals from canonical session aggregate rows or projection snapshots."""
-    snapshot = get_latest_snapshot(TOPIC_COST_TOKEN_USAGE, window)
+    snapshot = get_latest_snapshot(snapshot_topics.token_usage, window)
     if snapshot is not None:
         raw_rows = snapshot.get("rows")
         rows = raw_rows if isinstance(raw_rows, list) else []

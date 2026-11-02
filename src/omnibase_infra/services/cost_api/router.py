@@ -5,12 +5,13 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, FastAPI, Query
 
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.handlers.handler_cost_api_dependencies import (
+    HandlerCostApiDependencies,
+)
+from omnibase_infra.models.model_cost_snapshot_topics import ModelCostSnapshotTopics
 from omnibase_infra.services.cost_api.handlers import (
     fetch_cost_by_model,
     fetch_cost_by_repo,
@@ -30,37 +31,15 @@ from omnibase_infra.services.cost_api.models import (
 )
 
 router = APIRouter(tags=["costs"])
+get_cost_api_pool = HandlerCostApiDependencies.get_pool
+get_cost_snapshot_topics = HandlerCostApiDependencies.get_snapshot_topics
+SnapshotTopics = Annotated[ModelCostSnapshotTopics, Depends(get_cost_snapshot_topics)]
 
 
-def _request_correlation_id(request: Request) -> UUID:
-    raw_correlation = request.headers.get("X-Correlation-ID")
-    if raw_correlation:
-        try:
-            return UUID(raw_correlation)
-        except ValueError:
-            pass
-    return uuid4()
-
-
-def get_cost_api_pool(request: Request) -> object:
-    """Return the asyncpg pool configured by the registry app factory."""
-    pool = getattr(request.app.state, "cost_api_pool", None)
-    if pool is None:
-        context = ModelInfraErrorContext.with_correlation(
-            correlation_id=_request_correlation_id(request),
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="cost_api_pool_lookup",
-            target_name="registry_api.cost_api_pool",
-            suggested_resolution="Configure cost_api_pool on the registry API app state.",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "message": "Cost API database pool not configured",
-                "context": context.model_dump(mode="json"),
-            },
-        )
-    return pool
+def install_cost_routes(app: FastAPI, pool: object) -> None:
+    """Bind cost dependencies before installing their routes on the registry app."""
+    HandlerCostApiDependencies.handle(app, pool)
+    app.include_router(router)
 
 
 @router.get(
@@ -70,13 +49,16 @@ def get_cost_api_pool(request: Request) -> object:
 )
 async def get_cost_summary(
     pool: Annotated[object, Depends(get_cost_api_pool)],
+    snapshot_topics: SnapshotTopics,
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelCostSummary:
     # Why: Runtime wiring validates and narrows this payload shape before use.
-    return await fetch_cost_summary(pool, window=window)  # type: ignore[arg-type]
+    return await fetch_cost_summary(  # type: ignore[arg-type]
+        pool, window=window, snapshot_topics=snapshot_topics
+    )
 
 
 @router.get(
@@ -122,13 +104,16 @@ async def get_cost_by_model(
 )
 async def get_cost_by_repo(
     pool: Annotated[object, Depends(get_cost_api_pool)],
+    snapshot_topics: SnapshotTopics,
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelCostBreakdown:
     # Why: Runtime wiring validates and narrows this payload shape before use.
-    return await fetch_cost_by_repo(pool, window=window)  # type: ignore[arg-type]
+    return await fetch_cost_by_repo(  # type: ignore[arg-type]
+        pool, window=window, snapshot_topics=snapshot_topics
+    )
 
 
 @router.get(
@@ -138,13 +123,16 @@ async def get_cost_by_repo(
 )
 async def get_token_usage(
     pool: Annotated[object, Depends(get_cost_api_pool)],
+    snapshot_topics: SnapshotTopics,
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelTokenUsage:
     # Why: Runtime wiring validates and narrows this payload shape before use.
-    return await fetch_token_usage(pool, window=window)  # type: ignore[arg-type]
+    return await fetch_token_usage(  # type: ignore[arg-type]
+        pool, window=window, snapshot_topics=snapshot_topics
+    )
 
 
 @router.get(
