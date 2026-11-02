@@ -126,6 +126,9 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.models.runtime.model_auto_wiring_retry_policy import (
+    ModelAutoWiringRetryPolicy,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
 )
@@ -153,9 +156,6 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelDiscoveredContract,
     ModelHandlerRef,
     ModelHandlerRoutingEntry,
-)
-from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_retry_policy import (
-    ModelAutoWiringRetryPolicy,
 )
 from omnibase_infra.runtime.auto_wiring.report import (
     EnumWiringOutcome,
