@@ -65,10 +65,14 @@ def test_runtime_port_exposes_consumer_handler_optional_parameters() -> None:
     ):
         parameters = inspect.signature(dispatch_method).parameters
         assert parameters["max_tokens"].annotation in {"int | None", int | None}
-        assert parameters["execution_timeout_seconds"].annotation in {"int", int}
+        # OMN-21604: unset means the class's declared budget, not a number.
+        assert parameters["execution_timeout_seconds"].annotation in {
+            "int | None",
+            int | None,
+        }
         assert parameters["terminal_delivery_margin_seconds"].annotation in {
-            "int",
-            int,
+            "int | None",
+            int | None,
         }
         assert parameters["backend_id"].default is None
         assert parameters["response_contract"].default is None

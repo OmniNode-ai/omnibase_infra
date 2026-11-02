@@ -16,8 +16,8 @@ before dispatch, this refused the lane after it.
 WHY DEFAULTED RATHER THAN REQUIRED. A new argument lands consumer-first or is
 excluded when unset. Requiring it of a caller that does not yet pass it makes
 the failure the caller's, and here the caller is a different repository on a
-different release cadence. The defaults are the contract budget, so a caller
-that does pass them is unaffected.
+different release cadence. An unset budget resolves to the task class's
+declared budget (OMN-21604), so a caller that does pass them is unaffected.
 
 THIS EXACT SHAPE HAS HAPPENED BEFORE ON THIS SIGNATURE. The OMN-18321 comment
 in the protocol records a kwarg added on one side alone, a TypeError on the
@@ -35,8 +35,6 @@ import inspect
 import pytest
 
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
-    DEFAULT_EXECUTION_TIMEOUT_SECONDS,
-    DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
     ProtocolDelegationDispatchPort,
 )
 from omnibase_infra.runtime.service_delegation_dispatch_port import (
@@ -108,13 +106,22 @@ class TestTheBudgetArgumentsAreOptional:
 
 
 class TestTheDefaultsAgree:
-    """The port and its protocol declare one default, not two.
+    """The port and its protocol declare one default, and it is "unset".
 
-    The CLI no longer carries a default budget of its own (OMN-19407): it
-    reads every class's budget from the task-class contract, which declares
-    one for every class. What is left to pin is that the runtime port and its
-    protocol cannot disagree with each other.
+    No number lives in either signature (OMN-21604): an unset budget resolves
+    to the task class's declared budget, contract or site overlay. What is left
+    to pin is that both signatures default to unset and cannot disagree.
     """
+
+    def test_both_default_to_unset(self) -> None:
+        """A numeric default would put a second budget source back in the port."""
+        for dispatch in (
+            RuntimeDelegationDispatchPort.dispatch,
+            ProtocolDelegationDispatchPort.dispatch,
+        ):
+            parameters = inspect.signature(dispatch).parameters
+            for name in _BUDGET_KWARGS:
+                assert parameters[name].default is None, name
 
     def test_the_port_and_the_protocol_agree(self) -> None:
         """A default on one and a different default on the other is worse than none."""
