@@ -120,30 +120,40 @@ jobs:
             exit 0
           fi
 
-          git add config/validation/test-failure-baseline.yaml
-          git commit -m "chore(OMN-13027): update dev test-failure baseline [skip ci]" \
-            --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
-            --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
           # OMN-22128: a bare `git push origin dev` loses the baseline whenever
           # dev moves during the suite, which — at well over an hour of tests —
           # is almost every run. That is why every run from 2026-06-18 to
           # 2026-09-06 ended `failure`: run 34008081727 finished the suite,
           # committed the baseline as 8cca07378, then died on
           # "! [rejected] dev -> dev (fetch first)" and the baseline was never
-          # published. Rebase our single baseline commit onto whatever dev is
-          # now and re-attempt, so a concurrent merge costs a retry, not the
-          # whole night's run.
+          # published.
+          #
+          # The loop below RE-APPLIES the computed file onto dev's current head
+          # instead of rebasing a commit onto it. `git rebase` was rejected in
+          # review for two reasons, both right: an unchecked rebase can stop on
+          # a conflict and leave the repository mid-rebase while the loop burns
+          # its remaining attempts, and a rebased commit hides the fact that
+          # its content was computed against an older tree. A hard reset plus a
+          # copy cannot conflict and cannot leave rebase state, and the
+          # Onex-Computed-From trailer names the dev head the suite actually
+          # ran against, so the baseline's provenance is on the record rather
+          # than implied by its commit's position. Staleness itself is inherent
+          # to publishing after a long suite; the entries carry ttl_days 7 and
+          # the next run prunes what has been fixed.
           #
           # This is one physical line on purpose. The canonical-file-shape
           # ratchet matches `baseline` in this workflow's own FILE NAME against
           # its exception_name_pattern, and `.yml` is in neither its
           # code_extensions nor its prose_extensions, so it treats this
           # workflow as a shrink-only allowlist and counts every non-comment
-          # line as an "entry". Spelling the retry across several lines is
+          # line as an "entry". Spelling the loop across several lines is
           # refused as [exception-entry-growth]. The misclassification belongs
           # to omnibase_core's checker, not here.
-          for attempt in 1 2 3 4 5; do if git push origin HEAD:dev; then echo "Baseline pushed on attempt ${attempt}."; exit 0; fi; echo "Push rejected on attempt ${attempt}; rebasing onto origin/dev."; git fetch origin dev; git rebase origin/dev; done; echo "::error::baseline push still rejected after 5 rebase attempts"; exit 1
+          COMPUTED_FROM="$(git rev-parse HEAD)"
+          cp config/validation/test-failure-baseline.yaml "${RUNNER_TEMP}/computed-baseline.yaml"
+          for attempt in 1 2 3 4 5; do if ! git fetch origin dev; then echo "Fetch failed on attempt ${attempt}; retrying."; continue; fi; git reset --hard origin/dev; cp "${RUNNER_TEMP}/computed-baseline.yaml" config/validation/test-failure-baseline.yaml; if git diff --quiet config/validation/test-failure-baseline.yaml; then echo "Baseline on dev already matches the computed one; nothing to publish."; exit 0; fi; git add config/validation/test-failure-baseline.yaml; git commit -m "chore(OMN-13027): update dev test-failure baseline [skip ci]" --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --trailer "Onex-Computed-From: ${COMPUTED_FROM}"; if git push origin HEAD:dev; then echo "Baseline pushed on attempt ${attempt}, computed from ${COMPUTED_FROM}."; exit 0; fi; echo "Push rejected on attempt ${attempt}; dev moved, re-applying onto its new head."; done
+          echo "::error::baseline push still rejected after 5 re-apply attempts"
+          exit 1
 
       - name: Post summary
         if: always()

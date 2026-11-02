@@ -538,6 +538,15 @@ class TestPublisherWorkflow:
         then died on "! [rejected] dev -> dev (fetch first)". A job that spends
         an hour on tests always races a dev merge, so a single bare push loses
         the baseline it just computed.
+
+        The assertions below are on the step's EXECUTABLE text with comments
+        stripped, and each one names a way the loop could be wrong rather than
+        a phrase it happens to contain: no `git rebase` (which can stop on a
+        conflict and strand the repository mid-rebase while the loop burns its
+        attempts), a checked fetch, a re-apply onto dev's current head, a push
+        to dev inside the loop, and a provenance trailer naming the head the
+        suite ran against, so a published baseline can never silently claim to
+        have been computed from the commit it happens to sit on.
         """
         steps = _publisher_job()["steps"]
         assert isinstance(steps, list)
@@ -549,31 +558,60 @@ class TestPublisherWorkflow:
         assert push_steps, "no step in publish-baseline pushes the baseline"
 
         for step in push_steps:
-            run = str(step["run"])
-            assert "git rebase origin/dev" in run, (
-                f"step {step.get('name')!r} pushes the baseline without "
-                "rebasing onto the current origin/dev, so a merge landing "
-                "during the suite rejects it non-fast-forward and the "
-                "baseline is lost (run 34008081727)"
+            name = step.get("name")
+            code = "\n".join(
+                line
+                for line in str(step["run"]).splitlines()
+                if not line.strip().startswith("#")
             )
-            assert "git fetch origin dev" in run, (
-                f"step {step.get('name')!r} rebases without fetching first, "
-                "so it rebases onto a stale origin/dev"
+            assert "git rebase" not in code, (
+                f"step {name!r} rebases to land the baseline. An unchecked "
+                "rebase can stop on a conflict and leave the repository "
+                "mid-rebase while the loop burns its remaining attempts, and "
+                "a rebased commit hides that its content was computed against "
+                "an older tree. Re-apply the computed file onto dev's current "
+                "head instead."
             )
-            # The retry must actually loop, not just rebase once and give up.
-            assert "for attempt in" in run, (
-                f"step {step.get('name')!r} has no retry loop around the "
-                "push, so a second concurrent merge still loses the baseline"
+            assert "git fetch origin dev" in code, (
+                f"step {name!r} does not fetch dev before re-attempting, so it "
+                "re-applies onto a stale origin/dev"
+            )
+            assert "if ! git fetch origin dev" in code, (
+                f"step {name!r} does not check whether the fetch succeeded, so "
+                "a transport failure silently re-applies onto a stale ref"
+            )
+            assert "git reset --hard origin/dev" in code, (
+                f"step {name!r} does not reset onto dev's current head, so the "
+                "re-apply is not conflict-free"
+            )
+            assert "for attempt in" in code, (
+                f"step {name!r} has no retry loop around the push, so a second "
+                "concurrent merge still loses the baseline"
+            )
+            assert "git push origin HEAD:dev" in code, (
+                f"step {name!r} loops without pushing the baseline to dev"
+            )
+            assert "Onex-Computed-From" in code, (
+                f"step {name!r} publishes the baseline without recording the "
+                "dev head the suite was computed from, so its staleness is "
+                "unreadable after the fact"
             )
 
     def test_committed_baseline_loads_through_the_publishers_own_loader(
         self,
     ) -> None:
-        """AC4's repo-side half: whatever is committed must stay parseable.
+        """A standing guard, deliberately NOT bound to an acceptance criterion.
 
-        The publisher writes this file and the PR gate reads it, so a baseline
-        that the publisher's own loader cannot read would strand every open PR
-        with no way to baseline a dev-side failure.
+        It passes at the merge base too, because the committed baseline is
+        already loadable there, so it proves nothing this change introduces and
+        contracts/OMN-22128.yaml binds no AC to it. It is kept because the
+        publisher writes this file and the PR gate reads it: a baseline the
+        publisher's own loader could not read would strand every open PR with
+        no way to baseline a dev-side failure, and nothing else asserts that.
+
+        `publisher` is the module-level importlib load of
+        scripts/publish_test_failure_baseline.py near the top of this file, the
+        same object the rest of the module's publisher tests use.
         """
         assert _BASELINE_FILE.exists(), f"{_BASELINE_FILE} is missing"
         # Reached through an Any-typed alias rather than publisher.<attr>, so
