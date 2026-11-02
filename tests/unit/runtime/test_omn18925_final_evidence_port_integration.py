@@ -27,8 +27,19 @@ from omnibase_infra.runtime.service_delegation_dispatch_port import (
     RuntimeDelegationDispatchPort,
 )
 from omnibase_infra.runtime.service_pattern_b_broker import TerminalPayload
+from tests.helpers.cli_registry_stand_in import (
+    install_stand_in_registry,
+    wiring_authority,
+)
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _declared_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dispatch with no budget arguments resolves the class's declared budget (OMN-21604)."""
+    install_stand_in_registry(monkeypatch, wiring_authority())
+
 
 _SCRIPTS_DIR = Path(__file__).parents[3] / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:

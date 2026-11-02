@@ -1,0 +1,92 @@
+# Design-review verdict: host bring-up run (OMN-21882)
+
+Verdict: **PASS with conditions.** The run design of section 4.5 of the host
+bring-up plan (OMN-19130) may be built as T3, under the five conditions below.
+
+Reviewed against the committed TLC output in this directory, bound to
+`model.sha256` (the sha256 of `HostBringup.tla`, then each cfg in sorted
+order). TLC2 Version 2026.10.30.154139 (rev: 090e85c), `-workers 4`, Java
+Adoptium 17.0.20.1 in `eclipse-temurin:17-jre-alpine` on lab host h051,
+tla2tools.jar sha256 `011267fca25d0752cf18894dd585cd28b96960c112ea8a20b823ea770e7e10cd`.
+
+| Config | Expected | TLC result | Distinct states |
+| --- | --- | --- | --- |
+| Model.cfg | pass all eight invariants | No error has been found, 0 states left on queue | 1884189 |
+| mut_regrant_same_fence.cfg | counterexample | OneActivePerFence violated | 130 |
+| mut_sticky_reads.cfg | counterexample | NeedsReadSatisfied violated | 16868 |
+| mut_wait_timeout_passes.cfg | counterexample | WaitNeverPassesUnchecked violated | 11921 |
+| mut_terminal_unguarded.cfg | counterexample | AtMostOneTerminal violated | 348 |
+| mut_no_abandon.cfg | counterexample | AbandonedClosed violated | 249 |
+| mut_owed_not_chained.cfg | counterexample | AbandonedClosed violated | 1456 |
+| mut_release_before_terminal.cfg | counterexample | AbandonedClosed violated | 26408 |
+| mut_grace_le_timeout.cfg | counterexample | NoLandAfterSuccessorVerify violated | 62846 |
+| mut_ext_no_renew.cfg | counterexample | NoLandAfterSuccessorVerify violated | 21498 |
+| mut_cmp_before_lock.cfg | counterexample | StaleHolderRefused violated | 2288 |
+| mut_no_lock.cfg | counterexample | NoActionOutsideLock violated | 283 |
+| wit_stale_refused.cfg | witness violated | StaleWitness violated | 1579 |
+| wit_abandoned_emitted.cfg | witness violated | AbandonedWitness violated | 244 |
+| wit_ext_lands.cfg | witness violated | ExtLandsWitness violated | 2837 |
+| wit_wait_passes.cfg | witness violated | WaitPassesWitness violated | 18050 |
+
+Distinct-state counts of a violated config are where TLC stopped, and vary
+with the worker count; the Model.cfg count does not.
+
+## Findings
+
+1. All eight invariants of the plan's T0 hold over the bounded model (3 runs,
+   3 targets with needs a <- b <- c, time 0..4, grace 2, action timeout 1,
+   2 kills, 1 regression), and every mutant breaks the invariant it is named
+   for. The four witnesses are violated, so a stale holder refused at the
+   comparison, an `abandoned` terminal, an external action landing and a wait
+   passing are all reachable in the passing model; its zeros are not vacuous.
+2. `lease_grace_s` above the action timeout is not enough on its own: the
+   grace must run from the start of the external action. A lease renewed only
+   between actions lets a successor take over inside the window of an action
+   already in flight (`mut_ext_no_renew`). The model renews at each external
+   action start, and the plan's words "expired by `lease_grace_s`, which is
+   longer than that timeout" leave this implicit.
+3. The plan says the next holder "reads the prior run id" from the lease. One
+   id is not enough: a holder killed after it took over and before it emitted
+   `abandoned` for its predecessor leaves that predecessor with no terminal
+   (`mut_owed_not_chained`). The lease must carry the set of run ids still owed
+   a terminal, and the new holder adds the previous holder to it.
+4. A run must emit its own terminal before it frees the lease. Freed first, a
+   kill between the two leaves a run that no lease owes (`mut_release_before_terminal`).
+5. A stale holder that is refused and a successor that emits `abandoned` for it
+   race for the same run id. The terminal emit must add nothing when one is
+   there, keyed on the run id (`mut_terminal_unguarded`). Which verdict the
+   run id then carries depends on who is first; a refused stale run must not
+   report `completed`.
+6. The fence comparison belongs inside the lock (`mut_cmp_before_lock`) and no
+   host action may run outside it (`mut_no_lock`); `mut_sticky_reads` shows the
+   plan must use only the reads of the current pass, and `mut_wait_timeout_passes`
+   that a wait timeout stops the run and never carries on.
+
+## Conditions on T3
+
+1. The lease file holds the set of run ids owed an `abandoned` terminal, not
+   one prior run id; takeover adds the previous holder, and each emit removes
+   one id.
+2. The terminal emit is if-absent on the run id, atomic with the append, and
+   every path that ends a run (completion, refusal, wait timeout, abandon) uses it.
+3. A run emits its terminal first, then releases the lease.
+4. Starting an external action renews the lease to at least start plus
+   `lease_grace_s`, and `lease_grace_s` exceeds the action's hard timeout.
+5. A wait that reaches `wait_timeout_s` ends the run and prints the person line;
+   it never counts as passed.
+
+## Not modelled
+
+- The lease is taken at the start of a run; the plan takes it at `root-access`
+  and runs the targets before it without one. They act only on the launching
+  host, a repository or a person, so the model leaves them out.
+- A host action is one atomic step under the lock. A takeover that waits on the
+  same lock is therefore not tested against a half-run script; the kernel
+  releasing a killed holder's lock is modelled.
+- An external action's rows are one boolean per target. That a stale run can
+  re-apply an older revision's rows, and the next pass removes them, is the
+  plan's argument and is not checked here.
+- A run waiting on a person renews the lease in the model but nothing forces
+  it to. A wait that does not renew is refused at its next comparison once a
+  successor has taken over: safe, but the person line then comes from the
+  successor.
