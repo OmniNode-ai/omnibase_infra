@@ -127,6 +127,7 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
 )
@@ -413,7 +414,6 @@ if TYPE_CHECKING:
     )
     from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
-from omnibase_infra.handlers.handler_package_announcer import load_boot_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +426,7 @@ _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 # OMN-14507: staged rollout for the auto-wired consume boundary DLQ fix.
 # DEFAULT OFF (warn-first) -- see _boundary_dlq_enabled() below.
 _BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
-_BOUNDARY_DLQ_MAX_ATTEMPTS = load_boot_runtime_config().boundary_dlq_max_attempts
+_BOUNDARY_DLQ_MAX_ATTEMPTS = TIMEOUTS.boundary_dlq_max_attempts
 _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
 
 # OMN-14498 / OMN-15029: strong references to the detached DLQ-routing tasks
@@ -10376,9 +10376,11 @@ async def subscribe_wired_contract_topics(
             )
         )
 
+    knobs = readiness_config or ModelTopicReadinessConfig()
     for result in _prioritize_subscription_results(
         report,
         result_appliers_by_contract,
+        knobs.priority_contracts,
     ):
         if result.outcome is not EnumWiringOutcome.WIRED:
             # OMN-17372: this was the one filter of the six that logged
@@ -10474,7 +10476,6 @@ async def subscribe_wired_contract_topics(
             continue
         eligible.append((result, contract))
 
-    knobs = readiness_config or ModelTopicReadinessConfig()
     # Bounded parallelism across contracts; each contract keeps its own
     # provision->ready->attach order (§3.9).
     semaphore = asyncio.Semaphore(knobs.max_concurrent_contract_attach)
@@ -10565,7 +10566,7 @@ async def _split_boot_set_by_demand(
         result: ModelContractWiringResult,
         contract: ModelDiscoveredContract,
     ) -> None:
-        for attempt in range(1, DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS + 1):
+        for attempt in range(1, TIMEOUTS.not_ready_retry_max_attempts + 1):
             outcome = await start(result, contract)
             if outcome.status is EnumContractAttachStatus.ATTACHED:
                 logger.info(
@@ -10585,7 +10586,7 @@ async def _split_boot_set_by_demand(
                 outcome.status.value,
                 outcome.detail,
                 attempt,
-                DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS,
+                TIMEOUTS.not_ready_retry_max_attempts,
             )
             await asyncio.sleep(DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS)
 
@@ -10770,9 +10771,6 @@ async def _interleave_contract(
 # Bounded background NOT_READY reconciliation (OMN-15215, OMN-13237 follow-up).
 DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS: float = 30.0
 DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS: float = 30.0
-DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = (
-    load_boot_runtime_config().not_ready_retry_max_attempts
-)
 
 
 async def reattach_not_ready_contracts(
@@ -10916,7 +10914,7 @@ async def run_not_ready_reconciliation_loop(
     core_runtime_owners: Mapping[str, str] | None = None,
     initial_delay_seconds: float = DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS,
     backoff_seconds: float = DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS,
-    max_attempts: int = DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS,
+    max_attempts: int = TIMEOUTS.not_ready_retry_max_attempts,
     on_attempt: Callable[
         [dict[str, tuple[str, ...]], tuple[ModelContractAttachResult, ...]], None
     ]
@@ -11044,25 +11042,23 @@ def _prioritize_subscription_results(
     report: ModelAutoWiringReport,
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier]
     | None = None,
+    priority_contracts: Sequence[str] = (),
 ) -> tuple[ModelContractWiringResult, ...]:
-    """Return wired results with explicitly-applied contracts first.
+    """Return wired results in subscription order.
 
-    Contract-specific result appliers represent durable side effects such as
-    projection writes. Subscribing them before the generic backlog avoids
-    missing readiness-critical events during long Kafka group-join startup.
+    *priority_contracts* (runtime policy contract, OMN-18087) come first, in
+    order, then contracts with a result applier (durable side effects such as
+    projection writes, subscribed before the generic backlog so readiness-critical
+    events are not missed). The sort is stable within each rank.
     """
-    if not result_appliers_by_contract:
-        return tuple(report.results)
-
-    priority_contracts = frozenset(result_appliers_by_contract)
-    indexed_results = tuple(enumerate(report.results))
+    rank = {name: index for index, name in enumerate(priority_contracts)}
+    appliers = frozenset(result_appliers_by_contract or ())
     return tuple(
-        result
-        for _, result in sorted(
-            indexed_results,
-            key=lambda item: (
-                0 if item[1].contract_name in priority_contracts else 1,
-                item[0],
+        sorted(
+            report.results,
+            key=lambda r: (
+                rank.get(r.contract_name, len(rank)),
+                r.contract_name not in appliers,
             ),
         )
     )

@@ -68,8 +68,6 @@ capabilities:
     description: Announce installed contracts and build the node catalog before the container exists.
 runtime_config:
   catalog_settle_timeout_seconds: 60.0
-  boundary_dlq_max_attempts: 3
-  not_ready_retry_max_attempts: 5
 error_handling:
   retry_policy:
     max_retries: 0
