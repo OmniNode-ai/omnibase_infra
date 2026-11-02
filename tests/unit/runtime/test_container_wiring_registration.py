@@ -96,12 +96,18 @@ class TestWireRegistrationHandlers:
         )
 
         registered_interfaces: list[type] = []
+        instances: dict[type, object] = {}
 
-        async def capture_register(interface: type, **kwargs) -> None:
+        async def capture_register(interface: type, **kwargs: object) -> None:
             registered_interfaces.append(interface)
+            instances[interface] = kwargs["instance"]
+
+        async def resolve(interface: type) -> object:
+            return instances[interface]
 
         mock_registry = MagicMock()
         mock_registry.register_instance = AsyncMock(side_effect=capture_register)
+        mock_registry.resolve_service = AsyncMock(side_effect=resolve)
 
         mock_container = MagicMock()
         mock_container.service_registry = mock_registry
@@ -114,6 +120,8 @@ class TestWireRegistrationHandlers:
 
         assert HandlerNodeHeartbeat in registered_interfaces
         assert ProtocolNodeHeartbeat in registered_interfaces
+        # The protocol binding shares the container's heartbeat instance.
+        assert instances[ProtocolNodeHeartbeat] is instances[HandlerNodeHeartbeat]
 
     @pytest.mark.asyncio
     async def test_custom_liveness_interval_passed_to_handler(self) -> None:
