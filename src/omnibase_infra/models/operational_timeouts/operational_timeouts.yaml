@@ -48,3 +48,7 @@ timeouts:
   kill_wait_seconds: 5.0
   # Tool execution adapter: wait of one orchestrator call.
   tool_execution_seconds: 30.0
+  # Auto-wired consume boundary: dispatch attempts of one delivery before the
+  # DLQ, and attach attempts of a NOT_READY contract (OMN-18087).
+  boundary_dlq_max_attempts: 3
+  not_ready_retry_max_attempts: 5
