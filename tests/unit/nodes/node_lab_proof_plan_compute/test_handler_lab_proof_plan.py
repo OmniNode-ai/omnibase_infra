@@ -202,7 +202,7 @@ def test_refuses_a_row_that_runs_by_hand() -> None:
 
 def test_refuses_a_lane_root_that_is_not_a_prover_directory() -> None:
     with pytest.raises(ValueError, match="lane_root"):
-        core_request(lane_root="/home/prover")
+        core_request(lane_root="/srv/prover")
     with pytest.raises(ValueError, match="lane_root"):
         core_request(lane_root="/")
 

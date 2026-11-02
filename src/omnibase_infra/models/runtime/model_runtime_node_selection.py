@@ -29,6 +29,8 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.model_node_identity import ModelNodeIdentity
+
 ENV_RUNTIME_NODE_SELECTION = "ONEX_RUNTIME_NODE_SELECTION"
 ENV_RUNTIME_NODE_EXCLUSION = "ONEX_RUNTIME_NODE_EXCLUSION"
 
@@ -80,6 +82,38 @@ class ModelRuntimeNodeSelection(BaseModel):
         if contract_name in self.excluded:
             return False
         return not self.contracts or contract_name in self.contracts
+
+    def consumer_service(self, service: str | None) -> str:
+        """Return the service name the kernel's own consumer groups are derived from.
+
+        A process bound to contracts by ``ONEX_RUNTIME_NODE_SELECTION`` runs the
+        same kernel as the main runtime and may share its ``KAFKA_INSTANCE_ID``
+        (the dedicated writer does, so its contract's group keeps committed
+        offsets). The kernel's own consumers (contract registry, plugins, savings,
+        runtime-error triage) take their group from this name, so two processes
+        reading the same ``runtime_config.yaml`` would otherwise be two members of
+        one group on a one-partition topic, one with an empty assignment
+        (OMN-18087). Unselected is the main runtime: its name is unchanged and its
+        committed offsets stay valid. The selected contract's own group is derived
+        from its package and contract name, not from this value.
+        """
+        name = service or "onex-kernel"
+        return "-".join((name, *self.contracts))
+
+    def kernel_identity(
+        self,
+        env: str,
+        service: str | None,
+        node_name: str,
+        version: str | None,
+    ) -> ModelNodeIdentity:
+        """Return the identity one of the kernel's own consumers joins its group under."""
+        return ModelNodeIdentity(
+            env=env,
+            service=self.consumer_service(service),
+            node_name=node_name,
+            version=version or "v1",
+        )
 
 
 __all__ = [

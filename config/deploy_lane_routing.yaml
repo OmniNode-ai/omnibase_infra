@@ -53,9 +53,9 @@
 # other requester, omnibase_infra included, stays on the default .201 instance
 # (operator RULING 2026-09-25T00:56:45Z: omnimarket may be proven on .202,
 # omnibase_infra stays .201-only). dev-200 (the .200 host, OMN-19543) carries no
-# route yet: its instance reads every record in its own group and skips each
-# one, until a route names it and a runner exists to verify a merge routed
-# there.
+# route and is retired (OMN-21909): its agent no longer runs, and a route may
+# name it only after the instance is brought back and a runner exists to verify
+# a merge routed there.
 #
 # verify: (OMN-19507 AC2) is how the per-merge verify job reads the instance a
 # merge was routed to: the lab-pass lane its receipt is emitted under, the
@@ -191,6 +191,13 @@ instances:
     # settles. Until then the freeze stops idle restore, idle converge and
     # every routed rebuild from recreating the full stack. No route names this
     # instance, so nothing waits on it. Lift it with the tenant overlay.
+    # OMN-21909: retired from the host on 2026-11-01 by operator agreement. The
+    # stack had no client, no consumer group and no database write since about
+    # 2026-10-28, so its containers are stopped with their volumes kept, its
+    # databases are exported to the lab, and its launchd agent is booted out.
+    # The row stays because the compose overlay and the tests pin it; bringing
+    # the instance back means the stack, the agent and this one value.
+    available: false
     flags:
       freeze:
         until: "2026-11-20T00:00:00Z"
