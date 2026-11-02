@@ -12,12 +12,18 @@ declares no deploy-scope DoD evidence).
 
 from __future__ import annotations
 
+import fcntl
+import os
 import re
+import stat
+import threading
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from scripts.ci import check_deploy_scope_dod as hook
 from scripts.ci.check_deploy_scope_dod import (
     FAIL_NO_EVIDENCE,
     FAIL_NO_TICKET,
@@ -221,3 +227,151 @@ def test_a_current_canonical_validator_still_imports(tmp_path: Path) -> None:
     )
     module = load_canonical_validator(home)
     assert hasattr(module, "parse_evidence_metadata")
+
+
+# ---------------------------------------------------------------------------
+# Verifier install lock (OMN-21913): no flock(1), one exclusive fcntl lock.
+# ---------------------------------------------------------------------------
+
+_TAG = "dev-20261101000200-abcdef012345"
+#: Everything of the real install script that runs before it reads the ``installed`` marker.
+_LOCK_PREAMBLE = hook._VERIFIER_INSTALL_SCRIPT.split('[[ -f "$2/installed"')[0]
+
+
+@pytest.fixture
+def no_flock_binary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A PATH whose ``flock`` is the macOS answer: command not found, rc 127."""
+    shim = tmp_path / "shim" / "flock"
+    shim.parent.mkdir()
+    shim.write_text(
+        "#!/bin/sh\necho 'flock: command not found' >&2\nexit 127\n", encoding="utf-8"
+    )
+    shim.chmod(shim.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{shim.parent}:{os.environ['PATH']}")
+
+
+def _use_timed_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, hold_seconds: float
+) -> Path:
+    """Run the real lock preamble, then a body that logs start and end around a sleep."""
+    log = tmp_path / "order.log"
+    body = f'echo start >> "{log}"; sleep {hold_seconds}; echo end >> "{log}"'
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(hook, "_VERIFIER_INSTALL_SCRIPT", _LOCK_PREAMBLE + body)
+    return log
+
+
+def test_the_install_script_takes_no_flock_command() -> None:
+    """macOS lab hosts ship no flock(1); the bash string must not call it (rc 127)."""
+    assert not re.search(r"(?<![.\w])flock\b", hook._VERIFIER_INSTALL_SCRIPT)
+
+
+@pytest.mark.usefixtures("no_flock_binary")
+def test_a_second_install_waits_for_the_first_on_one_lock_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    log = _use_timed_install(monkeypatch, tmp_path, 0.6)
+
+    threads = [
+        threading.Thread(target=hook.install_verifier, args=(_TAG,)) for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert log.read_text(encoding="utf-8").split() == ["start", "end"] * 2
+
+
+@pytest.mark.usefixtures("no_flock_binary")
+def test_an_install_blocks_while_a_peer_holds_the_lock_and_runs_after_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    log = _use_timed_install(monkeypatch, tmp_path, 0.1)
+    lock = tmp_path / "cache" / "onex-dod-verifier" / f"{_TAG}.lock"
+    lock.parent.mkdir(parents=True)
+    with lock.open("w") as peer:
+        fcntl.flock(peer, fcntl.LOCK_EX)
+        thread = threading.Thread(target=hook.install_verifier, args=(_TAG,))
+        thread.start()
+        time.sleep(1.0)
+        assert not log.exists(), "the install ran while a peer held the lock"
+        fcntl.flock(peer, fcntl.LOCK_UN)
+    thread.join(timeout=60)
+
+    assert log.read_text(encoding="utf-8").split() == ["start", "end"]
+
+
+@pytest.mark.usefixtures("no_flock_binary")
+def test_a_lock_path_that_cannot_be_opened_refuses_and_never_installs_unlocked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    log = _use_timed_install(monkeypatch, tmp_path, 0.1)
+    (tmp_path / "cache" / "onex-dod-verifier" / f"{_TAG}.lock").mkdir(parents=True)
+
+    with pytest.raises(DeployScopeHookError, match=r"failed \(rc="):
+        hook.install_verifier(_TAG)
+
+    assert not log.exists()
+
+
+@pytest.mark.usefixtures("no_flock_binary")
+def test_a_lock_that_cannot_be_taken_refuses_and_never_installs_unlocked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    log = _use_timed_install(monkeypatch, tmp_path, 0.1)
+    failing = tmp_path / "failing"
+    failing.mkdir()
+    (failing / "python3").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    (failing / "python3").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{failing}:{os.environ['PATH']}")
+
+    with pytest.raises(DeployScopeHookError, match=r"failed \(rc=1\)"):
+        hook.install_verifier(_TAG)
+
+    assert not log.exists()
+
+
+def test_an_unwritable_lock_directory_fails_the_hook_with_a_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The cache root is a file, so no lock can be created under it, as root too."""
+    blocker = tmp_path / "cache"
+    blocker.write_text("not a directory\n", encoding="utf-8")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(blocker))
+    monkeypatch.setattr(hook, "resolve_omni_home", lambda _root: tmp_path)
+    monkeypatch.setattr(
+        hook,
+        "load_canonical_validator",
+        lambda _home: SimpleNamespace(DEPLOY_EVIDENCE_GUIDANCE=""),
+    )
+    monkeypatch.setattr(
+        hook,
+        "classify_deploy_scope",
+        lambda **_kw: SimpleNamespace(
+            outcome=SKIP_NO_RUNTIME, exit_code=0, runtime_hits=(), detail=""
+        ),
+    )
+    monkeypatch.setattr(hook, "render", lambda *_a: None)
+    monkeypatch.setattr(hook, "read_verifier_tag", lambda _root: _TAG)
+    monkeypatch.setattr(hook, "read_head_contract", lambda _root, _ticket: "x: 1\n")
+
+    rc = hook.main(
+        [
+            "--changed-files",
+            "README.md",
+            "--pr-body",
+            "",
+            "--contracts-dir",
+            str(tmp_path),
+            "--subjects",
+            "fix(OMN-21913): subject",
+        ]
+    )
+
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "ERROR (fail-loud): installing omnimarket tag" in err
+    assert "Not a directory" in err

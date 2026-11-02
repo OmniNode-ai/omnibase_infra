@@ -466,7 +466,11 @@ _CITED_TICKET_RE = re.compile(r"OMN-[0-9]+")
 _VERIFIER_TAG_RE = re.compile(r"dev-[0-9]{14}-[0-9a-f]{12}")
 #: The repository the hosted reusable fetches the verifier source from.
 _VERIFIER_REPO = "OmniNode-ai/omnimarket"
-_VERIFIER_INSTALL_SCRIPT = '''set -euo pipefail; mkdir -p "$(dirname "$2")"; exec 9>"$2.lock"; flock 9; [[ -f "$2/installed" ]] && exit 0; rm -rf "$2"; git init -q "$2/src"; git -C "$2/src" fetch -q --depth 1 --no-tags "https://github.com/$VERIFIER_REPO.git" "refs/tags/$1"; commit="$(git -C "$2/src" rev-parse --verify "FETCH_HEAD^{commit}")"; [[ "$commit" == "${1##*-}"* ]] || { echo "tag $1 names commit $commit, whose first 12 characters differ from the tag suffix; the tag was moved, refusing it" >&2; exit 1; }; git -C "$2/src" checkout -q --detach "$commit"; uv venv -q --clear --python 3.13 "$2/venv"; UV_PROJECT_ENVIRONMENT="$2/venv" uv sync -q --project "$2/src" --frozen --no-dev --no-editable --no-config --python 3.13; echo "tag=$1 commit=$commit" > "$2/installed"'''
+#: The lock is ``fcntl.flock(9)`` from the hook's own ``python3`` (under ``uv run``): the
+#: kernel lock flock(1) takes, which macOS has no binary for. It lives on the open file
+#: description fd 9 names, so it is held until this shell exits. A lock that cannot be
+#: taken fails the install under ``set -e``.
+_VERIFIER_INSTALL_SCRIPT = '''set -euo pipefail; mkdir -p "$(dirname "$2")"; exec 9>"$2.lock"; python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)'; [[ -f "$2/installed" ]] && exit 0; rm -rf "$2"; git init -q "$2/src"; git -C "$2/src" fetch -q --depth 1 --no-tags "https://github.com/$VERIFIER_REPO.git" "refs/tags/$1"; commit="$(git -C "$2/src" rev-parse --verify "FETCH_HEAD^{commit}")"; [[ "$commit" == "${1##*-}"* ]] || { echo "tag $1 names commit $commit, whose first 12 characters differ from the tag suffix; the tag was moved, refusing it" >&2; exit 1; }; git -C "$2/src" checkout -q --detach "$commit"; uv venv -q --clear --python 3.13 "$2/venv"; UV_PROJECT_ENVIRONMENT="$2/venv" uv sync -q --project "$2/src" --frozen --no-dev --no-editable --no-config --python 3.13; echo "tag=$1 commit=$commit" > "$2/installed"'''
 #: Runs inside the released verifier's environment: reads a JSON map of
 #: ticket to contract text on stdin and writes ``contract_prerequisite``'s
 #: refusal (or null) for each, the call ``onex scm pr-create`` makes.
@@ -617,7 +621,7 @@ def install_verifier(tag: str) -> Path:
         scrub_git_location_env,
     )
 
-    cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    cache = os.environ.get("XDG_CACHE_HOME") or f"{os.environ['HOME']}/.cache"
     entry = Path(cache) / "onex-dod-verifier" / tag
     env = {**scrub_git_location_env(os.environ), "VERIFIER_REPO": _VERIFIER_REPO}
     done = subprocess.run(
@@ -626,7 +630,7 @@ def install_verifier(tag: str) -> Path:
         capture_output=True,
         text=True,
         env=env,
-        timeout=900,
+        timeout=15 * 60,
     )
     if done.returncode != 0:
         raise DeployScopeHookError(

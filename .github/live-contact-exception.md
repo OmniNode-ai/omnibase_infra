@@ -1,1 +1,1 @@
-Live-contact exception: the changed ratchet files are adequacy receipt data and a baseline list that name no external service, so there is no contact surface to record.
+Live-contact exception: the change replaces the flock(1) call around the verifier install with a Python fcntl lock, the install's own network fetch is unchanged, and the lock is exercised against real kernel locks and a real bash child.

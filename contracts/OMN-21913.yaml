@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-21913
+title: The deploy-scope-dod pre-push hook takes its install lock in Python, not with the flock binary macOS hosts do not ship
+summary: >-
+  Lane h101-flock-1102. The verifier install step of scripts/ci/check_deploy_scope_dod.py ran `flock 9` inside a bash string, which exits 127 on a macOS lab host. The install script now takes an exclusive fcntl.flock lock on the same `<entry>.lock` path through the Python that runs the hook, holds it on fd 9 until the install shell exits, and refuses the push when the lock cannot be taken.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21913-portable-install-lock
+    statement: Declared by this pull request; transcribed from the ticket's three criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the install step no longer calls the flock binary and holds an exclusive lock on the same lock path for its whole run -- falsifier: a pytest in tests/ci that starts two installs against one lock path and asserts the second waits for the first, plus a pytest that flock does not appear as a command in _VERIFIER_INSTALL_SCRIPT'
+      - id: AC2
+        statement: 'AC2: a lock that cannot be taken makes the hook exit non-zero with a message, never a pass -- falsifier: a pytest with an unwritable lock directory asserting rc != 0'
+      - id: AC3
+        statement: 'AC3: the hook runs to its verdict on a Mac lab host and on a Linux lab host -- falsifier: uv run pytest over the new tests on a Mac lab host and on a Linux lab host through lab-run, exit code recorded for each'
+evidence_requirements:
+  - kind: "tests"
+    description: "The install-lock tests in the deploy-scope hook's test module."
+    command: "uv run --frozen pytest tests/ci/test_check_deploy_scope_dod.py -q -n 0 --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21913-ac1-install-lock-is-fcntl
+    description: >-
+      AC1. The install script holds no flock command; two installs on one lock path run one after the other, an install blocks while a peer holds the lock and runs after release.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_check_deploy_scope_dod.py -q -n 0 --no-cov -k "takes_no_flock_command or second_install_waits or install_blocks_while_a_peer"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21913-ac2-untaken-lock-refuses
+    description: >-
+      AC2. A lock path that cannot be opened and a locker that fails each refuse without running the install, and an unwritable cache root makes the hook's main return non-zero with the install failure message.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_check_deploy_scope_dod.py -q -n 0 --no-cov -k "unwritable_lock_directory or lock_path_that_cannot_be_opened or lock_that_cannot_be_taken"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21913-ac3-runs-on-mac-and-linux
+    description: >-
+      AC3. The hook's test module, including the real tag-install tests, runs to exit 0 on the lab hosts; the placements and exit codes are in the pull request body.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_check_deploy_scope_dod.py tests/ci/test_verifier_tag_install_omn21853.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
