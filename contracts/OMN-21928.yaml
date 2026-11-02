@@ -127,3 +127,6 @@ dod_evidence:
           doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/run-forward-migrations.sh?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
           grep -q 'advisory lock .* was lost before' <<<"$doc"
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_forward_migration_advisory_lock.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
