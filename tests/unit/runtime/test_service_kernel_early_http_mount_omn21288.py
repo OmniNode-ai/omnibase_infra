@@ -105,9 +105,20 @@ def kernel_harness(
         yield port
 
 
-async def _stop_when_up(task: asyncio.Task[int]) -> int:
-    """End a booted kernel the way an operator does: SIGTERM."""
-    await asyncio.sleep(0.2)
+async def _stop_when_up(task: asyncio.Task[int], original_handler: object) -> int:
+    """End a booted kernel the way an operator does: SIGTERM.
+
+    The signal is sent only once the kernel has replaced the SIGTERM handler
+    this process had before ``bootstrap()`` ran, so it can never reach the
+    pytest process while the default disposition is still in place.
+    """
+    async with asyncio.timeout(30):
+        while signal.getsignal(signal.SIGTERM) == original_handler:
+            if task.done():
+                break
+            await asyncio.sleep(0.01)
+    if task.done():
+        return await task
     os.kill(os.getpid(), signal.SIGTERM)
     return await asyncio.wait_for(task, timeout=30)
 
@@ -136,6 +147,7 @@ async def test_mount_answers_while_wiring_is_still_running(kernel_harness: int) 
         ),
         patch("omnibase_infra.runtime.auto_wiring.wire_from_manifest", new=slow_wire),
     ):
+        original_handler = signal.getsignal(signal.SIGTERM)
         task = asyncio.create_task(bootstrap())
         try:
             await asyncio.wait_for(wiring_reached, timeout=60)
@@ -155,7 +167,7 @@ async def test_mount_answers_while_wiring_is_still_running(kernel_harness: int) 
             assert not wiring_finished
         finally:
             let_wiring_finish.set_result(None)
-        assert await _stop_when_up(task) == 0
+        assert await _stop_when_up(task, original_handler) == 0
 
 
 async def test_failing_factory_fails_boot_before_wiring_starts(
