@@ -10,7 +10,7 @@ and after, and the result is a scope violation unless exactly the one declared c
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_standalone_compose_recreate_outcome import (
@@ -176,6 +176,10 @@ class HandlerStandaloneComposeRecreate:
     def handle(
         self, request: ModelStandaloneComposeRecreateRequest
     ) -> ModelStandaloneComposeRecreateResult:
-        docker = self._container.get_service(ProtocolStandaloneComposeDocker)
+        docker_interface: type = ProtocolStandaloneComposeDocker
+        docker = cast(
+            "ProtocolStandaloneComposeDocker",
+            self._container.get_service(docker_interface),
+        )
         policy = self._container.get_service(ModelStandaloneComposeRecreatePolicy)
         return recreate_standalone_compose(docker, policy, request)

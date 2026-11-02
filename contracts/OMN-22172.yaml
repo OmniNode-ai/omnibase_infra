@@ -39,3 +39,12 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_standalone_compose_recreate_omn22172.py -q -n 0 -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2, AC4]
+  - id: dod-omn22172-ac1-deploy-probe
+    description: >-
+      Deploy probe. The handler GitHub serves at the checked-out commit defines the recreate effect. The probe reads the file from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_standalone_compose_recreate.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'class HandlerStandaloneComposeRecreate' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
