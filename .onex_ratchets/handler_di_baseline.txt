@@ -32,7 +32,6 @@ src/omnibase_infra/handlers/handler_topic_catalog_postgres.py 3
 src/omnibase_infra/handlers/handler_work_ledger_query.py 3
 src/omnibase_infra/handlers/handler_workspace_runtime_config_materializer.py 2
 src/omnibase_infra/handlers/models/graph/contract_descriptor.py 1
-src/omnibase_infra/handlers/models/mcp/model_mcp_handler_config.py 1
 src/omnibase_infra/handlers/placement/handler_placement_election.py 2
 src/omnibase_infra/handlers/placement/handler_placement_etcd.py 3
 src/omnibase_infra/handlers/placement/handler_placement_runtime.py 7

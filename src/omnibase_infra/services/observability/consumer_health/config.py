@@ -13,12 +13,13 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.models.network_binding import ModelLoopbackHealthServerBinding
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_CONSUMER_HEALTH
 
 logger = logging.getLogger(__name__)
 
 
-class ConfigConsumerHealthProjection(BaseSettings):
+class ConfigConsumerHealthProjection(ModelLoopbackHealthServerBinding, BaseSettings):
     """Configuration for the consumer health read-model Kafka consumer.
 
     Environment variables use the OMNIBASE_INFRA_CONSUMER_HEALTH_ prefix.
@@ -121,10 +122,6 @@ class ConfigConsumerHealthProjection(BaseSettings):
     # Health check
     health_check_port: int = Field(
         default=8094, ge=1024, le=65535, description="Port for HTTP health check"
-    )
-    health_check_host: str = Field(
-        default="127.0.0.1",  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
-        description="Host for health check server",
     )
     health_check_staleness_seconds: int = Field(
         default=300,
