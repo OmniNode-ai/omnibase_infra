@@ -18,15 +18,18 @@ Two figures are recorded because two lists exist:
   environment holds. It is the figure T28's after-reading is compared with.
 * ``repo_specs`` is the same provisioning code run over this repository's own
   contracts and standalone manifests, which is the list a unit test can build.
-  It is the figure the CI check holds the code to.
+  It is the figure the CI check holds the code to. The committed record is an
+  exact measurement: a fold re-records the smaller count in data, keeping the
+  next extra spec detectable rather than leaving headroom for later growth.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _READ_AT_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
 _COMMIT_SHA_PATTERN = r"^[0-9a-f]{40}$"
@@ -44,6 +47,13 @@ class ModelTopicBootBaseline(BaseModel):
     source: str = Field(min_length=1)
     repo_specs: int = Field(ge=0)
     repo_specs_measured_at: str = Field(pattern=_COMMIT_SHA_PATTERN)
+
+    @field_validator("read_at")
+    @classmethod
+    def _read_at_is_a_real_utc_timestamp(cls, value: str) -> str:
+        """Check calendar validity while preserving the recorded UTC spelling."""
+        datetime.fromisoformat(value)
+        return value
 
     @model_validator(mode="after")
     def _repo_list_is_part_of_the_boot_list(self) -> ModelTopicBootBaseline:
@@ -86,6 +96,15 @@ class ModelTopicBootBaseline(BaseModel):
     def repo_specs_over(self, spec_count: int) -> int:
         """Return how many specs ``spec_count`` is above the repo baseline."""
         return max(0, spec_count - self.repo_specs)
+
+    def check_repo_specs(self, spec_count: int) -> None:
+        """Refuse a provisioning list that exceeds this lane's recorded count."""
+        over = self.repo_specs_over(spec_count)
+        if over:
+            raise ValueError(
+                f"lane {self.lane!r} boot provisioning builds {spec_count} topic "
+                f"specs, exceeding the recorded {self.repo_specs} by {over}"
+            )
 
 
 __all__: list[str] = ["ModelTopicBootBaseline"]

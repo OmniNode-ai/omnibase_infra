@@ -212,7 +212,7 @@ dod_evidence:
     binds_ac: [AC8]
   - id: dod-omn21288-ac7-planted-spec-fails
     description: >-
-      The test builds the provisioning list through TopicProvisioner, appends one extra spec in _build_topic_specs (the method the constructor calls at boot) and requires the planted list to be over the record by one while the unplanted list is within it. The test file is new on this branch, so the run fails at the merge base.
+      The test builds the provisioning list through TopicProvisioner, discovers one extra spec from a real standalone manifest at boot and requires the planted list to be over the committed record by one while the unplanted list is within it. The baseline validator must raise ValueError for the planted list. The test file is new on this branch, so the run fails at the merge base.
     source: manual
     checks:
       - check_type: test_passes
@@ -228,6 +228,24 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "declared_value or typed or larger or lane"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC10]
+  - id: dod-omn21288-topic-baseline-calendar
+    description: >-
+      Reject impossible calendar dates, non-UTC timestamps and malformed measurement SHAs while accepting a real leap day. This exercises the typed baseline record loaded from the committed data file.
+    source: manual
+    binds_ac: [AC8]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -k 'read_time or measured_at' -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21288-topic-baseline-deploy-check
+    description: >-
+      Hosted-runner deployment check: construct the runtime provisioner over the repository contracts and standalone manifests, read its emitted boot-count log and apply the committed baseline validator. A real additional manifest must raise ValueError and a duplicate topic must leave the count unchanged. No broker, Docker daemon or running lane is required.
+    source: manual
+    binds_ac: [AC9, AC10]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py tests/integration/event_bus/test_topic_boot_baseline_record_omn21288.py -k 'planted or duplicate_manifest or within_the_recorded or declared_value or committed_repo_specs' -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21288-ac6-contract-http-mount-served
     description: >-
       Run the mount tests: a contract.yaml carrying an http_mount block is parsed, its FastAPI factory is built and its lifespan started by the runtime's aiohttp server, and real GET and POST requests on the server's bound port under the declared prefix are answered by the mounted application while /health keeps answering. The test file imports a module that does not exist at the merge base, so the run fails there. No container is created or restarted by this check.
