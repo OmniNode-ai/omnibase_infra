@@ -583,7 +583,11 @@ class ContractRegistrationEventRouter:
                 safe_error,
                 correlation_id,
                 exc_info=(RuntimeError, safe_error, None),
-                extra={"error_type": type(error).__name__},
+                extra={
+                    "error_type": type(error).__name__,
+                    "contract_name": event.node_name,
+                    "event_id": str(event.event_id),
+                },
             )
         finally:
             logger.debug(

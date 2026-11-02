@@ -140,6 +140,14 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/test_boot_attach_report_omn21590.py -q --no-cov -o addopts=''"
+  - id: dod-omn21590-announced-failure-diagnostics
+    description: "Distinct catalog contracts are processed in order after a reduction failure; the single error identifies the failed contract and event, only the successful contract executes intents, and exception messages, arguments and formatted traces contain no credentials."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/node_contract_registry_reducer/test_contract_registration_event_router.py -q --no-cov -o addopts='' -k 'announced_'"
 emergency_bypass:
   enabled: false
   justification: ""
