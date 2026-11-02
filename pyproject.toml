@@ -147,7 +147,7 @@ dependencies = [
     "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.66", # Kafka tracing
     "opentelemetry-instrumentation-redis>=0.48b0,<0.66", # Redis tracing
     # MCP (Model Context Protocol) integration
-    "mcp>=1.25.0,<3.0.0", # Anthropic MCP SDK for streamable HTTP transport
+    "mcp>=2.3.0,<3.0.0", # Anthropic MCP SDK for streamable HTTP transport
     # Additional infrastructure dependencies
     "httpx>=0.28.1,<0.29.0", # Modern HTTP client (>=0.27.1 required by MCP SDK)
     "tenacity>=9.0.0,<10.0.0", # Retry and resilience patterns
@@ -270,7 +270,7 @@ override-dependencies = [
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261031202655-5bb91ae7e720" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261101203942-2080333acfaf" }
 
 
 [tool.ruff]

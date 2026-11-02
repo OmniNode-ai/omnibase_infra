@@ -11,7 +11,7 @@ What these fixtures provide:
 - Infrastructure detection for conditional Consul integration
 
 What these fixtures do NOT provide:
-- Real MCP SDK server (mcp.server.fastmcp)
+- Real MCP SDK server (mcp.server.mcpserver)
 - Real MCP client connections
 - Actual streamable HTTP transport
 

@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumProjectionTopic(str, Enum):
     """Kafka topic enum for producer: projection.
@@ -18,4 +20,4 @@ class EnumProjectionTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    SNAPSHOT_CODING_AGENT_CORRELATION_TRACE_V1 = "onex.snapshot.projection.coding-agent.correlation-trace.v1"  # onex.snapshot.projection.coding-agent.correlation-trace.v1
+    SNAPSHOT_CODING_AGENT_CORRELATION_TRACE_V1 = contract_topic_value('nodes/node_coding_agent_fsm_reducer/contract.yaml', 'projection', 'SNAPSHOT_CODING_AGENT_CORRELATION_TRACE_V1')  # onex.snapshot.projection.coding-agent.correlation-trace.v1
