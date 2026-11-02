@@ -99,6 +99,7 @@ from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.models.model_retry_error_classification import (
     ModelRetryErrorClassification,
 )
+from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
@@ -133,8 +134,7 @@ def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
             parsed.append(IPv4Network(cidr, strict=False))
         except ValueError:
             logger.warning(
-                "Skipping malformed CIDR in LLM_ENDPOINT_CIDR_ALLOWLIST: %r",
-                cidr,
+                "Skipping malformed CIDR in LLM_ENDPOINT_CIDR_ALLOWLIST: %r", cidr
             )
     if not parsed:
         msg = (
@@ -298,7 +298,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     def _init_llm_http_transport(
         self,
         target_name: str,
-        max_timeout_seconds: float = 120.0,
+        max_timeout_seconds: float = RUNTIME_TIMEOUTS.llm_transport_max_seconds,
         max_retry_after_seconds: float = 30.0,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -322,7 +322,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         # Initialize circuit breaker from parent mixin
         self._init_circuit_breaker(
             threshold=5,
-            reset_timeout=60.0,
+            reset_timeout=RUNTIME_TIMEOUTS.circuit_breaker_reset_seconds,
             service_name=target_name,
             transport_type=EnumInfraTransportType.HTTP,
             half_open_successes=1,
@@ -669,7 +669,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         payload: dict[str, JsonType],
         correlation_id: UUID,
         max_retries: int = 3,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = RUNTIME_TIMEOUTS.llm_post_seconds,
     ) -> dict[str, JsonType]:
         """Execute an HTTP POST to an LLM endpoint with retry and circuit breaker.
 

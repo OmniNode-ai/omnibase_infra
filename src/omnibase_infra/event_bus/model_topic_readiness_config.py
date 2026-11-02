@@ -12,8 +12,7 @@ This model is pure (no env reads). The runtime kernel — the approved
 overlay-resolution boundary — resolves any operator overrides and constructs the
 config explicitly; see ``service_kernel.resolve_topic_readiness_config``.
 
-Related Tickets:
-    - OMN-13237: Per-contract scoped topic provisioning at runtime boot.
+Related Tickets: OMN-13237 (per-contract scoped topic provisioning at boot).
 """
 
 from __future__ import annotations
@@ -39,8 +38,8 @@ class ModelTopicReadinessConfig(BaseModel):
         readiness_timeout_seconds: Total budget per contract's topic-set confirm.
         readiness_poll_interval_ms: Metadata poll cadence.
         max_attempts: Bounded retry count for the metadata poll.
-        max_concurrent_contract_attach: Bounded parallelism across contracts
-            (each contract still does provision->ready->attach in order).
+        max_concurrent_contract_attach: Bounded parallelism across contracts.
+        priority_contracts: Contracts subscribed first, in order (OMN-18087).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -55,6 +54,7 @@ class ModelTopicReadinessConfig(BaseModel):
     max_concurrent_contract_attach: int = Field(
         default=DEFAULT_MAX_CONCURRENT_CONTRACT_ATTACH, ge=1
     )
+    priority_contracts: tuple[str, ...] = ()
 
 
 __all__: list[str] = [
