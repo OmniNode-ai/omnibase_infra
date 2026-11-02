@@ -7,16 +7,17 @@ this module. The model has no field defaults, so a block that omits a value
 fails to load rather than falling back to a literal. Every field is strict: a
 fractional or float-typed value for an integer field, and a boolean or a
 non-finite value for a float field, is refused rather than truncated or coerced.
-The file is read through ``importlib.resources``, so the package loads from a
-directory, a zipped wheel or a zip import alike. The file ships with the wheel because hatchling includes
+The file is resolved beside this module with ``Path(__file__)``, never through
+``importlib.resources``, so importing the package does not touch the resource
+loader (``test_model_imports_do_not_read_the_contract`` pins that). The file ships with the wheel because hatchling includes
 every file under ``src/omnibase_infra`` (``[tool.hatch.build.targets.wheel]``).
 """
 
 from __future__ import annotations
 
 from functools import cache
-from importlib.resources import files
 from importlib.resources.abc import Traversable
+from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -24,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
-_TIMEOUTS_RESOURCE: Traversable = files(__package__).joinpath("runtime_timeouts.yaml")
+_TIMEOUTS_RESOURCE: Traversable = Path(__file__).with_name("runtime_timeouts.yaml")
 
 
 class ModelRuntimeTimeouts(BaseModel):
