@@ -47,7 +47,7 @@ def test_the_six_handler_writers_are_the_python_dash_m_handler_containers() -> N
 
 def test_other_entry_points_match_the_plan_table() -> None:
     kinds = Counter(
-        "consumer" if c["family"].endswith(".consumer") else c["family"]
+        c["family"]
         for c in _containers()
         if c["verdict"] == "remove" and c["container"] not in HANDLER_WRITERS
     )
