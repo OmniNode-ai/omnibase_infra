@@ -46,21 +46,21 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 def _emit_skill_routing_error(
     node_id: str,
     result: EnumWorkflowResult,
-    runtime: ExecutionGraphHostingRuntime,
+    message: str | None,
 ) -> None:
     """Emit the documented ``SkillRoutingError`` JSON envelope to stdout.
 
     Skill shells (e.g. ``golden_chain_sweep``) dispatch via ``onex node`` and
     document that a non-zero exit surfaces this envelope rather than a raw
     traceback (OMN-8724); its shape matches ``omnibase_core.cli.cli_run_node.
-    _emit_error``. A handler that refuses with a typed result leaves
-    ``last_error`` unset, so its ``error_message`` is the message and a hook
-    such as ci-live-contact names its fix on stdout (OMN-19998).
+    _emit_error``. ``message`` is resolved by the caller: a
+    handler that refuses with a typed result leaves ``last_error`` unset and
+    carries its reason in ``error_message``, so a hook such as ci-live-contact
+    names its fix on stdout (OMN-19998).
     """
     envelope: dict[str, str] = {
         "error_type": "SkillRoutingError",
-        "message": runtime.last_error
-        or getattr(runtime.handler_result, "error_message", None)
+        "message": message
         or f"Node '{node_id}' run did not complete (result={result.value}).",
         "node_id": node_id,
         "result": result.value,
@@ -266,7 +266,7 @@ def run_node_by_name(
         input_path=input_path,
         timeout=timeout,
     )
-    result = runtime.run()
-    if result is not EnumWorkflowResult.COMPLETED:
-        _emit_skill_routing_error(node_name, result, runtime)
+    if (result := runtime.run()) is not EnumWorkflowResult.COMPLETED:
+        refusal = getattr(runtime.handler_result, "error_message", None)
+        _emit_skill_routing_error(node_name, result, runtime.last_error or refusal)
     sys.exit(runtime.exit_code)

@@ -72,10 +72,20 @@ def _run(repo: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[int, str]:
 
 
 def _envelope(output: str) -> dict[str, str]:
-    start = output.rfind('{\n  "error_type"')
-    assert start != -1, f"no SkillRoutingError envelope in output: {output!r}"
-    envelope: dict[str, str] = json.loads(output[start:])
-    return envelope
+    """Return the last JSON object in ``output`` that carries an ``error_type``."""
+    decoder = json.JSONDecoder()
+    found: dict[str, str] | None = None
+    for index, char in enumerate(output):
+        if char != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(output[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and "error_type" in candidate:
+            found = candidate
+    assert found is not None, f"no SkillRoutingError envelope in output: {output!r}"
+    return found
 
 
 def test_refused_ci_tooling_change_names_its_fix_in_the_envelope(
