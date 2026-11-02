@@ -117,6 +117,8 @@ import logging
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
@@ -148,6 +150,16 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
 )
 from omnibase_infra.utils import sanitize_error_message
 
+if TYPE_CHECKING:
+    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+    from omnibase_infra.event_bus.kafka_transport import KafkaTransport
+    from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forwarder_runtime_config import (
+        ModelGatewayForwarderRuntimeConfig,
+    )
+    from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror_bus_source import (
+        ProtocolLaneMirrorSource,
+    )
+
 _MESSAGE_ID_HEADER = "message_id"
 _CORRELATION_ID_HEADER = "correlation_id"
 
@@ -163,6 +175,15 @@ this closes.
 """
 
 logger = logging.getLogger(__name__)
+
+
+def _remember_destination(
+    ring: OrderedDict[tuple[str, int, int], None], coordinate: tuple[str, int, int]
+) -> None:
+    """Record a destination coordinate, evicting the oldest past the window."""
+    ring[coordinate] = None
+    while len(ring) > DESTINATION_COORDINATE_WINDOW:
+        ring.popitem(last=False)
 
 
 class NodeLaneMirror:
@@ -270,6 +291,50 @@ class NodeLaneMirror:
         self._refused_lanes.pop(lane, None)
         self._destination_coordinates[lane] = OrderedDict()
 
+    @staticmethod
+    def open_source(
+        config: ModelGatewayForwarderRuntimeConfig,
+        transports: Mapping[str, KafkaTransport],
+        source_bus: ProtocolEventBus | None,
+    ) -> ProtocolLaneMirrorSource:
+        """The unstarted source leg the overlay selected (OMN-21950).
+
+        Lives on the mirror so the runtime entry point reaches the source and
+        guard through the one node class it already imports.
+        """
+        # Local import: the source module imports the runtime config model,
+        # which imports this module's config model.
+        from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror_bus_source import (
+            build_lane_mirror_source,
+        )
+
+        source = build_lane_mirror_source(config, transports, source_bus)
+        if source is None:
+            raise ValueError("a lane mirror requires a declared lane_mirror source")
+        return source
+
+    async def guard(
+        self,
+        *,
+        producers: Mapping[str, KafkaTransport],
+        shutdown_event: asyncio.Event,
+        interval_seconds: int,
+        health_path: Path | None,
+    ) -> None:
+        """Run this mirror's guard loop (OMN-17201) until shutdown."""
+        # Local import: the guard module imports this one.
+        from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror_guard import (
+            run_lane_mirror_guard,
+        )
+
+        await run_lane_mirror_guard(
+            mirror=self,
+            producers=producers,
+            shutdown_event=shutdown_event,
+            interval_seconds=interval_seconds,
+            health_path=health_path,
+        )
+
     def destination_topic(self, source_topic: str) -> str:
         """The physical topic a declared source topic is republished under.
 
@@ -280,14 +345,6 @@ class NodeLaneMirror:
         """
         tenant = self._tenant_slug if source_topic in self._tenant_topics else None
         return resolve_physical_topic(source_topic, tenant_slug=tenant)
-
-    def _remember_destination(
-        self, lane: str, coordinate: tuple[str, int, int]
-    ) -> None:
-        ring = self._destination_coordinates[lane]
-        ring[coordinate] = None
-        while len(ring) > DESTINATION_COORDINATE_WINDOW:
-            ring.popitem(last=False)
 
     def _lane_that_echoed(self, message: ModelTransportMessage) -> str | None:
         """Return the lane whose destination coordinate this source record IS.
@@ -520,7 +577,9 @@ class NodeLaneMirror:
                     now=datetime.now(UTC),
                 )
                 if receipt is not None:
-                    self._remember_destination(lane, receipt.coordinate)
+                    _remember_destination(
+                        self._destination_coordinates[lane], receipt.coordinate
+                    )
 
             await self._store.mark_processed(
                 envelope_id,

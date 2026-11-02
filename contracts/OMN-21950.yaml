@@ -14,7 +14,7 @@ requirements:
       - id: AC2
         statement: "AC2: a lane-mirror record from two tenants lands on two different tenant topics and each request reaches only its originating tenant's ingress -- falsifier: uv run pytest tests/unit/nodes/node_bus_forwarder_effect -k tenant_topic -q"
       - id: AC3
-        statement: "AC3: the lane records in a comment whether any existing omnibase_core validation script or the two stage-1 checks of OMN-21433 already fails a config model or handler constructor that names a concrete bus type, from reading their implementations -- falsifier: the comment on this ticket cites the files read and the result"
+        statement: "AC3: the lane records in a file whether any existing omnibase_core validation script or the two stage-1 checks of OMN-21433 already fails a config model or handler constructor that names a concrete bus type, from reading their implementations -- falsifier: docs/decisions/omn-21950-stage1-read.md cites the files read and the result"
 evidence_requirements:
   - kind: tests
     description: The focused forwarder tests pin the container source and the tenant topic mapping.
@@ -43,11 +43,20 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn21950-ac3-stage1-read
-    description: The stage-1 read is recorded in the pull request body as a table of the files read and the result; this check reruns the focused tests the record sits beside.
+    description: The stage-1 read is recorded in docs/decisions/omn-21950-stage1-read.md with the files read and the result; the check fails if the record loses a file row or the result line.
     source: manual
     checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect -q --no-cov -k "in_memory_source or source_bus_container or tenant_topic"
+      - check_type: command
+        check_value: "grep -q 'validator_event_chain_walker.py' docs/decisions/omn-21950-stage1-read.md && grep -q 'validate-no-direct-io.py' docs/decisions/omn-21950-stage1-read.md && grep -q '^Result: none of these fails' docs/decisions/omn-21950-stage1-read.md"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn21950-deploy-source-from-container
+    description: The deploy-scoped forwarder runtime config carries the container-selected lane-mirror source property at the pinned commit; the grep fails if the property is absent.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_bus_forwarder_effect/models/model_gateway_forwarder_runtime_config.py?ref=b4d97c0ff43ceb00a2fb1646d0ef4995bd28a7e9 --jq .content | base64 -d | grep -qF 'def lane_mirror_source_from_container'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

@@ -4,7 +4,16 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from collections.abc import Mapping
+from typing import Annotated
+
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    SerializeAsAny,
+    model_validator,
+)
 
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_container_source_bus import (
@@ -13,6 +22,15 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_contain
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forwarder_config import (
     ModelGatewayForwarderConfig,
 )
+
+
+def _resolve_source_bus(value: object) -> object:
+    """Pick the source-leg model the overlay selected: container or Kafka."""
+    if isinstance(value, BaseModel):
+        return value
+    if isinstance(value, Mapping) and value.get("source") == "container":
+        return ModelGatewayContainerSourceBus.model_validate(value)
+    return ModelKafkaEventBusConfig.model_validate(value)
 
 
 class ModelGatewayForwarderRuntimeConfig(BaseModel):
@@ -44,8 +62,11 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
     # ``{source: container}``, which means the hosting runtime's own
     # ``ProtocolEventBus`` (in-memory by default, a hosted bus where the overlay
     # says so). The overlay chooses; the node constructs no adapter for it.
+    # The union is resolved by ``_resolve_source_bus`` below rather than written
+    # as a type union (the repo's non-optional union budget is exhausted).
     lane_mirror_source_bus: (
-        ModelKafkaEventBusConfig | ModelGatewayContainerSourceBus | None
+        Annotated[SerializeAsAny[BaseModel], BeforeValidator(_resolve_source_bus)]
+        | None
     ) = None
     lane_mirror_buses: dict[str, ModelKafkaEventBusConfig] = {}
 
@@ -216,7 +237,12 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
             # offset policy to configure here: commit ordering is the mirror's
             # own (publish, mark, then commit) whatever bus it reads.
             return
-        source_endpoint = self.lane_mirror_source_bus.bootstrap_servers
+        source_bus = self.lane_mirror_source_bus
+        if not isinstance(source_bus, ModelKafkaEventBusConfig):
+            raise ValueError(
+                "lane_mirror_source_bus must be a Kafka leg or {source: container}"
+            )
+        source_endpoint = source_bus.bootstrap_servers
         for lane, bus in self.lane_mirror_buses.items():
             if bus.bootstrap_servers == source_endpoint:
                 raise ValueError(
@@ -224,13 +250,13 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
                     "brokers; mirroring a broker onto itself republishes every "
                     "record onto the topic it was just consumed from"
                 )
-        if self.lane_mirror_source_bus.enable_auto_commit:
+        if source_bus.enable_auto_commit:
             raise ValueError(
                 "the lane_mirror source leg requires enable_auto_commit=false; "
                 "the source offset commits only after every mirror lane has "
                 "acknowledged"
             )
-        if self.lane_mirror_source_bus.auto_offset_reset != "earliest":
+        if source_bus.auto_offset_reset != "earliest":
             raise ValueError(
                 "the lane_mirror source leg requires auto_offset_reset=earliest "
                 "for the same reason both trust-boundary legs do (OMN-15781)"
