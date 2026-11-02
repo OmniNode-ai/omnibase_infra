@@ -184,7 +184,7 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
-  - id: dod-omn21288-t5-ac1-head-holds-dev-and-touched-tests-pass
+  - id: dod-omn21288-t5-ac1-head-has-dev-suites-pass
     description: >-
       T5 AC1, the writers fold's head contains current origin/dev and the full deploy-agent suite and pre-commit over the whole PR diff pass on a lab host. At head 45e694f320b7d632e74a66c21ea04fcdcef68fd3, git merge-base --is-ancestor origin/dev HEAD exits 0 (origin/dev 5eda9ab591dd994d774df1cc86ddb7d9e506aa67). On h051, uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests -m "not lab_overlay" (the deploy-agent-tests CI form) gave 1930 passed, 2 deselected, exit 0 (unit lw-29f6e3c203a04544), and uv run --frozen pre-commit run --from-ref 5eda9ab591dd994d774df1cc86ddb7d9e506aa67 --to-ref 45e694f320b7d632e74a66c21ea04fcdcef68fd3 exited 0 (unit lw-4fe04ecd05644fff). Run with the repository's root environment instead, the suite gave 6 errors in test_queue_depth_omn18144.py (fixture aiohttp_client not found), identical at origin/dev and outside this diff. The hosted check below re-runs the focused files without a broker or a daemon.
     source: manual
@@ -205,7 +205,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
-  - id: dod-omn21288-t5-ac3-boot-guard-never-pairs-pre-fold-image-with-fold-overlay
+  - id: dod-omn21288-t5-boot-guard-fold-pairing
     description: >-
       T5 AC3, the dev boot guard never restores a retained image under the overlay of another fold generation. A boot-good snapshot planted from before the fold makes prepare() refuse before any container is replaced, and a failed fold deploy refuses to restore the pre-fold image under the fold overlay (the incident records recovery_verified false); a snapshot of the same generation still restores, and the pre-fold overlay starts the five writers again (rollback by revision). The new file is scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py; two of its tests fail on the parent commit, where the guard records no fold generation.
     source: manual
@@ -223,7 +223,7 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
-  - id: dod-omn21288-t5-ac4-five-readings-before-and-after
+  - id: dod-omn21288-t5-ac4-five-readings
     description: >-
       T5 AC4, the five readings before and after the fold. No slot reading was taken: the pre-PR slot bring-up at 45e694f320b7d632e74a66c21ea04fcdcef68fd3 exited 10 before any container started (h201 unit lw-e9671c9907614357), and a slot cannot fold (see the AC3 entry). As a read-only reference, dev was read twice 60 s apart on h201 (unit lw-54b86f0dc50746df, 2026-11-02T00:21:48Z and 00:22:49Z): 27 running containers in compose project omnibase-infra, the five writers among them; omninode-runtime memory.current 672374784 and memory.swap.current 10706944 bytes, cpu usage_usec 140447656 then 157531487; live_events +15, savings_estimates +2, claude_hook_events +129 rows inserted or updated, tenant_inference_credentials and tenant_registry_mirror +0; 8085 and 8086 ready and health 200, runtime healthy with 0 restarts. The after readings, with the five containers absent and their projections advancing, are owed to the post-merge dev proof through the deploy agent.
     source: manual
@@ -232,7 +232,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
-  - id: dod-omn21288-t5-ac4-ci-green-at-the-handoff-head
+  - id: dod-omn21288-t5-ac5-ready-and-handoff
     description: >-
       T5 AC5, the PR is out of draft and handed to the landing controller with needs=train at a head with no red context this PR caused. The evidence is the PR watcher's read for that head (python3 pr_state_local.py --pr omnibase_infra#5518, or onex scm pr-checks), recorded in the handoff; a draft is excluded from the watcher, so a stale read is reported as stale. The hosted check re-runs the tests of the guard this change touches.
     source: manual
