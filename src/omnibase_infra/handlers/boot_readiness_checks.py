@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import os
 import time
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
@@ -33,10 +34,48 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 READY_BOUND_POLL_SECONDS: float = 30.0
-# The moment this module was imported: the process start the boot bound counts from.
-PROCESS_START_MONOTONIC: float = time.monotonic()
 
 ReadinessCheck = Callable[[], Awaitable[dict[str, object]]]
+
+
+def seconds_since_process_start(
+    stat_text: str, uptime_text: str, clock_ticks_per_second: int
+) -> float:
+    """Seconds this process has run, from the text of ``/proc/self/stat`` and ``/proc/uptime``.
+
+    ``starttime`` (field 22 of the stat line) counts clock ticks since boot, as
+    does ``/proc/uptime``, so their difference is the process age wherever the
+    process started: in a container, the container's entrypoint is the process.
+    """
+    # The command name (field 2) may hold spaces and parentheses; skip past its end.
+    fields_after_comm = stat_text.rsplit(")", 1)[1].split()
+    start_ticks = int(fields_after_comm[19])
+    return float(uptime_text.split()[0]) - start_ticks / clock_ticks_per_second
+
+
+def _process_start_monotonic() -> float:
+    """The ``time.monotonic()`` value at which this process started.
+
+    Falls back to the moment of this call (module import) only where ``/proc``
+    is unavailable, such as a developer laptop; the deployed runtime is Linux.
+    """
+    now = time.monotonic()
+    try:
+        with (
+            open("/proc/self/stat", encoding="ascii") as stat,
+            open("/proc/uptime", encoding="ascii") as uptime,
+        ):
+            age = seconds_since_process_start(
+                stat.read(), uptime.read(), os.sysconf("SC_CLK_TCK")
+            )
+    except (OSError, ValueError, IndexError):
+        return now
+    return now - max(age, 0.0)
+
+
+# The process start the boot bound counts from, read from the OS rather than
+# captured at import, which runs after the interpreter and earlier imports.
+PROCESS_START_MONOTONIC: float = _process_start_monotonic()
 
 
 def parse_priority_contracts(env: Mapping[str, str]) -> tuple[str, ...]:
