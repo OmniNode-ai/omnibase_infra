@@ -203,10 +203,10 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/docker/test_omn19513_hook_events_writer.py tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
+        check_value: "uv run pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
       - check_type: "command"
-        check_value: "uv run pytest tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
+        check_value: "uv run pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC5]
   - id: "dod-omn19513-hook-events-writer-lane-overlay"
