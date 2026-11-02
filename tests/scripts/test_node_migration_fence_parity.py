@@ -573,6 +573,15 @@ FENCED_LOCAL_ENVIRONMENT_RLS_IDS = (
 FENCED_DELEGATION_CAPABILITY_MAP_RLS_IDS = (
     "node:node_projection_delegation_capability_map:0002_force_rls_delegation_capability_cells.sql",
 )
+# OMN-19991 and OMN-19986: local_alerts and local_identity follow the same split
+# as local_environment: only the FORCE step, 0002, is fenced on arrival; this
+# fence addition carries no lane release.
+FENCED_LOCAL_ALERTS_RLS_IDS = (
+    "node:node_projection_local_alerts:0002_force_rls_local_alerts.sql",
+)
+FENCED_LOCAL_IDENTITY_RLS_IDS = (
+    "node:node_projection_local_identity:0002_force_rls_local_identity.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -591,6 +600,8 @@ EXPECTED_FENCE = (
     + FENCED_RUN_TRACE_RLS_IDS
     + FENCED_LOCAL_ENVIRONMENT_RLS_IDS
     + FENCED_DELEGATION_CAPABILITY_MAP_RLS_IDS
+    + FENCED_LOCAL_ALERTS_RLS_IDS
+    + FENCED_LOCAL_IDENTITY_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -965,12 +976,15 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         + FENCED_RUN_TRACE_RLS_IDS
         + FENCED_LOCAL_ENVIRONMENT_RLS_IDS
         + FENCED_DELEGATION_CAPABILITY_MAP_RLS_IDS
+        + FENCED_LOCAL_ALERTS_RLS_IDS
+        + FENCED_LOCAL_IDENTITY_RLS_IDS
     ), (
         "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
         "OMN-20154 provider_quota_state, OMN-19793 eval-run, OMN-20242 "
         "delegation_dispositions, OMN-20613 budget_applied_events, OMN-19987 "
-        "run_trace, OMN-19988 local_environment and OMN-20169 capability-map RLS "
-        "holds are not the expected ids"
+        "run_trace, OMN-19988 local_environment, OMN-20169 capability-map, "
+        "OMN-19991 local_alerts and OMN-19986 local_identity RLS holds are not "
+        "the expected ids"
     )
 
 

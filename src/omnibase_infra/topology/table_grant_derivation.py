@@ -182,7 +182,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
 
 
 def _vendored_read_write(
-    table: str, node_dir: str, create_file: str
+    table: str, node_dir: str, create_file: str, schema: str = "omninode_internal"
 ) -> ContractTableDeclaration:
     """An infra-first vendored relation: read_write, role named for the table."""
     migration = f"docker/migrations/forward/nodes/{node_dir}/{create_file}"
@@ -192,7 +192,7 @@ def _vendored_read_write(
         table=ModelDbTableDeclaration(
             name=table,
             database_ref="application",
-            schema="omninode_internal",
+            schema=schema,
             migration=migration,
             access="read_write",
             role=table,
@@ -469,23 +469,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # lands its node contract (head 677d2941ff7e). This bridge expires once the
     # pin includes that contract. Retired by: omnimarket#4380 merging and the pin
     # advancing past it; the OMN-18863 expiry module names this bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_capability_cells",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
-            "0000_create_delegation_capability_cells.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_capability_cells",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
-                "0000_create_delegation_capability_cells.sql"
-            ),
-            access="read_write",
-            role="delegation_capability_cells",
-        ),
+    _vendored_read_write(
+        "delegation_capability_cells",
+        "node_projection_delegation_capability_map",
+        "0000_create_delegation_capability_cells.sql",
+        schema="public",
     ),
     # OMN-19988: the same infra-first window; this repo vendors
     # node_projection_local_environment/0000-0002 ahead of the omnimarket node
@@ -496,23 +484,33 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
     # node_projection_local_environment contract merges and the pin advances
     # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:local_environment",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_local_environment/"
-            "0000_create_local_environment.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="local_environment",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_local_environment/"
-                "0000_create_local_environment.sql"
-            ),
-            access="read_write",
-            role="local_environment",
-        ),
+    _vendored_read_write(
+        "local_environment",
+        "node_projection_local_environment",
+        "0000_create_local_environment.sql",
+        schema="public",
+    ),
+    # OMN-19991: the same infra-first window as local_environment; this repo
+    # vendors node_projection_local_alerts/0000-0002 ahead of the omnimarket node
+    # contract that declares the relation. 0001 grants tenant_projection_writer
+    # SELECT, INSERT, UPDATE. Retired when omnimarket's node_projection_local_alerts
+    # contract merges and the pin advances past it; the expiry module names it.
+    _vendored_read_write(
+        "local_alerts",
+        "node_projection_local_alerts",
+        "0000_create_local_alerts.sql",
+        schema="public",
+    ),
+    # OMN-19986: the same window for node_projection_local_identity/0000-0002,
+    # the API Keys page's local identity. 0001 grants tenant_projection_writer
+    # SELECT, INSERT, UPDATE. Retired when omnimarket's
+    # node_projection_local_identity contract merges and the pin advances past
+    # it; the expiry module names it.
+    _vendored_read_write(
+        "local_identity",
+        "node_projection_local_identity",
+        "0000_create_local_identity.sql",
+        schema="public",
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
