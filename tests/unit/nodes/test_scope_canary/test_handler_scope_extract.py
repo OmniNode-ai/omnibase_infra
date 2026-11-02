@@ -39,7 +39,7 @@ Also update `config/settings.yaml`.
                 content=content,
                 plan_file_path="plan.md",
                 correlation_id=cid,
-                output_path="/var/data/manifest.json",
+                output_path="scope-manifest.json",
             )
         )
 
@@ -59,7 +59,7 @@ Changes in `plugins/onex/hooks/` and `src/omniclaude/`.
                 content=content,
                 plan_file_path="plan.md",
                 correlation_id=cid,
-                output_path="/var/data/manifest.json",
+                output_path="scope-manifest.json",
             )
         )
 
@@ -78,7 +78,7 @@ This affects omniclaude and omnibase_core repositories.
                 content=content,
                 plan_file_path="plan.md",
                 correlation_id=cid,
-                output_path="/var/data/manifest.json",
+                output_path="scope-manifest.json",
             )
         )
 
@@ -97,7 +97,7 @@ Modify the hooks system and update CLAUDE.md.
                 content=content,
                 plan_file_path="plan.md",
                 correlation_id=cid,
-                output_path="/var/data/manifest.json",
+                output_path="scope-manifest.json",
             )
         )
 
@@ -121,7 +121,7 @@ Files affected:
                 content=content,
                 plan_file_path="plan.md",
                 correlation_id=cid,
-                output_path="/var/data/manifest.json",
+                output_path="scope-manifest.json",
             )
         )
 
@@ -138,7 +138,7 @@ Files affected:
                 content="",
                 plan_file_path="empty.md",
                 correlation_id=cid,
-                output_path="/var/data/manifest.json",
+                output_path="scope-manifest.json",
             )
         )
 
@@ -159,7 +159,7 @@ Edit `src/api.py` then update `src/api.py` again.
                 content=content,
                 plan_file_path="plan.md",
                 correlation_id=cid,
-                output_path="/var/data/manifest.json",
+                output_path="scope-manifest.json",
             )
         )
 
