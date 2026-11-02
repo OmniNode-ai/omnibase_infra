@@ -19,6 +19,7 @@ from typing import cast
 import pytest
 import yaml
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.handlers.placement import (
     EnumPlacementHealthVerdict,
     HandlerPlacementEtcd,
@@ -48,7 +49,13 @@ PROFILES = ("inmemory", "redpanda")
 
 
 class FakeSession:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        runtime_id: str = "rt-1",
+        node_names: tuple[str, ...] = ("any_node", "primary_node"),
+    ) -> None:
+        self.runtime_id = runtime_id
+        self.node_names = node_names
         self.lease_id = 0
         self.calls: list[str] = []
 
@@ -269,3 +276,98 @@ async def test_handle_answers_one_placement_decision(profile: str) -> None:
     assert override.min_serving == 1
     assert default.verdict is EnumPlacementHealthVerdict.FAIL
     assert default.under_served == ("any_node", "primary_node")
+
+
+async def _no_serving(
+    *, expected_nodes: Sequence[str], min_serving: int
+) -> ModelPlacementServingReport:
+    return evaluate_serving_health([], min_serving=min_serving)
+
+
+def _build(
+    *,
+    session: FakeSession,
+    elections: Mapping[str, FakeElection],
+    runtime_id: str = "rt-1",
+) -> HandlerPlacementRuntime:
+    return HandlerPlacementRuntime(
+        runtime_id=runtime_id,
+        session=session,
+        elections=elections,
+        nodes=_nodes(FakeNode(), FakeNode()),
+        serving_reader=_no_serving,
+        lock=asyncio.Lock(),
+        min_serving=1,
+        keepalive_interval_s=0.1,
+        campaign_interval_s=0.01,
+        fence_tick_s=0.01,
+    )
+
+
+def test_handler_copies_the_nodes_and_elections_mappings() -> None:
+    elections = {"primary_node": FakeElection(wins=True)}
+    runtime = _build(session=FakeSession(), elections=elections)
+    elections["ghost"] = FakeElection(wins=True)
+    assert set(runtime._elections) == {"primary_node"}
+
+
+@pytest.mark.parametrize(
+    "elections",
+    [
+        {},
+        {"primary_node": FakeElection(wins=True), "any_node": FakeElection(wins=True)},
+        {"primary_node": FakeElection(wins=True), "ghost": FakeElection(wins=True)},
+    ],
+)
+def test_handler_rejects_elections_not_matching_primary_nodes(
+    elections: Mapping[str, FakeElection],
+) -> None:
+    with pytest.raises(ProtocolConfigurationError, match="primary-mode nodes"):
+        _build(session=FakeSession(), elections=elections)
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        FakeSession(runtime_id="other"),
+        FakeSession(node_names=("any_node",)),
+    ],
+)
+def test_handler_rejects_session_disagreeing_on_identity(
+    session: FakeSession,
+) -> None:
+    with pytest.raises(ProtocolConfigurationError, match="disagree"):
+        _build(session=session, elections={"primary_node": FakeElection(wins=True)})
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"keepalive_interval_s": 2.5},
+        {"keepalive_interval_s": 3.0},
+        {"fence_tick_s": 1.5},
+        {"fence_tick_s": 2.0},
+    ],
+)
+def test_settings_reject_loops_slower_than_the_lease(
+    override: dict[str, float],
+) -> None:
+    base = {
+        "ttl_s": 4,
+        "margin_s": 1.5,
+        "keepalive_interval_s": 1.0,
+        "campaign_interval_s": 0.25,
+        "fence_tick_s": 0.1,
+        "min_serving": 2,
+    }
+    with pytest.raises(ValueError):
+        ModelPlacementRuntimeSettings.model_validate({**base, **override})
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+async def test_serving_report_rejects_non_positive_min_serving(bad: int) -> None:
+    runtime = _build(
+        session=FakeSession(), elections={"primary_node": FakeElection(wins=True)}
+    )
+    with pytest.raises(ProtocolConfigurationError, match="min_serving"):
+        await runtime.serving_report(min_serving=bad)

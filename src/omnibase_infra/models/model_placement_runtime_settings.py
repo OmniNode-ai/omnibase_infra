@@ -23,6 +23,10 @@ class ModelPlacementRuntimeSettings(BaseModel):
     def _margin_below_ttl(self) -> ModelPlacementRuntimeSettings:
         if self.margin_s >= self.ttl_s:
             raise ValueError("margin_s must be below ttl_s")
+        if self.keepalive_interval_s >= self.ttl_s - self.margin_s:
+            raise ValueError("keepalive_interval_s must be below ttl_s - margin_s")
+        if self.fence_tick_s >= self.margin_s:
+            raise ValueError("fence_tick_s must be below margin_s")
         return self
 
 

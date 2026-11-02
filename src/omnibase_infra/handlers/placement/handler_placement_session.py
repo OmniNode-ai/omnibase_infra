@@ -72,6 +72,10 @@ class HandlerPlacementSession:
     def runtime_id(self) -> str:
         return self._runtime_id
 
+    @property
+    def node_names(self) -> tuple[str, ...]:
+        return self._node_names
+
     def within_deadline(self) -> bool:
         """True while the session is open and its local deadline has not passed."""
         return self._lease_id != 0 and self._clock() < self._deadline

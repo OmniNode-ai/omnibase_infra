@@ -9,6 +9,16 @@ class ProtocolPlacementSession(Protocol):
     """Lease, membership key and local self-fence deadline of one runtime."""
 
     @property
+    def runtime_id(self) -> str:
+        """The runtime id this session registers membership under."""
+        ...
+
+    @property
+    def node_names(self) -> tuple[str, ...]:
+        """The node names this session registers membership for."""
+        ...
+
+    @property
     def lease_id(self) -> int:
         """The open lease, ``0`` when no session is open."""
         ...

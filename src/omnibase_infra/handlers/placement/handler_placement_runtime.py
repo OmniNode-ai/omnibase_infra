@@ -23,8 +23,16 @@ from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager
 from typing import Protocol, runtime_checkable
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.errors import InfraConnectionError
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.handlers.placement.model_placement_command import (
     ModelPlacementCommand,
 )
@@ -89,10 +97,26 @@ class HandlerPlacementRuntime:
         campaign_interval_s: float,
         fence_tick_s: float,
     ) -> None:
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="construct_placement_runtime",
+        )
+        primary = {n for n, (policy, _) in nodes.items() if policy.mode == "primary"}
+        if set(elections) != primary:
+            raise ProtocolConfigurationError(
+                "elections must cover exactly the primary-mode nodes: "
+                f"primary={sorted(primary)} elections={sorted(elections)}",
+                context=context,
+            )
+        if session.runtime_id != runtime_id or set(session.node_names) != set(nodes):
+            raise ProtocolConfigurationError(
+                "session and handler disagree on runtime_id or node set",
+                context=context,
+            )
         self._runtime_id = runtime_id
         self._session = session
-        self._elections = elections
-        self._nodes = nodes
+        self._elections = dict(elections)
+        self._nodes = dict(nodes)
         self._serving_reader = serving_reader
         self._min_serving = min_serving
         self._keepalive_interval_s = keepalive_interval_s
@@ -142,9 +166,17 @@ class HandlerPlacementRuntime:
     async def serving_report(
         self, *, min_serving: int | None = None
     ) -> ModelPlacementServingReport:
+        effective = self._min_serving if min_serving is None else min_serving
+        if effective <= 0:
+            raise ProtocolConfigurationError(
+                "min_serving must be positive",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="serving_report",
+                ),
+            )
         return await self._serving_reader(
-            expected_nodes=sorted(self._nodes),
-            min_serving=self._min_serving if min_serving is None else min_serving,
+            expected_nodes=sorted(self._nodes), min_serving=effective
         )
 
     async def handle(
