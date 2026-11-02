@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS public.agent_status_events (
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     metadata JSONB
 );
+ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS correlation_id UUID;
 ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS status_schema_version INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS progress DECIMAL(3, 2);
 ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS current_phase VARCHAR(255);

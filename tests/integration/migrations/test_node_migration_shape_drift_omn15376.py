@@ -847,6 +847,37 @@ def test_fixed_migration_is_green_on_the_same_drifted_shape(
         _drop_database(server, database)
 
 
+def test_agent_status_events_index_survives_a_table_missing_correlation_id(
+    server: Server,
+) -> None:
+    """OMN-21920: the correlation index must not fail on a drifted table."""
+    node = "node_projection_agent_actions"
+    filename = "0000_create_agent_observability_tables.sql"
+    path = _migration_path(node, filename)
+    database = _new_database(server)
+    try:
+        seeded = _psql(
+            server,
+            database,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            _drifted_table_ddl(path, "agent_status_events", "correlation_id"),
+        )
+        assert seeded.returncode == 0, seeded.stderr
+        result = _psql(server, database, "-v", "ON_ERROR_STOP=1", "-f", str(path))
+        assert result.returncode == 0, result.stdout + result.stderr
+        probe = _psql_script(
+            server,
+            database,
+            "SELECT count(*) FROM pg_indexes "
+            "WHERE indexname = 'idx_agent_status_correlation';",
+        )
+        assert _psql_stdout(probe, "correlation index probe") == "1", probe.stdout
+    finally:
+        _drop_database(server, database)
+
+
 def test_reconciliation_preserves_pre_existing_rows(server: Server) -> None:
     """A drifted table with data keeps every row; nothing is dropped."""
     path = _migration_path(
