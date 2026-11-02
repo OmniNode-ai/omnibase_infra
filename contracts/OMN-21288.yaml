@@ -40,15 +40,27 @@ requirements:
   - id: req-omn21288-ac6-topic-baseline
     statement: "The dev lane's topic-spec count per boot is recorded before the boot-provisioning change, held as data, and a boot that grows it fails a check."
     acceptance:
-      - id: AC6
-        statement: |-
-          AC6: the before reading (dev topics, partitions, groups, zero-consumer groups, memory and the per-boot topic spec count) is recorded with read times beside the plan's figures -- falsifier: re-read the numbers from the broker admin endpoint and show they match within the tolerance for a live bus
-      - id: AC7
-        statement: |-
-          AC7: a planted extra topic spec at boot fails the check -- falsifier: uv run pytest of the new test with one spec appended to the boot provisioning list fails, and passes without it
       - id: AC8
         statement: |-
-          AC8: the baseline record is data, not code -- falsifier: a test that changes the declared baseline value and sees the check's verdict change with no code edit
+          AC8: the before reading (dev topics, partitions, groups, zero-consumer groups, memory and the per-boot topic spec count) is recorded with read times beside the plan's figures -- falsifier: re-read the numbers from the broker admin endpoint and show they match within the tolerance for a live bus
+      - id: AC9
+        statement: |-
+          AC9: a planted extra topic spec at boot fails the check -- falsifier: uv run pytest of the new test with one spec appended to the boot provisioning list fails, and passes without it
+      - id: AC10
+        statement: |-
+          AC10: the baseline record is data, not code -- falsifier: a test that changes the declared baseline value and sees the check's verdict change with no code edit
+  - id: req-omn21288-ac6-contract-http-mount
+    statement: "One-runtime plan T15: a contract declares an ASGI factory and path prefix and the runtime serves that application on its existing HTTP port."
+    acceptance:
+      - id: AC6
+        statement: |-
+          AC6: a contract's `http_mount` block (factory and path_prefix) is built and served by the runtime's own aiohttp server on its existing port under the declared prefix, with the runtime's own routes unchanged -- falsifier: tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py::test_declared_factory_is_served_on_the_runtime_port fails at the merge base and passes on the branch
+  - id: req-omn21288-ac7-failing-mount-fails-boot
+    statement: "One-runtime plan T15: a mount that cannot be built or started fails boot rather than serving partly."
+    acceptance:
+      - id: AC7
+        statement: |-
+          AC7: a planted factory error, a non-ASGI factory result, an unimportable factory, a malformed declaration, an overlapping or runtime-shadowing prefix each raise at boot with nothing mounted, and a failing lifespan makes every request answer 503 -- falsifier: the failing-mount tests in tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py fail at the merge base and pass on the branch
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -190,7 +202,7 @@ dod_evidence:
         check_value: |-
           grep -c 'read_at: "2026-11-01T23:29:24Z"' config/boot_topic_specs.yaml
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC6]
+    binds_ac: [AC8]
   - id: dod-omn21288-ac7-planted-spec-fails
     description: >-
       The test builds the provisioning list through TopicProvisioner, appends one extra spec in _build_topic_specs (the method the constructor calls at boot) and requires the planted list to be over the record by one while the unplanted list is within it. The test file is new on this branch, so the run fails at the merge base.
@@ -199,7 +211,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "planted or within_the_recorded"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC7]
+    binds_ac: [AC9]
   - id: dod-omn21288-ac8-baseline-is-data
     description: >-
       The same boot list passes against a temporary baseline file declaring its count and fails against one declaring a count one lower, with no code edit between the two; the record refuses unknown keys, an unknown lane and a repository list larger than the image list. The test file is new on this branch, so the run fails at the merge base.
@@ -208,8 +220,33 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "declared_value or typed or larger or lane"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC8]
+    binds_ac: [AC10]
+  - id: dod-omn21288-ac6-contract-http-mount-served
+    description: >-
+      Run the mount tests: a contract.yaml carrying an http_mount block is parsed, its FastAPI factory is built and its lifespan started by the runtime's aiohttp server, and real GET and POST requests on the server's bound port under the declared prefix are answered by the mounted application while /health keeps answering. The test file imports a module that does not exist at the merge base, so the run fails there. No container is created or restarted by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py -k "served_on_the_runtime_port or without_a_mount" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mount_live_port_omn21288.py -k answers_on_the_runtime_port -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-omn21288-ac7-failing-mount-fails-boot
+    description: >-
+      Run the failing-mount tests: a planted factory error, a factory that returns a non-ASGI value, an unimportable factory, a malformed declaration, overlapping prefixes and a prefix that would shadow a runtime route each raise RuntimeHostError from attach_manifest (the kernel returns exit code 1 on that error) with nothing mounted; a lifespan that fails to start turns every request, /health included, into a 503. The tests fail at the merge base because the mount module is absent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py -k "fails_boot or out_of_service or may_not_shadow or malformed" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mount_live_port_omn21288.py -k planted_factory_error -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]
 context:
   remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
   worker_integration: "The independently owned worker fold must preserve both overlays and union main.folded_profiles to [workers, tenant-projection]; then remove runtime-worker from SEPARATE_SERVICES as well. This branch never changes the worker branch."
+  http_mount_remaining: "T15 omnibase_infra half only. Remaining: (1) the intelligence-api http_mount declaration lives in omniintelligence's node contract, not in this repository; (2) the kernel awaits no mount today: service_kernel.py carries unfixed hardcoded-model-config findings and cannot be edited, so a lifespan failure is a 503 on every route rather than a nonzero exit; (3) retire the intelligence-api container as a deploy step after the mount answers on the runtime's port."
