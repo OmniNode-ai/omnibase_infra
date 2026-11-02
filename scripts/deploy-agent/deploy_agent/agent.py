@@ -2007,21 +2007,19 @@ class DeployAgent:
                 with protection:
                     # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
                     # cache. prod pulls the pinned digest instead of rebuilding from a ref.
+                    lanes_off_guard = (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
+                    needs_point = cmd.scope in (Scope.RUNTIME, Scope.FULL)
+                    needs_point = (
+                        needs_point and cmd.runtime_lane not in lanes_off_guard
+                    )
                     rollback_point = (
                         capture_rollback_point(self.executor, cmd.runtime_lane)
-                        if cmd.scope in (Scope.RUNTIME, Scope.FULL)
-                        and cmd.runtime_lane
-                        not in (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
+                        if needs_point
                         else None
                     )
                     # Dev recovery belongs to the boot guard. Every other
                     # non-prod runtime/full rebuild needs a retained point.
-                    if (
-                        cmd.scope in (Scope.RUNTIME, Scope.FULL)
-                        and cmd.runtime_lane
-                        not in (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
-                        and rollback_point is None
-                    ):
+                    if needs_point and rollback_point is None:
                         raise RuntimeError(
                             f"Refusing {cmd.runtime_lane.value} {cmd.scope.value} deploy: "
                             "no healthy, retained rollback point"
@@ -2037,6 +2035,7 @@ class DeployAgent:
                         build_source=cmd.build_source,
                         lane=cmd.runtime_lane,
                         image_digest=cmd.image_digest,
+                        declared_pr=cmd.open_pr,
                     )
 
                     if dev_guard is not None:
