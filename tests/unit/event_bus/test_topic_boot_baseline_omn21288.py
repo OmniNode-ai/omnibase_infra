@@ -93,14 +93,22 @@ def test_boot_list_is_within_the_recorded_baseline(
 
 
 def test_planted_extra_spec_at_boot_fails_the_check(
-    baseline: ModelTopicBootBaseline, boot_spec_count: int
+    tmp_path: Path, boot_spec_count: int
 ) -> None:
-    """AC-T29-2: one extra spec on the boot path puts the list over the record."""
+    """AC-T29-2: one extra spec on the boot path puts the list over the record.
+
+    The record is pinned to the measured boot count in a temporary data file, so
+    the verdict does not depend on the committed figure matching the boot exactly
+    (that equality is held by the integration test).
+    """
+    at_count = ModelTopicBootBaseline.from_yaml_file(
+        _baseline_file_with(tmp_path, boot_spec_count), lane="dev"
+    )
     planted_count = _boot_spec_count_with_planted_spec()
 
     assert planted_count == boot_spec_count + 1
-    assert baseline.repo_specs_over(boot_spec_count) == 0
-    assert baseline.repo_specs_over(planted_count) == 1
+    assert at_count.repo_specs_over(boot_spec_count) == 0
+    assert at_count.repo_specs_over(planted_count) == 1
 
 
 def test_changing_the_declared_value_changes_the_verdict_without_a_code_edit(
