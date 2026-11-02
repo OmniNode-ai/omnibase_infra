@@ -827,6 +827,10 @@ def load_selection_oracle(
     Only its independently captured inventory header differs. Both inventories
     stay committed so a missing declared OCC install cannot be accepted.
     """
+    # Imported here, not referenced as a module global: the AC11 probe in
+    # contracts/OMN-20074.yaml execs this function alone from the tracked blob.
+    from tests.fixtures.dispatch_parity.harness import load_snapshot_file
+
     fixture_dir = Path(__file__).resolve().parent
     snapshot = load_snapshot_file(fixture_dir / "selection-oracle-v2.json")
     if "onex-change-control" not in required_packages:
