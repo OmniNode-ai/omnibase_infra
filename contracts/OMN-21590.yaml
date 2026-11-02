@@ -116,6 +116,30 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/nodes/test_registration_from_announcement.py -q --no-cov -o addopts='' -k 'announcement_failure_preserves or announced_node_publish_propagates'"
+  - id: dod-omn21590-announced-error-boundary
+    description: "A failed announced-contract reduction logs its correlation id and leaves later contracts processable; cancellation propagates."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/node_contract_registry_reducer/test_contract_registration_event_router.py -q --no-cov -o addopts='' -k 'announced_'"
+  - id: dod-omn21590-topic-identity
+    description: "Workload names with underscores or surrounding whitespace are refused rather than sharing another workload's announcement topic."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/topics/test_node_announcement_topic_template.py -q --no-cov -o addopts=''"
+  - id: dod-omn21590-path-redaction
+    description: "Only contract paths are normalized for the byte-identical attach-report check; path strings in descriptions remain visible, and symlinked fixture roots compare identically."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_boot_attach_report_omn21590.py -q --no-cov -o addopts=''"
 emergency_bypass:
   enabled: false
   justification: ""

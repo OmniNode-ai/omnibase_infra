@@ -35,9 +35,13 @@ class ModelNodeAnnouncementTopic(BaseModel):
     @field_validator("workload")
     @classmethod
     def _expansion_is_a_valid_topic(cls, value: str) -> str:
-        workload = value.strip().replace("_", "-")
-        if not workload:
+        if not value:
             raise ValueError("workload must be a non-empty string")
+        # Each workload owns its topic. Normalizing here would silently alias
+        # distinct workload identities (for example, a_b and a-b).
+        if value != value.strip() or "_" in value:
+            raise ValueError("workload must already be in canonical kebab-case")
+        workload = value
         result = validate_topic_suffix(cls.TEMPLATE.format(workload=workload))
         if not result.is_valid:
             raise ValueError(

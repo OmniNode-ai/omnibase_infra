@@ -561,17 +561,36 @@ class ContractRegistrationEventRouter:
         record is parsed: reduce, keep the state, execute the intents. The kernel calls
         it for every contract the catalog yielded, so a boot publishes nothing.
         """
-        event_metadata: dict[str, JsonType] = {
-            "topic": topic,
-            "partition": 0,
-            "offset": self._announced_offset,
-            "data_provenance": "unknown",
-        }
-        self._announced_offset += 1
-        output = self._reducer.reduce(self._state, event, event_metadata)
-        self._state = output.result
-        if output.intents:
-            await self._execute_intents(output.intents, correlation_id)
+        started = self._clock()
+        try:
+            event_metadata: dict[str, JsonType] = {
+                "topic": topic,
+                "partition": 0,
+                "offset": self._announced_offset,
+                "data_provenance": "unknown",
+            }
+            self._announced_offset += 1
+            output = self._reducer.reduce(self._state, event, event_metadata)
+            self._state = output.result
+            if output.intents:
+                await self._execute_intents(output.intents, correlation_id)
+        except Exception as error:
+            # Log exception information without exposing the original exception's
+            # credentials or traceback locals at this optional startup boundary.
+            safe_error = RuntimeError(sanitize_error_message(error))
+            logger.exception(
+                "Failed to process announced contract: %s (correlation_id=%s)",
+                safe_error,
+                correlation_id,
+                exc_info=(RuntimeError, safe_error, None),
+                extra={"error_type": type(error).__name__},
+            )
+        finally:
+            logger.debug(
+                "Announced contract callback completed (correlation_id=%s)",
+                correlation_id,
+                extra={"callback_duration_seconds": self._clock() - started},
+            )
 
     async def _execute_intents(
         self,

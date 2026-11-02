@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """In full_load mode with hot load off, the boot attach report did not change (OMN-21590, A2 AC2).
 
-The golden file was recorded by running this same scenario against the code at the
-commit before the catalog existed (the entry-point scan inside ``discover_contracts``),
+The golden file was recorded by running this same scenario against the code at
+``c373f5423437d211a7eb6d72df804e9b9d9b6537`` (the entry-point scan inside ``discover_contracts``),
 with the fixture directory path replaced by ``<fixtures>``. The scenario discovers three
 fixture contracts through the catalog, wires them as the kernel does and serialises the
 manifest and the attach report with sorted keys. A diff of one byte fails.
@@ -79,7 +79,22 @@ async def _manifest_and_report_json(root: Path = CONTRACTS) -> str:
             )
     finally:
         discover_contracts_cache_clear()
-    text = json.dumps(
+    # Normalize only the typed contract paths, before serialization. Resolving both
+    # sides handles symlinked roots without touching descriptions or other data.
+    manifest = manifest.model_copy(
+        update={
+            "contracts": tuple(
+                contract.model_copy(
+                    update={
+                        "contract_path": Path("<fixtures>")
+                        / contract.contract_path.resolve().relative_to(root.resolve())
+                    }
+                )
+                for contract in manifest.contracts
+            )
+        }
+    )
+    return json.dumps(
         {
             "manifest": json.loads(manifest.model_dump_json()),
             "report": json.loads(report.model_dump_json()),
@@ -87,11 +102,6 @@ async def _manifest_and_report_json(root: Path = CONTRACTS) -> str:
         sort_keys=True,
         indent=2,
     )
-    # The manifest may carry the path as built (``root``) or resolved (a symlinked
-    # temporary directory); both forms are redacted.
-    for form in {str(root), str(root.resolve())}:
-        text = text.replace(form, "<fixtures>")
-    return text
 
 
 def _changed_lines(produced: str) -> list[str]:
@@ -174,3 +184,38 @@ async def test_planted_violation_a_changed_topic_changes_the_report(
     changed_lines = _changed_lines(await _manifest_and_report_json(root))
 
     assert any("attach-one-changed.v1" in line for line in changed_lines)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_path_redaction_preserves_non_path_contract_data(tmp_path: Path) -> None:
+    root = tmp_path / "node_announce"
+    shutil.copytree(CONTRACTS, root)
+    changed = root / NAMES[0] / "contract.yaml"
+    text = changed.read_text(encoding="utf-8")
+    text = text.replace(
+        "Fixture contract for the boot attach report (OMN-21590)", str(root)
+    )
+    changed.write_text(text, encoding="utf-8")
+
+    produced = json.loads(await _manifest_and_report_json(root))
+    contract = next(
+        entry
+        for entry in produced["manifest"]["contracts"]
+        if entry["name"] == NAMES[0]
+    )
+    assert contract["description"] == str(root)
+    assert contract["contract_path"] == f"<fixtures>/{NAMES[0]}/contract.yaml"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_path_redaction_handles_a_symlinked_fixture_root(tmp_path: Path) -> None:
+    target = tmp_path / "node-target"
+    shutil.copytree(CONTRACTS, target)
+    root = tmp_path / "node"
+    root.symlink_to(target, target_is_directory=True)
+
+    produced = await _manifest_and_report_json(root)
+
+    assert produced + "\n" == GOLDEN.read_text(encoding="utf-8")

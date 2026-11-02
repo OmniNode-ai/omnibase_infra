@@ -232,6 +232,62 @@ def create_event_message(
 # =============================================================================
 
 
+@pytest.mark.asyncio
+async def test_announced_reducer_failure_does_not_abort_remaining_contracts(
+    router: ContractRegistrationEventRouter,
+    mock_reducer: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    initial_state = router.state
+    output = mock_reducer.reduce.return_value
+    mock_reducer.reduce.side_effect = [RuntimeError("reduction failed"), output]
+    correlation_id = uuid4()
+    event = create_contract_registered_event(correlation_id)
+
+    with caplog.at_level("WARNING"):
+        await router.register_announced(event, correlation_id, topic="catalog")
+
+    assert router.state is initial_state
+    assert "Failed to process announced contract" in caplog.text
+    assert str(correlation_id) in caplog.text
+    await router.register_announced(event, correlation_id, topic="catalog")
+    assert mock_reducer.reduce.call_count == 2
+    assert router.state is output.result
+
+
+@pytest.mark.asyncio
+async def test_announced_error_logging_redacts_exception_information(
+    router: ContractRegistrationEventRouter,
+    mock_reducer: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    error = RuntimeError("postgresql://user:synthetic-secret@localhost/db")
+    mock_reducer.reduce.side_effect = error
+    with caplog.at_level("ERROR"):
+        await router.register_announced(
+            create_contract_registered_event(), uuid4(), topic="catalog"
+        )
+
+    assert "synthetic-secret" not in caplog.text
+    record = next(
+        r for r in caplog.records if "Failed to process announced contract" in r.message
+    )
+    assert record.exc_info is not None
+    assert record.exc_info[1] is not error
+    assert record.exc_info[2] is None
+
+
+@pytest.mark.asyncio
+async def test_announced_cancellation_propagates(
+    router: ContractRegistrationEventRouter, mock_reducer: MagicMock
+) -> None:
+    mock_reducer.reduce.side_effect = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await router.register_announced(
+            create_contract_registered_event(), uuid4(), topic="catalog"
+        )
+
+
 class TestMessageParsingContractRegistered:
     """Test 1: Valid contract-registered event is parsed and processed."""
 

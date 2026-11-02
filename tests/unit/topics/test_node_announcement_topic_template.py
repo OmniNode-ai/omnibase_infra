@@ -44,7 +44,10 @@ def test_the_profile_set_is_not_empty() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("workload", ["", "  ", "Has Capitals", "dot.ted", "-leading"])
+@pytest.mark.parametrize(
+    "workload",
+    ["", "  ", "Has Capitals", "dot.ted", "-leading", "a_b", " main", "main "],
+)
 def test_planted_violation_a_workload_that_is_not_kebab_case_is_refused(
     workload: str,
 ) -> None:
