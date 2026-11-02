@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumSkillTopic(str, Enum):
     """Kafka topic enum for producer: skill.
@@ -18,6 +20,6 @@ class EnumSkillTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    CMD_SCOPE_CHECK_V1 = "onex.cmd.skill.scope-check.v1"  # onex.cmd.skill.scope-check.v1
-    EVT_SCOPE_CHECK_COMPLETE_V1 = "onex.evt.skill.scope-check-complete.v1"  # onex.evt.skill.scope-check-complete.v1
-    EVT_SCOPE_CHECK_FAILED_V1 = "onex.evt.skill.scope-check-failed.v1"  # onex.evt.skill.scope-check-failed.v1
+    CMD_SCOPE_CHECK_V1 = contract_topic_value('nodes/node_scope_workflow_orchestrator/contract.yaml', 'skill', 'CMD_SCOPE_CHECK_V1')  # onex.cmd.skill.scope-check.v1
+    EVT_SCOPE_CHECK_COMPLETE_V1 = contract_topic_value('nodes/node_scope_workflow_orchestrator/contract.yaml', 'skill', 'EVT_SCOPE_CHECK_COMPLETE_V1')  # onex.evt.skill.scope-check-complete.v1
+    EVT_SCOPE_CHECK_FAILED_V1 = contract_topic_value('nodes/node_scope_workflow_orchestrator/contract.yaml', 'skill', 'EVT_SCOPE_CHECK_FAILED_V1')  # onex.evt.skill.scope-check-failed.v1
