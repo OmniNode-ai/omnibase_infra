@@ -23,7 +23,7 @@ These tests pin:
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 from deploy_agent.events import (
@@ -112,7 +112,7 @@ class TestRuntimeScopeComposeUp:
             )
 
         assert captured_cmds, "Expected a docker compose up invocation"
-        compose_cmd = captured_cmds[0]
+        compose_cmd = next(c for c in captured_cmds if "up" in c)
         # OMN-18108: _compose_up defaults to the DEV lane, whose runtime scope
         # also carries the services declared only in the lane overlay.
         # OMN-18134: minus the gateway services. Those are in the DEV lane's
@@ -135,13 +135,14 @@ class TestRuntimeScopeComposeUp:
                 f"Core infra service {core_service!r} must not appear in a "
                 "runtime-scope compose up command (OMN-9455)"
             )
-        # The tail of the command must be exactly the runtime service list.
-        assert compose_cmd[-len(runtime_services) :] == runtime_services, (
+        # OMN-22006: one up per service, in the runtime service list's order.
+        ups = [c for c in captured_cmds if "up" in c]
+        assert [c[-1] for c in ups] == runtime_services, (
             "Runtime scope compose up must target the explicit runtime service "
-            f"list; got {compose_cmd}"
+            f"list one service at a time; got {ups}"
         )
         # Verification must be scoped to the requested runtime services.
-        mock_verify.assert_called_once_with(
+        assert mock_verify.call_args_list[-1] == call(
             runtime_services, timeout_s=120, lane=EnumRuntimeLane.DEV
         )
 
@@ -174,11 +175,11 @@ class TestRuntimeScopeComposeUp:
                 _noop_phase_update,
             )
 
-        compose_cmd = captured_cmds[0]
+        compose_cmd = next(c for c in captured_cmds if "up" in c)
 
         assert "--no-deps" in compose_cmd
-        assert compose_cmd[-len(requested) :] == requested
-        mock_verify.assert_called_once_with(
+        assert [c[-1] for c in captured_cmds if "up" in c] == requested
+        assert mock_verify.call_args_list[-1] == call(
             requested, timeout_s=120, lane=EnumRuntimeLane.DEV
         )
 
@@ -211,7 +212,7 @@ class TestCoreAndFullScopeComposeUp:
                 _noop_phase_update,
             )
 
-        compose_cmd = captured_cmds[0]
+        compose_cmd = next(c for c in captured_cmds if "up" in c)
         core_services = services_for_scope(Scope.CORE)
 
         assert "--no-deps" not in compose_cmd, (
@@ -259,7 +260,7 @@ class TestCoreAndFullScopeComposeUp:
                 _noop_phase_update,
             )
 
-        compose_cmd = captured_cmds[0]
+        compose_cmd = next(c for c in captured_cmds if "up" in c)
 
         assert "--no-deps" not in compose_cmd
         assert compose_cmd[-len(requested) :] == requested
@@ -358,7 +359,8 @@ class TestCoreAndFullScopeComposeUp:
         dev_runtime_services = without_gateway_services(
             services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV)
         )
-        assert captured_cmds[-1][-len(dev_runtime_services) :] == dev_runtime_services
+        tail = captured_cmds[-len(dev_runtime_services) :]
+        assert [c[-1] for c in tail] == dev_runtime_services
         assert verified[:2] == [["forward-migration"], ["migration-gate"]]
         # OMN-18438: the cloud one-shots run AFTER the lane-agnostic pair and
         # BEFORE the runtime family, each waited on individually, in the order

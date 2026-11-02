@@ -1,0 +1,138 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-21891 (one-runtime plan task T1): the services a compose stack may hold.
+#
+# Read by tests/unit/validation/test_checker_stack_shape.py, which hands it to omnibase_core's
+# stack-shape validator. Every service of every compose file matched by compose_files is the
+# runtime, a dependency, a one-shot or a baseline entry, and the runtime service runs one
+# replica. Nothing else is allowed.
+#
+# No lane or compose file is named here. The compose files are found by the glob below, so a
+# new docker/docker-compose*.yml is judged the day it appears; a file that is not a runtime
+# stack is listed under not_a_stack. A '*' in one_shots or in a baseline service is a
+# shell-style pattern over the service name (a one-shot pattern admits only a service that
+# declares restart: no).
+#
+# The baseline holds the services that predate the check and only shrinks. An entry names a
+# service and the number of compose files that declare it today, so a copy of the service in
+# one more file is refused as well as a new service. Fold the service into the runtime (or
+# declare it a dependency or one-shot), then lower the count or delete the entry. A count
+# above or below what the files hold fails, an entry absent from the merge base fails, and a
+# count above the merge base's fails, so a baseline cannot be grown to admit a service. Each
+# entry names the ticket that removes it.
+runtime:
+  services:
+    - omninode-runtime
+  max_replicas: 1
+dependencies:
+  - infisical
+  - keycloak
+  - omnibase-infra-memgraph
+  - phoenix
+  - postgres
+  - redpanda
+  - valkey
+one_shots:
+  - cloud-migration
+  - cloud-migration-files
+  - forward-migration
+  - intelligence-migration
+  - migration-gate
+  - redpanda-partition-cap
+  - redpanda-sasl-enable
+  - redpanda-scram-user
+  - redpanda-settings
+  - "*-labwork-user"
+  - "*-sasl-enable"
+  - "*-scram-user"
+  - "*-topics"
+compose_files: docker/docker-compose*.yml
+not_a_stack:
+  - docker/docker-compose.dns-cache.yml
+  - docker/docker-compose.gate-runner.yml
+  - docker/docker-compose.gateway-attach-test-lane.yml
+  - docker/docker-compose.gateway.yml
+  - docker/docker-compose.model-review-canary.yml
+  - docker/docker-compose.principal-issuer.yml
+  - docker/docker-compose.pypi-cache.yml
+  - docker/docker-compose.pypi-canary.yml
+  - docker/docker-compose.runners*.yml
+baseline:
+  - service: "*-infra-runtime-image"
+    files: 3
+    ticket: OMN-21288
+  - service: agent-actions-consumer
+    files: 8
+    ticket: OMN-21288
+  - service: autoheal
+    files: 7
+    ticket: OMN-21288
+  - service: context-audit-consumer
+    files: 8
+    ticket: OMN-21288
+  - service: cost-estimator-web
+    files: 1
+    ticket: OMN-21288
+  - service: dogfood-delegation-fault-429
+    files: 1
+    ticket: OMN-21288
+  - service: dogfood-delegation-fault-503
+    files: 1
+    ticket: OMN-21288
+  - service: factory-floor-web
+    files: 1
+    ticket: OMN-21288
+  - service: infra-routing-decisions-consumer
+    files: 5
+    ticket: OMN-21288
+  - service: intelligence-api
+    files: 8
+    ticket: OMN-21288
+  - service: omninode-contract-resolver
+    files: 8
+    ticket: OMN-21288
+  - service: onex-api
+    files: 6
+    ticket: OMN-21288
+  - service: projection-api
+    files: 12
+    ticket: OMN-21288
+  - service: projection-claude-hook-events-writer
+    files: 6
+    ticket: OMN-21288
+  - service: projection-delegation-writer
+    files: 7
+    ticket: OMN-21288
+  - service: projection-live-events-writer
+    files: 6
+    ticket: OMN-21288
+  - service: projection-registration-writer
+    files: 6
+    ticket: OMN-21288
+  - service: projection-savings-writer
+    files: 6
+    ticket: OMN-21288
+  - service: projection-tenant-credentials-writer
+    files: 6
+    ticket: OMN-21288
+  - service: projection-tenant-registry-writer
+    files: 7
+    ticket: OMN-21288
+  - service: redpanda-topic-manager
+    files: 1
+    ticket: OMN-21288
+  - service: runtime
+    files: 1
+    ticket: OMN-21288
+  - service: runtime-effects
+    files: 12
+    ticket: OMN-21288
+  - service: runtime-worker
+    files: 8
+    ticket: OMN-21288
+  - service: skill-lifecycle-consumer
+    files: 8
+    ticket: OMN-21288
+  - service: tenant-projection-writer
+    files: 8
+    ticket: OMN-21288
