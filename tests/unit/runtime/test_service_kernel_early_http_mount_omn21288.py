@@ -201,6 +201,9 @@ async def test_failing_factory_fails_boot_before_wiring_starts(
         exit_code = await asyncio.wait_for(bootstrap(), timeout=60)
     assert exit_code == 1
     assert wiring_calls == []
-    with pytest.raises(aiohttp.ClientConnectorError):
-        async with aiohttp.ClientSession() as session:
-            await session.get(f"http://127.0.0.1:{kernel_harness}/api/nodes/health")
+    async with aiohttp.ClientSession() as session:
+        with pytest.raises(aiohttp.ClientConnectorError):
+            async with session.get(
+                f"http://127.0.0.1:{kernel_harness}/api/nodes/health"
+            ):
+                pass

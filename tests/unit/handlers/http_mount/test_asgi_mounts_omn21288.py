@@ -216,6 +216,40 @@ async def test_a_contract_without_a_mount_changes_nothing(tmp_path: Path) -> Non
         await server.stop()
 
 
+async def test_a_second_attach_mounts_nothing_and_a_restart_mounts_again(
+    tmp_path: Path,
+) -> None:
+    """The kernel attaches before wiring and again for introspection (OMN-21288).
+
+    The second call keeps the first start task and registers no route twice.
+    After stop() the server builds a fresh router, so attaching again serves.
+    """
+    manifest = _manifest(tmp_path, _mount_block("/api/v1", "create_app"))
+    server = await _server()
+    try:
+        await _mounted(server, manifest)
+        first_task = server._mount_task
+        assert first_task is not None
+        await _mounted(server, manifest)
+        assert server._mount_task is first_task
+        base = f"http://127.0.0.1:{_bound_port(server)}"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{base}/api/v1/echo", json={"a": "b"}) as response:
+                assert response.status == 200
+    finally:
+        await server.stop()
+    await server.start()
+    try:
+        await _mounted(server, manifest)
+        assert server._mount_task is not first_task
+        base = f"http://127.0.0.1:{_bound_port(server)}"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{base}/api/v1/echo", json={"a": "b"}) as response:
+                assert response.status == 200
+    finally:
+        await server.stop()
+
+
 @pytest.mark.parametrize(
     "block",
     [
