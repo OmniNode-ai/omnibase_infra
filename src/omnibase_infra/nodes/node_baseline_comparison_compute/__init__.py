@@ -16,7 +16,6 @@ Available Exports:
     - NodeBaselineComparisonCompute: The declarative compute node
     - ModelBaselineComparisonInput: Input model for paired run results
     - HandlerBaselineComparison: Handler for delta computation
-    - RegistryInfraBaselineComparison: DI registry
 
 Tracking:
     - OMN-2155: Baselines + ROI -- A/B Run Infrastructure
@@ -31,9 +30,6 @@ from omnibase_infra.nodes.node_baseline_comparison_compute.models import (
 from omnibase_infra.nodes.node_baseline_comparison_compute.node import (
     NodeBaselineComparisonCompute,
 )
-from omnibase_infra.nodes.node_baseline_comparison_compute.registry import (
-    RegistryInfraBaselineComparison,
-)
 
 __all__: list[str] = [
     # Node
@@ -42,6 +38,4 @@ __all__: list[str] = [
     "HandlerBaselineComparison",
     # Models
     "ModelBaselineComparisonInput",
-    # Registry
-    "RegistryInfraBaselineComparison",
 ]

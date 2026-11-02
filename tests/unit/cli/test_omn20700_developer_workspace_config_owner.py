@@ -29,8 +29,8 @@ from omnibase_core.enums.enum_event_bus_type import EnumEventBusType
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime import service_kernel
 from omnibase_infra.runtime.service_kernel import (
-    WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH,
     resolve_embedded_runtime_config,
+    workspace_runtime_contracts_dir,
 )
 
 pytestmark = pytest.mark.unit
@@ -59,7 +59,7 @@ event_bus:
 """
 
 _RUNTIME_CONFIG = (
-    WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH / "runtime" / ("runtime_config.yaml")
+    workspace_runtime_contracts_dir(Path()) / "runtime" / ("runtime_config.yaml")
 )
 
 
