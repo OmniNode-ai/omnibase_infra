@@ -1,0 +1,23 @@
+{
+  "base_ref": "aceff4fb16039c68020d4bba4fd9035a55983ac6",
+  "canonical_handler_module": "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_node",
+  "legacy_handler_module": "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_node",
+  "node_id": "omnibase_infra.nodes.node_registry_api_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:af5c56d1e38dc3348fd21c7bbae2fecaa4570657c909206a4d501b1baebdc7af",
+      "sha256:e0648a7c053dea026207e300adef4112a42e6bbf6cd30fa76f6ddb628515dd4f"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_registry_api_effect/test_handle_typed_request_omn21536.py::TestGetNodeHandleTypedRequest::test_found_node_answers_with_the_request_correlation_id",
+      "tests/unit/nodes/node_registry_api_effect/test_handle_typed_request_omn21536.py::TestGetNodeHandleTypedRequest::test_request_without_node_id_is_rejected"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerRegistryApiGetNode.__init__",
+    "HandlerRegistryApiGetNode.handler_type",
+    "HandlerRegistryApiGetNode.handler_category"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}
