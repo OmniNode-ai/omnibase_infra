@@ -78,12 +78,14 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
         responder = client_bus = EventBusInmemory()
 
     commands: list[ModelEventEnvelope[dict[str, object]]] = []
+    active_client_groups: list[dict[tuple[str, str], str]] = []
 
     async def respond(message: ModelEventMessage) -> None:
         command = ModelEventEnvelope[dict[str, object]].model_validate_json(
             message.value
         )
         commands.append(command)
+        active_client_groups.append(client_bus.get_consumer_groups())
         # A foreign action must not finish the adapter's wait.
         replies = (
             {"correlation_id": str(uuid4()), "payload": {"action": "deny"}},
@@ -107,6 +109,18 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
     async with topics:
         await responder.start()
         try:
+            # The invocation matches deliberately: replaying this record would
+            # finish the handler with deny before the new command's response.
+            await responder.publish(
+                reply_topic,
+                key=None,
+                value=json.dumps(
+                    {
+                        "correlation_id": str(uuid4()),
+                        "payload": {"invocation_id": invocation_id, "action": "deny"},
+                    }
+                ).encode(),
+            )
             unsubscribe = await responder.subscribe(
                 command_topic,
                 group_id=f"receipt-responder.{suffix}",
@@ -133,6 +147,11 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
                 assert len(commands) == 1
                 assert commands[0].event_type == "receipt-mode.requested"
                 assert commands[0].payload == {"invocation_id": invocation_id}
+                assert len(active_client_groups) == 1
+                assert all(
+                    topic != reply_topic or group.startswith("ungrouped.")
+                    for topic, group in active_client_groups[0]
+                )
                 health = await client_bus.health_check()
                 assert health["started"] is False
                 assert not client_bus.get_consumer_groups()

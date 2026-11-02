@@ -55,7 +55,7 @@ requirements:
       - id: AC21288102
         statement: "AC21288102: the receipt-mode publish-and-await handler subscribes with subscribe_ungrouped and mints no receipt-mode-client group -- falsifier: the 14 tests that fail at the base in tests/unit/handlers/test_handler_receipt_mode_publish_await.py do not pass on the branch"
       - id: AC21288105
-        statement: "AC21288105: pre-commit passes on the files this branch changes and the focused handler tests pass -- falsifier: pre-commit rc != 0 on the changed files at the head, or the focused tests fail"
+        statement: "AC21288105: the focused handler tests and integration exchange pass, the handler and integration test pass ruff, and the handler passes mypy -- falsifier: any of the focused test, lint, format or type checks exits nonzero"
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -221,21 +221,29 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py -q --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21288-receipt-mode-ungrouped-precommit
-    description: "pre-commit passes on the files this change touches and the handler tests pass. The tests fail at the merge base."
+    description: "Run the focused handler and in-memory integration exchange, then check lint, formatting and types directly. These hosted checks avoid cold installation and execution of the whole repository's pre-commit hook graph inside one 180-second check. Repository pre-commit hooks still run before the commit; this evidence does not claim to rerun that full graph. The exchange asserts no named reply group while the command is handled and refuses stale replies with a matching invocation."
     source: manual
     binds_ac: [AC21288105]
     checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py tests/integration/handlers/test_receipt_mode_exchange_omn21341.py -k 'not kafka' -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: bash -o pipefail -c 'uv run --frozen pre-commit run --files src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py tests/unit/handlers/test_handler_receipt_mode_publish_await.py contracts/OMN-21288.yaml && uv run --frozen pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py -q --no-cov -p no:cacheprovider'
+        check_value: uv run --frozen ruff check src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py tests/integration/handlers/test_receipt_mode_exchange_omn21341.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen ruff format --check src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py tests/integration/handlers/test_receipt_mode_exchange_omn21341.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen mypy src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21288-receipt-mode-ungrouped-deploy-probe
-    description: "Hosted-runner artifact probe of the deployed handler: read the evaluated checkout's commit of handler_receipt_mode_publish_await.py from GitHub and require the subscribe_ungrouped call. The call is new on this branch, so the probe fails at the merge base. This does not claim a lab rollout."
+    description: "Hosted-runner deployment check: load the deployed handler by its adapter import spec and exchange real bus envelopes over the in-memory transport. A stale reply with the current invocation must not be replayed, the immediate progress and action must arrive, no named reply group may be active, and the client must close. The named-group assertion fails with the merge-base handler. No running lane, broker credentials or lab rollout is claimed by this hosted check; the Kafka variant is also run on the lab broker."
     source: manual
     binds_ac: [AC21288102]
     checks:
-      - check_type: command
-        check_value: |-
-          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "bus.subscribe_ungrouped(" > /dev/null'
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_receipt_mode_exchange_omn21341.py -k inmemory -q --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
 context:
   remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."

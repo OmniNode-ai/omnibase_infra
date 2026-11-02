@@ -189,8 +189,11 @@ class HandlerReceiptModePublishAwait:
                 async with timeout:
                     await bus.start()
                     for awaited_topic in awaited_events:
-                        # No consumer group: a one-shot caller reads from the log
-                        # end and leaves nothing on the broker after it returns.
+                        # Kafka's ungrouped reader fixes auto_offset_reset to
+                        # latest and resolves every partition position before
+                        # returning. Await it before publishing so an immediate
+                        # reply is read, while older replies stay behind us.
+                        # group_id=None and disabled commits leave no group.
                         unsubscribe = await bus.subscribe_ungrouped(
                             awaited_topic, partial(receive, awaited_topic)
                         )
