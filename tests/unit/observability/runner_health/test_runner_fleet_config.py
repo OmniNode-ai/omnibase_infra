@@ -38,10 +38,12 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     # scalars are the primary host's 44, and .202's omnipc2-ci-runner pool
     # carries the other 16, so the action fleet's declared total stays 60.
     # OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:66460) cut the
-    # primary host's share 44 -> 10, so the declared total is now 26.
+    # primary host's share 44 -> 10, so the declared total was 26. OMN-22111
+    # declares h053's 8 `omnibase-ci` runners before the primary share is
+    # lowered, so it is 34 until `--retire-surplus` follows the proof.
     assert config.expected_count == 10
     assert config.burst_count == 10
-    assert config.declared_total("action") == 26
+    assert config.declared_total("action") == 34
 
 
 def test_runner_compose_matches_configured_count() -> None:
