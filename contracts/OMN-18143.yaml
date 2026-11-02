@@ -23,7 +23,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn18143-ac7-config-hash-profiles
     description: >-
-      AC7 only. The tests check the generated argv and run the executor against real compose config using a minimal model with service profiles read from this repository's dev-lane overlay. They require hashes for every explicitly named service, an unchanged runtime-service hash, and exclusion of cost-estimator-web from the runtime-only wildcard service set. Compose config runs without a daemon, image pulls, or container changes, so the check can run on a hosted runner with Docker Compose. This evidence does not cover AC1 through AC6 or a live redeploy.
+      AC7 only. The tests run the executor against real compose config using a minimal model with service profiles read from this repository's dev-lane overlay. They require hashes for every explicitly named service, an unchanged runtime-service hash, and exclusion of cost-estimator-web from the runtime-only wildcard service set. Compose config runs without a daemon, image pulls, or container changes, so the check can run on a hosted runner with Docker Compose. This evidence does not cover AC1 through AC6 or a live redeploy.
     source: manual
     checks:
       - check_type: test_passes
