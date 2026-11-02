@@ -124,6 +124,11 @@ from omnibase_infra.errors import (
 from omnibase_infra.models.delegation.model_delegate_phase_durations import (
     ModelDelegatePhaseDurations,
 )
+from omnibase_infra.models.delegation.model_delegate_phase_timed_bus import (
+    DelegatePhaseStopwatch,
+    DelegatePhaseTimedBus,
+    wrap_delegate_bus,
+)
 from omnibase_infra.runtime_identity import (
     collect_runtime_identity,
     render_identity_line,
@@ -934,101 +939,6 @@ def _resolve_artifact_store_root(state_root: Path) -> Path:
 # successful publish until the runtime closes the bus.
 
 
-class DelegatePhaseStopwatch:
-    """Accumulate completed spans using an injectable monotonic clock."""
-
-    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
-        self._clock = clock
-        self._started: dict[EnumDelegatePhase, float] = {}
-        self._totals: dict[EnumDelegatePhase, float] = {}
-
-    def begin(self, phase: EnumDelegatePhase) -> None:
-        """Start a span, refusing to replace an already running span."""
-        if self.is_running(phase):
-            raise ValueError(f"Phase {phase.value} is already running")
-        self._started[phase] = self._clock()
-
-    def end(self, phase: EnumDelegatePhase) -> None:
-        """End a running span and add its elapsed seconds to the phase total."""
-        if not self.is_running(phase):
-            raise ValueError(f"Phase {phase.value} is not running")
-        elapsed = self._clock() - self._started.pop(phase)
-        self._totals[phase] = self._totals.get(phase, 0.0) + elapsed
-
-    @contextmanager
-    def phase(self, phase: EnumDelegatePhase) -> Iterator[None]:
-        """Record a span, including elapsed time when its body raises."""
-        self.begin(phase)
-        try:
-            yield
-        finally:
-            self.end(phase)
-
-    def is_running(self, phase: EnumDelegatePhase) -> bool:
-        """Whether a phase has a span that has begun and has not ended."""
-        return phase in self._started
-
-    def durations(self) -> ModelDelegatePhaseDurations:
-        """Snapshot completed totals, leaving phases with no ended span absent."""
-        return ModelDelegatePhaseDurations.model_validate(
-            {
-                f"{phase.value}_seconds": self._totals.get(phase)
-                for phase in EnumDelegatePhase
-            }
-        )
-
-
-class DelegatePhaseTimedBus:
-    """Time the client's bus calls, forwarding their arguments unchanged."""
-
-    def __init__(
-        self, inner: ProtocolLocalRuntimeBus, stopwatch: DelegatePhaseStopwatch
-    ) -> None:
-        self._inner = inner
-        self._stopwatch = stopwatch
-
-    @property
-    def inner(self) -> ProtocolLocalRuntimeBus:
-        """The runtime's own bus, which in-process handlers receive (OMN-20381)."""
-        return self._inner
-
-    async def start(self) -> None:
-        """Record connection time, including a failed connection attempt."""
-        with self._stopwatch.phase(EnumDelegatePhase.BUS_CONNECT):
-            await self._inner.start()
-
-    async def close(self) -> None:
-        """Finish terminal waiting before the bus begins closing."""
-        if self._stopwatch.is_running(EnumDelegatePhase.TERMINAL_WAIT):
-            self._stopwatch.end(EnumDelegatePhase.TERMINAL_WAIT)
-        await self._inner.close()
-
-    async def publish(self, topic: str, *args: object, **kwargs: object) -> object:
-        """Skip inline handler timing and avoid restarting terminal wait (OMN-20381)."""
-        publish = cast("Callable[..., Awaitable[object]]", self._inner.publish)
-        if self._stopwatch.is_running(EnumDelegatePhase.PUBLISH):
-            return await publish(topic, *args, **kwargs)
-        with self._stopwatch.phase(EnumDelegatePhase.PUBLISH):
-            result = await publish(topic, *args, **kwargs)
-        if not self._stopwatch.is_running(EnumDelegatePhase.TERMINAL_WAIT):
-            self._stopwatch.begin(EnumDelegatePhase.TERMINAL_WAIT)
-        return result
-
-    async def subscribe(
-        self, topic: str, *args: object, **kwargs: object
-    ) -> UnsubscribeCallback:
-        """Preserve handler subscription arguments without nested timing (OMN-20381)."""
-        subscribe = cast(
-            "Callable[..., Awaitable[UnsubscribeCallback]]", self._inner.subscribe
-        )
-        if self._stopwatch.is_running(
-            EnumDelegatePhase.PUBLISH
-        ) or self._stopwatch.is_running(EnumDelegatePhase.REPLY_SUBSCRIBE):
-            return await subscribe(topic, *args, **kwargs)
-        with self._stopwatch.phase(EnumDelegatePhase.REPLY_SUBSCRIBE):
-            return await subscribe(topic, *args, **kwargs)
-
-
 class ExecutionGraphHostingRuntime(RuntimeLocal):
     """Host the stage nodes an orchestrator's execution graph names (OMN-21071).
 
@@ -1227,7 +1137,7 @@ class DelegatePhaseTimedRuntime(ExecutionGraphHostingRuntime):
 
     def _create_event_bus(self) -> ProtocolLocalRuntimeBus:
         """Observe the runtime's chosen bus through the shared stopwatch."""
-        return DelegatePhaseTimedBus(super()._create_event_bus(), self._phase_stopwatch)
+        return wrap_delegate_bus(super()._create_event_bus(), self._phase_stopwatch)
 
     def _instantiate_handler(
         self,

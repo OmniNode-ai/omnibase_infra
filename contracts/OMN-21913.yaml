@@ -1,0 +1,50 @@
+# OMN-21913 contract file for omnibase_infra: the deploy-scope-dod pre-push hook takes its verifier-install lock without the flock binary.
+schema_version: "1.0.0"
+ticket_id: "OMN-21913"
+title: "The deploy-scope-dod pre-push hook takes its install lock with the fcntl lock helper, not the flock binary macOS hosts do not ship"
+summary: "scripts/ci/check_deploy_scope_dod.py serialized its verifier install with flock 9 inside a bash -c string. macOS ships no flock(1), so the hook died with rc 127 on every Mac lab host and landing workers were refused. The install now runs under scripts/heavy_lock.py, which takes fcntl.flock(2) LOCK_EX on the same <entry>.lock path (the kernel lock flock(1) takes), holds it for the whole install and fails closed with a non-zero exit and a message when it cannot take it. No second lock helper, no skip, no advisory mode; the other flock(1) callers are unchanged."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21913-install-lock-without-flock-binary
+    statement: "The pre-push verifier install holds an exclusive fcntl lock on its lock path for its whole run, fails closed when it cannot take it, and runs on a host with no flock(1)."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the install step no longer calls the flock binary and holds an exclusive lock on the same lock path for its whole run -- falsifier: a pytest in tests/ci that starts two installs against one lock path and asserts the second waits for the first, plus a pytest that flock does not appear as a command in _VERIFIER_INSTALL_SCRIPT"
+      - id: AC2
+        statement: "AC2: a lock that cannot be taken makes the hook exit non-zero with a message, never a pass -- falsifier: a pytest with an unwritable lock directory asserting rc != 0"
+      - id: AC3
+        statement: "AC3: the hook runs to its verdict on a Mac lab host and on a Linux lab host -- falsifier: uv run pytest over the new tests on a Mac lab host and on a Linux lab host through lab-run, exit code recorded for each"
+evidence_requirements:
+  - kind: tests
+    description: "The new lock tests and the existing tag-install tests pass."
+    command: "uv run pytest tests/ci/test_verifier_install_lock_omn21913.py tests/ci/test_verifier_tag_install_omn21853.py -q -p no:cacheprovider --no-cov"
+dod_evidence:
+  - id: dod-001
+    description: "No flock command in the install script; two installs of one tag run one after the other on one lock path; an install waits while a peer holds that path with fcntl.flock(2)."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/ci/test_verifier_install_lock_omn21913.py -q -p no:cacheprovider --no-cov -k 'flock_binary'"
+  - id: dod-002
+    description: "A lock that cannot be taken raises from the install and makes hook main() return non-zero with the fail-closed message; the script never runs unlocked."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/ci/test_verifier_install_lock_omn21913.py -q -p no:cacheprovider --no-cov -k 'cannot_be_taken'"
+  - id: dod-003
+    description: "The hook run as a process refuses with a non-zero exit and the fail-closed message when the lock cannot be taken. Hosted side: the Linux runner. Lab side: the Mac lab host and the Linux lab host through lab-run, host, sha and exit codes in the pull request body."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/ci/test_verifier_install_lock_omn21913.py -q -p no:cacheprovider --no-cov -k 'hook_exits_nonzero'"
+  - id: dod-004
+    description: "The whole new lock test file and the existing tag-install tests run to a verdict, including two installs on one lock path running one after the other and an install waiting while a peer holds the path."
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/ci/test_verifier_install_lock_omn21913.py tests/ci/test_verifier_tag_install_omn21853.py -q -p no:cacheprovider --no-cov"
