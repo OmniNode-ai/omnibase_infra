@@ -75,21 +75,27 @@ class TestRegistrationHandlerInterface:
             "HandlerNodeIntrospected.handle must be async"
         )
 
-        # Verify handle method signature accepts the typed 'request' parameter
+        # The dispatcher calls handle(request) positionally, so the signature
+        # is exactly (self, request): no envelope, no extra parameters.
         sig = inspect.signature(handle_method)
         param_names = list(sig.parameters.keys())
-        # First param is 'self', second should be 'request'
-        assert "request" in param_names, (
-            f"handle() must accept 'request' parameter, got: {param_names}"
+        assert param_names == ["self", "request"], (
+            f"handle() must take exactly (self, request), got: {param_names}"
         )
-        assert "envelope" not in param_names
 
-        # The parameter must be annotated with the typed request model over the
-        # introspection event, not merely named 'request'.
+        # The parameter is annotated with a typed request model over the
+        # introspection event. Compare the event field's annotation rather than
+        # the identity of the parametrized generic class.
         hints = typing.get_type_hints(handle_method)
-        assert hints["request"] == ModelInjectedRequest[ModelNodeIntrospectionEvent], (
-            f"handle() 'request' must be ModelInjectedRequest"
-            f"[ModelNodeIntrospectionEvent], got: {hints['request']}"
+        request_model = ModelInjectedRequest.narrow(hints["request"])
+        assert request_model is not None, (
+            f"handle() 'request' must be a ModelInjectedRequest model, "
+            f"got: {hints['request']}"
+        )
+        event_annotation = request_model.model_fields["event"].annotation
+        assert event_annotation is ModelNodeIntrospectionEvent, (
+            f"handle() request event must be ModelNodeIntrospectionEvent, "
+            f"got: {event_annotation}"
         )
 
     @pytest.mark.asyncio

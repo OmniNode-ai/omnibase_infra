@@ -14,6 +14,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -158,3 +159,38 @@ def test_uninjected_interval_resolves_the_contract_declaration(
     monkeypatch.setenv(ENV_INTERVAL, "not_a_number")
     with pytest.raises(ProtocolConfigurationError):
         get_liveness_interval_seconds()
+
+
+def test_contract_fallback_reads_the_packaged_contract_resource(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The fallback reads contract.yaml as package data of the orchestrator node.
+
+    The declarations come from ``importlib.resources`` of
+    ``omnibase_infra.nodes.node_registration_orchestrator``, not a path walked up
+    from this module's file, so a zipped or relocated install resolves them too.
+    """
+    from omnibase_infra.models.registration import model_registration_settings as mrs
+
+    (tmp_path / "contract.yaml").write_text(
+        "descriptor:\n"
+        '  registration_auto_ack: "true"\n'
+        '  liveness_interval_seconds: "123"\n',
+        encoding="utf-8",
+    )
+    asked: list[str] = []
+
+    def fake_files(package: str) -> Path:
+        asked.append(package)
+        return tmp_path
+
+    monkeypatch.setattr(mrs, "files", fake_files)
+    mrs._declared_descriptor.cache_clear()
+    try:
+        settings = ModelRegistrationSettings.from_contract()
+    finally:
+        mrs._declared_descriptor.cache_clear()
+
+    assert asked == ["omnibase_infra.nodes.node_registration_orchestrator"]
+    assert settings.auto_ack is True
+    assert settings.liveness_interval_seconds == 123

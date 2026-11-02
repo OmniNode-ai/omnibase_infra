@@ -18,7 +18,7 @@ Related Tickets:
 from __future__ import annotations
 
 from functools import cache
-from pathlib import Path
+from importlib.resources import files
 from typing import Final
 
 import yaml
@@ -30,25 +30,30 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 ENV_LIVENESS_INTERVAL_SECONDS: Final[str] = "ONEX_LIVENESS_INTERVAL_SECONDS"
 DEFAULT_LIVENESS_INTERVAL_SECONDS: Final[int] = 60
 
-_CONTRACT: Final[Path] = (
-    Path(__file__).resolve().parents[2]
-    / "nodes"
-    / "node_registration_orchestrator"
-    / "contract.yaml"
-)
+_CONTRACT_PACKAGE: Final[str] = "omnibase_infra.nodes.node_registration_orchestrator"
+_CONTRACT_NAME: Final[str] = "contract.yaml"
 
 
 @cache
 def _declared_descriptor() -> tuple[str, str]:
-    """Return the contract's raw ``(auto_ack, liveness_interval_seconds)`` declarations."""
-    with _CONTRACT.open(encoding="utf-8") as contract_file:
+    """Return the contract's raw ``(auto_ack, liveness_interval_seconds)`` declarations.
+
+    The contract is read as package data, so a zipped or relocated install
+    resolves it too. Only the raw declarations are cached; ``from_contract``
+    expands their environment references on every call.
+    """
+    with (
+        files(_CONTRACT_PACKAGE)
+        .joinpath(_CONTRACT_NAME)
+        .open(encoding="utf-8") as contract_file
+    ):
         raw = yaml.safe_load(contract_file)
     descriptor = raw.get("descriptor") if isinstance(raw, dict) else None
     auto_ack = descriptor.get("registration_auto_ack") if descriptor else None
     interval = descriptor.get("liveness_interval_seconds") if descriptor else None
     if not isinstance(auto_ack, str) or not isinstance(interval, str):
         raise ValueError(
-            f"contract {_CONTRACT} must declare string descriptor.registration_auto_ack "
+            f"contract {_CONTRACT_PACKAGE}/{_CONTRACT_NAME} must declare string descriptor.registration_auto_ack "
             "and descriptor.liveness_interval_seconds"
         )
     return auto_ack, interval
