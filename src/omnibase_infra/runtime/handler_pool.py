@@ -41,6 +41,10 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+from omnibase_infra.models.handlers.model_pool_checkout_metrics import (
+    ModelPoolCheckoutMetrics,
+)
+
 if TYPE_CHECKING:
     from omnibase_infra.protocols import ProtocolContainerAware
 
@@ -102,10 +106,8 @@ class HandlerPool:
         self._shutting_down: bool = False
 
         # Metrics
-        self._checkout_count: int = 0
-        self._checkin_count: int = 0
+        self._checkouts = ModelPoolCheckoutMetrics()
         self._recycle_count: int = 0
-        self._checkout_wait_total_ms: float = 0.0
 
     async def _initialize_instance(self, instance: ProtocolContainerAware) -> None:
         """Call ``initialize()`` on a handler instance, passing config if available.
@@ -186,8 +188,7 @@ class HandlerPool:
         start = time.monotonic()
         instance = await self._pool.get()
         wait_ms = (time.monotonic() - start) * 1000
-        self._checkout_count += 1
-        self._checkout_wait_total_ms += wait_ms
+        self._checkouts.record_checkout(wait_ms)
 
         try:
             yield instance
@@ -197,7 +198,7 @@ class HandlerPool:
                 self._pool.put_nowait(instance)
             else:
                 await self._recycle_instance(instance)
-            self._checkin_count += 1
+            self._checkouts.record_checkin()
 
     async def shutdown(self) -> None:
         """Shut down all handler instances in the pool.
@@ -253,22 +254,16 @@ class HandlerPool:
             - recycle_count: Number of instances recycled
             - avg_checkout_wait_ms: Average wait time for checkout
         """
-        avg_wait = (
-            self._checkout_wait_total_ms / self._checkout_count
-            if self._checkout_count > 0
-            else 0.0
-        )
-
         return {
             "healthy": self._initialized and not self._shutting_down,
             "handler_type": self.handler_type,
             "pool_size": self.pool_size,
             "available": self._pool.qsize(),
             "total_instances": len(self._all_instances),
-            "checkout_count": self._checkout_count,
-            "checkin_count": self._checkin_count,
+            "checkout_count": self._checkouts.checkout_count,
+            "checkin_count": self._checkouts.checkin_count,
             "recycle_count": self._recycle_count,
-            "avg_checkout_wait_ms": round(avg_wait, 2),
+            "avg_checkout_wait_ms": round(self._checkouts.average_wait_ms, 2),
         }
 
     @property

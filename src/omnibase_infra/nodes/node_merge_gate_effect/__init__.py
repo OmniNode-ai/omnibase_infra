@@ -10,7 +10,6 @@ Architecture:
     - node.py: Declarative node shell extending NodeEffect
     - handlers/: Merge gate upsert + Linear quarantine handler
     - models/: Payload models for merge gate events
-    - registry/: Infrastructure registry for dependency injection
     - contract.yaml: Event subscription, handler routing, and I/O definitions
 
 Node Type: EFFECT_GENERIC
@@ -35,15 +34,10 @@ from omnibase_infra.nodes.node_merge_gate_effect.models import (
 from omnibase_infra.nodes.node_merge_gate_effect.node import (
     NodeMergeGateEffect,
 )
-from omnibase_infra.nodes.node_merge_gate_effect.registry import (
-    RegistryInfraMergeGateEffect,
-)
 
 __all__: list[str] = [
     # Node
     "NodeMergeGateEffect",
-    # Registry
-    "RegistryInfraMergeGateEffect",
     # Handlers
     "HandlerUpsertMergeGate",
     # Models

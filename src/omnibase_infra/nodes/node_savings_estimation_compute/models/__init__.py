@@ -29,6 +29,12 @@ from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_c
 from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_correlation_batch_output import (
     ModelSavingsCorrelationBatchOutput,
 )
+from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_counterfactual_policy import (
+    ModelSavingsCounterfactualPolicy,
+)
+from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_counterfactual_rule import (
+    ModelSavingsCounterfactualRule,
+)
 from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_estimate import (
     ModelSavingsEstimate,
 )
@@ -41,6 +47,8 @@ __all__: list[str] = [
     "EnumModelTier",
     "EnumSavingsCategory",
     "ModelEffectivenessEntry",
+    "ModelSavingsCounterfactualPolicy",
+    "ModelSavingsCounterfactualRule",
     "ModelSavingsCorrelationBatchCommand",
     "ModelSavingsCorrelationBatchOutput",
     "ModelSavingsEstimationInput",

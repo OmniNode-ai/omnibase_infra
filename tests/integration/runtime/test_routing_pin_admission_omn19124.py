@@ -28,8 +28,19 @@ from omnibase_infra.event_bus.models.config.model_kafka_event_bus_config import 
 )
 from omnibase_infra.runtime import service_delegation_dispatch_port as port_module
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
+from tests.helpers.cli_registry_stand_in import (
+    install_stand_in_registry,
+    wiring_authority,
+)
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _declared_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dispatch with no budget arguments resolves the class's declared budget (OMN-21604)."""
+    install_stand_in_registry(monkeypatch, wiring_authority())
+
 
 _INTERNAL = "redpanda:9092"
 
@@ -126,6 +137,9 @@ def _dev_bus() -> EventBusKafka:
         config=ModelKafkaEventBusConfig(
             bootstrap_servers=_INTERNAL,
             environment="dev",
+            # OMN-21604: the lanes' poll interval, whose dispatch deadline covers
+            # a class's ceiling plus margin; the 300 s library default does not.
+            max_poll_interval_ms=1_800_000,
         )
     )
 

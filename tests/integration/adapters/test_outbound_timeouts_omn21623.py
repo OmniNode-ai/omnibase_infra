@@ -27,6 +27,9 @@ from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts
 
 pytestmark = pytest.mark.integration
 
+# The adapters take the model from their caller; any name serves these timeout probes.
+_PROBE_MODEL = "probe-model"
+
 
 @pytest.mark.parametrize("override", [None, 7.25])
 async def test_tracker_timeout_reaches_a_real_graphql_request(
@@ -96,11 +99,13 @@ async def test_llm_timeout_reaches_the_http_transport(
         | AdapterTestBoilerplateGeneration
     )
     if kind == "documentation":
-        adapter = AdapterDocumentationGeneration(base_url=endpoint)
+        adapter = AdapterDocumentationGeneration(base_url=endpoint, model=_PROBE_MODEL)
     elif kind == "boilerplate":
-        adapter = AdapterTestBoilerplateGeneration(base_url=endpoint)
+        adapter = AdapterTestBoilerplateGeneration(
+            base_url=endpoint, model=_PROBE_MODEL
+        )
     else:
-        adapter = AdapterCodeReviewAnalysis(base_url=endpoint)
+        adapter = AdapterCodeReviewAnalysis(base_url=endpoint, model=_PROBE_MODEL)
     observed: list[object] = []
 
     async def record_timeout(request: httpx.Request) -> None:

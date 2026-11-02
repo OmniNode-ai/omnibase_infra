@@ -34,7 +34,7 @@ class ModelSavingsEstimationInput(BaseModel):
         correlation_id: Correlation ID for tracing.
         effectiveness_entries: List of effectiveness measurements.
         actual_total_tokens: Total tokens consumed in the session.
-        actual_model_id: Actual model used (e.g. 'claude-opus-4-6').
+        actual_model_id: Actual model used; required, the caller supplies it.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -52,7 +52,7 @@ class ModelSavingsEstimationInput(BaseModel):
         default=0, ge=0, description="Total tokens consumed in session"
     )
     actual_model_id: str = Field(  # noqa: onex-pattern-validation
-        default="claude-opus-4-6", description="Actual model identifier"
+        ..., min_length=1, description="Actual model identifier"
     )
 
 

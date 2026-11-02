@@ -412,3 +412,22 @@ class TestManifestMergePolicyIntegration:
         assert (f["repo"], f["class"]) == ("omnibase_spi", lib.PARITY_QUEUE_DRIFT)
         # core (queue off, strict off) + omnidash (queue off, strict on) match -> clean.
         assert not [x for x in findings if x["repo"] in {"omnibase_core", "omnidash"}]
+
+
+# ---------------------------------------------------------------------------
+# OmniUI main entry in the shipped manifest (OMN-21863)
+# ---------------------------------------------------------------------------
+
+
+def test_shipped_manifest_declares_omniui_main_contexts() -> None:
+    import yaml
+
+    manifest_path = Path(__file__).resolve().parents[2] / (
+        "scripts/enforcement_parity_manifest.yaml"
+    )
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    gates = manifest["repos"]["omniui"]["main"]["load_bearing_gates"]
+    assert [(g["context"], g["coverage"]) for g in gates] == [
+        ("kb-doc-gate / kb-doc-gate", "direct"),
+        ("public-repo-hygiene / public-repo-hygiene", "direct"),
+    ]

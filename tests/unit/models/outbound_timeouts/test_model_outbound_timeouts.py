@@ -39,6 +39,8 @@ _TIMEOUTS_FILE = (
 )
 
 _TIMEOUTS = load_outbound_timeouts()
+# The adapters take the model from their caller; any name serves these timeout probes.
+_PROBE_MODEL = "probe-model"
 
 
 def _declared_block() -> dict[str, object]:
@@ -186,7 +188,7 @@ class TestCallSitesPassDeclaredTimeouts:
 
     def test_coder_transport_ceiling(self) -> None:
         adapter = adapter_code_analysis_enrichment.AdapterCodeAnalysisEnrichment(
-            base_url="http://localhost:1"
+            base_url="http://localhost:1", model=_PROBE_MODEL
         )
         assert (
             adapter._transport._max_timeout_seconds == _TIMEOUTS.llm_coder_max_seconds
@@ -201,7 +203,7 @@ class TestCallSitesPassDeclaredTimeouts:
         ],
     )
     def test_long_form_transport_ceiling(self, adapter_class: Any) -> None:
-        adapter = adapter_class(base_url="http://localhost:1")
+        adapter = adapter_class(base_url="http://localhost:1", model=_PROBE_MODEL)
         assert (
             adapter._transport._max_timeout_seconds
             == _TIMEOUTS.llm_long_form_max_seconds
