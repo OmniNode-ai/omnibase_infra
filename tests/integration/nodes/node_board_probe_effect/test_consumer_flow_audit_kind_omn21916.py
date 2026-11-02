@@ -29,7 +29,7 @@ from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_che
 )
 from scripts.ci import c28_consumer_flow_probe as script
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 NODES = Path(__file__).resolve().parents[4] / "src/omnibase_infra/nodes"
 AUDIT_KIND = "audit_projection_consumer"

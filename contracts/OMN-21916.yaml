@@ -18,7 +18,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: "The C28 kinds clause passes on the dev lane's recorded gateway-off rows, the audit kind is an audit consumer of its declared topic, and the parity grader reads the node's kinds."
-    command: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider"
+    command: "uv run --frozen pytest tests/integration/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider"
   - kind: tests
     description: "The node and script C28 suites pass on the retargeted kind and the regenerated recorded fixture."
     command: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect tests/ci/test_c28_consumer_flow_probe.py -q -p no:cacheprovider"
@@ -29,7 +29,7 @@ dod_evidence:
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider -k gateway_off"
+        check_value: "uv run --frozen pytest tests/integration/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider -k gateway_off"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21916-ac2-check-defect
     description: "C28 classification: a check defect in this repository's probe (ours). The node's kinds table and the parity grader name one audit kind, an audit consumer of its contract-declared topic, and the gateway-off rows grade green. Fails at the merge base, where the audit kind reads messages_in [0, 0]."
@@ -37,7 +37,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider -k 'parity or gateway_off'"
+        check_value: "uv run --frozen pytest tests/integration/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider -k 'parity or gateway_off'"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21916-ac3-c28-suites
     description: "The regression and the C28 node and script suites pass at the PR head. Fails at the merge base, where the regression reads messages_in [0, 0]."
