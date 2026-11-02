@@ -79,7 +79,12 @@ def test_factory_floor_web_runtime() -> None:
         str(COMPOSE),
     ]
     require(["docker", "compose", "version"], base_env)
-    with tempfile.TemporaryDirectory(prefix="factory-floor-probe-") as temporary:
+    with (
+        tempfile.TemporaryDirectory(prefix="factory-floor-probe-") as temporary,
+        tempfile.TemporaryDirectory(
+            prefix="factory-floor-override-"
+        ) as temporary_override,
+    ):
         site = Path(temporary)
         site.chmod(0o755)
         content = {
@@ -122,7 +127,7 @@ def test_factory_floor_web_runtime() -> None:
                 "protocol": "tcp",
             }
         ], service["ports"]
-        override = site / "probe-compose.json"
+        override = Path(temporary_override) / "probe-compose.json"
         override.write_text(
             json.dumps(
                 {
@@ -188,8 +193,7 @@ def test_factory_floor_web_runtime() -> None:
                 ("/reports/decision-map/missing", 404, SCOPED_POLICY, None),
             ]
             for path, status, policy, expected_body in cases:
-                methods = ("GET", "HEAD", "POST") if status == 200 else ("GET",)
-                for method in methods:
+                for method in ("GET", "HEAD", "POST"):
                     request = Request(
                         f"http://127.0.0.1:{binding['HostPort']}{path}", method=method
                     )
@@ -198,9 +202,16 @@ def test_factory_floor_web_runtime() -> None:
                     except HTTPError as error:
                         response = error
                     with response:
-                        assert response.status == (
-                            403 if method == "POST" else status
-                        ), (method, path, response.status)
+                        # The dot-file rule returns 404 for every method; elsewhere
+                        # limit_except refuses POST with 403.
+                        expected_status = status
+                        if method == "POST" and "/." not in path:
+                            expected_status = 403
+                        assert response.status == expected_status, (
+                            method,
+                            path,
+                            response.status,
+                        )
                         assert response.headers.get_all("Cache-Control") == ["no-store"]
                         assert response.headers.get_all("X-Content-Type-Options") == [
                             "nosniff"
@@ -215,4 +226,7 @@ def test_factory_floor_web_runtime() -> None:
                             assert body == expected_body, (path, body)
                     LOGGER.info("PASS: %s %s", method, path)
         finally:
-            require([*deployed, "down", "--timeout", "5"], env)
+            # Teardown must not mask the assertion that failed or leave the project behind.
+            down = run([*deployed, "down", "--volumes", "--timeout", "5"], env)
+            if down.returncode:
+                LOGGER.error("teardown of %s failed: %s", project, down.stderr)
