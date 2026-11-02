@@ -12,6 +12,8 @@ a compose job was not running.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,7 @@ def _run(
     world: World,
     *,
     budget: float = 2400,
+    flag: str = "true",
 ) -> tuple[int, dict[str, str]]:
     monkeypatch.setattr(resolver, "http_health", world.health)
     monkeypatch.setattr(resolver, "read_deploy_agent", world.read_agent)
@@ -70,7 +73,7 @@ def _run(
             "LANE_REQUIRE": "gateway_url",
             "LANE_DEPLOY_WAIT_SECONDS": str(budget),
             "LANE_DEPLOY_POLL_SECONDS": str(POLL_SECONDS),
-            "LANE_DEPLOY_WAIT_WHILE_BUSY": "true",
+            "LANE_DEPLOY_WAIT_WHILE_BUSY": flag,
             "GITHUB_ENV": str(env_file),
         }
     )
@@ -210,10 +213,127 @@ def test_handler_reads_the_declared_stages_from_its_request() -> None:
     assert handler.handle(undeclared).busy_reason == "state=settling"
 
 
-def test_the_action_runs_wait_while_busy_in_the_repository_environment() -> None:
+def _action_bash() -> str:
+    """Find the Bash 4+ the Linux action requires, including on a macOS lab host."""
+    for directory in os.get_exec_path():
+        candidate = Path(directory) / "bash"
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            continue
+        version = subprocess.run(
+            [str(candidate), "-c", "(( BASH_VERSINFO[0] >= 4 ))"],
+            check=False,
+            timeout=5,
+        )
+        if version.returncode == 0:
+            return str(candidate)
+    pytest.fail("The resolve-lab-lane action requires Bash 4+ on PATH")
+
+
+@pytest.mark.parametrize(
+    ("flag", "interpreter"),
+    [
+        ("true", "uv"),
+        ("TRUE", "uv"),
+        ("TrUe", "uv"),
+        ("1", "uv"),
+        ("yes", "uv"),
+        ("YeS", "uv"),
+        ("false", "python3"),
+        ("0", "python3"),
+        ("no", "python3"),
+        ("", "python3"),
+        ("anything", "python3"),
+        (" true ", "python3"),
+    ],
+)
+def test_action_executes_the_selected_interpreter(
+    tmp_path: Path, flag: str, interpreter: str
+) -> None:
+    """Execute the shipped shell, including case folding, quoting and exec status."""
     action = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
-    run = action["runs"]["steps"][0]["run"]
-    assert 'true|1|yes) exec uv run --frozen python "${GITHUB_ACTION_PATH}/' in run
-    assert run.rstrip().endswith(
-        'exec python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"'
+    for name in ("uv", "python3"):
+        executable = tmp_path / name
+        executable.write_text(
+            f"#!/bin/sh\nprintf '%s\\n' '{name}' \"$@\"\nexit 37\n",
+            encoding="utf-8",
+        )
+        executable.chmod(0o755)
+    action_path = tmp_path / "action directory with spaces"
+    result = subprocess.run(
+        [
+            _action_bash(),
+            "-eu",
+            "-o",
+            "pipefail",
+            "-c",
+            action["runs"]["steps"][0]["run"],
+        ],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "GITHUB_ACTION_PATH": str(action_path),
+            "LANE_DEPLOY_WAIT_WHILE_BUSY": flag,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
     )
+    expected = [interpreter]
+    if interpreter == "uv":
+        expected.extend(["run", "--frozen", "python"])
+    expected.append(str(action_path / "resolve_lab_lane.py"))
+    assert result.returncode == 37, result.stderr
+    assert result.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected_code"),
+    [
+        ("true", 1),
+        ("TRUE", 1),
+        ("TrUe", 1),
+        ("1", 1),
+        ("yes", 1),
+        ("YeS", 1),
+        ("false", 0),
+        ("0", 0),
+        ("no", 0),
+        ("", 0),
+        ("anything", 0),
+        (" true ", 0),
+    ],
+)
+def test_python_wait_mode_matches_shell_truthy_parsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str, expected_code: int
+) -> None:
+    world = World(ready_at=0, busy_until=10**6, busy_payload=NEXT_JOB)
+    code, written = _run(tmp_path, monkeypatch, world, budget=1, flag=flag)
+    assert code == expected_code
+    assert ("LANE_NAME" in written) == (expected_code == 0)
+    assert bool(world.sleeps) == (expected_code == 1)
+
+
+@pytest.mark.parametrize(
+    ("health", "reason"),
+    [
+        (None, None),
+        ([], None),
+        ({}, None),
+        ({"state": "settling"}, "state=settling"),
+        ({"state": "settling", "last_result": None}, "state=settling"),
+        ({"state": "settling", "last_result": []}, "state=settling"),
+        (
+            {"state": "settling", "last_result": {"settling_stage": ["lab_overlay"]}},
+            "state=settling",
+        ),
+        (
+            {"state": "settling", "last_result": {"settling_stage": None}},
+            "state=settling",
+        ),
+    ],
+)
+def test_malformed_snapshots_do_not_exempt_an_unknown_settle(
+    health: object, reason: str | None
+) -> None:
+    assert resolver.compose_busy_reason({"health": health, "queue": None}) == reason

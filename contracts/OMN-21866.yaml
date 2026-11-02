@@ -27,12 +27,18 @@ dod_evidence:
       - check_type: test_passes
         check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_overlay_settle_omn21866.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/integration/nodes/test_lab_lane_overlay_settle_omn21866.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
   - id: dod-deploy
-    description: Deploy-scope readback, bound to no criterion; the lab lane compose-busy handler is present in the repository at the evaluated checkout revision.
+    description: Deploy-scope revision content readback is retained alongside an HTTP integration check through the shipped contract and handler, proving overlay settle proceeds while a compose deploy remains busy.
     source: manual
     checks:
       - check_type: command
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_lab_lane_compose_busy.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class HandlerLabLaneComposeBusy' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/integration/nodes/test_lab_lane_overlay_settle_omn21866.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
