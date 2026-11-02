@@ -10,7 +10,7 @@ bundle and clones it there. It built that bundle with::
 
 which packs only the commits reachable from ``HEAD`` and **no ref under
 ``refs/tags/``**. Every remote clone, on every host, on every push, therefore had
-zero tags -- and ``scripts/check_release_identity.py`` derives "the latest
+zero tags -- and the ``check-release-identity`` gate derives "the latest
 published version" from ``git tag --list``. With no tags it took its "no published
 tag yet" branch and printed a message the suite does not expect, so three tests
 went red remotely while passing locally at the identical SHA (first observed on

@@ -5,7 +5,7 @@
 """Node Release Identity Compute — fresh-deploy fitness gate node.
 
 Canonical CONTRACT+NODE+HANDLER replacement for the freestanding imperative script
-``scripts/check_release_identity.py`` (legacy, OMN-13412). Enforces that packaged
+the ``check-release-identity`` gate (legacy, OMN-13412). Enforces that packaged
 source (``src/**``) may not merge onto an already-published version without a bump.
 
 Architecture:
@@ -14,7 +14,7 @@ Architecture:
     - contract.yaml defines behavior via handler_routing.
 
 The git/pyproject I/O is performed by the thin CLI collector/shim at
-``scripts/check_release_identity.py`` and handed to the handler as a typed request,
+the ``check-release-identity`` gate and handed to the handler as a typed request,
 so the handler is pure and deterministic.
 
 Ticket: OMN-14471

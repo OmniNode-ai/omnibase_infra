@@ -22,7 +22,6 @@ Sites pinned by this module:
 * ``scripts/hooks/prepush_smart_tests.sh`` -- the OMN-13973 governed selector's
   ``BASE_SHA`` range (structural ratchet; the shell hook is not importable).
 * ``scripts/validate-kafka-schema-handshake.py`` -- ``_changed_module_prefixes``.
-* ``scripts/check_release_identity.py`` -- ``_collect_changed_files``.
 """
 
 from __future__ import annotations
@@ -232,38 +231,6 @@ def test_kafka_schema_handshake_range_is_merge_base_anchored() -> None:
     assert forbidden not in source
     # Positive control: the forbidden literal is exactly what the assertion reads.
     assert forbidden in source.replace("merge_base]", '"origin/main"]')
-
-
-@pytest.mark.unit
-def test_release_identity_empty_branch_diff_does_not_fall_back_to_a_peers_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The empty-three-dot fallback must stay merge-base anchored.
-
-    When the branch has no commits of its own, the branch changed nothing. The old
-    two-dot fallback reported the PEER's ``src/`` landings instead, which arms the
-    release-identity version gate against a branch that touched no packaged source
-    at all.
-    """
-    identity = _load_module(
-        "_omn18058_release_identity", REPO_ROOT / "scripts/check_release_identity.py"
-    )
-    repo = _build_stale_base_repo(tmp_path, branch_commits=False)
-    # Positive control: the three-dot set really is empty here, so the fallback
-    # branch under test is the one that executes, and the two-dot form on this
-    # same fixture DOES surface the peer's file.
-    assert _git(repo, "diff", "--name-only", "origin/dev...HEAD").strip() == ""
-    assert _PEER_DEPLOY_SCOPED in _two_dot(repo, "origin/dev")
-
-    # ``_git`` runs with ``cwd=_REPO_ROOT``; point it at the fixture so the test
-    # exercises the fixture's history rather than this checkout's.
-    monkeypatch.setattr(identity, "_REPO_ROOT", repo)
-    assert identity._collect_changed_files("origin/dev", []) == ()
-
-    # And the fallback still sees this branch's own UNCOMMITTED edit.
-    (repo / "src" / "omnibase_infra").mkdir(parents=True, exist_ok=True)
-    (repo / "docs" / "base.md").write_text("locally edited\n", encoding="utf-8")
-    assert identity._collect_changed_files("origin/dev", []) == ("docs/base.md",)
 
 
 @pytest.mark.unit

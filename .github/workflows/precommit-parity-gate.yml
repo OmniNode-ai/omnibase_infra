@@ -76,12 +76,13 @@ jobs:
           uv run --no-project --with pyyaml \
             python3 scripts/validation/validate_precommit_fail_loud.py
 
-      # OMN-16958: port of omnimarket's OMN-17219 interpreter-resolution gate,
-      # the CI half of the precommit-interpreter-resolution pre-commit hook.
+      # OMN-16958: the CI half of the precommit-interpreter-resolution pre-commit
+      # hook, run from omnibase_core at the hook's own rev (OMN-21939).
       - name: Interpreter-resolution gate (no bare `python` in hook entries)
         run: |
-          uv run --no-project --with pyyaml \
-            python3 scripts/validation/validate_precommit_interpreter.py
+          uv run --no-project \
+            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261101023710-a66b5ff79cc0' \
+            python -m omnibase_core.nodes.node_precommit_interpreter_check_compute.runtime_precommit_interpreter_check
 
       - name: Pin-parity check (pre-commit rev vs CI-pinned SHA)
         run: |

@@ -5,7 +5,7 @@
 """Pure COMPUTE handler for the release-identity fresh-deploy fitness gate.
 
 Canonical replacement for the freestanding imperative script
-``scripts/check_release_identity.py`` (legacy, OMN-13412). The gate enforces:
+the ``check-release-identity`` gate (legacy, OMN-13412). The gate enforces:
 when a diff touches packaged source (``src/**``) AND any published tag exists,
 ``pyproject.toml``'s ``project.version`` MUST be strictly greater than the highest
 published version — otherwise two distinct builds ship the same version string and
@@ -54,7 +54,7 @@ class HandlerReleaseIdentity:
 
     ``handle`` is a pure function of its ``ModelReleaseIdentityRequest``: same
     request -> same decision, no I/O. The messages and exit codes are preserved
-    byte-for-byte from the legacy ``scripts/check_release_identity.py`` so the two
+    byte-for-byte from the legacy ``check-release-identity`` gate script so the two
     wiring points (fresh-deploy-fitness CI + the pre-commit hook) behave identically.
 
     Attributes:

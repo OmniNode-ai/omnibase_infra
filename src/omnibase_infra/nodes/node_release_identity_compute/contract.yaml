@@ -12,7 +12,7 @@
 # effects.
 #
 # Related Tickets:
-#   - OMN-14471: Refactor legacy scripts/check_release_identity.py -> canonical node
+#   - OMN-14471: Refactor the legacy check-release-identity gate -> canonical node
 #   - OMN-13412: Fresh-deploy fitness gates (original release-identity invariant)
 #   - OMN-12515: Imperative-contract guard (scan_freestanding_imperative_io) context
 #   - OMN-17240: An EMPTY published-tag set is a PASS only when it is CREDIBLE.

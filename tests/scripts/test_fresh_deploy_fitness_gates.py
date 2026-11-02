@@ -6,7 +6,7 @@
 Covers the three NEW validators wired in this PR:
   * scripts/check_terminal_cost_completeness.py  (item 5)
   * scripts/check_context_field_presence.py      (item 6)
-  * scripts/check_release_identity.py            (item 7)
+  * the core check-release-identity hook          (item 7)
 
 Each test proves a deliberately-broken input fails (non-zero exit) and a
 correct input passes (exit 0) — the DoD requirement for an enforcement gate.
@@ -24,6 +24,10 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPTS = _REPO_ROOT / "scripts"
+_CORE_RELEASE_IDENTITY = (
+    "omnibase_core.nodes.node_release_identity_check_compute."
+    "runtime_release_identity_check"
+)
 
 
 def _run(script: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -41,11 +45,7 @@ def _git(root: Path, *args: str) -> None:
 
 def _release_identity_repo(tmp_path: Path, version: str, tags: tuple[str, ...]) -> Path:
     root = tmp_path / "release_identity_repo"
-    scripts = root / "scripts"
-    scripts.mkdir(parents=True)
-    shutil.copyfile(
-        _SCRIPTS / "check_release_identity.py", scripts / "check_release_identity.py"
-    )
+    root.mkdir(parents=True)
     (root / "pyproject.toml").write_text(
         f'[project]\nname = "release-identity-fixture"\nversion = "{version}"\n',
         encoding="utf-8",
@@ -63,12 +63,11 @@ def _release_identity_repo(tmp_path: Path, version: str, tags: tuple[str, ...]) 
 
 def _run_release_identity(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(root / "scripts" / "check_release_identity.py"), *args],
+        [sys.executable, "-m", _CORE_RELEASE_IDENTITY, "--root", str(root), *args],
         cwd=root,
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "PYTHONPATH": str(_REPO_ROOT / "src")},
     )
 
 

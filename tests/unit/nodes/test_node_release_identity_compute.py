@@ -5,9 +5,7 @@
 Fast, subprocess-free tests of ``HandlerReleaseIdentity.handle`` — the pure core of
 the ``node_release_identity_compute`` node. Every decision branch is exercised by
 constructing a typed ``ModelReleaseIdentityRequest`` directly and asserting the
-decision's exit code, stream, message, and reason code. Byte-for-byte equivalence
-with the legacy gate is proven separately by
-``tests/scripts/test_check_release_identity.py``.
+decision's exit code, stream, message, and reason code.
 """
 
 from __future__ import annotations
