@@ -91,3 +91,15 @@ def test_kernel_identity_is_the_old_identity_when_nothing_is_selected() -> None:
     assert _selection("").kernel_identity("local", None, "x", "1.0.0").service == (
         "onex-kernel"
     )
+
+
+def test_multi_contract_selection_ignores_blanks_and_repeats() -> None:
+    """The service name follows the parsed selection, not the raw env spelling."""
+    spaced = _selection(" a , b ,a,, ")
+    assert spaced.contracts == ("a", "b")
+    assert spaced.consumer_service(CONFIG_NAME) == _selection("a,b").consumer_service(
+        CONFIG_NAME
+    )
+    assert spaced.consumer_service(CONFIG_NAME) != _selection("a").consumer_service(
+        CONFIG_NAME
+    )
