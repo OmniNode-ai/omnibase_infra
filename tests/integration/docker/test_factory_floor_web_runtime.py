@@ -44,6 +44,7 @@ REQUIRED = {
     "FACTORY_FLOOR_BIND_ADDR": "set FACTORY_FLOOR_BIND_ADDR to the host tailnet address",
     "FACTORY_FLOOR_PORT": "set FACTORY_FLOOR_PORT",
     "FACTORY_FLOOR_SERVE_DIR": "set FACTORY_FLOOR_SERVE_DIR",
+    "FACTORY_FLOOR_ACCESS_DIR": "set FACTORY_FLOOR_ACCESS_DIR",
 }
 
 
@@ -100,7 +101,12 @@ def test_factory_floor_web_runtime() -> None:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(body, encoding="utf-8")
             file_path.chmod(0o644)
+        # Never inside the served directory; empty, so the gated report path answers 403 to everyone.
+        access = Path(temporary_override) / "access"
+        access.mkdir()
+        access.chmod(0o755)
         values = {
+            "FACTORY_FLOOR_ACCESS_DIR": str(access),
             "FACTORY_FLOOR_BIND_ADDR": "127.0.0.1",
             "FACTORY_FLOOR_PORT": "0",
             "FACTORY_FLOOR_SERVE_DIR": str(site),
@@ -113,7 +119,7 @@ def test_factory_floor_web_runtime() -> None:
                     env[missing] = ""
                 result = run([*command, "config"], env)
                 assert result.returncode != 0 and message in result.stderr, result
-        LOGGER.info("PASS: Compose refuses all six unset/empty deployment values")
+        LOGGER.info("PASS: Compose refuses all eight unset/empty deployment values")
         env = {**base_env, **values}
         document = json.loads(require([*command, "config", "--format", "json"], env))
         service = document["services"][SERVICE]

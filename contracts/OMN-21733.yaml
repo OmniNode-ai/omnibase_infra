@@ -27,7 +27,7 @@ evidence_requirements:
     description: "Deploy check on the serving host: the container's port bindings name one address, and the page answers on it."
     command: "ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
   - kind: tests
-    description: "Deploy check on a hosted Ubuntu runner with Docker: start the candidate in an isolated project, verify nginx syntax, actual port bindings, HTTP policies, dot-file refusal and the refusal for each of the three required values when it is unset and when it is empty (six cases). Docker absence fails this check."
+    description: "Deploy check on a hosted Ubuntu runner with Docker: start the candidate in an isolated project, verify nginx syntax, actual port bindings, HTTP policies, dot-file refusal and the refusal for each of each of the four required values when it is unset and when it is empty (eight cases). Docker absence fails this check."
     command: "deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_factory_floor_web_runtime.py -q --no-cov --log-cli-level=INFO"
 dod_evidence:
   - id: dod-001
