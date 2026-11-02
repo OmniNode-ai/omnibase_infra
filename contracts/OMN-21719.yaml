@@ -66,7 +66,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
   - id: dod-omn21719-deploy-hosted-shipped-file
-    description: Hosted CI loads the shipped runtime timeouts YAML and verifies the capability probe binds its declared TTL; a missing file, invalid value or disconnected binding fails.
+    description: Hosted CI reads the shipped runtime timeouts YAML as plain YAML and checks it equals the model the runtime holds, then imports the capability probe against a copy of the file holding other values and checks the probe holds those values; a missing file, an invalid value or a probe bound to a literal fails.
     source: manual
     checks:
       - check_type: test_passes
