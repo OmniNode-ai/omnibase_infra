@@ -79,7 +79,7 @@ def make_announcement(
         content_hash="a" * 64,
         package=ModelAnnouncedPackage(distribution="omnibase-example", version=version),
         node_kind=EnumAnnouncedNodeKind.NODE,
-        declared_topics=("onex.evt.example.v1",),
+        declared_topics=("example.topic.v1",),
         announcer_id=ANNOUNCER,
         generation=generation,
         announced_at=TEST_NOW,
