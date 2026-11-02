@@ -12,6 +12,7 @@ the correlation id is derived from the announcement.
 
 from __future__ import annotations
 
+import logging
 from uuid import uuid5
 
 from omnibase_core.enums.enum_announcement_operation import EnumAnnouncementOperation
@@ -36,6 +37,8 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
+
+logger = logging.getLogger(__name__)
 
 
 class HandlerRegistrationFromAnnouncement:
@@ -78,6 +81,11 @@ class HandlerRegistrationFromAnnouncement:
         try:
             version = ModelSemVer.parse(announcement.package.version)
         except (ModelOnexError, ValueError):
+            logger.warning(
+                "Package version %r of %s is not semver; registering with the runtime version",
+                announcement.package.version,
+                announcement.entity_id,
+            )
             version = identity.node_version
         event = ModelNodeIntrospectionEvent(
             node_id=identity.node_id,

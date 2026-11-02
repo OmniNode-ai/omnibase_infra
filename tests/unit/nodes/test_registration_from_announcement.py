@@ -147,6 +147,13 @@ class TestAdapter:
         assert event is not None
         assert event.node_version == make_identity().node_version
 
+    def test_non_semver_package_version_fallback_is_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("WARNING"):
+            adapt(make_announcement(version="not-a-version"), make_identity())
+        assert any("not-a-version" in r.getMessage() for r in caplog.records)
+
     def test_withdraw_builds_no_event(self) -> None:
         result = HandlerRegistrationFromAnnouncement().handle(
             ModelRegistrationFromAnnouncementRequest(
@@ -338,6 +345,21 @@ class TestStartupHandlerWithoutAnnouncements:
 
         assert not result.published
         assert result.last_introspection_time is None
+
+    @pytest.mark.asyncio
+    async def test_generator_exit_is_not_swallowed(self) -> None:
+        service = make_service()
+        service.publish_introspection.side_effect = GeneratorExit()
+        handler = HandlerRuntimeIntrospectionStartup()
+
+        with pytest.raises(GeneratorExit):
+            await handler.handle(
+                make_request(),
+                service=service,
+                config=make_config(),
+                event_bus=None,
+                build_events=HandlerRegistrationFromAnnouncement.build_events,
+            )
 
     @pytest.mark.asyncio
     async def test_heartbeat_failure_is_logged_not_raised(self) -> None:

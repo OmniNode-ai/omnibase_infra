@@ -6,9 +6,9 @@ After handlers are wired the runtime announces its presence. Two protections
 apply: jitter (a random delay so many nodes restarting together do not publish
 at once) and throttling (skip when the last introspection was too recent).
 
-With no node announcements the runtime's own introspection service publishes its
-event. With announcements, one introspection event per ``announce`` record is
-built from the announcement and the runtime's identity and published on the
+The runtime's own introspection service always publishes the runtime's event
+first. With announcements, one more introspection event per ``announce`` record
+is built from the announcement and the runtime's identity and published on the
 introspection topic, so the registry reads the announced nodes.
 """
 
@@ -49,9 +49,6 @@ from omnibase_infra.protocols.protocol_node_introspection import (
 from omnibase_infra.topics import SUFFIX_NODE_INTROSPECTION
 
 logger = logging.getLogger(__name__)
-
-# Cancellation and interpreter exit are never swallowed by the optional-startup boundary.
-_NEVER_SWALLOWED = (asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 
 
 class HandlerRuntimeIntrospectionStartup:
@@ -135,13 +132,10 @@ class HandlerRuntimeIntrospectionStartup:
                 },
             )
 
-        except BaseException as e:
-            if isinstance(e, _NEVER_SWALLOWED):
-                raise
-            # Log warning but don't fail startup - introspection is optional
-            logger.warning(
+        except Exception as e:
+            # Log the failure but do not fail startup - introspection is optional
+            logger.exception(
                 "Failed to publish startup introspection",
-                exc_info=True,
                 extra={
                     "error": str(e),
                     "correlation_id": str(correlation_id),
@@ -165,12 +159,9 @@ class HandlerRuntimeIntrospectionStartup:
         # Separate try block: heartbeat failure shouldn't affect throttle tracking
         try:
             await service.start_heartbeat_task()
-        except BaseException as e:
-            if isinstance(e, _NEVER_SWALLOWED):
-                raise
-            logger.warning(
+        except Exception as e:
+            logger.exception(
                 "Failed to start heartbeat task",
-                exc_info=True,
                 extra={
                     "error": str(e),
                     "correlation_id": str(correlation_id),
