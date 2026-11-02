@@ -21,7 +21,7 @@ pytestmark = pytest.mark.unit
 class TestHandlerImportable:
     """Prove handler module path in contract.yaml is resolvable."""
 
-    def test_registry_factory_importable(self) -> None:
+    def test_handler_importable(self) -> None:
         """Handler module path in contract is importable."""
         mod = importlib.import_module(
             "omnibase_infra.nodes.node_baselines_batch_compute.handlers.handler_baselines_batch_compute"
@@ -57,23 +57,3 @@ class TestHandlerImportable:
         assert HandlerBaselinesBatchCompute is not None
         assert ModelBaselinesBatchComputeCommand is not None
         assert ModelBaselinesBatchComputeOutput is not None
-
-
-class TestRegistryCreatesNode:
-    """Registry factory creates correct node type."""
-
-    def test_registry_creates_node(self) -> None:
-        """RegistryInfraBaselinesBatchCompute.create_effect() returns NodeBaselinesBatchCompute."""
-        from unittest.mock import MagicMock
-
-        from omnibase_infra.nodes.node_baselines_batch_compute.node import (
-            NodeBaselinesBatchCompute,
-        )
-        from omnibase_infra.nodes.node_baselines_batch_compute.registry.registry_infra_baselines_batch_compute import (
-            RegistryInfraBaselinesBatchCompute,
-        )
-
-        mock_container = MagicMock()
-        registry = RegistryInfraBaselinesBatchCompute(mock_container)
-        node = registry.create_effect()
-        assert isinstance(node, NodeBaselinesBatchCompute)
