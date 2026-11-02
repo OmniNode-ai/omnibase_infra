@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumValidationTopic(str, Enum):
     """Kafka topic enum for producer: validation.
@@ -18,6 +20,6 @@ class EnumValidationTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_CROSS_REPO_RUN_COMPLETED_V1 = "onex.evt.validation.cross-repo-run-completed.v1"  # onex.evt.validation.cross-repo-run-completed.v1
-    EVT_CROSS_REPO_RUN_STARTED_V1 = "onex.evt.validation.cross-repo-run-started.v1"  # onex.evt.validation.cross-repo-run-started.v1
-    EVT_CROSS_REPO_VIOLATIONS_BATCH_V1 = "onex.evt.validation.cross-repo-violations-batch.v1"  # onex.evt.validation.cross-repo-violations-batch.v1
+    EVT_CROSS_REPO_RUN_COMPLETED_V1 = contract_topic_value('nodes/node_validation_ledger_projection_compute/contract.yaml', 'validation', 'EVT_CROSS_REPO_RUN_COMPLETED_V1')  # onex.evt.validation.cross-repo-run-completed.v1
+    EVT_CROSS_REPO_RUN_STARTED_V1 = contract_topic_value('nodes/node_validation_ledger_projection_compute/contract.yaml', 'validation', 'EVT_CROSS_REPO_RUN_STARTED_V1')  # onex.evt.validation.cross-repo-run-started.v1
+    EVT_CROSS_REPO_VIOLATIONS_BATCH_V1 = contract_topic_value('nodes/node_validation_ledger_projection_compute/contract.yaml', 'validation', 'EVT_CROSS_REPO_VIOLATIONS_BATCH_V1')  # onex.evt.validation.cross-repo-violations-batch.v1

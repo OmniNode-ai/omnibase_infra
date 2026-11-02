@@ -14,6 +14,7 @@ import yaml
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     load_runner_fleet_config,
 )
+from tests.ci._runner_compose_text import RUNNER_HOME, read_runner_compose
 
 REPO_ROOT = Path(__file__).parents[4]
 
@@ -46,9 +47,7 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
 def test_runner_compose_matches_configured_count() -> None:
     config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
     compose = yaml.safe_load(
-        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
-            encoding="utf-8"
-        )
+        read_runner_compose(REPO_ROOT / "docker" / "docker-compose.runners.yml")
     )
 
     services = compose["services"]
@@ -70,9 +69,7 @@ def test_runner_compose_matches_configured_count() -> None:
 
 def test_runner_compose_resource_limits_match_live_capacity() -> None:
     compose = yaml.safe_load(
-        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
-            encoding="utf-8"
-        )
+        read_runner_compose(REPO_ROOT / "docker" / "docker-compose.runners.yml")
     )
 
     base = compose["x-runner-base"]
@@ -94,9 +91,7 @@ def test_runner_compose_has_fleet_uv_concurrency_cap() -> None:
     built-in default. A fleet default of 2 would loosen the composite path.
     """
     compose = yaml.safe_load(
-        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
-            encoding="utf-8"
-        )
+        read_runner_compose(REPO_ROOT / "docker" / "docker-compose.runners.yml")
     )
     env = compose["x-runner-base"]["environment"]
     assert env["UV_CONCURRENT_DOWNLOADS"] == "1"
@@ -112,9 +107,7 @@ def test_runner_compose_pypi_index_wiring_stays_inert() -> None:
     yet stood up. This guards against accidentally activating the egress cache
     from the design/canary PR.
     """
-    raw = (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
-        encoding="utf-8"
-    )
+    raw = read_runner_compose(REPO_ROOT / "docker" / "docker-compose.runners.yml")
     compose = yaml.safe_load(raw)
     env = compose["x-runner-base"]["environment"]
     # Not an active env key...
@@ -168,9 +161,7 @@ def test_pypi_canary_membership_matches_override_file() -> None:
 
     # Every canary member must be a real steady-state runner service.
     compose = yaml.safe_load(
-        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
-            encoding="utf-8"
-        )
+        read_runner_compose(REPO_ROOT / "docker" / "docker-compose.runners.yml")
     )
     assert wired <= set(compose["services"]), (
         "canary override names services absent from the fleet compose file: "
@@ -511,9 +502,7 @@ def test_runner_compose_healthcheck_uses_egress_script() -> None:
     """OMN-12433: every runner service must run the egress healthcheck script,
     not the old pgrep-only test, and mount the script into the container."""
     compose = yaml.safe_load(
-        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
-            encoding="utf-8"
-        )
+        read_runner_compose(REPO_ROOT / "docker" / "docker-compose.runners.yml")
     )
 
     base_test = compose["x-runner-base"]["healthcheck"]["test"]
@@ -560,9 +549,7 @@ def test_runner_compose_reconciled_to_the_spread_60_fleet() -> None:
             16,
         ),
     ):
-        compose = yaml.safe_load(
-            (REPO_ROOT / "docker" / filename).read_text(encoding="utf-8")
-        )
+        compose = yaml.safe_load(read_runner_compose(REPO_ROOT / "docker" / filename))
         runner_services = {
             name: definition
             for name, definition in compose["services"].items()
@@ -577,7 +564,7 @@ def test_runner_compose_reconciled_to_the_spread_60_fleet() -> None:
                 f"{name} missing healthcheck mount"
             )
             assert definition["volumes"][-1] == (
-                f"{volume_prefix}-{name.rsplit('-', 1)[1]}-creds:/home/runner/.runner-creds"
+                f"{volume_prefix}-{name.rsplit('-', 1)[1]}-creds:{RUNNER_HOME}/.runner-creds"
             )
         volume_names = {
             name
@@ -597,9 +584,7 @@ def test_every_general_pool_runner_runs_in_the_aggregate_slice() -> None:
     customer-plane, prod-deploy) are deliberately not in it.
     """
     compose = yaml.safe_load(
-        (REPO_ROOT / "docker" / "docker-compose.runners.yml").read_text(
-            encoding="utf-8"
-        )
+        read_runner_compose(REPO_ROOT / "docker" / "docker-compose.runners.yml")
     )
     slice_unit = REPO_ROOT / "docker" / "runners" / "systemd" / "omnirunners.slice"
     assert slice_unit.is_file()

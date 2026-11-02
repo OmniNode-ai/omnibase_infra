@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Done-write receipt guard: the one check every Linear Done writer calls.
 
-OMN-20368. Operator ruling (2026-10-02): a ticket reaches Done only on a PASS
-dod_verify whose checks bind every acceptance criterion. The rule itself is
+OMN-20368. Operator ruling (2026-10-02): a ticket reaches Done only on a PASS dod_verify whose checks bind every criterion. The rule itself is
 ``node_done_write_receipt_gate_compute`` (lifted out of the evidence-
 autoclose closer so that omnimarket and this repo evaluate one implementation).
 This module is the infra half: it runs the verifier the way the closer does,
@@ -49,6 +48,7 @@ from omnibase_core.models.ticket.model_done_write_receipt_request import (
 )
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ContainerWiringError, ModelInfraErrorContext
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.protocols.protocol_done_write_receipt_gate import (
     ProtocolDoneWriteReceiptGate,
 )
@@ -172,7 +172,7 @@ LINEAR_COMPLETED_STATE_TYPE = "completed"
 #: The state NAME a Done write carries when the caller does not know the type.
 LINEAR_DONE_STATE_NAME = "done"
 #: A verifier run executes the contract's checks, so it is slow by design.
-DEFAULT_DOD_VERIFY_TIMEOUT_SECONDS = 300.0
+DEFAULT_DOD_VERIFY_TIMEOUT_SECONDS = TIMEOUTS.done_write_verify_seconds
 
 # Injectable runner signature (the real one execs the dispatch venv's `onex`;
 # tests inject fakes with the same shape).
@@ -236,7 +236,7 @@ async def reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
         return
     proc.kill()
     try:
-        await asyncio.wait_for(proc.wait(), timeout=5)
+        await asyncio.wait_for(proc.wait(), timeout=TIMEOUTS.kill_wait_seconds)
     except TimeoutError:
         logger.warning(
             "Timed-out subprocess (pid=%s) did not exit after kill()", proc.pid
