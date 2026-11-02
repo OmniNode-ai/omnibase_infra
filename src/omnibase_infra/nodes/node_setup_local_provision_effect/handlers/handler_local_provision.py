@@ -33,6 +33,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.models.network_binding import load_network_binding_settings
 from omnibase_infra.nodes.node_setup_local_provision_effect.models.model_local_provision_effect_output import (
     ModelLocalProvisionEffectOutput,
 )
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_LOCALHOST = "localhost"
+_LOCALHOST = load_network_binding_settings().local_host
 
 
 async def _poll_port_open(host: str, port: int, max_wait: float) -> bool:

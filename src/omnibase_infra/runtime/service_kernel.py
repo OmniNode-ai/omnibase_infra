@@ -154,7 +154,9 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
+from omnibase_infra.models.network_binding import load_network_binding_settings
 from omnibase_infra.models.runtime import ModelRuntimeNodeSelection
+from omnibase_infra.models.runtime_kernel_defaults import load_runtime_kernel_defaults
 from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
@@ -268,6 +270,10 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 # profile), never a hardcoded code fallback.
 TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 
+# Contracts directory and LLM endpoint variables the kernel uses by default,
+# declared in models/runtime_kernel_defaults/runtime_kernel_defaults.yaml.
+_DEFAULTS = load_runtime_kernel_defaults()
+
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
 # Marketplace package skill-manifest root.
@@ -288,10 +294,6 @@ _DEPRECATED_TOPIC_ENV_VARS: tuple[str, ...] = (
     "ONEX_INPUT_TOPIC",
     "ONEX_OUTPUT_TOPIC",
 )
-
-# Port validation constants
-MIN_PORT = 1
-MAX_PORT = 65535
 
 # Kafka broker allowlist validation
 # Patterns that are unconditionally rejected — they point at local or
@@ -664,7 +666,7 @@ def _get_contracts_dir() -> Path:
     if onex_value:
         return Path(onex_value)
 
-    return Path("./contracts")
+    return Path(_DEFAULTS.default_contracts_dir)
 
 
 def _load_runtime_database_topology() -> ModelDeploymentTopology | None:
@@ -2472,17 +2474,7 @@ async def bootstrap() -> int:
         if use_kafka:
             try:
                 _llm_endpoints: dict[str, str] = {}
-                for env_key in (
-                    "LLM_CODER_URL",
-                    "LLM_CODER_FAST_URL",
-                    "LLM_EMBEDDING_URL",
-                    "LLM_DEEPSEEK_R1_URL",
-                    "LLM_SMALL_URL",
-                ):
-                    # LLM_CODER_FAST_URL -> "coder-fast"; the logical name is the
-                    # endpoint key, not a second spelling of it.
-                    logical_name = env_key[len("LLM_") : -len("_URL")].lower()
-                    logical_name = logical_name.replace("_", "-")
+                for env_key, logical_name in _DEFAULTS.llm_endpoint_names.items():
                     _url = os.environ.get(env_key, "").strip()
                     if _url:
                         _llm_endpoints[logical_name] = _url
@@ -4157,12 +4149,13 @@ async def bootstrap() -> int:
         http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
         try:
             http_port = int(http_port_str)
-            if not MIN_PORT <= http_port <= MAX_PORT:
+            port_bounds = load_network_binding_settings()
+            if not port_bounds.tcp_port_min <= http_port <= port_bounds.tcp_port_max:
                 logger.warning(
                     "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
                     http_port,
-                    MIN_PORT,
-                    MAX_PORT,
+                    port_bounds.tcp_port_min,
+                    port_bounds.tcp_port_max,
                     DEFAULT_HTTP_PORT,
                     correlation_id,
                 )
