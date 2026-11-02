@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.unit.infra.test_broker_profile_omn19419 import _RPK_STUB, _render
+from tests.unit.infra.test_broker_profile_omn19419 import _DOCKER, _RPK_STUB, _render
 
 _ENV = "REDPANDA_GROUP_OFFSET_RETENTION_SEC"
 _SERVICE = "redpanda-partition-cap"
@@ -54,6 +54,14 @@ def _run_profile(tmp_path: Path, lane: str) -> tuple[str, str, int]:
 @pytest.mark.unit
 def test_dev_lane_declares_a_one_day_group_offset_retention() -> None:
     env = _render("dev")["services"][_SERVICE]["environment"]
+    assert env[_ENV] == "86400"
+
+
+@pytest.mark.unit
+def test_hosted_bus_declares_a_one_day_group_offset_retention() -> None:
+    (overlay,) = _DOCKER.glob("docker-compose.ci-*.yml")
+    lane = overlay.name.removeprefix("docker-compose.").removesuffix(".yml")
+    env = _render(lane)["services"][_SERVICE]["environment"]
     assert env[_ENV] == "86400"
 
 

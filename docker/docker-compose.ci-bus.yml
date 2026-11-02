@@ -188,6 +188,9 @@ services:
     container_name: omninode-ci-bus-redpanda-partition-cap
     environment:
       REDPANDA_PROFILE_MEMORY: ${CI_BUS_REDPANDA_MEMORY:-1G}
+      # OMN-21288 T30: 16,900 Empty lab-run caller groups held for the 7-day cluster
+      # default on 2026-11-01; 24 hours expires a per-run group a day after the run.
+      REDPANDA_GROUP_OFFSET_RETENTION_SEC: "86400"
       RPK_USER: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set}
       RPK_PASS: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set}
     depends_on:

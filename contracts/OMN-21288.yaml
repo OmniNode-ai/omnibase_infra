@@ -49,6 +49,13 @@ requirements:
       - id: AC7
         statement: |-
           AC7: a planted factory error, a non-ASGI factory result, an unimportable factory, a malformed declaration, an overlapping or runtime-shadowing prefix each raise at boot with nothing mounted, and a failing lifespan makes every request answer 503 -- falsifier: the failing-mount tests in tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py fail at the merge base and pass on the branch
+  - id: req-omn21288-hosted-bus-group-retention
+    statement: "The hosted CI bus overlay expires a Redpanda consumer group's offsets a day after its last activity. The change is a draft, gated behind the guard reaper contract change and a scratch-broker run on the CI bus's Redpanda build."
+    acceptance:
+      - id: AC21288103
+        statement: "AC21288103: the hosted CI bus overlay sets REDPANDA_GROUP_OFFSET_RETENTION_SEC to 86400 on the partition-cap service, and the PR is a draft whose body names the gate -- falsifier: the new test in tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py fails on the branch, or the PR is not draft at head"
+      - id: AC21288106
+        statement: "AC21288106: pre-commit passes on the files this branch changes and the focused retention tests pass -- falsifier: pre-commit rc != 0 on the changed files at the head, or the focused tests fail"
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -205,6 +212,22 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mount_live_port_omn21288.py -k planted_factory_error -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC7]
+  - id: dod-omn21288-hosted-bus-group-retention
+    description: "The rendered ci-bus overlay carries REDPANDA_GROUP_OFFSET_RETENTION_SEC=86400 on the partition-cap service. The new test fails at the merge base, whose overlay has no such variable. Gated: the PR stays a draft until the guard reaper contract change has landed or a scratch-broker run on the CI bus's Redpanda build exists."
+    source: manual
+    binds_ac: [AC21288103]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q --no-cov -p no:cacheprovider -k hosted_bus_declares
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21288-hosted-bus-group-retention-precommit
+    description: "pre-commit passes on the files this change touches and the retention tests pass. The new retention test fails at the merge base."
+    source: manual
+    binds_ac: [AC21288106]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'uv run --frozen pre-commit run --files docker/docker-compose.ci-*.yml tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py contracts/OMN-21288.yaml && uv run --frozen pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q --no-cov -p no:cacheprovider'
+        cwd: ${OMNI_HOME}/omnibase_infra
 context:
   remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
