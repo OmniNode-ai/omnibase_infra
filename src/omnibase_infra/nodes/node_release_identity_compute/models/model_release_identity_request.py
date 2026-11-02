@@ -11,7 +11,7 @@ are handed to the handler as this typed request. The handler is therefore pure a
 deterministic: identical requests always produce identical decisions with no
 subprocess or filesystem access.
 
-Ticket: OMN-14471 (refactor of the legacy check-release-identity gate, OMN-13412)
+Ticket: OMN-14471 (refactor of legacy scripts/check_release_identity.py, OMN-13412)
 """
 
 from __future__ import annotations
