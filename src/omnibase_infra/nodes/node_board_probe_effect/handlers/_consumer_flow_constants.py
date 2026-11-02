@@ -53,10 +53,15 @@ LIVE_WINDOW_SQL: Final[str] = (
 )
 
 #: (kind, consumer-group prefix, subscribed topic, the counter that must move)
+#: The audit kind is the event-ledger projection on the node heartbeat, a topic
+#: every lab runtime produces. It was the gateway link-health projection on the
+#: gateway heartbeat, which has no producer on a lane that runs no gateway: the
+#: lab dev lane turned its gateway phase off when the cloud broker went away
+#: (#5485), and C28 read messages_in [0, 0] from then on (OMN-21916).
 KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
     (
         "audit_projection_consumer",
-        "local.omnibase_infra.node_gateway_link_health_projection_compute.consume.",
+        "local.omnibase_infra.node_ledger_projection_compute.consume.",
         _contract_topic("audit_projection"),
         "messages_in",
     ),
