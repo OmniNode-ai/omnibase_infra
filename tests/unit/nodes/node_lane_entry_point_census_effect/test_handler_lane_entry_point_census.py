@@ -166,3 +166,18 @@ def test_launcher_is_matched_by_program_basename() -> None:
     argv = ("tini", "--", "/app/entrypoint-runtime.sh", "onex-runtime")
     assert entry_point_of(argv, prefix) == "onex-runtime"
     assert entry_point_of(("tini", "x", "onex-runtime"), prefix) == "tini"
+
+
+def test_container_referenced_by_image_id_is_found_by_its_runtime_launcher() -> None:
+    """The lane-mirror forwarder runs the runtime image under a bare image id."""
+    request = ModelLaneEntryPointCensusRequest(
+        policy_path=str(POLICY),
+        inspect_json_path=str(FIXTURE.with_name("inspect_image_id.json")),
+    )
+    result = HandlerLaneEntryPointCensus().handle(request)
+    assert result.success, result.error_message
+    (census,) = result.censuses
+    assert census.lane == "proj-gw"
+    assert [e.container for e in census.containers] == ["gw-forwarder"]
+    assert census.remove == ("gw-forwarder",)
+    assert census.containers[0].entry_point == "onex-gateway-forwarder"

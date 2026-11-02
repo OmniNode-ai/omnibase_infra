@@ -7,10 +7,13 @@
 # entry point to remove.
 schema_version: "1.0.0"
 # An image reference matching any of these is a runtime-image container: compose
-# builds every service that runs the runtime image under <project>-<service>.
+# builds every service that runs the runtime image under <project>-<service>. A
+# container whose entrypoint starts with launcher_prefix is one too, whatever its
+# image reference reads (the lane-mirror forwarder is created from a bare image id).
 runtime_image_patterns:
   - '-(omninode-runtime|runtime-effects|runtime-worker|runtime-canary|omninode-contract-resolver|projection-[a-z-]+|[a-z-]+-consumer|[a-z-]+-forwarder)$'
-# The image entrypoint's wrapper tokens, stripped before the command is graded.
+# The image entrypoint's wrapper tokens: they identify the runtime image and are
+# stripped before the command is graded.
 launcher_prefix: [/usr/bin/tini, "--", /app/entrypoint-runtime.sh]
 allowed_commands:
   - onex-runtime

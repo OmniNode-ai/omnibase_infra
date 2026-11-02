@@ -4,7 +4,9 @@
 
 The census reads container inspection (a recorded ``docker inspect`` array, or the
 daemon through read-only ``docker ps`` and ``docker inspect``), keeps the containers
-whose image the policy names as the runtime image, and records each one's entrypoint
+whose image the policy names as the runtime image or whose entrypoint is the runtime
+image's launcher (a container created from a bare image id carries no image name to
+match), and records each one's entrypoint
 and cmd as run. An entry point outside the policy's allowed list reads ``remove``.
 The policy, the allowed list and the table families are data; this module holds
 none of them. It starts, stops and changes no container.
@@ -60,7 +62,7 @@ def lane_projects(manifest_path: Path) -> dict[str, str]:
 
 def _is_launched(argv: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
     """True when argv starts with the launcher prefix, its program compared by basename."""
-    if len(argv) < len(prefix):
+    if not prefix or len(argv) < len(prefix):
         return False
     head = argv[0].rsplit("/", 1)[-1] == prefix[0].rsplit("/", 1)[-1]
     return head and argv[1 : len(prefix)] == prefix[1:]
@@ -130,7 +132,9 @@ def build_census(
     for item in inspected:
         config = _mapping(item.get("Config"))
         image = str(config.get("Image", ""))
-        if not any(pattern.search(image) for pattern in runtime):
+        if not any(pattern.search(image) for pattern in runtime) and not _is_launched(
+            _words(config.get("Entrypoint")), policy.launcher_prefix
+        ):
             continue
         labels = _mapping(config.get("Labels"))
         project = str(labels.get(COMPOSE_PROJECT_LABEL, ""))

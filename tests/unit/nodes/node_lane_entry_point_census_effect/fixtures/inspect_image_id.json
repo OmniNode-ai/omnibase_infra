@@ -1,0 +1,58 @@
+[
+  {
+    "Name": "/gw-forwarder",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "sha256:31ff66eee50996b53cd25502696da87fa2593133595e3b7232cfc5acdc1756b7",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "onex-gateway-forwarder",
+        "--config",
+        "/app/config/gateway-forwarder.yaml"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-gw"
+      }
+    }
+  },
+  {
+    "Name": "/gw-dns-bastion",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "proj-gw-gateway-dns-bastion",
+      "Entrypoint": [
+        "/usr/local/bin/dns-bastion"
+      ],
+      "Cmd": [],
+      "Labels": {
+        "com.docker.compose.project": "proj-gw"
+      }
+    }
+  },
+  {
+    "Name": "/gw-opaque-db",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "sha256:721873c34cebd0000000000000000000000000000000000000000000000000aa",
+      "Entrypoint": [
+        "docker-entrypoint.sh"
+      ],
+      "Cmd": [
+        "postgres"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-gw"
+      }
+    }
+  }
+]
