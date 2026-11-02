@@ -145,6 +145,7 @@ from omnibase_infra.event_bus.event_bus_kafka import (
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.handlers import boot_readiness_checks
 from omnibase_infra.handlers.handler_workspace_config_root_resolve import (
     DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH,
     ENV_WORKSPACE_CONFIG_ROOT,
@@ -712,45 +713,35 @@ def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
         ModelTopicReadinessConfig,
     )
 
-    def _float_env(name: str, default: float) -> float:
-        raw = os.environ.get(name)
-        if raw is None or raw.strip() == "":
-            return default
+    def _env_number[T: (int, float)](name: str, default: T, cast: type[T]) -> T:
         try:
-            value = float(raw)
+            value = cast(os.environ.get(name) or default)
         except ValueError:
             return default
-        if value <= 0.0 or math.isnan(value) or math.isinf(value):
-            return default
-        return value
-
-    def _int_env(name: str, default: int) -> int:
-        raw = os.environ.get(name)
-        if raw is None or raw.strip() == "":
-            return default
-        try:
-            value = int(raw)
-        except ValueError:
-            return default
-        return value if value >= 1 else default
+        return value if value > 0 and math.isfinite(value) else default
 
     return ModelTopicReadinessConfig(
-        readiness_timeout_seconds=_float_env(
+        readiness_timeout_seconds=_env_number(
             "ONEX_TOPIC_READINESS_TIMEOUT_SECONDS",
             DEFAULT_READINESS_TIMEOUT_SECONDS,
+            float,
         ),
-        readiness_poll_interval_ms=_int_env(
+        readiness_poll_interval_ms=_env_number(
             "ONEX_TOPIC_READINESS_POLL_INTERVAL_MS",
             DEFAULT_READINESS_POLL_INTERVAL_MS,
+            int,
         ),
-        max_attempts=_int_env(
+        max_attempts=_env_number(
             "ONEX_TOPIC_READINESS_MAX_ATTEMPTS",
             DEFAULT_READINESS_MAX_ATTEMPTS,
+            int,
         ),
-        max_concurrent_contract_attach=_int_env(
+        max_concurrent_contract_attach=_env_number(
             "ONEX_MAX_CONCURRENT_CONTRACT_ATTACH",
             DEFAULT_MAX_CONCURRENT_CONTRACT_ATTACH,
+            int,
         ),
+        priority_contracts=boot_readiness_checks.parse_priority_contracts(os.environ),
     )
 
 
@@ -3594,9 +3585,72 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
-        # Prefetch configuration without constructing the runtime before health
-        # bind (OMN-9741/13768). Preserve its outcome for runtime startup.
+        # Prefetch configuration without constructing the runtime (OMN-9741/13768).
+        # Preserve its outcome for runtime startup.
         config_prefetch_status = "pending"
+
+        # Start HTTP health server before auto-wiring and before long Kafka
+        # subscription work (OMN-21288): a contract-declared HTTP mount is served
+        # from this port while wiring is still running. At this
+        # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
+        # startup liveness with runtime_attached=false. The runtime is
+        # constructed and attached immediately below (OMN-13768), still before the
+        # long-running Kafka subscription work further down.
+        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
+        try:
+            http_port = int(http_port_str)
+            port_bounds = load_network_binding_settings()
+            if not port_bounds.tcp_port_min <= http_port <= port_bounds.tcp_port_max:
+                logger.warning(
+                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
+                    http_port,
+                    port_bounds.tcp_port_min,
+                    port_bounds.tcp_port_max,
+                    DEFAULT_HTTP_PORT,
+                    correlation_id,
+                )
+                http_port = DEFAULT_HTTP_PORT
+        except ValueError:
+            logger.warning(
+                "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",
+                http_port_str,
+                DEFAULT_HTTP_PORT,
+                correlation_id,
+            )
+            http_port = DEFAULT_HTTP_PORT
+
+        health_server = ServiceHealth(
+            container=container,
+            port=http_port,
+            version=KERNEL_VERSION,
+        )
+        # OMN-15217: publish the runtime health monitor's verdict on /health.
+        # The monitor is started above (step 3) and owns the semantic view of
+        # runtime health — contract discovery errors, consumer-group coverage,
+        # topic coverage. Without this line that verdict never leaves the
+        # container logs and /health reports a DEGRADED runtime as healthy.
+        # When the monitor did not start (non-Kafka profiles, startup failure)
+        # the provider is left unset and the payload carries a null verdict.
+        if runtime_health_monitor is not None:
+            health_server.set_runtime_health_provider(
+                lambda: (
+                    runtime_health_monitor.latest_event
+                    if runtime_health_monitor is not None
+                    else None
+                )
+            )
+        health_start_time = time.time()
+        await health_server.start()
+        health_start_duration = time.time() - health_start_time
+        logger.debug(
+            "Health server started in %.3fs before auto-wiring (correlation_id=%s)",
+            health_start_duration,
+            correlation_id,
+            extra={
+                "duration_seconds": health_start_duration,
+                "port": http_port,
+            },
+        )
 
         # --- Auto-wiring: Contract discovery + handler wiring (OMN-7656) ---
         #
@@ -3723,6 +3777,10 @@ async def bootstrap() -> int:
                         os.environ,
                     ),
                 )
+                # OMN-21288: serve the contracts' declared HTTP mounts now, ahead
+                # of lifecycle hooks and handler wiring, so a mount answers while
+                # they run. A mount that cannot be built fails boot here.
+                health_server.attach_manifest(manifest)
                 # auto_wiring_manifest_discovered keeps the full discovery
                 # result: the cross-profile effect lookup below (OMN-14517)
                 # raises RuntimeHostError on cold boot when it is narrowed.
@@ -4141,68 +4199,6 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
-        # Start HTTP health server before long Kafka subscription work. At this
-        # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
-        # startup liveness with runtime_attached=false. The runtime is
-        # constructed and attached immediately below (OMN-13768), still before the
-        # long-running Kafka subscription work further down.
-        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
-        try:
-            http_port = int(http_port_str)
-            port_bounds = load_network_binding_settings()
-            if not port_bounds.tcp_port_min <= http_port <= port_bounds.tcp_port_max:
-                logger.warning(
-                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
-                    http_port,
-                    port_bounds.tcp_port_min,
-                    port_bounds.tcp_port_max,
-                    DEFAULT_HTTP_PORT,
-                    correlation_id,
-                )
-                http_port = DEFAULT_HTTP_PORT
-        except ValueError:
-            logger.warning(
-                "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",
-                http_port_str,
-                DEFAULT_HTTP_PORT,
-                correlation_id,
-            )
-            http_port = DEFAULT_HTTP_PORT
-
-        health_server = ServiceHealth(
-            container=container,
-            port=http_port,
-            version=KERNEL_VERSION,
-        )
-        # OMN-15217: publish the runtime health monitor's verdict on /health.
-        # The monitor is started above (step 3) and owns the semantic view of
-        # runtime health — contract discovery errors, consumer-group coverage,
-        # topic coverage. Without this line that verdict never leaves the
-        # container logs and /health reports a DEGRADED runtime as healthy.
-        # When the monitor did not start (non-Kafka profiles, startup failure)
-        # the provider is left unset and the payload carries a null verdict.
-        if runtime_health_monitor is not None:
-            health_server.set_runtime_health_provider(
-                lambda: (
-                    runtime_health_monitor.latest_event
-                    if runtime_health_monitor is not None
-                    else None
-                )
-            )
-        health_start_time = time.time()
-        await health_server.start()
-        health_start_duration = time.time() - health_start_time
-        logger.debug(
-            "Health server started in %.3fs before Kafka subscriptions (correlation_id=%s)",
-            health_start_duration,
-            correlation_id,
-            extra={
-                "duration_seconds": health_start_duration,
-                "port": http_port,
-                "runtime_attached": False,
-            },
-        )
-
         # 5. Resolve RegistryProtocolBinding from container or create new instance
         # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
         # The handler registry is optional for basic runtime operation - core event
@@ -4589,6 +4585,9 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+            boot_readiness_checks.start_ready_bound_watch(
+                runtime.readiness_check, os.environ, plugin_unsubscribe_callbacks
+            )
             _attach_results: list[ModelContractAttachResult] = []
             # OMN-17372: the interleave reports the contracts it will NEVER
             # attempt, so the gate requires only what can actually report.
@@ -4634,6 +4633,9 @@ async def bootstrap() -> int:
                 demand_watch_stops_out=_demand_watch_stops,
             )
             plugin_unsubscribe_callbacks.extend(_demand_watch_stops)
+            boot_readiness_checks.report_roster_partition(
+                auto_wiring_report.results, _attach_results, _attach_exclusions
+            )
             _contract_attach_gate.exclude(tuple(_attach_exclusions))
             _contract_attach_gate.record(tuple(_attach_results))
             _gate_status = _contract_attach_gate.status()
