@@ -40,6 +40,12 @@ requirements:
       - id: AC11
         statement: >-
           AC11: a process whose ONEX_RUNTIME_NODE_SELECTION names a contract derives its kernel consumer groups (contract registry, plugins, savings, runtime-error triage and the host process) from a service name that carries the selection, so it shares no group with the main runtime under the same KAFKA_INSTANCE_ID, and an unselected process keeps its existing group names
+  - id: req-omn18087-prepr-slot-first-party-audit
+    statement: The pre-PR slot build passes the first-party audit for the branch under test, with siblings at dev-merge tags.
+    acceptance:
+      - id: AC12
+        statement: >-
+          AC12: the first-party audit accepts a branch-staged target only in the pre-PR slot context declared in first_party_sources.yaml, the same record fails with kind branch in the dev-lane context, and a sibling staged from a branch still fails on the slot
 evidence_requirements:
   - kind: tests
     description: "Boot subscription tests pass"
@@ -102,6 +108,15 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/test_kernel.py -q --no-cov -k selection_scoped_service"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac12-prepr-slot-first-party-audit
+    description: >-
+      The same branch-staged target record passes in the declared pre-PR slot context and fails with kind branch in the dev-lane context, and a sibling staged from a branch fails on the slot. The test module does not exist at the merge base.
+    source: manual
+    binds_ac: [AC12]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_first_party_slot_context_omn21928.py -q --no-cov -k 'first_party_slot_context_negative_control or sibling_branch_still_fails_on_slot'"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn18087-deploy-probe
     description: >-

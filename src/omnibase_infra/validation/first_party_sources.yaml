@@ -18,6 +18,30 @@
 #                  dev-merge tag and installed from that staged tree.
 #   build-context  the repository whose Docker build context is the image.
 #
+# build_contexts (OMN-21928): the build contexts an audit may run in, by name.
+# The audit runs in default_context unless the build names another with the
+# FIRST_PARTY_BUILD_CONTEXT build arg. A context changes ONE rule: which kinds
+# beyond a dev-merge tag the TARGET (the package installed with
+# install: build-context) may resolve to. A vendored sibling needs a dev-merge
+# tag in every context, so no entry here can relax a sibling. The dev lane builds
+# in default_context, which accepts only a dev-merge tag. A pre-PR slot builds an
+# unmerged branch of the target repository, so its context accepts the target
+# staged from a branch; pre_pr_slot_context names that context for the slot
+# entrypoint (scripts/runtime_build/prepr_verify_lane.sh).
+#
+# open_pr_context (OMN-21928): the context of a deploy-agent build of a DECLARED
+# OPEN PULL REQUEST's branch. Only a lane named in open_pr_lanes may build in it;
+# every other lane (stability, judge, collaborator, prod) builds in
+# default_context and so keeps refusing a branch build. The context sets
+# requires_declared_pr, so the target is accepted only when the signed command's
+# declaration (repository, pull request number, head sha) names the target
+# repository and the exact commit that was staged; the declaration is recorded in
+# build-provenance.json as first_party_declared_pr and the target stays a branch
+# build there, never a dev merge. A branch image is not a promotion premise: the
+# workspace build stamps it stability-candidate with non-main lineage, which the
+# prod promotion gate refuses. The next merge-driven deploy builds the dev-merge
+# tag again, which returns the dev lane to main lineage.
+#
 # omnibase_compat is not a first-party package of the dev lane (OMN-21284): it is
 # being retired, it has no dev-merge tags and gets none, and until its last
 # consumer drops it the image takes it from the lock like any other dependency.
@@ -40,3 +64,15 @@ packages:
   - distribution: omnibase-infra
     repo: omnibase_infra
     install: build-context
+default_context: dev-lane
+pre_pr_slot_context: pre-pr-slot
+open_pr_context: dev-lane-open-pr
+open_pr_lanes: [dev]
+build_contexts:
+  - name: dev-lane
+    target_accepts: []
+  - name: pre-pr-slot
+    target_accepts: [branch]
+  - name: dev-lane-open-pr
+    target_accepts: [branch, sha]
+    requires_declared_pr: true

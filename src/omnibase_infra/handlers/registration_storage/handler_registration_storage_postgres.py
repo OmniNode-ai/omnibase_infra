@@ -65,6 +65,7 @@ from omnibase_infra.handlers.registration_storage.models import (
     ModelUpdateRegistrationRequest,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.network_binding import load_network_binding_settings
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
@@ -178,7 +179,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
         postgres_adapter: ProtocolPostgresAdapter | None = None,
         dsn: str | None = None,
         host: str | None = None,
-        port: int = 5432,
+        port: int = load_network_binding_settings().postgres_port,
         database: str = "omnibase_infra",
         user: str = "postgres",
         password: str | None = None,
