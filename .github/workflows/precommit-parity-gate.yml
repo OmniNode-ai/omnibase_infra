@@ -80,9 +80,7 @@ jobs:
       # hook, run from omnibase_core at the hook's own rev (OMN-21939).
       - name: Interpreter-resolution gate (no bare `python` in hook entries)
         run: |
-          uv run --no-project \
-            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261101023710-a66b5ff79cc0' \
-            python -m omnibase_core.nodes.node_precommit_interpreter_check_compute.runtime_precommit_interpreter_check
+          uvx pre-commit@4.5.1 run precommit-interpreter-resolution --all-files
 
       - name: Pin-parity check (pre-commit rev vs CI-pinned SHA)
         run: |

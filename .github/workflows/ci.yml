@@ -1385,11 +1385,7 @@ jobs:
           echo "================================================================"
           echo "Exposed Identifier Gate (OMN-17320)"
           echo "================================================================"
-          uv run --no-project \
-            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261101023710-a66b5ff79cc0' \
-            python -m omnibase_core.nodes.node_exposed_identifiers_check_compute.runtime_exposed_identifiers_check \
-            --mode blocking --scope all \
-            --denylist scripts/validation/exposed_identifiers_denylist.json
+          uvx pre-commit@4.5.1 run exposed-identifier-gate --all-files
 
   # Pin reachability -- every cross-repo pin (workflow `uses:`/`with:` refs,
   # pyproject [tool.uv.sources] revs, uv.lock git revs) must name a commit
@@ -6412,9 +6408,9 @@ jobs:
         run: |
           if [ -n "$GITHUB_BASE_REF" ]; then
             git fetch origin "$GITHUB_BASE_REF" --no-tags --depth=1
-            FILES=$(git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD -- '*.py' '*.md' | tr '\n' ' ')
+            FILES=$(git diff --name-only --diff-filter=d "origin/$GITHUB_BASE_REF"...HEAD -- '*.py' '*.md' | tr '\n' ' ')
           else
-            FILES=$(git diff --name-only HEAD~1 -- '*.py' '*.md' 2>/dev/null | tr '\n' ' ')
+            FILES=$(git diff --name-only --diff-filter=d HEAD~1 -- '*.py' '*.md' 2>/dev/null | tr '\n' ' ')
           fi
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
         env:
@@ -6424,6 +6420,6 @@ jobs:
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
           if [ -z "$CHANGED_FILES" ]; then exit 0; fi
-          echo "$CHANGED_FILES" | tr ' ' '\n' | xargs uv run --no-project \
-            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261101023710-a66b5ff79cc0' \
-            python -m omnibase_core.nodes.node_ai_slop_check_compute.runtime_ai_slop_check --strict
+          # The check-ai-slop hook carries --strict in omnibase_core's manifest.
+          # shellcheck disable=SC2086
+          uvx pre-commit@4.5.1 run check-ai-slop --files $CHANGED_FILES
