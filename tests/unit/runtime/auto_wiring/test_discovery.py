@@ -25,7 +25,7 @@ from omnibase_infra.runtime.auto_wiring.profile_ownership import (
     filter_manifest_for_runtime_profile,
 )
 
-_EP_MODULE = "omnibase_infra.runtime.auto_wiring.discovery.entry_points"
+_EP_MODULE = "omnibase_infra.handlers.handler_package_announcer.entry_points"
 
 
 def _make_contract_yaml(
