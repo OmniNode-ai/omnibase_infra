@@ -212,6 +212,11 @@ def test_deploy_handler_retires_exactly_the_overlay_gated_services() -> None:
     gates = _overlay_gates()
     for service, profile in gates.items():
         assert handler.get(profile) == service, profile
+    # The other direction: the handler may name nothing beyond the overlay's
+    # gates except the two base-stack services folded by profile alone.
+    gated_profiles = set(gates.values())
+    extras = {p: s for p, s in handler.items() if p not in gated_profiles}
+    assert extras == {"effects": "runtime-effects", "workers": "runtime-worker"}
 
 
 @pytest.mark.parametrize("profile", sorted(RUNTIME_WRITER_CONTRACTS))
