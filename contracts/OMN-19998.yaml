@@ -154,7 +154,7 @@ requirements:
     statement: When a handler refuses with a typed result (success false) and the runtime records no error of its own, the SkillRoutingError envelope that onex node prints carries the handler's error_message or reason, so the ci-live-contact pre-commit hook names its fix on the console instead of printing only run did not complete (result=failed).
     acceptance:
       - id: AC33
-        statement: 'AC33: onex node node_ci_live_contact_effect on a repository with a staged scripts/ci change exits 1 with a SkillRoutingError envelope whose message names a live-contact test and .github/live-contact-exception.md, and a staged non-tooling change exits 0 with no envelope -- falsifier: uv run pytest tests/unit/cli/test_cli_node_refusal_reason_omn19998.py -q -n 0 fails test_refused_ci_tooling_change_names_its_fix_in_the_envelope against the merge-base cli_node.py'
+        statement: 'AC33: onex node node_ci_live_contact_effect on a repository with a staged scripts/ci change exits 1 with a SkillRoutingError envelope whose message names a live-contact test and .github/live-contact-exception.md, and a staged non-tooling change exits 0 with no envelope -- falsifier: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q fails test_refused_ci_tooling_change_names_its_fix_in_the_envelope against the merge-base cli_node.py'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -230,7 +230,7 @@ evidence_requirements:
     command: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0
   - kind: tests
     description: The refusal-reason tests run the packaged node_ci_live_contact_effect through the onex node command on a temporary git repository with a staged change and read the printed envelope.
-    command: uv run pytest tests/unit/cli/test_cli_node_refusal_reason_omn19998.py -q -n 0
+    command: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -627,7 +627,16 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/cli/test_cli_node_refusal_reason_omn19998.py -q -n 0
+        check_value: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC33
+  - id: dod-omn19998-ac33-node-refusal-deploy-probe
+    description: Hosted-runner runtime probe executes the packaged ci-live-contact node against temporary Git repositories on the in-memory backend and reads its console envelope. Requires the handler refusal reason and exit 1 for staged CI tooling, and exit 0 with no error envelope for staged non-tooling code. No external services or credentials are needed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q
         cwd: .
     binds_ac:
       - AC33

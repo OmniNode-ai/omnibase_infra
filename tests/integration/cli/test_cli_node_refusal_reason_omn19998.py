@@ -24,7 +24,7 @@ from click.testing import CliRunner
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.cli.cli_node import run_node_by_name
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 _NODE = "node_ci_live_contact_effect"
 
