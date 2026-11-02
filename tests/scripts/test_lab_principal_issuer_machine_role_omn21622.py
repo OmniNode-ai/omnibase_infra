@@ -109,6 +109,12 @@ def _overlay(tmp_path: Path, *rows: dict[str, object]) -> Path:
     return path
 
 
+def _sub(tmp_path: Path, n: int) -> Path:
+    sub = tmp_path / f"overlay-{n}"
+    sub.mkdir()
+    return sub
+
+
 def _listing(principal: str, drop: str | None = None, extra: str | None = None) -> str:
     lines = [ACL_HEADER]
     for g in [
@@ -213,16 +219,26 @@ def test_a_machine_row_may_bind_grant_roles_the_issuer_does_not_grant(
     overlay = lpi.load_overlay(_overlay(tmp_path, bound, DEVELOPER_ROW), declaration)
     assert overlay.principals == {"dev-ops-lab-host", "dev-ana-ana-laptop"}
     granted = []
-    for row in (MACHINE_ROW, bound):
+    for n, row in enumerate((MACHINE_ROW, bound)):
         broker = FakeBroker()
         lpi.Issuer(
             declaration,
             broker,
-            lpi.Ledger(tmp_path / f"{len(granted)}.jsonl"),
-            lpi.load_overlay(_overlay(tmp_path, row), declaration),
+            lpi.Ledger(tmp_path / f"ledger-{n}.jsonl"),
+            lpi.load_overlay(_overlay(_sub(tmp_path, n), row), declaration),
         ).issue("ops@example.invalid", {"lane": "dev", "device": "lab-host"})
         granted.append(sorted(broker.granted))
+    assert granted[0], "the machine profile must actually be granted"
     assert granted[0] == granted[1]
+
+
+def test_grant_roles_without_a_role_defaults_to_developer_and_is_refused(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    with pytest.raises(lpi.DeclarationError, match="only a machine binds grant_roles"):
+        lpi.load_overlay(
+            _overlay(tmp_path, {**DEVELOPER_ROW, "grant_roles": ["x"]}), declaration
+        )
 
 
 def test_only_a_machine_row_binds_grant_roles(
