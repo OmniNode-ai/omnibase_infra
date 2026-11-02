@@ -63,6 +63,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.models.network_binding import ModelBindAllHealthServerBinding
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_OMNICLAUDE_AGENT_MATCH,
@@ -82,7 +83,9 @@ _T_INJECTION_RECORDED: str = _registry.resolve(topic_keys.INJECTION_RECORDED)
 logger = logging.getLogger(__name__)
 
 
-class ConfigInjectionEffectivenessConsumer(BaseSettings):
+class ConfigInjectionEffectivenessConsumer(
+    ModelBindAllHealthServerBinding, BaseSettings
+):
     """Configuration for the injection effectiveness Kafka consumer.
 
     Environment variables use the OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_ prefix.
@@ -243,10 +246,6 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
         ge=1024,
         le=65535,
         description="Port for HTTP health check endpoint",
-    )
-    health_check_host: str = Field(
-        default="0.0.0.0",  # noqa: S104 - Configurable for container access
-        description="Host/IP for health check server binding.",
     )
     health_check_staleness_seconds: int = Field(
         default=300,
