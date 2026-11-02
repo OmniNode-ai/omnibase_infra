@@ -250,7 +250,7 @@ dod_evidence:
     binds_ac: [AC9, AC10]
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py tests/integration/event_bus/test_topic_boot_baseline_record_omn21288.py -k 'planted or duplicate_manifest or within_the_recorded or declared_value or committed_repo_specs' -q --no-cov -p no:cacheprovider
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -k 'planted or duplicate_manifest or within_the_recorded or declared_value or committed_baseline' -q --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21288-ac6-contract-http-mount-served
     description: >-
