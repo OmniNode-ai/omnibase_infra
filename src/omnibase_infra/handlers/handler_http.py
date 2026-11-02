@@ -43,6 +43,8 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models.http import ModelHttpBodyContent
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.runtime.models.model_http_client_config import ModelHttpClientConfig
+from omnibase_infra.runtime.providers.provider_http_client import ProviderHttpClient
 from omnibase_infra.utils import parse_env_float, parse_env_int
 
 logger = logging.getLogger(__name__)
@@ -274,10 +276,11 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
                         },
                     )
 
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout),
-                follow_redirects=True,
-            )
+            self._client = await ProviderHttpClient(
+                ModelHttpClientConfig(
+                    timeout_seconds=self._timeout, follow_redirects=True
+                )
+            ).create()
             self._initialized = True
             logger.info(
                 "%s initialized successfully",
@@ -368,13 +371,13 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
                 "Missing or invalid 'operation' in envelope", context=ctx
             )
 
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation=operation,
+            target_name="http_handler",
+            correlation_id=correlation_id,
+        )
         if operation not in _SUPPORTED_OPERATIONS:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.HTTP,
-                operation=operation,
-                target_name="http_handler",
-                correlation_id=correlation_id,
-            )
             raise ProtocolConfigurationError(
                 f"Operation '{operation}' not supported in MVP. Available: {', '.join(sorted(_SUPPORTED_OPERATIONS))}",
                 context=ctx,
@@ -382,24 +385,12 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
 
         payload = envelope.get("payload")
         if not isinstance(payload, dict):
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.HTTP,
-                operation=operation,
-                target_name="http_handler",
-                correlation_id=correlation_id,
-            )
             raise ProtocolConfigurationError(
                 "Missing or invalid 'payload' in envelope", context=ctx
             )
 
         url = payload.get("url")
         if not isinstance(url, str) or not url:
-            ctx = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.HTTP,
-                operation=operation,
-                target_name="http_handler",
-                correlation_id=correlation_id,
-            )
             raise ProtocolConfigurationError(
                 "Missing or invalid 'url' in payload", context=ctx
             )
