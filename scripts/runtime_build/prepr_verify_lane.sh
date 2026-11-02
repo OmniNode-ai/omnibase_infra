@@ -319,10 +319,14 @@ while read -r repo tag commit; do
     SIBLING_COMMIT["${repo}"]="${commit}"
     log "sibling ${repo} <- ${SIBLING_SRC[${repo}]} @ ${commit} tag ${tag} (${SIBLING_ORIGIN[${repo}]})"
 done <<< "${SIBLING_PINS}"
+for repo in "${SIBLING_REPOS[@]}"; do
+    [[ -n "${SIBLING_COMMIT[${repo}]:-}" ]] \
+        || fail "${EXIT_PROVENANCE_MISMATCH}" "sibling ${repo} received no dev-merge tag; the pins read were: ${SIBLING_PINS}"
+done
 
 if [[ "${PLAN_ONLY}" == "1" ]]; then
     log "--plan-only: every refusal passed. Nothing was built, started or connected to."
-    "${PY}" - "$@" <<PYPLAN
+    "${PY}" - "${SIBLING_PINS}" <<PYPLAN
 import json, sys
 print(json.dumps({
     "plan_only": True,
@@ -331,7 +335,7 @@ print(json.dumps({
     "target_repo": "${TARGET_REPO}",
     "target_commit": "${TARGET_COMMIT}",
     "target_branch": "${TARGET_BRANCH}",
-    "siblings": {r: {"tag": t, "commit": c} for r, t, c in map(str.split, """${SIBLING_PINS}""".splitlines())},
+    "siblings": {r: {"tag": t, "commit": c} for r, t, c in map(str.split, sys.argv[1].splitlines())},
     "staging_root": "${STAGING_ROOT}",
     "topic_namespace": "${TOPIC_NAMESPACE}",
     "db_slot": "${DB_SLOT}",

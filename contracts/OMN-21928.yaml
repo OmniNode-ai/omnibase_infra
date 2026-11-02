@@ -111,5 +111,5 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q --no-cov -k "refuse_a_branch_build or sibling_branch_still_refused"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/test_open_pr_declaration_omn21928.py -q --no-cov
-        cwd: ${OMNI_HOME}/omnibase_infra/scripts/deploy-agent
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
