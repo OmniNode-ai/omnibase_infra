@@ -30,9 +30,10 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime import service_kernel
 from omnibase_infra.runtime.service_kernel import (
     resolve_embedded_runtime_config,
+    workspace_runtime_contracts_dir,
 )
 
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = workspace_runtime_contracts_dir(Path())
 
 pytestmark = pytest.mark.unit
 

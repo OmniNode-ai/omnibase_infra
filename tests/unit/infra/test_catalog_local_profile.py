@@ -1366,15 +1366,15 @@ _OTHER_BUNDLE_DIGESTS = {
     "auth": "1bf4de388a77a7d94e7a44cf785c7caba8a051c8aaf5501cc0b082cb5a25d28d",
     "canary": "5ab631eca245b2bdee989982d8e2e7b562e2632c149aadd7297a77dfdbdac76b",
     "core": "6aadec4f0303690e429c3dbe6b4b72fec42b6ee4624d1b84f6941e6f8e09eb55",
-    "fault-injection": "53d980df521b621ad4095f6282a7b84d80801c3f5bea2f6d15f6f9e6b93c3651",
+    "fault-injection": "4a2049b6de0cf4110005b25386666b2a8abafcbe0c85996ac9c6de309b11e49b",
     "memgraph": "d55629512c84083550a018a068c3e394f352e06414192eff5a4f9f0967bd8bc3",
     "observability": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
     "omnidash": "c8ec69a7177b270479e795459ad901c7608bfe5dafee676d83706f0c4ad267ba",
     "omnimarket-projections": "2dddac4c21e6209ca3c09f04e43dc7a7f56b087e862fc565ed0315db3f5762e0",
     "omnimemory": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
-    "runtime": "4768cde91f4ec036bc7dedbc4115e30d6c81e331109d03739495c3ff25e4ed1b",
-    "runtime-core": "5222613c885c152a633217df561aa36b6484d35274c1bd8c448b4d94435c356c",
-    "runtime-infrastructure": "d9ede60eb8ad39e49546060607833a4e5fd6d40df73249fa36141a80094fb14e",
+    "runtime": "fab71bdb4fb9ba98e8a144ae77afc0e03fc5814667a78fb6d445d8a9971f7010",
+    "runtime-core": "e8ebf550a1e16fa7a4cb93379fb8a08c5e12358a2f1a225528f37579dbf46f99",
+    "runtime-infrastructure": "b8e6270c7f964793f014a832dc032ab4415809951a9895bb4bafe40dc564ed43",
     "runtime-integrations": "becf59c5917d835f5148c9449bcec688b593792c89b1d31d6a62666b31d6b623",
     "runtime-observability-projections": "843681c597dcf5ba7e0d1fd223c1bae557f8dc8a69c132f0c9376eb8365da052",
     "secrets": "6aadec4f0303690e429c3dbe6b4b72fec42b6ee4624d1b84f6941e6f8e09eb55",
@@ -1400,6 +1400,8 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     # local-lane-mirror and local-market extend the laptop stack.
     # OMN-21279: only market image tags (projection-api included) changed in the
     # three updated digests.
+    # OMN-18087: main's memory limit moved to the runtime policy contract, so
+    # the four bundles carrying omninode-runtime render a new digest.
     assert sorted(
         set(bundles) - {"local", "local-market", "local-lane-mirror"}
     ) == sorted(_OTHER_BUNDLE_DIGESTS)

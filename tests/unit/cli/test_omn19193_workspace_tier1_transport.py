@@ -57,9 +57,10 @@ from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusCo
 from omnibase_infra.runtime.service_kernel import (
     load_runtime_config,
     resolve_embedded_runtime_config,
+    workspace_runtime_contracts_dir,
 )
 
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = workspace_runtime_contracts_dir(Path())
 
 pytestmark = pytest.mark.unit
 

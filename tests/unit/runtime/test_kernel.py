@@ -641,6 +641,42 @@ class TestBootstrap:
         mock_health_instance.start.assert_called_once()
         mock_health_instance.stop.assert_called_once()
 
+    @pytest.mark.parametrize("selection", ["", "projection_claude_hook_events"])
+    async def test_bootstrap_hands_the_host_process_a_selection_scoped_service(
+        self,
+        selection: str,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OMN-18087: a node-bound process owns its host-process consumer groups.
+
+        RuntimeHostProcess builds its group ids from ``service_name``. A process
+        bound by ``ONEX_RUNTIME_NODE_SELECTION`` gets a service name carrying the
+        selection, so it never joins the main runtime's groups; an unselected
+        process keeps ``config.name`` and its committed offsets.
+        """
+        from omnibase_infra.models.runtime.model_runtime_node_selection import (
+            ENV_RUNTIME_NODE_SELECTION,
+            ModelRuntimeNodeSelection,
+        )
+
+        monkeypatch.setenv(ENV_RUNTIME_NODE_SELECTION, selection)
+        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as event:
+            event.return_value.wait = AsyncMock(return_value=None)
+            assert await bootstrap() == 0
+
+        host_config = mock_runtime_host.call_args.kwargs["config"]
+        node_name = host_config["node_name"]
+        expected = ModelRuntimeNodeSelection.from_env(
+            {ENV_RUNTIME_NODE_SELECTION: selection}
+        ).consumer_service(node_name)
+        assert host_config["service_name"] == expected
+        assert (host_config["service_name"] == node_name) is (selection == "")
+
     async def test_bootstrap_returns_error_on_unexpected_exception(
         self,
         mock_wire_infrastructure: MagicMock,

@@ -1243,8 +1243,23 @@ services:
       # do NOT set this flag, so they process intelligence events without
       # starting duplicate heartbeat loops for the same deterministic node IDs.
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
+      # OMN-18087: boot bound, join limit and join priority come from the
+      # runtime policy contract (profiles.dev.services.main.boot).
+      ONEX_BOOT_READY_BOUND_SECONDS: ${DEV_RUNTIME_MAIN_READY_BOUND_SECONDS:?runtime policy contract must set DEV_RUNTIME_MAIN_READY_BOUND_SECONDS}
+      ONEX_MAX_CONCURRENT_CONTRACT_ATTACH: ${DEV_RUNTIME_MAIN_MAX_CONCURRENT_CONTRACT_ATTACH:?runtime policy contract must set DEV_RUNTIME_MAIN_MAX_CONCURRENT_CONTRACT_ATTACH}
+      ONEX_BOOT_PRIORITY_CONTRACTS: ${DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS:?runtime policy contract must set DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS}
     ports:
       - "${DEV_RUNTIME_MAIN_PORT:?runtime policy contract must set DEV_RUNTIME_MAIN_PORT}:8085"
+    # OMN-18087: main's memory limit is declared in the runtime policy contract
+    # (profiles.dev.services.main.memory_limit), not as a literal here.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: ${DEV_RUNTIME_MAIN_MEMORY:?runtime policy contract must set DEV_RUNTIME_MAIN_MEMORY}
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     stop_grace_period: 90s
     volumes:
       - runtime_logs:/app/logs

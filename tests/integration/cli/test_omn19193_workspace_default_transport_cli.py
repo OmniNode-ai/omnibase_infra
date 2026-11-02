@@ -34,8 +34,9 @@ from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import delegate_command
 from omnibase_infra.cli.delegate_lane import LANE_DECLARATION_RELATIVE_PATH
 from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
+from omnibase_infra.runtime.service_kernel import workspace_runtime_contracts_dir
 
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
+WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = workspace_runtime_contracts_dir(Path())
 
 pytestmark = pytest.mark.integration
 

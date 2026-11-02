@@ -15,11 +15,10 @@ measured on the dev lane on 2026-11-01).
 The kernel's consumer service name now comes from the node selection, so a process
 bound to a contract by ``ONEX_RUNTIME_NODE_SELECTION`` owns its own kernel groups,
 while the selected contract's own group (``package_name`` / contract name) is not
-built from it and keeps ``runtime-main``.
+built from it and keeps ``runtime-main``. That bootstrap hands the host process
+the scoped name is asserted by running it, in
+``tests/unit/runtime/test_kernel.py::TestBootstrap::test_bootstrap_hands_the_host_process_a_selection_scoped_service``.
 """
-
-import ast
-from pathlib import Path
 
 import pytest
 
@@ -32,14 +31,6 @@ from omnibase_infra.models.runtime.model_runtime_node_selection import (
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 
 pytestmark = [pytest.mark.unit]
-
-KERNEL = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "omnibase_infra"
-    / "runtime"
-    / "service_kernel.py"
-)
 
 CONFIG_NAME = "runtime_config"
 INSTANCE_ID = "runtime-main"
@@ -100,38 +91,4 @@ def test_kernel_identity_is_the_old_identity_when_nothing_is_selected() -> None:
     )
     assert _selection("").kernel_identity("local", None, "x", "1.0.0").service == (
         "onex-kernel"
-    )
-
-
-def test_kernel_builds_every_consumer_identity_through_the_selection() -> None:
-    """No kernel consumer identity is built straight from ``config.name``."""
-    tree = ast.parse(KERNEL.read_text(encoding="utf-8"))
-    direct = [
-        ast.unparse(node)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "ModelNodeIdentity"
-    ]
-    via_selection = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "kernel_identity"
-    ]
-    assert direct == [], (
-        "kernel consumer identities built outside the node selection collide with "
-        f"the main runtime's groups when the instance id is shared: {direct}"
-    )
-    assert len(via_selection) == 4, "contract registry, plugins, savings, triage"
-
-
-def test_kernel_hands_the_host_process_the_selection_scoped_service_name() -> None:
-    """RuntimeHostProcess derives its subscription groups from ``service_name``."""
-    source = KERNEL.read_text(encoding="utf-8")
-    assert 'runtime_config_dict["service_name"] = config.name' not in source
-    assert (
-        'runtime_config_dict["service_name"] = node_selection.consumer_service('
-        in source
     )
