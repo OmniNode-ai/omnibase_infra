@@ -244,7 +244,9 @@ async def test_payload_is_read_by_its_topic_model_only() -> None:
     )
     rows = sorted(db.rows.values(), key=lambda row: row[7])
     assert [row[1] for row in rows] == ["unknown", "unknown"]
-    assert [row[0] == _RUN_ID for row in rows] == [False, False]
+    # Kept under the message's correlation id, not the report_ref or the payload's.
+    assert [row[0] for row in rows] == [_RUN_ID, _RUN_ID]
+    assert all(row[2] in {TRIGGERED_TOPIC, RUN_TOPIC} for row in rows)
 
 
 @pytest.mark.asyncio
@@ -269,3 +271,31 @@ async def test_message_without_a_broker_position_is_refused(
     )
     with pytest.raises(ProtocolConfigurationError):
         await HandlerValidatorEventLedgerProject().handle(message)
+
+
+@pytest.mark.asyncio
+async def test_fallback_row_uses_message_correlation_id_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    db = _ConflictModellingDb()
+    with caplog.at_level("WARNING", logger=_HANDLER_MODULE):
+        await _persist([_message(TRIGGERED_TOPIC, b"not json", offset=2)], db)
+    (row,) = db.rows.values()
+    assert row[0] == _RUN_ID
+    assert "kept under fallback identity" in caplog.text
+    assert "not json" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_naive_header_timestamp_is_read_as_utc_on_every_path() -> None:
+    db = _ConflictModellingDb()
+    naive = _STAMP.replace(tzinfo=None)
+    messages = []
+    for index, (topic, body) in enumerate(
+        [(TRIGGERED_TOPIC, _triggered()), (TRIGGERED_TOPIC, b"not json")]
+    ):
+        message = _message(topic, body, offset=index)
+        headers = message.headers.model_copy(update={"timestamp": naive})
+        messages.append(message.model_copy(update={"headers": headers}))
+    await _persist(messages, db)
+    assert {row[4] for row in db.rows.values()} == {_STAMP}

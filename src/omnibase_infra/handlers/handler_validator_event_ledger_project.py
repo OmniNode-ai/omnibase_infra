@@ -18,7 +18,8 @@ has a single ``emitted_at``, ``ModelValidatorTriggeredEvent`` has no timestamp).
 
 The wire model is chosen by the topic the message arrived on, never by trial
 parsing: a payload that does not validate against its own topic's model is kept,
-with fallback ``run_id`` and ``repo_id``, so the ledger never drops what the broker
+with the message's correlation id as ``run_id``, ``repo_id`` "unknown" and a logged
+warning, so the ledger never drops what the broker
 delivered.
 
 ``occurred_at`` has one source per event type, because the wire models differ: a
@@ -35,6 +36,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -65,6 +67,8 @@ HANDLER_ID_VALIDATOR_EVENT_LEDGER_PROJECT: str = (
     "validator-event-ledger-project-handler"
 )
 _UNKNOWN_REPOSITORY = "unknown"
+
+logger = logging.getLogger(__name__)
 
 
 class HandlerValidatorEventLedgerProject:
@@ -119,8 +123,12 @@ class HandlerValidatorEventLedgerProject:
     def _row_identity(message: ModelEventMessage) -> tuple[UUID, str, datetime]:
         """Return (run_id, repo_id, occurred_at) for the event on ``message``."""
         header_time = message.headers.timestamp
+        if header_time.tzinfo is None:
+            header_time = header_time.replace(tzinfo=UTC)
+        # A payload the topic's model rejects keeps the message's own correlation
+        # id, so the kept row still joins to its run.
         fallback = (
-            uuid5(NAMESPACE_URL, hashlib.sha256(message.value).hexdigest()),
+            message.headers.correlation_id,
             _UNKNOWN_REPOSITORY,
             header_time,
         )
@@ -131,9 +139,19 @@ class HandlerValidatorEventLedgerProject:
                 )
                 return triggered.correlation_id, triggered.repository, header_time
             if message.topic != EnumPlatformTopic.EVT_VALIDATOR_RUN_V1.value:
+                logger.warning(
+                    "validator event on an unrouted topic kept under fallback identity: topic=%s",
+                    message.topic,
+                )
                 return fallback
             run = ModelValidatorRunEvent.model_validate_json(message.value)
         except ValidationError:
+            logger.warning(
+                "validator event kept under fallback identity: topic=%s partition=%s offset=%s",
+                message.topic,
+                message.partition,
+                message.offset,
+            )
             return fallback
         try:
             run_id = UUID(run.report_ref)
