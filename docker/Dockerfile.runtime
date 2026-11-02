@@ -408,16 +408,9 @@ RUN set -eu; \
 # installed commit, or the build fails. The classification is written into
 # build-provenance.json as first_party_sources. The same function reads a running
 # container: run_audit(Path("/app/build-provenance.json")).
-#
-# OMN-18087: COMPOSE_PROJECT is declared here, just before its one reader, so it
-# invalidates no earlier layer. Only a pre-PR verify slot's project (listed under
-# slot_mode in first_party_sources.yaml) relaxes the audit, and only for a clean
-# staged tree at a recorded commit; the dev, stability and deploy-agent lanes
-# pass their own project and are audited exactly as before.
-ARG COMPOSE_PROJECT=unknown
 RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
-        COMPOSE_PROJECT="${COMPOSE_PROJECT}" /app/.venv/bin/python -c 'import os, sys; from pathlib import Path; from omnibase_infra.validation.checker_first_party_sources import run_audit; sys.exit(run_audit(Path("/workspace/sibling-vcs-provenance.json"), record_into=Path("/app/build-provenance.json"), require=sys.argv[1:], compose_project=os.environ["COMPOSE_PROJECT"]))' \
+        /app/.venv/bin/python -c 'import sys; from pathlib import Path; from omnibase_infra.validation.checker_first_party_sources import run_audit; sys.exit(run_audit(Path("/workspace/sibling-vcs-provenance.json"), record_into=Path("/app/build-provenance.json"), require=sys.argv[1:]))' \
             omnibase-core omnibase-spi omnibase-infra; \
     fi
 

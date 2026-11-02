@@ -40,12 +40,3 @@ packages:
   - distribution: omnibase-infra
     repo: omnibase_infra
     install: build-context
-# OMN-18087: the pre-PR verify slots. A build whose COMPOSE_PROJECT build arg
-# matches this pattern accepts a first-party tree staged clean at a recorded 40-hex
-# commit (kind slot-pinned-commit), because a slot boots a branch before it
-# merges and a branch has no dev-merge tag. Nothing else is relaxed, and no other
-# compose project gets the exception. The pattern matches the pool slots of
-# scripts/runtime_build/prepr_slot_policy.py; tests/scripts/
-# test_first_party_sources_omn17427.py holds the pattern to exactly those slots.
-slot_mode:
-  compose_project_pattern: '^omnibase-infra-prepr-[12]$'

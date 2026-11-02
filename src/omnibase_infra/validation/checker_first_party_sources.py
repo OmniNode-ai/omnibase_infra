@@ -18,18 +18,6 @@ local tree) and names every package whose source is not a dev-merge tag:
 * ``tag-mismatch``   a tag whose twelve hex digits are not the installed commit
 * ``absent``         a package this build requires and did not install
 
-One scoped exception, the pre-PR verify slot (OMN-18087). A slot exists to boot
-a branch BEFORE it merges, so the branch under test can never carry a dev-merge
-tag. When the build names a compose project the contract lists under
-``slot_mode.compose_project_pattern`` (the pool slots of
-``scripts/runtime_build/prepr_slot_policy.py``), a tree staged from a clean
-checkout at a recorded 40-hex commit is classified ``slot-pinned-commit`` and
-accepted. Every other kind is refused in a slot exactly as on the dev lane, and
-every other compose project (the dev, stability and deploy-agent lanes, or none)
-gets no exception at all:
-
-* ``slot-pinned-commit``  a slot build's staged tree at a recorded commit
-
 Two entry points, both usable without importing the rest of ``omnibase_infra``
 (load the file by path where the package is not installed):
 
@@ -66,9 +54,6 @@ KIND_EXACT_VERSION = "exact-version"
 KIND_UNBOUND = "unbound"
 KIND_TAG_MISMATCH = "tag-mismatch"
 KIND_ABSENT = "absent"
-KIND_SLOT_PINNED_COMMIT = "slot-pinned-commit"
-_ACCEPTED_KINDS = frozenset({KIND_DEV_MERGE_TAG, KIND_SLOT_PINNED_COMMIT})
-_FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 _SHA = re.compile(r"^[0-9a-f]{7,40}$")
 # Dots belong to one suffix segment. Only '+' and '-' separate later segments,
@@ -90,12 +75,6 @@ class FirstPartyContract:
     policy: str
     tag_pattern: re.Pattern[str]
     packages: tuple[FirstPartyPackage, ...]
-    slot_project_pattern: re.Pattern[str] | None = None
-
-    def is_slot_build(self, compose_project: str) -> bool:
-        """True only for a compose project the contract names as a pre-PR slot."""
-        pattern = self.slot_project_pattern
-        return pattern is not None and pattern.fullmatch(compose_project) is not None
 
     def package(self, distribution: str) -> FirstPartyPackage:
         wanted = normalize(distribution)
@@ -120,7 +99,7 @@ class InstalledSource:
 
     @property
     def ok(self) -> bool:
-        return self.kind in _ACCEPTED_KINDS
+        return self.kind == KIND_DEV_MERGE_TAG
 
     def to_dict(self) -> dict[str, str]:
         return {key: str(value) for key, value in asdict(self).items()}
@@ -142,18 +121,10 @@ def load_contract(path: Path = CONTRACT_PATH) -> FirstPartyContract:
         )
         for item in raw["packages"]
     )
-    slot_mode = raw.get("slot_mode") or {}
-    if not isinstance(slot_mode, dict):
-        raise ValueError(f"{path}: slot_mode must be a mapping")
     return FirstPartyContract(
         policy=str(raw["policy"]),
         tag_pattern=re.compile(str(raw["tag_pattern"])),
         packages=packages,
-        slot_project_pattern=(
-            re.compile(str(slot_mode["compose_project_pattern"]))
-            if slot_mode.get("compose_project_pattern")
-            else None
-        ),
     )
 
 
@@ -231,31 +202,11 @@ def _classify_staged(
     return KIND_SHA, "", commit, f"staged at commit {commit[:12]} with no dev-merge tag"
 
 
-def _slot_pinned(kind: str, record: Mapping[str, object] | None) -> tuple[str, str]:
-    """(kind, detail) of a staged tree in a pre-PR slot build.
-
-    Only a branch or sha classification of a CLEAN staged tree whose record
-    carries a full commit is lifted. Unbound, dirty and short-ref trees keep the
-    kind the dev lane gives them.
-    """
-    if record is None or kind not in (KIND_BRANCH, KIND_SHA):
-        return kind, ""
-    commit = str(record.get("vcs_ref", ""))
-    if record.get("vcs_dirty") is not False or not _FULL_SHA.match(commit):
-        return kind, ""
-    return (
-        KIND_SLOT_PINNED_COMMIT,
-        f"pre-PR slot build: staged clean at commit {commit[:12]}",
-    )
-
-
 def classify_distribution(
     package: FirstPartyPackage,
     dist: importlib.metadata.Distribution,
     staging: Mapping[str, object],
     contract: FirstPartyContract,
-    *,
-    slot_build: bool = False,
 ) -> InstalledSource:
     version = dist.version
     direct_url = _read_direct_url(dist)
@@ -288,10 +239,6 @@ def classify_distribution(
         )
     record = _staging_record(package, staging)
     kind, tag, commit, detail = _classify_staged(record, contract)
-    if slot_build:
-        slot_kind, slot_detail = _slot_pinned(kind, record)
-        if slot_kind != kind:
-            kind, detail = slot_kind, f"{slot_detail} ({detail})"
     return InstalledSource(
         package.distribution, package.repo, kind, version, tag, commit, url, detail
     )
@@ -303,15 +250,10 @@ def audit_environment(
     *,
     search_paths: Sequence[str] | None = None,
     required: Iterable[str] = (),
-    compose_project: str = "",
 ) -> list[InstalledSource]:
     """One ``InstalledSource`` per first-party distribution found, plus an
     ``absent`` row for each ``required`` distribution that is not installed.
-
-    ``compose_project`` is the build's compose project; only one the contract
-    lists under ``slot_mode`` enables the pre-PR slot exception.
     """
-    slot_build = contract.is_slot_build(compose_project)
     dists: dict[str, importlib.metadata.Distribution] = {}
     found_dists = (
         importlib.metadata.distributions()
@@ -338,11 +280,7 @@ def audit_environment(
                     )
                 )
             continue
-        found.append(
-            classify_distribution(
-                package, installed, staging, contract, slot_build=slot_build
-            )
-        )
+        found.append(classify_distribution(package, installed, staging, contract))
     return found
 
 
@@ -414,7 +352,6 @@ def run_audit(
     record_into: Path | None = None,
     search_paths: Sequence[str] | None = None,
     contract_path: Path = CONTRACT_PATH,
-    compose_project: str = "",
 ) -> int:
     """Audit the installed environment; print one line per package; 1 on a finding.
 
@@ -422,29 +359,16 @@ def run_audit(
     carries the record under ``per_repo_vcs_provenance``), so a running container
     is audited with ``staging_record=/app/build-provenance.json``. With
     ``record_into`` the classification is written into that build-provenance.json.
-    ``compose_project`` is the build's compose project (the Dockerfile passes its
-    ``COMPOSE_PROJECT`` build arg); only a pre-PR slot project relaxes anything.
     """
     contract = load_contract(contract_path)
     staging = json.loads(staging_record.read_text(encoding="utf-8"))
     staging = staging.get("per_repo_vcs_provenance", staging)
     sources = audit_environment(
-        contract,
-        staging,
-        search_paths=search_paths,
-        required=require,
-        compose_project=compose_project,
+        contract, staging, search_paths=search_paths, required=require
     )
-    if contract.is_slot_build(compose_project):
-        sys.stdout.write(
-            f"slot mode: {compose_project} is a pre-PR verify slot; a clean staged "
-            "tree at a recorded commit is accepted\n"
-        )
     if record_into is not None:
         manifest = json.loads(record_into.read_text(encoding="utf-8"))
         manifest["first_party_sources"] = [source.to_dict() for source in sources]
-        if contract.is_slot_build(compose_project):
-            manifest["first_party_slot_mode"] = compose_project
         manifest.setdefault("per_repo_vcs_provenance", {})["build_context"] = (
             staging.get("build_context", {})
         )

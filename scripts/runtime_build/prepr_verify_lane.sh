@@ -538,7 +538,7 @@ done
         _sep=",
 "
     done
-    printf '\n  },\n  "build_context": {"omnibase_infra": {"vcs_ref": "%s", "vcs_dirty": false, "vcs_branch": "HEAD"}}\n}\n' "${TARGET_COMMIT}"
+    printf '\n  }\n}\n'
 } > "${STAGING_ROOT}/repo/workspace/sibling-vcs-provenance.json"
 
 # OMN-21279: Dockerfile.runtime COPYs workspace/routing_tiers.yaml (the image
