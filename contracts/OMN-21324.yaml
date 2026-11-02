@@ -69,5 +69,5 @@ dod_evidence:
       - AC3
     checks:
       - check_type: command
-        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.enums.enum_non_retryable_error_category import EnumNonRetryableErrorCategory as E; assert E.undecodable_body_code(UnicodeDecodeError("utf-8", b"\xff", 0, 1, "x")) is not None'
+        check_value: PROBE='from omnibase_infra.enums.enum_non_retryable_error_category import EnumNonRetryableErrorCategory as E; assert E.undecodable_body_code(UnicodeDecodeError("utf-8", b"\xff", 0, 1, "x")) is not None'; if docker inspect ${RUNTIME_CONTAINER:-omninode-runtime} >/dev/null 2>&1; then docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "$PROBE"; else env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "$PROBE"; fi
         cwd: ${OMNI_HOME}/omnibase_infra
