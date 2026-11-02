@@ -58,6 +58,7 @@ from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
 )
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.errors.error_projection import ProjectionError
+from omnibase_infra.models.dispatch.model_principal_topic import ModelPrincipalTopic
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -399,13 +400,13 @@ class DispatchResultApplier:
                 if isinstance(envelope_event_type, str) and envelope_event_type.strip():
                     embedded_topic = envelope_event_type
         if isinstance(embedded_topic, str) and embedded_topic.strip():
-            candidate_topic = embedded_topic.strip()
-            if candidate_topic in self._allowed_output_topics():
-                return candidate_topic
+            topic = embedded_topic.strip()
+            if ModelPrincipalTopic.admits(topic, self._allowed_output_topics()):
+                return topic
             logger.warning(
                 "Ignoring undeclared embedded output topic",
                 extra={
-                    "topic": candidate_topic,
+                    "topic": topic,
                     "event_type": type(event).__name__,
                 },
             )
@@ -415,8 +416,6 @@ class DispatchResultApplier:
         """Resolve output topic from configured class maps or fallback topic."""
         class_name = type(event).__name__
         delegation_intent_topic = _DELEGATION_INTENT_TOPIC_BY_CLASS.get(class_name)
-        if not self._output_topic_map:
-            return delegation_intent_topic or self._output_topic
         short_name = class_name.removeprefix("Model")
         return self._output_topic_map.get(
             short_name,

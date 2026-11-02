@@ -45,6 +45,14 @@ LANE_MIRROR_CREDENTIALS = (
     ROOT / "docker/lane-overlays/local.lane-credentials.example.yaml"
 )
 LANE_MIRROR_BROKER = "lane.dev.kafka.broker"
+# The compaction replies a principal reads from its own topic (OMN-22103). `{principal}`
+# is the principal the issuer issues for, resolved per principal, so no principal's
+# ACL names another's reply topic.
+COMPACTION_PRINCIPAL_REPLY_TOPICS: tuple[str, ...] = (
+    "onex.cmd.omniintelligence.context-compaction-package-for-{principal}.v1",
+    "onex.evt.omnimarket.context-compaction-prepared-for-{principal}.v1",
+    "onex.evt.omnimarket.context-compaction-fallback-for-{principal}.v1",
+)
 
 # The grants `deploy/lab/developer-principal-grants.yaml` typed by hand until
 # OMN-19975, spelled here as that file spelled them: (resource, name, pattern,
@@ -332,6 +340,10 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "onex.evt.omnimarket.context-compaction-fallback.v1",
         "literal",
         ("read", "describe"),
+    ),
+    *(
+        ("topic", template, "literal", ("read", "describe"))
+        for template in COMPACTION_PRINCIPAL_REPLY_TOPICS
     ),
     ("group", "receipt-mode-client.", "prefixed", ("read", "describe")),
 )
@@ -815,6 +827,7 @@ def test_the_non_mirror_omniintelligence_grants_are_exactly_compaction() -> None
     assert non_mirror_omniintelligence == {
         COMPACTION_COMMAND_TOPIC,
         *(t for t in COMPACTION_REPLY_TOPICS if "omniintelligence" in t),
+        *(t for t in COMPACTION_PRINCIPAL_REPLY_TOPICS if "omniintelligence" in t),
     }
 
 
@@ -838,6 +851,7 @@ def test_the_compaction_replies_grant_read_on_three_topics_and_one_group_prefix(
         (resource_type, resource, operation)
         for resource_type, resource in (
             *(("TOPIC", topic) for topic in COMPACTION_REPLY_TOPICS),
+            *(("TOPIC", topic) for topic in COMPACTION_PRINCIPAL_REPLY_TOPICS),
             ("GROUP", "receipt-mode-client."),
         )
         for operation in ("READ", "DESCRIBE")
@@ -861,7 +875,8 @@ def test_compaction_replies_use_prefix_grants_for_concrete_runtime_groups(
                 binding.model_copy(
                     update={"consumer_group": f"receipt-mode-client.{suffix}"}
                 )
-                if binding.physical_topic in COMPACTION_REPLY_TOPICS
+                if binding.physical_topic
+                in (*COMPACTION_REPLY_TOPICS, *COMPACTION_PRINCIPAL_REPLY_TOPICS)
                 else binding
                 for binding in shipped.bindings
             )
@@ -875,9 +890,13 @@ def test_compaction_replies_use_prefix_grants_for_concrete_runtime_groups(
 
 
 def test_compaction_replies_add_only_the_declared_dev_grants() -> None:
-    """Removing the compaction declarations removes exactly ten ACL rows."""
+    """Removing the compaction declarations removes exactly sixteen ACL rows."""
     shipped = shipped_bindings()
-    topics = {COMPACTION_COMMAND_TOPIC, *COMPACTION_REPLY_TOPICS}
+    topics = {
+        COMPACTION_COMMAND_TOPIC,
+        *COMPACTION_REPLY_TOPICS,
+        *COMPACTION_PRINCIPAL_REPLY_TOPICS,
+    }
     without = shipped.model_copy(
         update={
             "bindings": tuple(
@@ -895,7 +914,7 @@ def test_compaction_replies_add_only_the_declared_dev_grants() -> None:
     expected = (
         {
             (BROKER, "TOPIC", topic, "LITERAL", operation)
-            for topic in COMPACTION_REPLY_TOPICS
+            for topic in (*COMPACTION_REPLY_TOPICS, *COMPACTION_PRINCIPAL_REPLY_TOPICS)
             for operation in ("READ", "DESCRIBE")
         }
         | {
@@ -909,7 +928,7 @@ def test_compaction_replies_add_only_the_declared_dev_grants() -> None:
     )
     assert derive(shipped) - derive(without) == expected
     assert derive(without) - derive(shipped) == set()
-    assert len(expected) == 10
+    assert len(expected) == 16
     assert not any(row[0] != BROKER for row in expected)
 
 
