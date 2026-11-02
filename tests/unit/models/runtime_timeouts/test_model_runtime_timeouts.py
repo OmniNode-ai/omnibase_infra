@@ -30,17 +30,42 @@ pytestmark = pytest.mark.unit
 _DECLARED = Path(model_module.__file__).parent / "runtime_timeouts.yaml"
 _SRC = Path(model_module.__file__).resolve().parents[2]
 
-# (module path under src/omnibase_infra, called name, keyword) -> declared key.
-_KEYWORD_WIRING: dict[tuple[str, str, str], str] = {
-    ("runtime/request_response_wiring.py", "AIOKafkaConsumer", "session_timeout_ms"): "kafka_session_ms",
-    ("runtime/request_response_wiring.py", "AIOKafkaConsumer", "heartbeat_interval_ms"): "kafka_heartbeat_interval_ms",
-    ("runtime/request_response_wiring.py", "AIOKafkaConsumer", "max_poll_interval_ms"): "kafka_max_poll_interval_ms",
-    ("runtime/request_response_wiring.py", "_init_circuit_breaker", "reset_timeout"): "circuit_breaker_reset_seconds",
-    ("projectors/snapshot_publisher_registration.py", "AIOKafkaConsumer", "session_timeout_ms"): "kafka_session_ms",
-    ("projectors/snapshot_publisher_registration.py", "AIOKafkaConsumer", "heartbeat_interval_ms"): "kafka_heartbeat_interval_ms",
-    ("projectors/snapshot_publisher_registration.py", "AIOKafkaConsumer", "max_poll_interval_ms"): "kafka_max_poll_interval_ms",
-    ("mixins/mixin_llm_http_transport.py", "_init_circuit_breaker", "reset_timeout"): "circuit_breaker_reset_seconds",
-    ("runtime/node_invocation_adapter.py", "wait_for", "timeout"): "terminal_seconds",
+# (module path under src/omnibase_infra, enclosing scope, called name, keyword) -> declared key.
+_KEYWORD_WIRING: dict[tuple[str, str, str, str], str] = {
+    ("runtime/request_response_wiring.py", "RequestResponseWiring._wire_instance", "AIOKafkaConsumer", "session_timeout_ms"): "kafka_session_ms",
+    ("runtime/request_response_wiring.py", "RequestResponseWiring._wire_instance", "AIOKafkaConsumer", "heartbeat_interval_ms"): "kafka_heartbeat_interval_ms",
+    ("runtime/request_response_wiring.py", "RequestResponseWiring._wire_instance", "AIOKafkaConsumer", "max_poll_interval_ms"): "kafka_max_poll_interval_ms",
+    ("runtime/request_response_wiring.py", "RequestResponseWiring.__init__", "_init_circuit_breaker", "reset_timeout"): "circuit_breaker_reset_seconds",
+    ("projectors/snapshot_publisher_registration.py", "SnapshotPublisherRegistration._load_cache_from_topic", "AIOKafkaConsumer", "session_timeout_ms"): "kafka_session_ms",
+    ("projectors/snapshot_publisher_registration.py", "SnapshotPublisherRegistration._load_cache_from_topic", "AIOKafkaConsumer", "heartbeat_interval_ms"): "kafka_heartbeat_interval_ms",
+    ("projectors/snapshot_publisher_registration.py", "SnapshotPublisherRegistration._load_cache_from_topic", "AIOKafkaConsumer", "max_poll_interval_ms"): "kafka_max_poll_interval_ms",
+    ("mixins/mixin_llm_http_transport.py", "MixinLlmHttpTransport._init_llm_http_transport", "_init_circuit_breaker", "reset_timeout"): "circuit_breaker_reset_seconds",
+    ("runtime/node_invocation_adapter.py", "NodeInvocationAdapter._run_local_bus_round_trip", "wait_for", "timeout"): "terminal_seconds",
+}  # fmt: skip
+
+# One distinct value per declared key, none equal to the shipped value: a call site
+# bound to the wrong key, or still holding a literal, then reads a different number.
+_SENTINEL: dict[str, float] = {
+    "capability_probe_ttl_seconds": 601,
+    "capability_probe_seconds": 7.25,
+    "health_check_min_seconds": 2.5,
+    "health_check_max_seconds": 61.5,
+    "health_check_default_seconds": 9.5,
+    "handler_shutdown_min_seconds": 3.5,
+    "handler_shutdown_max_seconds": 301.5,
+    "handler_shutdown_default_seconds": 13.5,
+    "kafka_session_ms": 46001,
+    "kafka_heartbeat_interval_ms": 15003,
+    "kafka_max_poll_interval_ms": 300007,
+    "snapshot_consumer_wait_ms": 5011,
+    "circuit_breaker_reset_seconds": 61.25,
+    "health_probe_seconds": 2.75,
+    "local_dispatch_seconds": 121,
+    "terminal_seconds": 0.625,
+    "llm_transport_max_seconds": 123.5,
+    "llm_post_seconds": 31.5,
+    "introspection_base_backoff_seconds": 1.125,
+    "introspection_heartbeat_interval_seconds": 33.75,
 }  # fmt: skip
 
 
@@ -49,25 +74,50 @@ def _block() -> dict[str, object]:
     return dict(document["timeouts"])
 
 
-def _wired_keywords(relative_path: str) -> set[tuple[str, str, str]]:
-    """Return (called name, keyword, RUNTIME_TIMEOUTS attribute) for each wired keyword."""
-    tree = ast.parse((_SRC / relative_path).read_text(encoding="utf-8"))
-    found: set[tuple[str, str, str]] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
+class _KeywordSites(ast.NodeVisitor):
+    """Collect (scope, called name, keyword, RUNTIME_TIMEOUTS attribute or "") per keyword argument."""
+
+    def __init__(self) -> None:
+        self._scope: list[str] = []
+        self.sites: list[tuple[str, str, str, str]] = []
+
+    def _enter(
+        self, node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
+        self._scope.append(node.name)
+        self.generic_visit(node)
+        self._scope.pop()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._enter(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._enter(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._enter(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
         func = node.func
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
         for keyword in node.keywords:
             value = keyword.value
-            if (
-                keyword.arg is not None
-                and isinstance(value, ast.Attribute)
+            bound = (
+                value.attr
+                if isinstance(value, ast.Attribute)
                 and isinstance(value.value, ast.Name)
                 and value.value.id == "RUNTIME_TIMEOUTS"
-            ):
-                found.add((name, keyword.arg, value.attr))
-    return found
+                else ""
+            )
+            if keyword.arg is not None:
+                self.sites.append((".".join(self._scope), name, keyword.arg, bound))
+        self.generic_visit(node)
+
+
+def _keyword_sites(relative_path: str) -> list[tuple[str, str, str, str]]:
+    visitor = _KeywordSites()
+    visitor.visit(ast.parse((_SRC / relative_path).read_text(encoding="utf-8")))
+    return visitor.sites
 
 
 def test_loaded_timeouts_equal_the_declared_file() -> None:
@@ -129,13 +179,24 @@ def test_a_fractional_or_float_value_for_an_integer_key_is_refused(
 
 
 @pytest.mark.parametrize(
-    ("relative_path", "called", "keyword", "key"),
-    [(*wire[:3], key) for wire, key in sorted(_KEYWORD_WIRING.items())],
+    ("relative_path", "scope", "called", "keyword", "key"),
+    [(*wire, key) for wire, key in sorted(_KEYWORD_WIRING.items())],
 )
 def test_keyword_call_sites_are_wired_to_their_declared_key(
-    relative_path: str, called: str, keyword: str, key: str
+    relative_path: str, scope: str, called: str, keyword: str, key: str
 ) -> None:
-    assert (called, keyword, key) in _wired_keywords(relative_path)
+    """Every call of ``called`` with ``keyword`` in the file is the one expected site, bound to ``key``."""
+    sites = [
+        site for site in _keyword_sites(relative_path) if site[1:3] == (called, keyword)
+    ]
+    assert sites == [(scope, called, keyword, key)]
+
+
+def test_the_sentinel_gives_every_declared_key_its_own_value() -> None:
+    assert set(_SENTINEL) == set(_block())
+    assert len(set(_SENTINEL.values())) == len(_SENTINEL)
+    assert not [key for key, value in _SENTINEL.items() if value == _block()[key]]
+    ModelRuntimeTimeouts.model_validate(_SENTINEL)
 
 
 _SENTINEL_SCRIPT = textwrap.dedent(
@@ -232,10 +293,9 @@ _SENTINEL_SCRIPT = textwrap.dedent(
 
 
 def test_call_sites_follow_the_declared_file_not_a_literal(tmp_path: Path) -> None:
-    """Import every call site against a doubled file; a surviving literal keeps its old value."""
-    doubled = {key: value * 2 for key, value in _block().items()}
+    """Import every call site against a file with a distinct value per key; a surviving literal or a crossed key reads a different value."""
     path = tmp_path / "runtime_timeouts.yaml"
-    path.write_text(yaml.safe_dump({"timeouts": doubled}), encoding="utf-8")
+    path.write_text(yaml.safe_dump({"timeouts": _SENTINEL}), encoding="utf-8")
     assert ModelRuntimeTimeouts.from_file(path) != RUNTIME_TIMEOUTS
 
     completed = subprocess.run(
