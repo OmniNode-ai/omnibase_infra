@@ -1,8 +1,8 @@
 schema_version: 1.0.0
 ticket_id: OMN-21623
-title: omnibase_infra builds handlers at a binding site or not at all, declares model names in node contracts, and injects them into the LLM adapters (contracts_and_di burn-down, handler_hand_construction and literal_model_name slices)
+title: omnibase_infra builds handlers at a binding site or not at all, declares model names in node contracts and injects them into the LLM adapters, and reads third-party URLs, bind addresses, local stack endpoints and the runtime health port from declared settings files (contracts_and_di burn-down)
 summary: >-
-  The literal_model_name slice of the contracts_and_di burn-down (omnibase_core#2175) for omnibase_infra, alongside the handler_hand_construction slice already on dev (24 unused node registry factories deleted; six handlers moved onto a binding site in each of their five nodes). The savings estimation node held a counterfactual model map and a fallback model in its handler and input model; the waste detection analyzer held its premium-model markers; the five LLM enrichment and generation adapters, the OpenAI-compatible provider adapter and the decision search client held default model names. The two nodes now declare their model policy in the contract config block, parsed into frozen models with every field required; the adapters and the search client take the model from their caller, which resolves it from the model-routing policy. Separately, the contracts_and_di check reported 42 literal_url findings in src/omnibase_infra. This change declares the GitHub, Linear, Slack, Gmail, Claude Code schema and loopback-probe endpoints in models/third_party_endpoints/third_party_endpoints.yaml, loads them through ModelThirdPartyEndpoints (no field defaults, so an omitted value fails to load), and reads them in 11 modules. The check reports no literal_url finding over those modules, which held 16. Separately, the unit drift check and the CLAUDE.md reference check parse home-relative paths with Path parts; the literal_path rule reports nothing in those two files.
+  Two slices of the contracts_and_di burn-down (omnibase_core#2175) for omnibase_infra. The handler_hand_construction slice deletes 24 node registry factories that nothing called and moves the six handlers that composed a HandlerDb by hand onto a binding site in each of their five nodes, nodes/<node>/container/container_handler_db.py (133 findings to 103). The literal_model_name slice moves the savings estimation and waste detection model policy into their node contracts and makes the LLM adapters and the decision search client take the model from their caller. The contracts_and_di check reported 42 literal_url findings in src/omnibase_infra. This change declares the GitHub, Linear, Slack, Gmail, Claude Code schema and loopback-probe endpoints in models/third_party_endpoints/third_party_endpoints.yaml, loads them through ModelThirdPartyEndpoints (no field defaults, so an omitted value fails to load), and reads them in 11 modules. The check reports no literal_url finding over those modules, which held 16. The contracts_and_di check reported 37 literal_host, literal_ip and literal_port findings in src/omnibase_infra (literal_ip 18, literal_host 10, literal_port 9), among 1228 in src. This change declares the loopback and bind-all addresses, the local host, the PostgreSQL port and the TCP port bounds in models/network_binding/network_binding_settings.yaml, loads them through ModelNetworkBindingSettings (no field defaults, so an omitted value fails to load), and reads them where 17 source files held the literals; nine service configs take their health_check_host field from one of two small mixin models instead of declaring it each. Every fallback keeps its previous value. The check reports 19 fewer findings (1228 to 1209). The 18 findings left in the three rules sit in files whose canonical-file-shape baseline forbids growth or that another change holds. Separately, the unit drift check and the CLAUDE.md reference check parse home-relative paths with Path parts; the literal_path rule reports nothing in those two files.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -34,13 +34,20 @@ requirements:
         statement: 'AC5: the endpoints load from the declared file, an omitted value is refused, and each consuming module holds the declared value -- falsifier: an endpoints block missing a value that still loads, or a consumer constant that differs from the declared value'
       - id: AC6
         statement: 'AC6: the contracts_and_di check reports no literal_url finding in the 11 consuming modules and reports a planted URL as the positive control -- falsifier: any literal_url issue from those modules, or none from the planted module'
+  - id: req-omn21623-slice-network-binding-settings
+    statement: Infra services take their fallback bind addresses, loopback host names, local stack endpoints and runtime health port from the declared network binding settings, and a settings block that omits a value fails to load.
+    acceptance:
+      - id: AC31
+        statement: 'AC31: the network binding settings load from the declared file, an omitted or unknown key is refused, and every consumer that held a host, address or port literal reads the declared value -- falsifier: a settings block missing a key that still loads, or a consumer default that differs from the declared value'
+      - id: AC32
+        statement: 'AC32: the contracts_and_di check reports no literal_host, literal_ip or literal_port finding in the 17 source files this change edited and the three new models -- falsifier: any such finding from the check over those files'
   - id: req-omn21623-slice-literal-path
     statement: Home-relative paths in the deploy-agent unit drift check and the CLAUDE.md reference check are parsed with Path parts, not a literal prefix.
     acceptance:
-      - id: AC32
-        statement: 'AC32: the contracts_and_di literal_path rule reports no finding in unit_drift.py and check_claudemd_references.py, and reports the planted literal in the positive control -- falsifier: any literal_path issue from those files, or none from the planted file'
-      - id: AC33
-        statement: 'AC33: both path resolvers expand bare and nested home-relative paths, preserve absolute paths and handle non-tilde inputs; reference paths prefer the repository before the workspace root and return None when absent, and installed registry paths obey resolve_registry -- falsifier: any returned path differs from the expected path in the behavioral tests'
+      - id: AC34
+        statement: 'AC34: the contracts_and_di literal_path rule reports no finding in unit_drift.py and check_claudemd_references.py, and reports the planted literal in the positive control -- falsifier: any literal_path issue from those files, or none from the planted file'
+      - id: AC35
+        statement: 'AC35: both path resolvers expand bare and nested home-relative paths, preserve absolute paths and handle non-tilde inputs; reference paths prefer the repository before the workspace root and return None when absent, and installed registry paths obey resolve_registry -- falsifier: any returned path differs from the expected path in the behavioral tests'
 evidence_requirements:
   - kind: tests
     description: The registry directories are gone, the six handlers hold no hand construction, the binding site builds a HandlerDb, and the planted construction is reported.
@@ -57,6 +64,12 @@ evidence_requirements:
   - kind: tests
     description: The handlers, adapter and probes that read the endpoints keep their behaviour.
     command: uv run --frozen pytest tests/unit/adapters/test_linear_graphql_project_tracker_adapter.py tests/unit/event_bus/test_topic_violation_alerter.py tests/unit/handlers/test_handler_gmail_api.py tests/unit/handlers/test_handler_slack_webhook.py -q
+  - kind: tests
+    description: The loaded settings equal the declared file, each omitted key fails to load, and the health, MCP, registration storage, kernel and domain-validator consumers carry the declared values.
+    command: uv run --frozen pytest tests/unit/models/network_binding tests/integration/test_network_binding_settings_consumers.py -q -p no:cacheprovider
+  - kind: tests
+    description: The contracts_and_di check reports no host, address or port finding in the edited files, and reports a planted file.
+    command: uv run --frozen pytest tests/unit/validation/test_network_binding_contracts_and_di_omn21623.py -q -p no:cacheprovider
   - kind: tests
     description: The literal_path rule finds nothing in the two cleared files and one issue in the planted control.
     command: uv run --frozen pytest tests/unit/scripts/test_literal_path_slice_omn21623.py -q
@@ -175,7 +188,38 @@ dod_evidence:
         check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints; load_third_party_endpoints()'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
-  - id: dod-omn21623-ac32-literal-path-clean
+  - id: dod-omn21623-ac31-network-binding-settings
+    description: The settings load from the declared file, an omitted key is refused, and the consumers carry the declared values. Fails at the merge base, where the settings model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/network_binding tests/integration/test_network_binding_settings_consumers.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC31
+  - id: dod-omn21623-ac32-binding-check-clean
+    description: The contracts_and_di check reports no host, address or port finding in the edited files and reports a planted file. Fails at the merge base, where those files hold 19 such findings.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_network_binding_contracts_and_di_omn21623.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC32
+  - id: dod-omn21623-deploy-network-binding-settings
+    description: 'Deploy packaging smoke: build the runtime wheel, import its kernel and settings outside the source checkout, bind a socket to the declared loopback address, and enforce the declared port bounds. Runs on hosted CI without Docker; fails if the shipped YAML is missing or the runtime consumers cannot import it.'
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_network_binding_settings_wheel.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: docker run --rm -v ${OMNI_HOME}/omnibase_infra/src/omnibase_infra/models/network_binding:/nb:ro python:3.12-slim python -c "import pathlib; t = pathlib.Path('/nb/network_binding_settings.yaml').read_text(); [t.index(k + ':') for k in ('loopback_address', 'bind_all_address', 'local_host', 'postgres_port', 'tcp_port_min', 'tcp_port_max')]"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC31
+  - id: dod-omn21623-ac34-literal-path-clean
     description: The literal_path rule reports nothing in unit_drift.py and check_claudemd_references.py and reports the planted literal.
     source: manual
     checks:
@@ -183,8 +227,8 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/test_literal_path_slice_omn21623.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC32
-  - id: dod-omn21623-ac33-path-behavior
+      - AC34
+  - id: dod-omn21623-ac35-path-behavior
     description: 'Hosted post-deploy smoke: imports the two path resolvers and asserts returned paths for bare tilde, nested home paths, absolute paths, relative paths, missing references, repository precedence and registry resolution. Runs without containers or external services.'
     source: manual
     execution_scope: hosted_and_local
@@ -193,4 +237,4 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/test_literal_path_slice_omn21623.py -q -k 'resolvers or installed_path or reference_path or installed_registry'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC33
+      - AC35
