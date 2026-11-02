@@ -370,11 +370,11 @@ dod_evidence:
     binds_ac: [AC8]
   - id: dod-omn21288-ac9-hook-events-fold
     description: >-
-      Hosted-runner check of the compose and deploy definitions: the dev lane overlay neither starts the writer nor excludes its node, the fold overlay gates the writer under a folded profile so the dev stack renders none, the dev main runtime keeps the instance id the writer shared, the restart and build sets omit the writer, the handler retires a previous revision's writer container with a stop and a remove (no volume removal) before the compose up that recreates main, and. The test file is new on this branch, so the run fails at the merge base. The live reading (newest claude_hook_events row within the bound across a redeploy, and the group resuming from its committed offsets) is PENDING a post-merge deploy through the deploy agent and is not claimed here; the change depends on the boot bound of omnibase_infra#5553.
+      Hosted-runner check of the compose and deploy definitions: the dev lane overlay neither starts the writer nor excludes its node, the fold overlay gates the writer under a folded profile so the dev stack renders none, the dev main runtime keeps the instance id the writer shared, the restart and build sets omit the writer, the handler retires a previous revision's writer container with a stop and a remove (no volume removal) before the compose up that recreates main. The test file is new on this branch, so the run fails at the merge base. The live reading (newest claude_hook_events row within the bound across a redeploy, and the group resuming from its committed offsets) is PENDING a post-merge deploy through the deploy agent and is not claimed here; the change depends on the boot bound of omnibase_infra#5553.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC9]
 context:

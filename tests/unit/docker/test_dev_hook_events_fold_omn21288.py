@@ -19,7 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.unit.docker.test_dev_stack_runtime_only_omn21288 import dev_stack_services
+from tests.unit.docker.test_dev_tenant_projection_fold_omn21288 import (
+    dev_stack_services,
+)
 
 pytestmark = pytest.mark.unit
 
