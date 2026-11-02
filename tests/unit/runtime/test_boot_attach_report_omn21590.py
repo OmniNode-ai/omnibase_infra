@@ -12,6 +12,7 @@ manifest and the attach report with sorted keys. A diff of one byte fails.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -120,6 +121,22 @@ def test_the_golden_names_every_fixture_contract() -> None:
     """Positive control: a golden that omitted a contract would make the diff meaningless."""
     golden = GOLDEN.read_text(encoding="utf-8")
     assert all(name in golden for name in NAMES)
+
+
+@pytest.mark.unit
+def test_the_golden_content_hashes_are_the_sha256_of_the_fixture_file_bytes() -> None:
+    """The golden's hashes are checkable without running the catalog code under test."""
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    recorded = {
+        entry["contract_path"]: entry["contract_content_hash"]
+        for entry in golden["manifest"]["contracts"]
+    }
+    assert len(recorded) == len(NAMES)
+    for name in NAMES:
+        expected = hashlib.sha256(
+            (CONTRACTS / name / "contract.yaml").read_bytes()
+        ).hexdigest()
+        assert recorded[f"<fixtures>/{name}/contract.yaml"] == expected
 
 
 @pytest.mark.unit
