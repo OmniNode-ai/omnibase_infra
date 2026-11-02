@@ -1149,8 +1149,7 @@ prepush_developer_shell_path() {
     rowuv="$(prepush_local_row_uv "$lc" 2> /dev/null || true)"
     [ -n "$rowuv" ] && rowdir="$(dirname "$rowuv"):"
   fi
-  local linuxbrew_home="/home/linuxbrew"
-  printf '%s' "${uvdir}${rowdir}/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:${linuxbrew_home}/.linuxbrew/bin:/snap/bin:${HOME:-}/.cargo/bin:${PATH}"
+  printf '%s' "${uvdir}${rowdir}/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:${linuxbrew_home-/home/linuxbrew}/.linuxbrew/bin:/snap/bin:${HOME:-}/.cargo/bin:${PATH}"
 }
 
 # prepush_remote_reachability LC_HOST REPO -- how many capacity rows THIS ACTOR
@@ -1742,8 +1741,7 @@ export ONEX_PREPUSH_HOOK_ACTIVE="remote-leg:${ORIGIN}"
 # full tests/unit/ dispatch to it returned zero tool-missing reds). The Linux
 # analogues of the Homebrew prefix are appended AFTER every measured entry, so
 # they can only add resolution and never shadow a tool that already resolves.
-linuxbrew_home="/home/linuxbrew"
-PATH="$(dirname "$UV"):/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:${linuxbrew_home}/.linuxbrew/bin:/snap/bin:${HOME:-}/.cargo/bin:${PATH}"
+PATH="$(dirname "$UV"):/opt/homebrew/bin:/usr/local/bin:${HOME:-}/.local/bin:${linuxbrew_home-/home/linuxbrew}/.linuxbrew/bin:/snap/bin:${HOME:-}/.cargo/bin:${PATH}"
 export PATH
 
 ARGV=()

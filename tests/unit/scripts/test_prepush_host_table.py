@@ -2430,13 +2430,13 @@ def test_the_remote_wrapper_path_covers_linux_hosts_too() -> None:
     line = next(
         ln for ln in remote.splitlines() if ln.startswith('PATH="$(dirname "$UV")')
     )
-    # The prefix is held in `linuxbrew_home` so the script carries no literal
-    # user-home path (the local-path gate) and no suppression comment.
-    assert 'linuxbrew_home="/home/linuxbrew"' in remote
-    for entry in ("${linuxbrew_home}/.linuxbrew/bin", "/snap/bin"):
+    # The prefix is a parameter default (`linuxbrew_home`, no colon so the entry
+    # still splits on ":"): the script carries no literal user-home path (the
+    # local-path gate) and no suppression comment, and gains no line.
+    for entry in ("${linuxbrew_home-/home/linuxbrew}/.linuxbrew/bin", "/snap/bin"):
         assert entry in line, f"expected {entry} on the remote PATH"
     assert line.index("${HOME:-}/.local/bin") < line.index(
-        "${linuxbrew_home}/.linuxbrew/bin"
+        "${linuxbrew_home-/home/linuxbrew}/.linuxbrew/bin"
     ), "the measured entries must keep precedence over the added ones"
 
 
