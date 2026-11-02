@@ -78,7 +78,7 @@ evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
     command: |-
-      uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+      uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ""
@@ -86,12 +86,12 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn21288-ac1-fixture-refusal
     description: >-
-      Read the dev-stack-runtime-only hook registered in .pre-commit-config.yaml, require its files pattern to match a fixture path, and run its entry. The entry executes the stack tests, including refusal of separate effects processes, workers, event consumers and projection writers. The merge-base control copies the tests and fixtures, but not the hook registration, so the check exits 1 there. It reads the config directly rather than through pre-commit run, whose cold-cache clone of every remote hook repository exceeds the verifier's 30s per-check budget.
+      Read the stack-shape hook registered in .pre-commit-config.yaml, require its files pattern to match a fixture path, and run its entry. The entry executes the stack tests, including refusal of separate effects processes, workers, event consumers and projection writers. The merge-base control copies the tests and fixtures, but not the hook registration, so the check exits 1 there. It reads the config directly rather than through pre-commit run, whose cold-cache clone of every remote hook repository exceeds the verifier's 30s per-check budget.
     source: manual
     checks:
       - check_type: test_passes
         check_value: |-
-          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' tests/fixtures/omn21288/stack_separate_workloads.yml
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "stack-shape"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' tests/fixtures/stack_shape/planted_services.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn21288-ac2-real-dev-stack
@@ -101,7 +101,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: |-
-          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "stack-shape"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
   - id: dod-omn21288-hosted-stack-deploy-check
@@ -111,7 +111,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: |-
-          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "stack-shape"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
   - id: dod-omn21288-ac3-lab-lane-effects-folded-deploy
@@ -191,7 +191,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
   - id: dod-omn21288-tenant-fold-deploy-check
