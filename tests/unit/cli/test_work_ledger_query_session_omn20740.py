@@ -173,3 +173,24 @@ async def test_interrupted_session_read_closes_the_connection(
             await task
         transport.close.assert_awaited_once()
     transport.close.assert_awaited_once()
+
+
+async def test_failed_start_closes_the_transport_and_the_next_query_builds_a_new_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failed = AsyncMock(spec=KafkaTransport)
+    failed.start.side_effect = ConnectionError
+    replacement = AsyncMock(spec=KafkaTransport)
+    replacement.poll.side_effect = TimeoutError
+    monkeypatch.setattr(
+        "omnibase_infra.handlers.handler_work_ledger_query.KafkaTransport",
+        Mock(side_effect=[failed, replacement]),
+    )
+    async with HandlerWorkLedgerQuery(ModelKafkaEventBusConfig()) as client:
+        with pytest.raises(ConnectionError):
+            await client.query({"query": "rows"}, timeout_s=1)
+        failed.close.assert_awaited_once()
+        failed.send.assert_not_awaited()
+        with pytest.raises(TimeoutError):
+            await client.query({"query": "rows"}, timeout_s=1)
+        replacement.start.assert_awaited_once()
