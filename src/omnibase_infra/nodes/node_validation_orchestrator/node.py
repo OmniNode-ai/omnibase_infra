@@ -45,7 +45,6 @@ Coroutine Safety:
 Related Modules:
     - contract.yaml: Workflow definition, execution graph, and handler routing
     - handlers/: Handler implementations (HandlerBuildPlan)
-    - registry/: RegistryInfraValidationOrchestrator for handler wiring
 
 Ticket: OMN-2147
 """
@@ -71,8 +70,8 @@ class NodeValidationOrchestrator(NodeOrchestrator):
 
     Handler Routing:
         Handler routing is initialized by the runtime, not by this class.
-        The runtime uses RegistryInfraValidationOrchestrator.create_orchestrator()
-        to create instances with properly configured dependencies.
+        The runtime builds instances from the node contract with properly
+        configured dependencies.
 
     Usage:
         >>> from omnibase_core.models.container import ModelONEXContainer
