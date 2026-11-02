@@ -20,4 +20,7 @@ class EnumGithubTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    EVT_POST_MERGE_RESULT_V1 = contract_topic_value('services/topics.yaml', 'github', 'EVT_POST_MERGE_RESULT_V1')  # onex.evt.github.post-merge-result.v1
+    EVT_PR_MERGED_V1 = contract_topic_value('services/topics.yaml', 'github', 'EVT_PR_MERGED_V1')  # onex.evt.github.pr-merged.v1
+    EVT_PR_STATUS_V1 = contract_topic_value('services/topics.yaml', 'github', 'EVT_PR_STATUS_V1')  # onex.evt.github.pr-status.v1
     EVT_PR_WEBHOOK_V1 = contract_topic_value('nodes/node_artifact_change_detector_effect/contract.yaml', 'github', 'EVT_PR_WEBHOOK_V1')  # onex.evt.github.pr-webhook.v1

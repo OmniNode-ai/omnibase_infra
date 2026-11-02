@@ -31,6 +31,8 @@ class EnumPlatformTopic(str, Enum):
     EVT_CI_LIVE_CONTACT_CHECKED_V1 = contract_topic_value('nodes/node_ci_live_contact_effect/contract.yaml', 'platform', 'EVT_CI_LIVE_CONTACT_CHECKED_V1')  # onex.evt.platform.ci-live-contact-checked.v1
     EVT_CONTRACT_DEREGISTERED_V1 = contract_topic_value('nodes/node_contract_registry_reducer/contract.yaml', 'platform', 'EVT_CONTRACT_DEREGISTERED_V1')  # onex.evt.platform.contract-deregistered.v1
     EVT_CONTRACT_REGISTERED_V1 = contract_topic_value('nodes/node_contract_loader_effect/contract.yaml', 'platform', 'EVT_CONTRACT_REGISTERED_V1')  # onex.evt.platform.contract-registered.v1
+    EVT_DLQ_MESSAGE_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_DLQ_MESSAGE_V1')  # onex.evt.platform.dlq-message.v1
+    EVT_FEATURE_FLAG_CHANGED_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_FEATURE_FLAG_CHANGED_V1')  # onex.evt.platform.feature-flag-changed.v1
     EVT_FSM_STATE_TRANSITIONS_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'EVT_FSM_STATE_TRANSITIONS_V1')  # onex.evt.platform.fsm-state-transitions.v1
     EVT_HOTPATCH_LEDGER_RECONCILED_V1 = contract_topic_value('nodes/node_hotpatch_ledger_reconcile_effect/contract.yaml', 'platform', 'EVT_HOTPATCH_LEDGER_RECONCILED_V1')  # onex.evt.platform.hotpatch-ledger-reconciled.v1
     EVT_LEDGER_APPENDED_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'EVT_LEDGER_APPENDED_V1')  # onex.evt.platform.ledger-appended.v1
@@ -49,6 +51,8 @@ class EnumPlatformTopic(str, Enum):
     EVT_NODE_REGISTRATION_RESULT_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_NODE_REGISTRATION_RESULT_V1')  # onex.evt.platform.node-registration-result.v1
     EVT_REGISTRATION_SNAPSHOTS_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'EVT_REGISTRATION_SNAPSHOTS_V1')  # onex.evt.platform.registration-snapshots.v1
     EVT_REGISTRY_REQUEST_INTROSPECTION_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_REGISTRY_REQUEST_INTROSPECTION_V1')  # onex.evt.platform.registry-request-introspection.v1
+    EVT_RESOLUTION_DECIDED_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_RESOLUTION_DECIDED_V1')  # onex.evt.platform.resolution-decided.v1
+    EVT_SERVICE_HEARTBEAT_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_SERVICE_HEARTBEAT_V1')  # onex.evt.platform.service-heartbeat.v1
     EVT_TICKET_CONTRACT_COMPOSED_V1 = contract_topic_value('nodes/node_ticket_contract_compose_effect/contract.yaml', 'platform', 'EVT_TICKET_CONTRACT_COMPOSED_V1')  # onex.evt.platform.ticket-contract-composed.v1
     EVT_TOPIC_CATALOG_CHANGED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_TOPIC_CATALOG_CHANGED_V1')  # onex.evt.platform.topic-catalog-changed.v1
     EVT_TOPIC_CATALOG_RESPONSE_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_TOPIC_CATALOG_RESPONSE_V1')  # onex.evt.platform.topic-catalog-response.v1

@@ -50,6 +50,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_VECTOR_STORE_REQUEST_V1 = contract_topic_value('nodes/node_vector_store_effect/contract.yaml', 'omnibase-infra', 'CMD_VECTOR_STORE_REQUEST_V1')  # onex.cmd.omnibase-infra.vector-store-request.v1
     DLQ_COMMANDS_V1 = contract_topic_value('nodes/node_dlq_replay_effect/contract.yaml', 'omnibase-infra', 'DLQ_COMMANDS_V1')  # onex.dlq.omnibase-infra.commands.v1
     DLQ_CONTRACT_VALIDATION_REQUESTED_V1 = contract_topic_value('nodes/node_contract_validate_compute/contract.yaml', 'omnibase-infra', 'DLQ_CONTRACT_VALIDATION_REQUESTED_V1')  # onex.dlq.omnibase-infra.contract-validation-requested.v1
+    DLQ_DEPLOY_COMMAND_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'DLQ_DEPLOY_COMMAND_V1')  # onex.dlq.omnibase-infra.deploy-command.v1
     DLQ_EVENTS_V1 = contract_topic_value('nodes/node_dlq_replay_effect/contract.yaml', 'omnibase-infra', 'DLQ_EVENTS_V1')  # onex.dlq.omnibase-infra.events.v1
     DLQ_INTENTS_V1 = contract_topic_value('nodes/node_dlq_replay_effect/contract.yaml', 'omnibase-infra', 'DLQ_INTENTS_V1')  # onex.dlq.omnibase-infra.intents.v1
     DLQ_OMNIBASE_INFRA_V1 = contract_topic_value('nodes/node_chain_orchestrator/contract.yaml', 'omnibase-infra', 'DLQ_OMNIBASE_INFRA_V1')  # onex.dlq.omnibase-infra.omnibase-infra.v1
@@ -66,6 +67,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CHAIN_LEARN_FAILED_V1 = contract_topic_value('nodes/node_chain_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_CHAIN_LEARN_FAILED_V1')  # onex.evt.omnibase-infra.chain-learn-failed.v1
     EVT_CHAIN_RETRIEVAL_RESULT_V1 = contract_topic_value('nodes/node_chain_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_CHAIN_RETRIEVAL_RESULT_V1')  # onex.evt.omnibase-infra.chain-retrieval-result.v1
     EVT_CHAIN_STORED_V1 = contract_topic_value('nodes/node_chain_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_CHAIN_STORED_V1')  # onex.evt.omnibase-infra.chain-stored.v1
+    EVT_CIRCUIT_BREAKER_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_CIRCUIT_BREAKER_V1')  # onex.evt.omnibase-infra.circuit-breaker.v1
     EVT_CODING_AGENT_COMPLETED_V1 = contract_topic_value('nodes/node_coding_agent_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_CODING_AGENT_COMPLETED_V1')  # onex.evt.omnibase-infra.coding-agent-completed.v1
     EVT_CODING_AGENT_FAILED_V1 = contract_topic_value('nodes/node_coding_agent_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_CODING_AGENT_FAILED_V1')  # onex.evt.omnibase-infra.coding-agent-failed.v1
     EVT_CODING_AGENT_FSM_ADVANCE_V1 = contract_topic_value('nodes/node_coding_agent_fsm_reducer/contract.yaml', 'omnibase-infra', 'EVT_CODING_AGENT_FSM_ADVANCE_V1')  # onex.evt.omnibase-infra.coding-agent-fsm-advance.v1
@@ -76,14 +78,17 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CONSUMER_HEALTH_V1 = contract_topic_value('nodes/node_consumer_health_triage_effect/contract.yaml', 'omnibase-infra', 'EVT_CONSUMER_HEALTH_V1')  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_CONTRACT_VALIDATION_COMPLETED_V1 = contract_topic_value('nodes/node_contract_validate_compute/contract.yaml', 'omnibase-infra', 'EVT_CONTRACT_VALIDATION_COMPLETED_V1')  # onex.evt.omnibase-infra.contract-validation-completed.v1
     EVT_DB_ERROR_V1 = contract_topic_value('nodes/node_db_error_linear_effect/contract.yaml', 'omnibase-infra', 'EVT_DB_ERROR_V1')  # onex.evt.omnibase-infra.db-error.v1
+    EVT_EVAL_COMPLETED_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_EVAL_COMPLETED_V1')  # onex.evt.omnibase-infra.eval-completed.v1
     EVT_EVENT_FORWARDED_V1 = contract_topic_value('nodes/node_event_forward_effect/contract.yaml', 'omnibase-infra', 'EVT_EVENT_FORWARDED_V1')  # onex.evt.omnibase-infra.event-forwarded.v1
     EVT_FAULT_INJECT_FIXTURE_COMPLETED_V1 = contract_topic_value('nodes/node_fault_inject_fixture_compute/contract.yaml', 'omnibase-infra', 'EVT_FAULT_INJECT_FIXTURE_COMPLETED_V1')  # onex.evt.omnibase-infra.fault-inject-fixture-completed.v1
     EVT_GATEWAY_HEARTBEAT_V1 = contract_topic_value('nodes/node_gateway_link_health_projection_compute/contract.yaml', 'omnibase-infra', 'EVT_GATEWAY_HEARTBEAT_V1')  # onex.evt.omnibase-infra.gateway-heartbeat.v1
     EVT_GATEWAY_SESSION_V1 = contract_topic_value('nodes/node_gateway_attach_effect/contract.yaml', 'omnibase-infra', 'EVT_GATEWAY_SESSION_V1')  # onex.evt.omnibase-infra.gateway-session.v1
+    EVT_GMAIL_ARCHIVE_PURGED_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_GMAIL_ARCHIVE_PURGED_V1')  # onex.evt.omnibase-infra.gmail-archive-purged.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = contract_topic_value('nodes/node_gmail_intent_poller_effect/contract.yaml', 'omnibase-infra', 'EVT_GMAIL_INTENT_RECEIVED_V1')  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_INFERENCE_RESPONSE_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnibase-infra', 'EVT_INFERENCE_RESPONSE_V1')  # onex.evt.omnibase-infra.inference-response.v1
     EVT_LLM_CALL_COMPLETED_V1 = contract_topic_value('nodes/node_llm_inference_effect/contract.yaml', 'omnibase-infra', 'EVT_LLM_CALL_COMPLETED_V1')  # onex.evt.omnibase-infra.llm-call-completed.v1
     EVT_LLM_COMPLETION_COMPLETED_V1 = contract_topic_value('nodes/node_llm_completion_effect/contract.yaml', 'omnibase-infra', 'EVT_LLM_COMPLETION_COMPLETED_V1')  # onex.evt.omnibase-infra.llm-completion-completed.v1
+    EVT_LLM_ENDPOINT_HEALTH_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_LLM_ENDPOINT_HEALTH_V1')  # onex.evt.omnibase-infra.llm-endpoint-health.v1
     EVT_LLM_INFERENCE_RESPONSE_V1 = contract_topic_value('nodes/node_llm_inference_effect/contract.yaml', 'omnibase-infra', 'EVT_LLM_INFERENCE_RESPONSE_V1')  # onex.evt.omnibase-infra.llm-inference-response.v1
     EVT_NETWORK_POOL_STATUS_V1 = contract_topic_value('nodes/node_runner_health_snapshot_effect/contract.yaml', 'omnibase-infra', 'EVT_NETWORK_POOL_STATUS_V1')  # onex.evt.omnibase-infra.network-pool-status.v1
     EVT_ONBOARDING_COMPLETED_V1 = contract_topic_value('nodes/node_onboarding_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_ONBOARDING_COMPLETED_V1')  # onex.evt.omnibase-infra.onboarding-completed.v1
@@ -99,7 +104,9 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_RUNTIME_BOOTED_V1 = contract_topic_value('nodes/node_runtime_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_BOOTED_V1')  # onex.evt.omnibase-infra.runtime-booted.v1
     EVT_RUNTIME_ERROR_V1 = contract_topic_value('nodes/node_runtime_error_triage_effect/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_ERROR_V1')  # onex.evt.omnibase-infra.runtime-error.v1
     EVT_RUNTIME_ERROR_ESCALATED_V1 = contract_topic_value('nodes/node_runtime_error_triage_effect/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_ERROR_ESCALATED_V1')  # onex.evt.omnibase-infra.runtime-error-escalated.v1
+    EVT_RUNTIME_HEALTH_CHECK_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_RUNTIME_HEALTH_CHECK_V1')  # onex.evt.omnibase-infra.runtime-health-check.v1
     EVT_RUNTIME_MANIFEST_PUBLISHED_V1 = contract_topic_value('nodes/node_runtime_manifest_reducer/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_MANIFEST_PUBLISHED_V1')  # onex.evt.omnibase-infra.runtime-manifest-published.v1
     EVT_SAVINGS_ESTIMATED_V1 = contract_topic_value('nodes/node_runner_usage_effect/contract.yaml', 'omnibase-infra', 'EVT_SAVINGS_ESTIMATED_V1')  # onex.evt.omnibase-infra.savings-estimated.v1
     EVT_TOPIC_MIGRATION_LIFECYCLE_V1 = contract_topic_value('nodes/node_topic_migration_executor_effect/contract.yaml', 'omnibase-infra', 'EVT_TOPIC_MIGRATION_LIFECYCLE_V1')  # onex.evt.omnibase-infra.topic-migration-lifecycle.v1
     EVT_VECTOR_STORE_COMPLETED_V1 = contract_topic_value('nodes/node_vector_store_effect/contract.yaml', 'omnibase-infra', 'EVT_VECTOR_STORE_COMPLETED_V1')  # onex.evt.omnibase-infra.vector-store-completed.v1
+    EVT_WIRING_HEALTH_SNAPSHOT_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_WIRING_HEALTH_SNAPSHOT_V1')  # onex.evt.omnibase-infra.wiring-health-snapshot.v1

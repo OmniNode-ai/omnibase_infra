@@ -21,4 +21,5 @@ class EnumOmniintelligenceTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     EVT_LLM_CALL_COMPLETED_V1 = contract_topic_value('nodes/node_llm_inference_effect/contract.yaml', 'omniintelligence', 'EVT_LLM_CALL_COMPLETED_V1')  # onex.evt.omniintelligence.llm-call-completed.v1
+    EVT_PATTERN_REFINED_V1 = contract_topic_value('services/topics.yaml', 'omniintelligence', 'EVT_PATTERN_REFINED_V1')  # onex.evt.omniintelligence.pattern-refined.v1
     EVT_WASTE_DETECTED_V1 = contract_topic_value('nodes/node_waste_detection_compute/contract.yaml', 'omniintelligence', 'EVT_WASTE_DETECTED_V1')  # onex.evt.omniintelligence.waste-detected.v1

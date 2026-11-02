@@ -20,8 +20,27 @@ class EnumOmniclaudeTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_BRAINSTORMING_V1 = contract_topic_value('services/topics.yaml', 'omniclaude', 'CMD_BRAINSTORMING_V1')  # onex.cmd.omniclaude.brainstorming.v1
+    CMD_CHECKPOINT_V1 = contract_topic_value('services/topics.yaml', 'omniclaude', 'CMD_CHECKPOINT_V1')  # onex.cmd.omniclaude.checkpoint.v1
+    CMD_RELEASE_V1 = contract_topic_value('services/topics.yaml', 'omniclaude', 'CMD_RELEASE_V1')  # onex.cmd.omniclaude.release.v1
+    CMD_RRH_V1 = contract_topic_value('services/topics.yaml', 'omniclaude', 'CMD_RRH_V1')  # onex.cmd.omniclaude.rrh.v1
+    EVT_AGENT_ACTIONS_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_AGENT_ACTIONS_V1')  # onex.evt.omniclaude.agent-actions.v1
+    EVT_AGENT_EXECUTION_LOGS_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_AGENT_EXECUTION_LOGS_V1')  # onex.evt.omniclaude.agent-execution-logs.v1
+    EVT_AGENT_TRANSFORMATION_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_AGENT_TRANSFORMATION_V1')  # onex.evt.omniclaude.agent-transformation.v1
+    EVT_AUDIT_COMPRESSION_TRIGGERED_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_AUDIT_COMPRESSION_TRIGGERED_V1')  # onex.evt.omniclaude.audit-compression-triggered.v1
+    EVT_AUDIT_CONTEXT_BUDGET_EXCEEDED_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_AUDIT_CONTEXT_BUDGET_EXCEEDED_V1')  # onex.evt.omniclaude.audit-context-budget-exceeded.v1
+    EVT_AUDIT_DISPATCH_VALIDATED_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_AUDIT_DISPATCH_VALIDATED_V1')  # onex.evt.omniclaude.audit-dispatch-validated.v1
+    EVT_AUDIT_RETURN_BOUNDED_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_AUDIT_RETURN_BOUNDED_V1')  # onex.evt.omniclaude.audit-return-bounded.v1
+    EVT_AUDIT_SCOPE_VIOLATION_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_AUDIT_SCOPE_VIOLATION_V1')  # onex.evt.omniclaude.audit-scope-violation.v1
     EVT_CONTEXT_AUDIT_DLQ_V1 = contract_topic_value('nodes/node_context_audit_dlq_effect/contract.yaml', 'omniclaude', 'EVT_CONTEXT_AUDIT_DLQ_V1')  # onex.evt.omniclaude.context-audit-dlq.v1
+    EVT_DETECTION_FAILURE_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_DETECTION_FAILURE_V1')  # onex.evt.omniclaude.detection-failure.v1
+    EVT_MANIFEST_INJECTED_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_MANIFEST_INJECTED_V1')  # onex.evt.omniclaude.manifest-injected.v1
+    EVT_MANIFEST_INJECTION_FAILED_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_MANIFEST_INJECTION_FAILED_V1')  # onex.evt.omniclaude.manifest-injection-failed.v1
+    EVT_MANIFEST_INJECTION_STARTED_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_MANIFEST_INJECTION_STARTED_V1')  # onex.evt.omniclaude.manifest-injection-started.v1
     EVT_NOTIFICATION_BLOCKED_V1 = contract_topic_value('nodes/node_emit_daemon_runtime/contract.yaml', 'omniclaude', 'EVT_NOTIFICATION_BLOCKED_V1')  # onex.evt.omniclaude.notification-blocked.v1
     EVT_NOTIFICATION_COMPLETED_V1 = contract_topic_value('nodes/node_emit_daemon_runtime/contract.yaml', 'omniclaude', 'EVT_NOTIFICATION_COMPLETED_V1')  # onex.evt.omniclaude.notification-completed.v1
+    EVT_PERFORMANCE_METRICS_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_PERFORMANCE_METRICS_V1')  # onex.evt.omniclaude.performance-metrics.v1
     EVT_PHASE_METRICS_V1 = contract_topic_value('nodes/node_emit_daemon_runtime/contract.yaml', 'omniclaude', 'EVT_PHASE_METRICS_V1')  # onex.evt.omniclaude.phase-metrics.v1
+    EVT_ROUTING_DECISION_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_ROUTING_DECISION_V1')  # onex.evt.omniclaude.routing-decision.v1
     EVT_SESSION_COORDINATION_SIGNAL_V1 = contract_topic_value('runtime/topics.yaml', 'omniclaude', 'EVT_SESSION_COORDINATION_SIGNAL_V1')  # onex.evt.omniclaude.session-coordination-signal.v1
+    EVT_SKILL_LIFECYCLE_DLQ_V1 = contract_topic_value('services/observability/topics.yaml', 'omniclaude', 'EVT_SKILL_LIFECYCLE_DLQ_V1')  # onex.evt.omniclaude.skill-lifecycle-dlq.v1

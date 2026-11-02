@@ -260,7 +260,9 @@ SUFFIX_INTELLIGENCE_DISPATCH_OUTCOME_EVALUATED: str = (
 )
 """Topic for dispatch worker outcome evaluation events."""
 
-SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
+SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = (
+    topic_enums.EnumPatternTopic.EVT_DISCOVERED_V1.value
+)
 """Topic for generic pattern discovery events."""
 
 SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT: str = (
@@ -924,7 +926,7 @@ Producer: omnimarket node_github_pr_poller_effect / HandlerGitHubApiPoll
 Consumer: omnidash PR triage dashboard (future)
 """
 
-SUFFIX_LINEAR_SNAPSHOT: str = "onex.evt.linear.snapshot.v1"
+SUFFIX_LINEAR_SNAPSHOT: str = topic_enums.EnumLinearTopic.EVT_SNAPSHOT_V1.value
 """Topic suffix for Linear workspace snapshot events.
 
 Published by onex-linear-relay CLI for each snapshot relayed to Kafka.
@@ -933,7 +935,7 @@ Producer: onex-linear-relay (omnibase_infra CLI)
 Consumer: omnidash, omnibase_infra TUI
 """
 
-SUFFIX_GIT_HOOK: str = "onex.evt.git.hook.v1"
+SUFFIX_GIT_HOOK: str = topic_enums.EnumGitTopic.EVT_HOOK_V1.value
 """Topic suffix for git hook relay events.
 
 Published by onex-git-hook-relay CLI for each git hook event relayed to Kafka.
@@ -1882,8 +1884,8 @@ _OMNICLAUDE_SKILL_TOPIC_SUFFIXES: tuple[str, ...] = (
     "onex.cmd.omniclaude.action-logging.v1",
     "onex.cmd.omniclaude.agent-observability.v1",
     "onex.cmd.omniclaude.auto-merge.v1",
-    "onex.cmd.omniclaude.brainstorming.v1",
-    "onex.cmd.omniclaude.checkpoint.v1",
+    topic_enums.EnumOmniclaudeTopic.CMD_BRAINSTORMING_V1.value,
+    topic_enums.EnumOmniclaudeTopic.CMD_CHECKPOINT_V1.value,
     "onex.cmd.omniclaude.ci-failures.v1",
     "onex.cmd.omniclaude.ci-fix-pipeline.v1",
     "onex.cmd.omniclaude.ci-watch.v1",
@@ -1922,12 +1924,12 @@ _OMNICLAUDE_SKILL_TOPIC_SUFFIXES: tuple[str, ...] = (
     "onex.cmd.omniclaude.pr-watch.v1",
     "onex.cmd.omniclaude.project-status.v1",
     "onex.cmd.omniclaude.receiving-code-review.v1",
-    "onex.cmd.omniclaude.release.v1",
+    topic_enums.EnumOmniclaudeTopic.CMD_RELEASE_V1.value,
     "onex.cmd.omniclaude.requesting-code-review.v1",
     "onex.cmd.omniclaude.review-all-prs.v1",
     "onex.cmd.omniclaude.review-cycle.v1",
     "onex.cmd.omniclaude.root-cause-tracing.v1",
-    "onex.cmd.omniclaude.rrh.v1",
+    topic_enums.EnumOmniclaudeTopic.CMD_RRH_V1.value,
     "onex.cmd.omniclaude.setup-statusline.v1",
     "onex.cmd.omniclaude.sharing-skills.v1",
     "onex.cmd.omniclaude.slack-gate.v1",

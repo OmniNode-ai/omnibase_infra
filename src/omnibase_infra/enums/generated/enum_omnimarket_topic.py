@@ -21,6 +21,7 @@ class EnumOmnimarketTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     CMD_DELEGATE_SKILL_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnimarket', 'CMD_DELEGATE_SKILL_V1')  # onex.cmd.omnimarket.delegate-skill.v1
+    CMD_NODE_GENERATION_REQUESTED_V1 = contract_topic_value('services/topics.yaml', 'omnimarket', 'CMD_NODE_GENERATION_REQUESTED_V1')  # onex.cmd.omnimarket.node-generation-requested.v1
     CMD_REDEPLOY_START_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnimarket', 'CMD_REDEPLOY_START_V1')  # onex.cmd.omnimarket.redeploy-start.v1
     EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1 = contract_topic_value('nodes/node_build_loop_projection_compute/contract.yaml', 'omnimarket', 'EVT_BUILD_LOOP_ORCHESTRATOR_COMPLETED_V1')  # onex.evt.omnimarket.build-loop-orchestrator-completed.v1
     EVT_DELEGATE_SKILL_COMPLETED_V1 = contract_topic_value('nodes/node_delegation_chain_ledger_effect/contract.yaml', 'omnimarket', 'EVT_DELEGATE_SKILL_COMPLETED_V1')  # onex.evt.omnimarket.delegate-skill-completed.v1

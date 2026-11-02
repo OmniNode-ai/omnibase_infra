@@ -10,7 +10,10 @@
 #   uv run python scripts/generate_topic_enums.py
 #
 from .enum_artifact_topic import EnumArtifactTopic as EnumArtifactTopic
+from .enum_deploy_topic import EnumDeployTopic as EnumDeployTopic
+from .enum_git_topic import EnumGitTopic as EnumGitTopic
 from .enum_github_topic import EnumGithubTopic as EnumGithubTopic
+from .enum_linear_topic import EnumLinearTopic as EnumLinearTopic
 from .enum_occ_topic import EnumOccTopic as EnumOccTopic
 from .enum_omnibase_infra_topic import EnumOmnibaseInfraTopic as EnumOmnibaseInfraTopic
 from .enum_omniclaude_topic import EnumOmniclaudeTopic as EnumOmniclaudeTopic
@@ -19,6 +22,7 @@ from .enum_omnimarket_topic import EnumOmnimarketTopic as EnumOmnimarketTopic
 from .enum_omnimemory_topic import EnumOmnimemoryTopic as EnumOmnimemoryTopic
 from .enum_omninode_topic import EnumOmninodeTopic as EnumOmninodeTopic
 from .enum_onex_change_control_topic import EnumOnexChangeControlTopic as EnumOnexChangeControlTopic
+from .enum_pattern_topic import EnumPatternTopic as EnumPatternTopic
 from .enum_platform_topic import EnumPlatformTopic as EnumPlatformTopic
 from .enum_projection_topic import EnumProjectionTopic as EnumProjectionTopic
 from .enum_router_topic import EnumRouterTopic as EnumRouterTopic

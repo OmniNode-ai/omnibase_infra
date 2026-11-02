@@ -80,6 +80,11 @@ _DEFAULT_SUPPLEMENTARY_SOURCES: tuple[Path, ...] = ()
 # omnibase_infra, so its contract.yaml cannot be read directly in CI.
 _DEFAULT_TOPIC_MANIFEST_ROOTS: tuple[Path, ...] = (
     _REPO_ROOT / "src" / "omnibase_infra" / "runtime",
+    # OMN-21689: the CLI relay and infrastructure-service manifests declare
+    # provisioned topics that no node contract owns; platform_topic_suffixes.py
+    # binds those suffix constants through the members generated from here.
+    _REPO_ROOT / "src" / "omnibase_infra" / "cli",
+    _REPO_ROOT / "src" / "omnibase_infra" / "services",
 )
 
 # Pattern for stale-file detection (only these may be removed)
