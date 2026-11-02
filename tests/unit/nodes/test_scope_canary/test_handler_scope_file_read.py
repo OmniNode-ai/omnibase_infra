@@ -7,6 +7,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_file_read import (
     HandlerScopeFileRead,
@@ -28,7 +29,11 @@ class TestHandlerScopeFileRead:
         plan_file.write_text("# My Plan\n\nSome content.", encoding="utf-8")
         cid = uuid4()
 
-        result = await handler.handle(file_path=str(plan_file), correlation_id=cid)
+        result = await handler.handle(
+            file_path=str(plan_file),
+            correlation_id=cid,
+            output_path=str(tmp_path / "scope-manifest.json"),
+        )
 
         assert result.success is True
         assert result.content == "# My Plan\n\nSome content."
@@ -41,7 +46,9 @@ class TestHandlerScopeFileRead:
         cid = uuid4()
 
         result = await handler.handle(
-            file_path=str(tmp_path / "missing.md"), correlation_id=cid
+            file_path=str(tmp_path / "missing.md"),
+            correlation_id=cid,
+            output_path=str(tmp_path / "scope-manifest.json"),
         )
 
         assert result.success is False
@@ -57,6 +64,33 @@ class TestHandlerScopeFileRead:
         plan_file.write_text("content", encoding="utf-8")
         cid = uuid4()
 
-        result = await handler.handle(file_path=str(plan_file), correlation_id=cid)
+        result = await handler.handle(
+            file_path=str(plan_file),
+            correlation_id=cid,
+            output_path=str(tmp_path / "scope-manifest.json"),
+        )
 
         assert result.correlation_id == cid
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("output_path", ["", "   "])
+    async def test_blank_output_path_is_refused(
+        self, handler: HandlerScopeFileRead, tmp_path, output_path: str
+    ):
+        """A blank output_path fails loudly instead of being carried forward."""
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("content", encoding="utf-8")
+
+        with pytest.raises(ValidationError, match="output_path"):
+            await handler.handle(
+                file_path=str(plan_file),
+                correlation_id=uuid4(),
+                output_path=output_path,
+            )
+
+        with pytest.raises(ValidationError, match="output_path"):
+            await handler.handle(
+                file_path=str(tmp_path / "missing.md"),
+                correlation_id=uuid4(),
+                output_path=output_path,
+            )

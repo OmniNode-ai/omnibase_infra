@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumRsdTopic(str, Enum):
     """Kafka topic enum for producer: rsd.
@@ -18,6 +20,6 @@ class EnumRsdTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    CMD_SCORE_V1 = "onex.cmd.rsd.score.v1"  # onex.cmd.rsd.score.v1
-    EVT_SCORE_COMPLETE_V1 = "onex.evt.rsd.score-complete.v1"  # onex.evt.rsd.score-complete.v1
-    EVT_SCORE_FAILED_V1 = "onex.evt.rsd.score-failed.v1"  # onex.evt.rsd.score-failed.v1
+    CMD_SCORE_V1 = contract_topic_value('nodes/node_rsd_orchestrator/contract.yaml', 'rsd', 'CMD_SCORE_V1')  # onex.cmd.rsd.score.v1
+    EVT_SCORE_COMPLETE_V1 = contract_topic_value('nodes/node_rsd_orchestrator/contract.yaml', 'rsd', 'EVT_SCORE_COMPLETE_V1')  # onex.evt.rsd.score-complete.v1
+    EVT_SCORE_FAILED_V1 = contract_topic_value('nodes/node_rsd_orchestrator/contract.yaml', 'rsd', 'EVT_SCORE_FAILED_V1')  # onex.evt.rsd.score-failed.v1

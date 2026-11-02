@@ -70,26 +70,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from omnibase_infra.enums.contract_topic_value import (
+    contract_topic_member_key,
+    render_contract_topic_member,
+)
 from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
-
-# ---------------------------------------------------------------------------
-# Kind prefix map
-# ---------------------------------------------------------------------------
-
-# OMN-17557: "snapshot" completes this map against the extractor's own
-# ``_VALID_KINDS``, which has admitted it since OMN-15832. The two had drifted:
-# a ``kind="snapshot"`` entry reaching ``_normalize_key`` raised KeyError, and
-# the only reason it never did was that every snapshot topic in this repo's own
-# node contracts also carried a dotted event name and was being skipped one
-# layer earlier for the wrong reason. Fixing that arity bug exposed this one,
-# so both are closed here rather than leaving a latent crash behind the fix.
-_KIND_PREFIX: dict[str, str] = {
-    "evt": "EVT_",
-    "cmd": "CMD_",
-    "intent": "INTENT_",
-    "dlq": "DLQ_",
-    "snapshot": "SNAPSHOT_",
-}
 
 # File header template (filled per producer)
 _FILE_HEADER = """\
@@ -106,6 +91,8 @@ _FILE_HEADER = """\
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class {class_name}(str, Enum):
     \"\"\"Kafka topic enum for producer: {producer}.
@@ -115,7 +102,7 @@ class {class_name}(str, Enum):
     \"\"\"
 """
 
-_MEMBER_TEMPLATE = '    {key} = "{value}"  # {topic}'
+_MEMBER_TEMPLATE = "    {key} = contract_topic_value({args})  # {topic}\n"
 
 _INIT_HEADER = """\
 # spdx-skip: auto-generated — do not edit manually
@@ -147,10 +134,7 @@ def _normalize_key(entry: ModelContractTopicEntry) -> str:
       3. Prepend kind prefix (EVT_ / CMD_ / INTENT_)
       4. Append _V{N} from version field
     """
-    base_key = entry.event_name.replace("-", "_").replace(".", "_").upper()
-    prefix = _KIND_PREFIX[entry.kind]
-    version_suffix = "_V" + entry.version[1:]  # "v1" → "_V1"
-    return f"{prefix}{base_key}{version_suffix}"
+    return contract_topic_member_key(entry.kind, entry.event_name, entry.version)
 
 
 def _producer_to_class_name(producer: str) -> str:
@@ -237,27 +221,24 @@ class TopicEnumGenerator:
             file_path = output_dir / filename
 
             # Collision detection on normalized keys
-            seen_keys: dict[str, str] = {}  # key → first topic that claimed it
-            members: list[tuple[str, str]] = []  # (key, topic_value)
+            members: dict[str, ModelContractTopicEntry] = {}
             for entry in producer_entries:
                 key = _normalize_key(entry)
-                if key in seen_keys:
+                if key in members:
                     raise RuntimeError(
                         f"Enum key collision for producer {producer!r}: "
                         f"normalized key {key!r} is claimed by both "
-                        f"{seen_keys[key]!r} and {entry.topic!r}. "
+                        f"{members[key].topic!r} and {entry.topic!r}. "
                         f"Rename one topic's event-name to resolve."
                     )
-                seen_keys[key] = entry.topic
-                members.append((key, entry.topic))
+                members[key] = entry
 
             # Render file content
             content = _FILE_HEADER.format(class_name=class_name, producer=producer)
-            for key, topic_value in members:
-                content += _MEMBER_TEMPLATE.format(
-                    key=key, value=topic_value, topic=topic_value
-                )
-                content += "\n"
+            content += "".join(
+                render_contract_topic_member(key, entry, _MEMBER_TEMPLATE)
+                for key, entry in members.items()
+            )
 
             result[file_path] = content
             class_exports.append((filename[:-3], class_name))  # strip .py
@@ -266,7 +247,7 @@ class TopicEnumGenerator:
         init_path = output_dir / "__init__.py"
         init_content = _INIT_HEADER
         for stem, class_name in class_exports:
-            init_content += f"from .{stem} import {class_name}\n"
+            init_content += f"from .{stem} import {class_name} as {class_name}\n"
 
         result[init_path] = init_content
 

@@ -32,31 +32,10 @@ class RegistryInfraContractResolverBridge:
     properly configured ``NodeContractResolverBridge`` instances.
 
     Example:
-        >>> from omnibase_core.models.container import ModelONEXContainer
         >>> from omnibase_infra.nodes.node_contract_resolver_bridge.registry import (
         ...     RegistryInfraContractResolverBridge,
         ... )
-        >>> container = ModelONEXContainer()
-        >>> bridge = RegistryInfraContractResolverBridge.create(container)
     """
-
-    @staticmethod
-    def create(container: ModelONEXContainer) -> NodeContractResolverBridge:
-        """Create a ``NodeContractResolverBridge`` instance via container injection.
-
-        Args:
-            container: ONEX dependency injection container. The optional
-                ``ProtocolEventBus`` may be registered to enable fire-and-forget
-                Kafka event emission.
-
-        Returns:
-            Configured ``NodeContractResolverBridge`` instance.
-        """
-        from omnibase_infra.nodes.node_contract_resolver_bridge.node import (
-            NodeContractResolverBridge,
-        )
-
-        return NodeContractResolverBridge(container)
 
     @staticmethod
     def get_required_protocols() -> list[str]:

@@ -25,6 +25,16 @@
 #   * a second concurrent build (the pool-wide build lock)
 #   * a rendered configuration that does not match the slot policy
 #
+# WHAT IT STAGES (OMN-21928)
+#   The target is the worktree's own commit. Every sibling is staged at the newest
+#   dev-merge tag of its repository, read from the object store, so no clone is
+#   checked out and a sibling's working tree is never read. The staging record
+#   binds the target to the branch and commit under test and each sibling to its
+#   tag. The image's first-party audit (checker_first_party_sources.run_audit)
+#   runs in the build context that first_party_sources.yaml declares for a
+#   pre-PR slot: there a branch-staged TARGET passes, and a sibling still needs
+#   a dev-merge tag.
+#
 # IT ACCEPTS NO LANE ARGUMENT AT ALL. There is no --lane, no --compose-project,
 # no --force and no --skip. The compose project is DERIVED from the slot
 # number, so there is no argument through which a caller could aim this script
@@ -91,6 +101,8 @@ EXIT_PROVENANCE_MISMATCH=12
 source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
 SIBLING_REPOS=("${SIBLING_VENDORED_REPOS[@]}")
 
+FPS_MODULE_REL="src/omnibase_infra/validation/checker_first_party_sources.py"
+
 log()  { printf '[prepr-verify-lane] %s\n' "$*" >&2; }
 fail() { local code="$1"; shift; printf '[prepr-verify-lane] REFUSED/FAILED: %s\n' "$*" >&2; exit "${code}"; }
 
@@ -102,6 +114,13 @@ python_bin() {
     else
         return 1
     fi
+}
+
+# first_party_sources <module> <statements> [args]: run the statements with the
+# checker loaded by path as `m` (stdlib and PyYAML only) and args as sys.argv[2:].
+first_party_sources() {
+    local code="import importlib.util as u, sys; from pathlib import Path; s = u.spec_from_file_location('c', sys.argv[1]); m = u.module_from_spec(s); sys.modules['c'] = m; s.loader.exec_module(m); $2"
+    "${PY}" -c "${code}" "$1" "${@:3}"
 }
 
 usage() {
@@ -270,9 +289,8 @@ TICKET_DIR="$(dirname "${WORKTREE}")"
 
 declare -A SIBLING_SRC=()
 declare -A SIBLING_COMMIT=()
+declare -A SIBLING_TAG=()
 declare -A SIBLING_ORIGIN=()
-declare -A SIBLING_BRANCH=()
-declare -A SIBLING_DIRTY=()
 for repo in "${SIBLING_REPOS[@]}"; do
     if [[ -d "${TICKET_DIR}/${repo}/.git" || -f "${TICKET_DIR}/${repo}/.git" ]]; then
         SIBLING_SRC["${repo}"]="${TICKET_DIR}/${repo}"
@@ -283,53 +301,46 @@ for repo in "${SIBLING_REPOS[@]}"; do
     else
         fail "${EXIT_USAGE}" "sibling repository '${repo}' found neither at ${TICKET_DIR}/${repo} nor at ${OMNI_HOME_RESOLVED}/${repo}."
     fi
-    src="${SIBLING_SRC[${repo}]}"
-    SIBLING_COMMIT["${repo}"]="$(git -C "${src}" rev-parse HEAD)"
-    SIBLING_BRANCH["${repo}"]="$(git -C "${src}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
-    if [[ -n "$(git -C "${src}" status --porcelain)" ]]; then
-        SIBLING_DIRTY["${repo}"]="true"
-    else
-        SIBLING_DIRTY["${repo}"]="false"
-    fi
-    # A dirty SIBLING is recorded, not refused. The receipt's clean-tree
-    # assertion is about the TARGET, whose commit the gate keys on; a sibling
-    # is vendored content and its dirt is a provenance fact the descriptor must
-    # carry rather than a reason to block a branch that did not cause it.
-    # A dirty sibling is REFUSED, not recorded. It used to be recorded, on the
-    # reasoning that the gate keys on the target's commit and a sibling is
-    # vendored content. That reasoning is wrong under the pinned-sha staging
-    # rule: the image would contain content belonging to no commit in that
-    # repository, so the sibling commit written on the receipt would name a
-    # tree the build did not use. Recording the discrepancy does not make the
-    # artifact reproducible; refusing it does.
-    if [[ "${SIBLING_DIRTY[${repo}]}" == "true" ]]; then
-        fail "${EXIT_REFUSED_DIRTY_WORKTREE}" \
-            "sibling ${repo} at ${src} is DIRTY and will not be vendored.
-  The slot records ${repo}@${SIBLING_COMMIT[${repo}]} on its receipt, and an
-  image built from uncommitted content in that tree does not correspond to
-  that commit. Commit or discard the change in ${src}.
-  Uncommitted paths:
-$(git -C "${src}" status --porcelain | sed 's/^/    /')"
-    fi
-    log "sibling ${repo} <- ${src} @ ${SIBLING_COMMIT[${repo}]} (${SIBLING_ORIGIN[${repo}]})"
+done
+
+# Every sibling is staged at its newest dev-merge tag, never at its source's HEAD:
+# the first-party audit refuses a sibling from a branch in every build context
+# (OMN-21928). The tag is read from the object store, so the source is neither
+# checked out nor written to, and its working tree (dirty or not) never reaches
+# the image. One line per sibling: repo, tag, commit.
+SIBLING_ARGS=()
+for repo in "${SIBLING_REPOS[@]}"; do SIBLING_ARGS+=("${repo}=${SIBLING_SRC[${repo}]}"); done
+SIBLING_PINS="$(first_party_sources "${REPO_ROOT}/${FPS_MODULE_REL}" \
+    'c = m.load_contract(); [print(r, *m.newest_dev_merge_tag_of(Path(p), c)) for r, p in (a.split("=", 1) for a in sys.argv[2:])]' \
+    "${SIBLING_ARGS[@]}")" \
+    || fail "${EXIT_PROVENANCE_MISMATCH}" "a sibling has no dev-merge tag to stage; a clone without dev-* tags cannot feed a slot build."
+# Each line is checked field by field: a stray line on the checker's stdout, a
+# repository the manifest does not list, or a commit that is not a literal sha
+# refuses the run, naming the line, instead of staging a pin nothing verified.
+while read -r repo tag commit extra; do
+    [[ -n "${tag}" && -z "${extra}" && "${commit}" =~ ^[0-9a-f]{40}$ && " ${SIBLING_REPOS[*]} " == *" ${repo} "* ]] \
+        || fail "${EXIT_PROVENANCE_MISMATCH}" "the sibling pin line '${repo} ${tag} ${commit} ${extra}' is not '<listed repo> <tag> <40-hex commit>'; the pins read were: ${SIBLING_PINS}"
+    SIBLING_TAG["${repo}"]="${tag}"
+    SIBLING_COMMIT["${repo}"]="${commit}"
+    log "sibling ${repo} <- ${SIBLING_SRC[${repo}]} @ ${commit} tag ${tag} (${SIBLING_ORIGIN[${repo}]})"
+done <<< "${SIBLING_PINS}"
+for repo in "${SIBLING_REPOS[@]}"; do
+    [[ -n "${SIBLING_COMMIT[${repo}]:-}" ]] \
+        || fail "${EXIT_PROVENANCE_MISMATCH}" "sibling ${repo} received no dev-merge tag; the pins read were: ${SIBLING_PINS}"
 done
 
 if [[ "${PLAN_ONLY}" == "1" ]]; then
     log "--plan-only: every refusal passed. Nothing was built, started or connected to."
-    "${PY}" - "$@" <<PYPLAN
+    # Every value reaches the script through argv, so a branch name carrying a
+    # quote or a backslash cannot alter the Python source.
+    "${PY}" - "${SIBLING_PINS}" "${SLOT}" "${COMPOSE_PROJECT}" "${TARGET_REPO}" "${TARGET_COMMIT}" \
+        "${TARGET_BRANCH}" "${STAGING_ROOT}" "${TOPIC_NAMESPACE}" "${DB_SLOT}" "${WITH_GATEWAY}" <<'PYPLAN'
 import json, sys
-print(json.dumps({
-    "plan_only": True,
-    "slot": ${SLOT},
-    "compose_project": "${COMPOSE_PROJECT}",
-    "target_repo": "${TARGET_REPO}",
-    "target_commit": "${TARGET_COMMIT}",
-    "target_branch": "${TARGET_BRANCH}",
-    "staging_root": "${STAGING_ROOT}",
-    "topic_namespace": "${TOPIC_NAMESPACE}",
-    "db_slot": "${DB_SLOT}",
-    "with_gateway": bool(${WITH_GATEWAY}),
-}, indent=2))
+pins, *v = sys.argv[1:]
+keys = ("slot", "compose_project", "target_repo", "target_commit", "target_branch", "staging_root", "topic_namespace", "db_slot", "with_gateway")
+plan = dict(zip(keys, v))
+print(json.dumps({"plan_only": True, **plan, "slot": int(v[0]), "with_gateway": bool(int(v[-1])),
+    "siblings": {r: {"tag": t, "commit": c} for r, t, c in map(str.split, pins.splitlines())}}, indent=2))
 PYPLAN
     exit 0
 fi
@@ -440,7 +451,7 @@ chmod 1733 "${TENANT_STATE_DIR}"
 # archive carries no repository metadata, so nothing in the snapshot can
 # answer a git query about the clone it came from.
 stage_commit_tree() {
-    local src="$1" commit="$2" dest="$3" label="$4"
+    local src="$1" commit="$2" dest="$3" label="$4" ref="${5:-HEAD}"
 
     # A BRANCH NAME IS NOT A PIN, and this refuses one outright.
     #
@@ -466,7 +477,7 @@ stage_commit_tree() {
     fi
 
     local head
-    head="$(git -C "${src}" rev-parse HEAD)"
+    head="$(git -C "${src}" rev-parse "${ref}^{commit}")"
     # Readback: the pin this run recorded must still be what the source names.
     # A source that moved between resolution and staging would otherwise be
     # staged under the OLD commit's name.
@@ -476,7 +487,8 @@ stage_commit_tree() {
   ${commit} and the source now reports ${head}. Refusing rather than staging
   a tree under a commit that no longer names it."
     fi
-    if [[ -n "$(git -C "${src}" status --porcelain)" ]]; then
+    # Only a working tree can be dirty; a tag (a sibling's ref) is read from the object store.
+    if [[ "${ref}" == "HEAD" && -n "$(git -C "${src}" status --porcelain)" ]]; then
         fail "${EXIT_REFUSED_DIRTY_WORKTREE}" \
             "${label} at ${src} became dirty during staging; refusing."
     fi
@@ -490,7 +502,8 @@ stage_commit_tree "${WORKTREE}" "${TARGET_COMMIT}" "${STAGING_ROOT}/repo" "the t
 mkdir -p "${STAGING_ROOT}/repo/workspace/sibling-repos"
 for repo in "${SIBLING_REPOS[@]}"; do
     stage_commit_tree "${SIBLING_SRC[${repo}]}" "${SIBLING_COMMIT[${repo}]}" \
-        "${STAGING_ROOT}/repo/workspace/sibling-repos/${repo}" "sibling ${repo}"
+        "${STAGING_ROOT}/repo/workspace/sibling-repos/${repo}" "sibling ${repo}" \
+        "refs/tags/${SIBLING_TAG[${repo}]}"
 done
 
 # Content digests of the snapshot itself. The commit above is read from the
@@ -528,18 +541,18 @@ for repo in "${SIBLING_REPOS[@]}"; do
         > "${STAGING_ROOT}/repo/workspace/sibling-repos/${repo}/.build-sha"
 done
 
-{
-    printf '{\n  "siblings": {\n'
-    _sep=""
-    for repo in "${SIBLING_REPOS[@]}"; do
-        printf '%s    "%s": {"vcs_ref": "%s", "vcs_dirty": %s, "vcs_branch": "%s"}' \
-            "${_sep}" "${repo}" "${SIBLING_COMMIT[${repo}]}" \
-            "${SIBLING_DIRTY[${repo}]}" "${SIBLING_BRANCH[${repo}]}"
-        _sep=",
-"
-    done
-    printf '\n  }\n}\n'
-} > "${STAGING_ROOT}/repo/workspace/sibling-vcs-provenance.json"
+# The record binds the target to the branch and commit under test and each
+# sibling to the dev-merge tag it is staged at (OMN-21928).
+first_party_sources "${REPO_ROOT}/${FPS_MODULE_REL}" \
+    'm.write_slot_staging_record(Path(sys.argv[2]), target_commit=sys.argv[3], target_branch=sys.argv[4], siblings={r: (t, c) for r, t, c in map(str.split, sys.argv[5].splitlines())})' \
+    "${STAGING_ROOT}/repo/workspace/sibling-vcs-provenance.json" "${TARGET_COMMIT}" "${TARGET_BRANCH}" "${SIBLING_PINS}"
+# The build context of the image's first-party audit is the one the TARGET's own
+# policy data declares for a pre-PR slot, read from the snapshot because the audit
+# in the image reads the same file. A target commit that predates the declaration
+# is refused here rather than as an opaque image-build failure.
+SLOT_AUDIT_CONTEXT="$(first_party_sources "${STAGING_ROOT}/repo/${FPS_MODULE_REL}" 'print(m.load_contract().pre_pr_slot_context)')" \
+    || fail "${EXIT_PROVENANCE_MISMATCH}" "the target commit declares no pre-PR slot build context in first_party_sources.yaml; rebase the branch onto a dev that carries it (OMN-21928)."
+log "first-party audit build context for this slot: ${SLOT_AUDIT_CONTEXT}"
 
 # OMN-21279: Dockerfile.runtime COPYs workspace/routing_tiers.yaml (the image
 # installs no omnimarket). The committed file is an empty-ladder placeholder; the
@@ -841,6 +854,7 @@ BUILD_ARGS=(
     --build-arg "RUNTIME_VERSION=${RUNTIME_VERSION}"
     --build-arg "COMPOSE_PROJECT=${COMPOSE_PROJECT}"
     --build-arg "BUILD_SOURCE=workspace"
+    --build-arg "FIRST_PARTY_BUILD_CONTEXT=${SLOT_AUDIT_CONTEXT}"
     --build-arg "EXPECTED_BUILD_SOURCE=workspace"
     --build-arg "PROMOTION_CLASS=stability-candidate"
     --build-arg "NON_MAIN_LINEAGE=true"
