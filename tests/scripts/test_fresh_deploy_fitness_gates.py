@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPTS = _REPO_ROOT / "scripts"
 _CORE_RELEASE_IDENTITY = (
@@ -40,7 +42,14 @@ def _run(script: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=scrub_git_location_env(os.environ),
+    )
 
 
 def _release_identity_repo(tmp_path: Path, version: str, tags: tuple[str, ...]) -> Path:

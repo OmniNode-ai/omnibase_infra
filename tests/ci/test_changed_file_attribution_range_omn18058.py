@@ -26,12 +26,14 @@ Sites pinned by this module:
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from scripts.ci.check_deploy_scope_dod import (
     FAIL_NO_EVIDENCE,
     FAIL_NO_TICKET,
@@ -57,6 +59,7 @@ def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
+        env=scrub_git_location_env(os.environ),
         capture_output=True,
         text=True,
     )
@@ -91,8 +94,16 @@ def _build_stale_base_repo(
     """
     origin = tmp_path / "origin.git"
     work = tmp_path / "work"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(origin)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    subprocess.run(
+        ["git", "init", "-q", str(work)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
     _git(work, "config", "user.email", "omn18058@example.invalid")
     _git(work, "config", "user.name", "omn18058 fixture")
     _git(work, "config", "commit.gpgsign", "false")
