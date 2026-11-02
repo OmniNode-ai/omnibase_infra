@@ -37,6 +37,18 @@ requirements:
       - id: AC5
         statement: |-
           AC5: every DRIFT or MISSING unit in the lab-host drift fixture except the prod-pinned deploy-agent.service declares a committed installer, the log monitor installs through install-host-maintenance.sh --log-monitor (run against a temporary home with a fake systemctl) and the git-mirror units through the omninode-host-maintenance-sync.sh manifest (row parity with the drift manifest), the text report prints repair=bash <installer> <args>, and no tracked unit's Documentation= URL names a missing repo path -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
+  - id: req-omn21288-ac6-contract-http-mount
+    statement: "One-runtime plan T15: a contract declares an ASGI factory and path prefix and the runtime serves that application on its existing HTTP port."
+    acceptance:
+      - id: AC6
+        statement: |-
+          AC6: a contract's `http_mount` block (factory and path_prefix) is built and served by the runtime's own aiohttp server on its existing port under the declared prefix, with the runtime's own routes unchanged -- falsifier: tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py::test_declared_factory_is_served_on_the_runtime_port fails at the merge base and passes on the branch
+  - id: req-omn21288-ac7-failing-mount-fails-boot
+    statement: "One-runtime plan T15: a mount that cannot be built or started fails boot rather than serving partly."
+    acceptance:
+      - id: AC7
+        statement: |-
+          AC7: a planted factory error, a non-ASGI factory result, an unimportable factory, a malformed declaration, an overlapping or runtime-shadowing prefix each raise at boot with nothing mounted, and a failing lifespan makes every request answer 503 -- falsifier: the failing-mount tests in tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py fail at the merge base and pass on the branch
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -169,7 +181,26 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
+  - id: dod-omn21288-ac6-contract-http-mount-served
+    description: >-
+      Run the mount tests: a contract.yaml carrying an http_mount block is parsed, its FastAPI factory is built and its lifespan started by the runtime's aiohttp server, and real GET and POST requests on the server's bound port under the declared prefix are answered by the mounted application while /health keeps answering. The test file imports a module that does not exist at the merge base, so the run fails there. No container is created or restarted by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py -k "served_on_the_runtime_port or without_a_mount" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-omn21288-ac7-failing-mount-fails-boot
+    description: >-
+      Run the failing-mount tests: a planted factory error, a factory that returns a non-ASGI value, an unimportable factory, a malformed declaration, overlapping prefixes and a prefix that would shadow a runtime route each raise RuntimeHostError from attach_manifest (the kernel returns exit code 1 on that error) with nothing mounted; a lifespan that fails to start turns every request, /health included, into a 503. The tests fail at the merge base because the mount module is absent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py -k "fails_boot or out_of_service or may_not_shadow or malformed" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]
 context:
   remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
   worker_integration: "The independently owned worker fold must preserve both overlays and union main.folded_profiles to [workers, tenant-projection]; then remove runtime-worker from SEPARATE_SERVICES as well. This branch never changes the worker branch."
+  http_mount_remaining: "T15 omnibase_infra half only. Remaining: (1) the intelligence-api http_mount declaration lives in omniintelligence's node contract, not in this repository; (2) the kernel awaits no mount today: service_kernel.py carries unfixed hardcoded-model-config findings and cannot be edited, so a lifespan failure is a 503 on every route rather than a nonzero exit; (3) retire the intelligence-api container as a deploy step after the mount answers on the runtime's port."
