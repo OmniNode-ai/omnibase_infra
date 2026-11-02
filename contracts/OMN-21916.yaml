@@ -20,7 +20,7 @@ evidence_requirements:
     description: "The C28 kinds clause passes on the dev lane's recorded gateway-off rows, the audit kind is an audit consumer of its declared topic, and the parity grader reads the node's kinds."
     command: "uv run --frozen pytest tests/integration/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider"
   - kind: tests
-    description: "The node and script C28 suites pass on the retargeted kind and the regenerated recorded fixture."
+    description: "The node and script C28 suites pass on the retargeted kind and the recorded fixture, whose audit rows were edited by hand to the ledger projection's group and topic."
     command: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect tests/ci/test_c28_consumer_flow_probe.py -q -p no:cacheprovider"
 dod_evidence:
   - id: dod-omn21916-ac1-c28-cause
