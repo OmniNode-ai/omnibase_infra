@@ -60,3 +60,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/cli/test_delegate_timed_runtime_ungrouped_omn21996.py -q --no-cov
     binds_ac: ["AC2"]
+  - id: dod-omn21996-ac2-reader-capability-validation
+    description: >-
+      The wrapper resolves its stopwatch annotations independently of the CLI and advertises only an async reader accepting the two forwarded positional arguments. Invalid readers retain the grouped bus without being called.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_timed_bus_capabilities_omn21996.py -q --no-cov
+    binds_ac: ["AC2"]

@@ -13,8 +13,9 @@ method.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from omnibase_core.protocols.runtime.protocol_local_runtime_bus import (
     ProtocolLocalRuntimeBus,
@@ -25,16 +26,16 @@ from omnibase_core.protocols.runtime.protocol_local_runtime_message import (
     ProtocolLocalRuntimeMessage,
 )
 from omnibase_infra.enums.enum_delegate_phase import EnumDelegatePhase
-
-if TYPE_CHECKING:
-    from omnibase_infra.cli.receipt_mode import DelegatePhaseStopwatch
+from omnibase_infra.protocols.protocol_delegate_phase_stopwatch import (
+    ProtocolDelegatePhaseStopwatch,
+)
 
 
 class DelegatePhaseTimedBus:
     """Time the client's bus calls, forwarding their arguments unchanged."""
 
     def __init__(
-        self, inner: ProtocolLocalRuntimeBus, stopwatch: DelegatePhaseStopwatch
+        self, inner: ProtocolLocalRuntimeBus, stopwatch: ProtocolDelegatePhaseStopwatch
     ) -> None:
         self._inner = inner
         self._stopwatch = stopwatch
@@ -100,11 +101,20 @@ class DelegatePhaseTimedUngroupedBus(DelegatePhaseTimedBus):
 
 
 def wrap_delegate_bus(
-    inner: ProtocolLocalRuntimeBus, stopwatch: DelegatePhaseStopwatch
+    inner: ProtocolLocalRuntimeBus, stopwatch: ProtocolDelegatePhaseStopwatch
 ) -> DelegatePhaseTimedBus:
     """Wrap ``inner`` so a delegation's terminals are read with no group when it can."""
     if isinstance(inner, ProtocolLocalRuntimeUngroupedBus):
-        return DelegatePhaseTimedUngroupedBus(inner, stopwatch)
+        reader = inner.subscribe_ungrouped
+        if inspect.iscoroutinefunction(reader):
+            try:
+                # Check the positional call the wrapper makes without invoking
+                # the reader, which could open a broker connection.
+                inspect.signature(reader).bind("topic", object())
+            except (TypeError, ValueError):
+                pass
+            else:
+                return DelegatePhaseTimedUngroupedBus(inner, stopwatch)
     return DelegatePhaseTimedBus(inner, stopwatch)
 
 
