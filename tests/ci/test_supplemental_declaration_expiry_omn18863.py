@@ -121,6 +121,8 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "agent_detection_failures": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_execution_logs": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_status_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
+    "local_alerts": "omnimarket OMN-19991 (node_projection_local_alerts)",
+    "local_identity": "omnimarket OMN-19986 (node_projection_local_identity)",
     "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
 }
 
