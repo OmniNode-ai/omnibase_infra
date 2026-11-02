@@ -1,14 +1,15 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The writer and the main runtime share no kernel consumer group on the real bus.
+"""The writer and the main runtime resolve different kernel groups in ``EventBusKafka``.
 
-Resolves the effective consumer group each process joins, through the real
-``EventBusKafka._resolve_effective_group_id`` with the instance id both
-containers are deployed with (``runtime-main``), for every consumer the kernel
-builds from the node selection. No broker is contacted: the group name is what
-the broker keys membership on, and two processes that resolve the same name are
-two members of one group (OMN-18087, 18 groups with 2 members on a
-one-partition topic on the dev lane).
+Resolves the effective consumer group each process joins, through
+``EventBusKafka._resolve_effective_group_id`` (the one place the bus composes the
+joined group, with no public accessor) under the instance id both containers are
+deployed with (``runtime-main``), for every consumer the kernel builds from the
+node selection. No broker is contacted, so this is a unit test of the naming: two
+processes that resolve the same name are two members of one group on a
+one-partition topic (OMN-18087). Membership on a real broker is a slot reading,
+not this test.
 """
 
 from uuid import uuid4
