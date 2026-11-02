@@ -63,10 +63,11 @@ dod_evidence:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn21324_boundary_wheel.py -q --no-cov
   - id: dod-deploy-branch-content
-    description: The deploy-scoped boundary failure classifier reads the typed undecodable-body code, a source read the hosted runner can run that fails before this change.
+    description: The deploy-scoped boundary failure classifier on the published branch reads the typed undecodable-body code, a read of the GitHub copy of the changed path that fails before this change.
     source: manual
     binds_ac:
       - AC3
     checks:
       - check_type: command
-        check_value: grep -q undecodable_body_code src/omnibase_infra/runtime/boundary_failure_terminal.py
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/boundary_failure_terminal.py?ref=omn-21324-undecodable-body-terminal" --jq .content | base64 -d | grep -q 'undecodable_body_code'
+        cwd: ${OMNI_HOME}/omnibase_infra

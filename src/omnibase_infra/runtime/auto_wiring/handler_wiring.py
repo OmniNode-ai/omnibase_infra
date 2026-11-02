@@ -154,6 +154,9 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRef,
     ModelHandlerRoutingEntry,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_retry_policy import (
+    ModelAutoWiringRetryPolicy,
+)
 from omnibase_infra.runtime.auto_wiring.report import (
     EnumWiringOutcome,
     ModelAutoWiringReport,
@@ -424,7 +427,8 @@ _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 # OMN-14507: staged rollout for the auto-wired consume boundary DLQ fix.
 # DEFAULT OFF (warn-first) -- see _boundary_dlq_enabled() below.
 _BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
-_BOUNDARY_DLQ_MAX_ATTEMPTS = 3
+_RETRY_POLICY = ModelAutoWiringRetryPolicy()
+_BOUNDARY_DLQ_MAX_ATTEMPTS = _RETRY_POLICY.boundary_dlq_max_attempts
 _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
 
 # OMN-14498 / OMN-15029: strong references to the detached DLQ-routing tasks
@@ -10774,7 +10778,9 @@ async def _interleave_contract(
 # Bounded background NOT_READY reconciliation (OMN-15215, OMN-13237 follow-up).
 DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS: float = 30.0
 DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS: float = 30.0
-DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = 5
+DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = (
+    _RETRY_POLICY.not_ready_reattach_max_attempts
+)
 
 
 async def reattach_not_ready_contracts(
