@@ -105,16 +105,22 @@ jobs:
           # one, ignoring the VOLATILE header fields (wall-clock generated_at_utc +
           # installed_package_versions). Those vary with the CI venv/clock but not
           # with the dispatch corpus, so leaving them in re-broke the baseline on
-          # every tracked-package release (OMN-14361). A drift in anything else means
+          # every tracked-package release (OMN-14361). The committed file carries contract
+          # references instead of topic literals (OMN-22002); both sides are compared
+          # after load_snapshot_file / load_selection_oracle resolve them. A drift in anything else means
           # someone changed selection logic without regenerating the oracle.
           uv run python -m tests.fixtures.dispatch_parity.harness --out /tmp/parity-live.json
           uv run python - <<'PY'
           import json, sys
-          from tests.fixtures.dispatch_parity.harness import load_selection_oracle, strip_volatile_header_fields
+          from tests.fixtures.dispatch_parity.harness import (
+              load_selection_oracle,
+              load_snapshot_file,
+              strip_volatile_header_fields,
+          )
           committed = strip_volatile_header_fields(
               load_selection_oracle()
           )
-          live = strip_volatile_header_fields(json.load(open("/tmp/parity-live.json")))
+          live = strip_volatile_header_fields(load_snapshot_file("/tmp/parity-live.json"))
           if json.dumps(committed, sort_keys=True) != json.dumps(live, sort_keys=True):
               print(
                   "::error::Committed selection-oracle-v2.json is STALE vs the live "
