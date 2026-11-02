@@ -86,7 +86,8 @@ def _with_openai_compatible(obs: dict[str, Any]) -> dict[str, Any]:
 def test_the_deployed_openai_compatible_row_is_a_declared_customer_only_provider() -> (
     None
 ):
-    """Board run 41409937453 read C12 red on exactly this shape:
+    """Board publish run 41409937453 read c12 not ok on exactly this shape (its
+    probe reading came from scheduled C12 run 41406642460):
     customer_only=['anthropic', 'openai', 'openai_compatible'] against a grader
     that declared only anthropic and openai (OMN-21981)."""
     record = probe.grade(_with_openai_compatible(_healthy()))
@@ -106,11 +107,23 @@ def test_the_pre_fix_declared_list_reproduces_the_board_red(
     monkeypatch.setattr(probe, "CUSTOMER_ONLY_PROVIDERS", ("anthropic", "openai"))
     record = probe.grade(_with_openai_compatible(_healthy()))
     assert record.verdict == "fail"
-    assert record.failures == [
+    assert _failed(record) == {"customer_only_exemptions_are_declared_here"}
+    assert (
         "parity/customer_only_exemptions_are_declared_here: "
         "customer_only=['anthropic', 'openai', 'openai_compatible'] "
         "declared=['anthropic', 'openai']"
-    ]
+    ) in record.failures
+
+
+@pytest.mark.unit
+def test_openai_compatible_refused_by_the_intake_route_grades_fail() -> None:
+    """The generated intake check really grades the row: an intake that does not
+    accept openai_compatible fails the probe."""
+    obs = _with_openai_compatible(_healthy())
+    obs["intake"]["openai_compatible"] = {"accepted": False, "errors": []}
+    record = probe.grade(obs)
+    assert record.verdict == "fail"
+    assert "intake_accepts_openai_compatible" in _failed(record)
 
 
 @pytest.mark.unit

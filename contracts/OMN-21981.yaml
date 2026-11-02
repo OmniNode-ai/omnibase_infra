@@ -27,7 +27,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -p no:cacheprovider
   - id: dod-002
-    description: "The cause, reproduced: graded with the pre-fix declared list (anthropic, openai), the deployed shape with openai_compatible customer-only fails on exactly the line C12 run 41406642460 printed: parity/customer_only_exemptions_are_declared_here: customer_only=['anthropic', 'openai', 'openai_compatible'] declared=['anthropic', 'openai']."
+    description: "The cause, reproduced: graded with the pre-fix declared list (anthropic, openai), the deployed shape with openai_compatible customer-only fails on exactly the line scheduled C12 run 41406642460 printed (the failing run behind board publish run 41409937453, whose c12 reading is the one AC1 names): parity/customer_only_exemptions_are_declared_here: customer_only=['anthropic', 'openai', 'openai_compatible'] declared=['anthropic', 'openai']."
     source: generated
     binds_ac: [AC1]
     checks:
