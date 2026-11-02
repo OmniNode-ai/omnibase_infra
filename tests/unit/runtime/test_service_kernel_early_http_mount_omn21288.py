@@ -13,10 +13,10 @@ test lets it go.
 from __future__ import annotations
 
 import asyncio
-import os
 import signal
 import socket
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from functools import partial
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -105,29 +105,20 @@ def kernel_harness(
         yield port
 
 
-async def _stop_when_up(task: asyncio.Task[int], original_handler: object) -> int:
-    """End a booted kernel the way an operator does: SIGTERM.
-
-    The signal is sent only once the kernel has replaced the SIGTERM handler
-    this process had before ``bootstrap()`` ran, so it can never reach the
-    pytest process while the default disposition is still in place.
-    """
-    async with asyncio.timeout(30):
-        while signal.getsignal(signal.SIGTERM) == original_handler:
-            if task.done():
-                break
-            await asyncio.sleep(0.01)
-    if task.done():
-        return await task
-    os.kill(os.getpid(), signal.SIGTERM)
-    return await asyncio.wait_for(task, timeout=30)
-
-
 async def test_mount_answers_while_wiring_is_still_running(kernel_harness: int) -> None:
     loop = asyncio.get_running_loop()
     wiring_reached: asyncio.Future[None] = loop.create_future()
     let_wiring_finish: asyncio.Future[None] = loop.create_future()
+    shutdown_ready: asyncio.Future[Callable[[], None]] = loop.create_future()
     wiring_finished = False
+
+    def capture_shutdown(
+        sig: signal.Signals, callback: Callable[..., None], *args: object
+    ) -> None:
+        # Exercise the kernel's real shutdown callback without installing a
+        # process-wide handler or sending SIGTERM to the pytest process.
+        if sig == signal.SIGTERM:
+            shutdown_ready.set_result(partial(callback, *args))
 
     async def slow_wire(**kwargs: object) -> ModelAutoWiringReport:
         nonlocal wiring_finished
@@ -146,8 +137,8 @@ async def test_mount_answers_while_wiring_is_still_running(kernel_harness: int) 
             return_value=discovered,
         ),
         patch("omnibase_infra.runtime.auto_wiring.wire_from_manifest", new=slow_wire),
+        patch.object(loop, "add_signal_handler", side_effect=capture_shutdown),
     ):
-        original_handler = signal.getsignal(signal.SIGTERM)
         task = asyncio.create_task(bootstrap())
         try:
             await asyncio.wait_for(wiring_reached, timeout=60)
@@ -167,7 +158,14 @@ async def test_mount_answers_while_wiring_is_still_running(kernel_harness: int) 
             assert not wiring_finished
         finally:
             let_wiring_finish.set_result(None)
-        assert await _stop_when_up(task, original_handler) == 0
+            try:
+                shutdown = await asyncio.wait_for(shutdown_ready, timeout=30)
+                shutdown()
+                assert await asyncio.wait_for(task, timeout=30) == 0
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_failing_factory_fails_boot_before_wiring_starts(
