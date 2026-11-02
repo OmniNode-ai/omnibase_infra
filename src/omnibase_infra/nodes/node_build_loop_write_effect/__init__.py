@@ -20,13 +20,9 @@ from omnibase_infra.nodes.node_build_loop_write_effect.models import (
 from omnibase_infra.nodes.node_build_loop_write_effect.node import (
     NodeBuildLoopWriteEffect,
 )
-from omnibase_infra.nodes.node_build_loop_write_effect.registry import (
-    RegistryInfraBuildLoopWrite,
-)
 
 __all__ = [
     "HandlerBuildLoopAppend",
     "ModelBuildLoopAppendResult",
     "NodeBuildLoopWriteEffect",
-    "RegistryInfraBuildLoopWrite",
 ]

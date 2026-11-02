@@ -34,10 +34,19 @@ requirements:
       - id: AC4
         statement: >-
           AC4: bootstrap starts plugin consumers before it calls subscribe_wired_contract_topics
+  - id: req-omn18087-no-shared-kernel-groups
+    statement: A process bound to contracts by node selection does not join the kernel consumer groups of the main runtime.
+    acceptance:
+      - id: AC11
+        statement: >-
+          AC11: a process whose ONEX_RUNTIME_NODE_SELECTION names a contract derives its kernel consumer groups (contract registry, plugins, savings, runtime-error triage and the host process) from a service name that carries the selection, so it shares no group with the main runtime under the same KAFKA_INSTANCE_ID, and an unselected process keeps its existing group names
 evidence_requirements:
   - kind: tests
     description: "Boot subscription tests pass"
     command: "uv run pytest tests/unit/runtime/test_omn18087_recovering_bus_concurrent_subscribe.py tests/unit/runtime/auto_wiring/test_omn18087_boot_subscribes_only_topics_in_use.py -q --no-cov"
+  - kind: tests
+    description: "Kernel consumer group collision test passes"
+    command: "uv run pytest tests/unit/runtime/test_kernel_consumer_group_collision_omn18087.py -q --no-cov"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -78,6 +87,21 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/test_kernel.py -q --no-cov -k plugin_consumers_before_auto_wired_joins"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac11-no-shared-kernel-groups
+    description: >-
+      The writer's and the main runtime's kernel consumer groups are disjoint under one instance id, bootstrap hands the host process and the plugin consumers a service name that carries the node selection, and an unselected process keeps its group names. Fails at the merge base, where bootstrap hands a node-bound process the same service name as the main runtime and the model has no consumer_service.
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel_consumer_group_collision_omn18087.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/event_bus/test_kernel_group_ownership_omn18087.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel.py -q --no-cov -k selection_scoped_service"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn18087-deploy-probe
     description: >-
