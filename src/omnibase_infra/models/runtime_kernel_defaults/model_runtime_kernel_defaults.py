@@ -29,8 +29,6 @@ class ModelRuntimeKernelDefaults(BaseModel):
 
     Attributes:
         default_contracts_dir: Contracts directory used when the environment names none.
-        workspace_contracts_dir: Runtime contracts directory of a workspace,
-            relative to its config root.
         llm_endpoint_env_keys: Environment variables that name the LLM endpoints
             the kernel health-probes.
     """
@@ -38,7 +36,6 @@ class ModelRuntimeKernelDefaults(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     default_contracts_dir: str = Field(min_length=1)
-    workspace_contracts_dir: str = Field(min_length=1)
     llm_endpoint_env_keys: tuple[str, ...] = Field(min_length=1)
 
     @property

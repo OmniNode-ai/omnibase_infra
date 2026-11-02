@@ -49,7 +49,7 @@ def test_an_omitted_value_fails_to_load(key: str) -> None:
         ModelRuntimeKernelDefaults.model_validate(block)
 
 
-@pytest.mark.parametrize("key", ["default_contracts_dir", "workspace_contracts_dir"])
+@pytest.mark.parametrize("key", ["default_contracts_dir"])
 def test_an_empty_value_fails_to_load(key: str) -> None:
     block = {**_declared_block(), key: ""}
 
@@ -100,7 +100,3 @@ def test_the_kernel_reads_its_defaults_from_the_declared_settings(
     settings = load_runtime_kernel_defaults()
 
     assert service_kernel._get_contracts_dir() == Path(settings.default_contracts_dir)
-    assert (
-        Path(settings.workspace_contracts_dir)
-        == service_kernel.WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
-    )

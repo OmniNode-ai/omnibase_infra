@@ -155,6 +155,7 @@ from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
 from omnibase_infra.models.network_binding import load_network_binding_settings
+from omnibase_infra.models.runtime import ModelRuntimeNodeSelection
 from omnibase_infra.models.runtime_kernel_defaults import load_runtime_kernel_defaults
 from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
@@ -269,16 +270,9 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 # profile), never a hardcoded code fallback.
 TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 
-# OMN-19193: where a workspace keeps its own tier-1 (self-hosted) runtime
-# contracts directory, relative to the owning config root; its
-# runtime/runtime_config.yaml is the working-tree fallback after the copy
-# materialized from origin/main (OMN-19212), once no bootstrap pointer or
-# developer lane binding is set. The product ships only this convention.
-# The VALUES (which transport, which lane) belong to the workspace that
-# declares them and are never shipped in this package: lab configuration is
-# not hardcoded in the product every customer runs (OMN-19184).
+# Contracts directory and LLM endpoint variables the kernel uses by default,
+# declared in models/runtime_kernel_defaults/runtime_kernel_defaults.yaml.
 _DEFAULTS = load_runtime_kernel_defaults()
-WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path(_DEFAULTS.workspace_contracts_dir)
 
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
@@ -652,6 +646,11 @@ def _load_node_graph_config() -> ModelRuntimeNodeGraphConfig:
 
     contracts_dir = get_runtime_contracts_dir()
     return ModelRuntimeNodeGraphConfig.from_contracts_dir(contracts_dir)
+
+
+def workspace_runtime_contracts_dir(config_root: Path) -> Path:
+    """Tier-1 runtime contracts under the owning config root (OMN-19193)."""
+    return config_root / "config" / "onex"
 
 
 def _get_contracts_dir() -> Path:
@@ -1633,9 +1632,7 @@ def resolve_embedded_runtime_config(
             return config, provenance
         workspace_config: Path | None = None
         if config_root is not None:
-            workspace_contracts = (
-                config_root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
-            )
+            workspace_contracts = workspace_runtime_contracts_dir(config_root)
             workspace_config = workspace_contracts / DEFAULT_RUNTIME_CONFIG
             if workspace_config.is_file():
                 config = load_runtime_config(
@@ -1650,9 +1647,9 @@ def resolve_embedded_runtime_config(
         missing_owner_details = ""
         if config_root is None:
             developer_config = (
-                workspace_root.resolve()
-                / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
-                / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+                workspace_runtime_contracts_dir(
+                    workspace_root.resolve() / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
+                )
                 / DEFAULT_RUNTIME_CONFIG
             )
             missing_owner_details = (
@@ -2068,6 +2065,7 @@ async def bootstrap() -> int:
             "ONEX_ENVIRONMENT"
         )
         environment: str = _kafka_env_from_env or config.event_bus.environment
+        node_selection = ModelRuntimeNodeSelection.from_env()
         kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
         if not kafka_bootstrap_servers:
             logger.warning(
@@ -2737,11 +2735,11 @@ async def bootstrap() -> int:
                         pool=_savings_correlation_pool,
                         publisher=_savings_publish,
                     )
-                    _savings_node_identity = ModelNodeIdentity(
-                        env=environment,
-                        service=config.name or "onex-kernel",
-                        node_name="node_savings_estimation_compute",
-                        version="v1",
+                    _savings_node_identity = node_selection.kernel_identity(
+                        environment,
+                        config.name,
+                        "node_savings_estimation_compute",
+                        "v1",
                     )
 
                     async def _savings_on_injection_message(
@@ -3200,11 +3198,8 @@ async def bootstrap() -> int:
         # Create typed node identity for plugin subscriptions (OMN-1602)
         plugin_node_identity: ModelNodeIdentity | None = None
         if config.name:
-            plugin_node_identity = ModelNodeIdentity(
-                env=environment,
-                service=config.name,
-                node_name=config.name,
-                version=config.contract_version or "v1",
+            plugin_node_identity = node_selection.kernel_identity(
+                environment, config.name, config.name, config.contract_version
             )
         else:
             # Graceful degradation (OMN-1992): config.name absence is logged
@@ -4289,16 +4284,9 @@ async def bootstrap() -> int:
         # TRIGGER FOR SPLIT: Split when ServiceKernel supports registering multiple
         # node contracts under one service runtime.
         #
-        # Why both fields get the same value:
-        # - For services using simplified config with just 'name', there's no semantic
-        #   distinction between service and node - a single service hosts a single node
-        # - RuntimeHostProcess uses these to construct ModelNodeIdentity for Kafka
-        #   consumer group IDs and event routing
-        # - The introspection consumer group format is:
-        #   {env}.{service_name}.{node_name}.{purpose}.{version}
-        #   e.g., "local.my-service.my-service.introspection.v1"
-        # - When service_name == node_name, the format is intentionally redundant but
-        #   maintains consistency with multi-node deployments where they would differ
+        # RuntimeHostProcess builds its Kafka consumer group IDs from these:
+        # {env}.{service_name}.{node_name}.{purpose}.{version}. service_name carries
+        # the node selection (OMN-18087); a simple config has service == node.
         runtime_create_start_time = time.time()
         runtime_config_dict = cast("dict[str, object]", config.model_dump(mode="json"))
         if not config.name:
@@ -4331,7 +4319,9 @@ async def bootstrap() -> int:
                 ),
                 config_path=str(_runtime_config_path),
             )
-        runtime_config_dict["service_name"] = config.name
+        runtime_config_dict["service_name"] = node_selection.consumer_service(
+            config.name
+        )
         runtime_config_dict["node_name"] = config.name
 
         # 6.1 Create introspection service (OMN-5609)
@@ -5066,11 +5056,11 @@ async def bootstrap() -> int:
                 )
             else:
                 # Create typed node identity for contract registry subscriptions
-                contract_node_identity = ModelNodeIdentity(
-                    env=environment,
-                    service=config.name or "onex-kernel",
-                    node_name="contract-registry",
-                    version=config.contract_version or "v1",
+                contract_node_identity = node_selection.kernel_identity(
+                    environment,
+                    config.name,
+                    "contract-registry",
+                    config.contract_version,
                 )
 
                 # Subscribe to 3 contract lifecycle topics with same identity
@@ -5223,11 +5213,8 @@ async def bootstrap() -> int:
                     SUFFIX_RUNTIME_ERROR,
                     correlation_id=correlation_id,
                 )
-                triage_node_identity = ModelNodeIdentity(
-                    env=environment,
-                    service=config.name or "onex-kernel",
-                    node_name="runtime-error-triage",
-                    version="v1",
+                triage_node_identity = node_selection.kernel_identity(
+                    environment, config.name, "runtime-error-triage", "v1"
                 )
 
                 async def _triage_on_message(
@@ -6161,4 +6148,5 @@ __all__: list[str] = [
     "load_runtime_config",
     "main",
     "raise_nofile_soft_limit",
+    "workspace_runtime_contracts_dir",
 ]

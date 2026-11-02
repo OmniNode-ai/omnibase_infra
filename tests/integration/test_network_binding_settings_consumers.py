@@ -87,7 +87,8 @@ def test_the_declared_settings_equal_the_pinned_values() -> None:
 
 def _field_default(module_name: str, class_name: str, field: str) -> object:
     model = getattr(importlib.import_module(module_name), class_name)
-    return model.model_fields[field].default
+    # The defaults are built lazily by a default_factory, so resolve the factory.
+    return model.model_fields[field].get_default(call_default_factory=True)
 
 
 @pytest.mark.parametrize(("module_name", "class_name"), _LOOPBACK_BOUND_CONFIGS)
@@ -132,10 +133,9 @@ def test_a_health_host_environment_override_still_wins(
             value = "postgresql://db.test/x" if "dsn" in name else "required.test:9092"
             monkeypatch.setenv(f"{prefix}{name.upper()}", value)
     monkeypatch.delenv(f"{prefix}HEALTH_CHECK_HOST", raising=False)
-    assert (
-        model(_env_file=None).health_check_host
-        == model.model_fields["health_check_host"].default
-    )
+    assert model(_env_file=None).health_check_host == model.model_fields[
+        "health_check_host"
+    ].get_default(call_default_factory=True)
     monkeypatch.setenv(f"{prefix}HEALTH_CHECK_HOST", "health-probe.test")
 
     assert model(_env_file=None).health_check_host == "health-probe.test"

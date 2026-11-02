@@ -9,8 +9,6 @@
 settings:
   # Contracts directory used when ONEX_CONTRACTS_DIR is unset.
   default_contracts_dir: "./contracts"
-  # Where a workspace keeps its own runtime contracts, relative to its config root.
-  workspace_contracts_dir: "config/onex"
   # Environment variables whose value is an LLM endpoint the kernel health-probes.
   # An endpoint's logical name is the variable name between LLM_ and _URL.
   llm_endpoint_env_keys:
