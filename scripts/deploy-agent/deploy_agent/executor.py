@@ -1251,6 +1251,24 @@ def _build_source_build_args(
     ]
 
 
+def _first_party_audit_args(lane: EnumRuntimeLane, declared_pr: str) -> list[str]:
+    """The audit's build-context build arguments; empty without a declaration (OMN-21928)."""
+    # The checker is loaded by path from the clone being built: the agent's own
+    # ``omnibase_infra`` is a released wheel that need not carry it.
+    if not declared_pr:
+        return []
+    path = (
+        Path(REPO_DIR) / "src/omnibase_infra/validation/checker_first_party_sources.py"
+    )
+    spec = importlib.util.spec_from_file_location("first_party_checker", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load the first-party source checker from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return cast("list[str]", module.audit_build_args(lane.value, declared_pr))
+
+
 def _decode_stream(stream: str | bytes | None) -> str:
     """Render a captured subprocess stream as text, whatever it came back as.
 
@@ -3393,6 +3411,9 @@ class DeployExecutor:
         # without this the terminal event named one repository's commit and left
         # the other three to be inferred from the image.
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-21928: <repo>#<number>@<head sha> of the open pull request this
+        # rebuild declares; rebuild_scope sets it from the signed command.
+        self.declared_pr = ""
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
         # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
         # stages, so every RUN after it takes the value as build environment
@@ -4610,6 +4631,7 @@ class DeployExecutor:
         build_source: BuildSource | str = BuildSource.RELEASE,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
+        declared_pr: str = "",
     ) -> list[str]:
         # OMN-16442: no self-update here. This method runs inside an accepted
         # job, after preflight/git/compose_gen/seed; a re-exec from this point
@@ -4622,6 +4644,7 @@ class DeployExecutor:
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
         # OMN-18057: residue is per-rebuild, not per-process.
         self.reset_deploy_observations()
+        self.declared_pr = declared_pr
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).
@@ -5428,29 +5451,29 @@ class DeployExecutor:
 
         The guard STAYS. This passes the pin the operator supplied; it does not
         weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
-        deliberately NOT substituted with a fallback ref — nothing is exported
-        and the script refuses in its own words, which is the correct outcome
-        for a caller that has no pin to offer.
-
-        OMN-17135: ``deploy_ref`` pins ONE repository. The CI path
-        (``runtime-rebuild-trigger.yml`` → ``trigger_rebuild_on_merge.py``)
-        constrains the published ``git_ref`` to a lowercase hex commit SHA of
-        **omnibase_infra**, and that commit exists in no sibling — so RT-1
-        aborted on the first one it tried (``ERROR: omnibase_core: cannot
-        resolve ref '<infra sha>'``, exit 4) and every CI-triggered agent
-        rebuild failed by construction, 13 seconds after acceptance (job
-        ``a5b200d5``, 2026-09-09T21:02Z). ``sibling_fallback_ref`` is the ref
-        each sibling resolves for itself instead: the declared tracking head.
-        Manual requests carrying ``git_ref=origin/dev`` are unaffected, because
-        the fallback engages only where the primary names no commit.
-
-        Returns repo → the commit SHA RT-1 actually resolved for that sibling,
-        read back from the expected-refs manifest this call pins the location of.
-        The path is named explicitly, under the same ``~/.omnibase/state``
-        convention the script's own default uses but with a distinct
-        agent-and-pid basename, so two concurrent callers cannot read each
-        other's manifest and neither can collide with the script's default.
         """
+        # deliberately NOT substituted with a fallback ref — nothing is exported
+        # and the script refuses in its own words, which is the correct outcome
+        # for a caller that has no pin to offer.
+        #
+        # OMN-17135: ``deploy_ref`` pins ONE repository. The CI path
+        # (``runtime-rebuild-trigger.yml`` → ``trigger_rebuild_on_merge.py``)
+        # constrains the published ``git_ref`` to a lowercase hex commit SHA of
+        # **omnibase_infra**, and that commit exists in no sibling — so RT-1
+        # aborted on the first one it tried (``ERROR: omnibase_core: cannot
+        # resolve ref '<infra sha>'``, exit 4) and every CI-triggered agent
+        # rebuild failed by construction, 13 seconds after acceptance (job
+        # ``a5b200d5``, 2026-09-09T21:02Z). ``sibling_fallback_ref`` is the ref
+        # each sibling resolves for itself instead: the declared tracking head.
+        # Manual requests carrying ``git_ref=origin/dev`` are unaffected, because
+        # the fallback engages only where the primary names no commit.
+        #
+        # Returns repo → the commit SHA RT-1 actually resolved for that sibling,
+        # read back from the expected-refs manifest this call pins the location of.
+        # The path is named explicitly, under the same ``~/.omnibase/state``
+        # convention the script's own default uses but with a distinct
+        # agent-and-pid basename, so two concurrent callers cannot read each
+        # other's manifest and neither can collide with the script's default.
         script = Path(repo_dir) / "scripts" / "runtime_build" / "stage_workspace.sh"
         if not script.exists():
             raise RuntimeError(
@@ -5580,6 +5603,11 @@ class DeployExecutor:
             build_source,
             expected_build_source=expected_build_source,
         )
+        # OMN-21928: a declared open pull request names the first-party audit's
+        # build context. The policy data (first_party_sources.yaml, read from the
+        # clone being built) names the lanes that may declare; any other lane is
+        # refused here, before staging or any docker side effect.
+        validated_args += _first_party_audit_args(runtime_lane, self.declared_pr)
 
         selected_source = _coerce_build_source(build_source, layer="deploy-agent")
         omni_home = os.environ.get("OMNI_HOME", "").strip()

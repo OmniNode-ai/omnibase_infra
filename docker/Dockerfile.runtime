@@ -408,9 +408,20 @@ RUN set -eu; \
 # installed commit, or the build fails. The classification is written into
 # build-provenance.json as first_party_sources. The same function reads a running
 # container: run_audit(Path("/app/build-provenance.json")).
+#
+# The audit runs in the build context named by FIRST_PARTY_BUILD_CONTEXT, declared
+# in first_party_sources.yaml (OMN-21928). Unset is the dev lane's context, which
+# accepts a dev-merge tag and nothing else; the pre-PR slot entrypoint names the
+# slot context, in which the omnibase-infra build context may be a branch. A
+# sibling needs a dev-merge tag in every context. The deploy agent's build of a
+# declared open pull request names the open-PR context and the declaration
+# (<repo>#<number>@<head sha>) in FIRST_PARTY_DECLARED_PR; the audit accepts the
+# omnibase-infra build context only at that exact head and records the declaration.
+ARG FIRST_PARTY_BUILD_CONTEXT=""
+ARG FIRST_PARTY_DECLARED_PR=""
 RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
-        /app/.venv/bin/python -c 'import sys; from pathlib import Path; from omnibase_infra.validation.checker_first_party_sources import run_audit; sys.exit(run_audit(Path("/workspace/sibling-vcs-provenance.json"), record_into=Path("/app/build-provenance.json"), require=sys.argv[1:]))' \
+        /app/.venv/bin/python -c 'import os, sys; from pathlib import Path; from omnibase_infra.validation.checker_first_party_sources import run_audit; sys.exit(run_audit(Path("/workspace/sibling-vcs-provenance.json"), record_into=Path("/app/build-provenance.json"), require=sys.argv[1:], context=os.environ.get("FIRST_PARTY_BUILD_CONTEXT", ""), declared_pr=os.environ.get("FIRST_PARTY_DECLARED_PR", "")))' \
             omnibase-core omnibase-spi omnibase-infra; \
     fi
 
