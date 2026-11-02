@@ -334,6 +334,6 @@ def test_declared_context_the_image_audit_reads_the_build_arg_and_defaults_to_de
 ):
     dockerfile = (REPO_ROOT / "docker/Dockerfile.runtime").read_text(encoding="utf-8")
     assert 'ARG FIRST_PARTY_BUILD_CONTEXT=""' in dockerfile
-    assert 'context=os.environ["FIRST_PARTY_BUILD_CONTEXT"]' in dockerfile
+    assert 'context=os.environ.get("FIRST_PARTY_BUILD_CONTEXT", "")' in dockerfile
     # The empty default is the policy's default (dev-lane) context.
     assert CONTRACT.default_context == DEV

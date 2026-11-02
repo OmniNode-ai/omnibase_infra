@@ -234,4 +234,4 @@ def test_the_image_audit_passes_the_declaration_build_arg() -> None:
         encoding="utf-8"
     )
     assert 'ARG FIRST_PARTY_DECLARED_PR=""' in dockerfile
-    assert 'declared_pr=os.environ["FIRST_PARTY_DECLARED_PR"]' in dockerfile
+    assert 'declared_pr=os.environ.get("FIRST_PARTY_DECLARED_PR", "")' in dockerfile
