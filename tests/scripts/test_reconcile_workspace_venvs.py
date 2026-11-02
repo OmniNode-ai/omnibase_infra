@@ -463,6 +463,114 @@ def test_proven_installs_the_floor_commit_without_moving_the_clone(
     assert floor.read_bytes() == previous
 
 
+_WRAPPER_SOURCE = _REPO_ROOT / "scripts" / "onex"
+_WRAPPER_EXIT_BELOW_FLOOR = 3
+_WRAPPER_RAN = 41  # the entrypoint's own status, so "it ran" cannot be a shell error
+
+
+def _evidence_command_after_install(
+    ws: _Workspace, installed_commit: str
+) -> subprocess.CompletedProcess[str]:
+    """Run the real ``scripts/onex`` wrapper against what the reconcile installed.
+
+    The install shim only logs the ref it was handed, so this writes what uv
+    would have written for it: a ``direct_url.json`` naming that commit in the
+    dispatch venv, and an entrypoint that exits ``_WRAPPER_RAN``. ``skill`` is
+    an evidence-minting subcommand, so a floor mismatch refuses it.
+    """
+    site = ws.dispatch_venv / "lib" / "python3.12" / "site-packages"
+    dist = site / "omnimarket-0.4.11.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "METADATA").write_text(
+        "Name: omnimarket\nVersion: 0.4.11\n", encoding="utf-8"
+    )
+    (dist / "direct_url.json").write_text(
+        json.dumps(
+            {
+                "url": "https://github.com/OmniNode-ai/omnimarket.git",
+                "vcs_info": {"vcs": "git", "commit_id": installed_commit},
+            }
+        ),
+        encoding="utf-8",
+    )
+    entrypoint = ws.dispatch_venv / "bin" / "onex"
+    entrypoint.write_text(
+        f"#!/usr/bin/env bash\nexit {_WRAPPER_RAN}\n", encoding="utf-8"
+    )
+    entrypoint.chmod(0o755)
+    wrapper = ws.infra / "scripts" / "onex"
+    wrapper.write_bytes(_WRAPPER_SOURCE.read_bytes())
+    wrapper.chmod(0o755)
+    env = {
+        "OMNIBASE_PATH": str(ws.root),
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",  # no stray `onex` to shadow
+    }
+    return subprocess.run(
+        ["bash", str(wrapper), "skill", "merge_sweep"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_proven_reconcile_after_a_clone_advance_leaves_onex_runnable(
+    ws: _Workspace,
+) -> None:
+    """OMN-17305: the clone advances, the routine reconcile runs, nodes still run.
+
+    canonical-clone-sync fast-forwards the omnimarket clone past the floor. The
+    reconcile that follows (pull-all.sh runs ``--proven``) installs the floor's
+    commit, so the installed commit equals the floor and the real wrapper still
+    execs an evidence-minting command.
+    """
+    proven = ws.market_head
+    newer = _advance(ws.omnimarket, "newer")
+    ws.set_installed_commit("0" * _SHA_LEN)
+    (ws.root / ".onex-workspace-floor.json").write_text(
+        json.dumps({"omnimarket_commit": proven}, indent=2) + "\n", encoding="utf-8"
+    )
+
+    proc = ws.run("--proven")
+
+    assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == newer
+    assert ws.install_refs() == [proven]
+    wrapped = _evidence_command_after_install(ws, ws.install_refs()[-1])
+    assert wrapped.returncode == _WRAPPER_RAN, wrapped.stdout + wrapped.stderr
+    assert "REFUSED" not in wrapped.stderr
+
+
+def test_default_reconcile_after_a_clone_advance_installs_past_the_floor_and_the_gate_refuses(
+    ws: _Workspace,
+) -> None:
+    """OMN-17305, the measured mechanism and the gate's negative case.
+
+    The same clone advance with the default repair mode installs the clone HEAD.
+    That commit is not the floor's, nothing restamps the floor on this path, and
+    the wrapper refuses the evidence command. The gate is not relaxed to accept
+    a descendant of the floor commit.
+    """
+    proven = ws.market_head
+    newer = _advance(ws.omnimarket, "newer")
+    ws.set_installed_commit("0" * _SHA_LEN)
+    (ws.root / ".onex-workspace-floor.json").write_text(
+        json.dumps({"omnimarket_commit": proven}, indent=2) + "\n", encoding="utf-8"
+    )
+
+    proc = ws.run()
+
+    assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
+    assert ws.install_refs() == [newer]
+    assert newer != proven
+    wrapped = _evidence_command_after_install(ws, ws.install_refs()[-1])
+    assert wrapped.returncode == _WRAPPER_EXIT_BELOW_FLOOR, (
+        wrapped.stdout + wrapped.stderr
+    )
+    assert "not the proven commit" in wrapped.stderr
+
+
 def test_proven_never_updates_head_under_a_detach_refusing_guard(
     ws: _Workspace,
 ) -> None:
