@@ -44,10 +44,11 @@ def _policy(monkeypatch: pytest.MonkeyPatch, folded: str) -> None:
     monkeypatch.setattr(
         executor_mod, "RUNTIME_POLICY_ENV_FILE", REPO_ROOT / "docker/runtime-policy.env"
     )
+    policy = executor_mod._load_dotenv_file(REPO_ROOT / "docker/runtime-policy.env")
     monkeypatch.setattr(
         executor_mod,
         "_load_runtime_policy_env",
-        lambda: {"DEV_RUNTIME_MAIN_FOLDED_PROFILES": folded},
+        lambda: {**policy, "DEV_RUNTIME_MAIN_FOLDED_PROFILES": folded},
     )
 
 

@@ -73,16 +73,12 @@ def _layers_the_dev_lane_overlay(filename: str, dev_lane_only: set[str]) -> bool
     A service with no image, build or extends cannot render on its own, so a
     file holding one renders only on top of the dev-lane overlay. A lane that
     declares such a service in full (its own image or build) layers the base
-    file alone and is not a borrower. A declaration that sets only ``profiles``
-    retires the overlay's container (the tenant-fold overlay does this for every
-    role folded into the runtime); it patches a lane that already exists and
-    does not borrow the overlay's roles, so it does not count.
+    file alone and is not a borrower.
     """
     services = load_compose(filename).get("services") or {}
     return any(
         isinstance(services.get(name), dict)
         and not {"image", "build", "extends"}.intersection(services[name])
-        and set(services[name]) != {"profiles"}
         for name in dev_lane_only
     )
 
@@ -131,7 +127,12 @@ def _compose_environment(
             else:
                 environment[variable] = "placeholder"
     policy = dotenv_values(DOCKER_DIR / "runtime-policy.env")
-    for key in ("DEV_REDPANDA_MEMORY", "DEV_REDPANDA_MEM_LIMIT"):
+    # Compose validates memory sizes, so these take the rendered policy value.
+    for key in (
+        "DEV_REDPANDA_MEMORY",
+        "DEV_REDPANDA_MEM_LIMIT",
+        "DEV_RUNTIME_MAIN_MEMORY",
+    ):
         if key in environment and policy.get(key):
             environment[key] = str(policy[key])
     environment.update(overrides)

@@ -40,7 +40,7 @@ def test_wheel_loads_topic_declarations_and_serves_snapshots(tmp_path: Path) -> 
     installed = tmp_path / "installed"
     with ZipFile(wheel) as archive:
         declarations = (
-            "omnibase_infra/services/cost_api/cost_api_topics.yaml",
+            "omnibase_infra/nodes/node_registry_api_effect/contract.yaml",
             "omnibase_infra/nodes/node_board_probe_effect/contract.yaml",
             "omnibase_infra/nodes/node_developer_principal_plan_compute/contract.yaml",
         )
@@ -57,16 +57,15 @@ from pathlib import Path
 installed = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(installed))
 
-from omnibase_infra.models.cost_api import model_cost_api_topics
-from omnibase_infra.models.cost_api import load_cost_api_topics
+from omnibase_infra.models import model_cost_snapshot_topics
 from omnibase_infra.models.developer_principal import topics as plan_topics
 from omnibase_infra.models.developer_principal.topics import SCOPED_WRITE_TOPICS
 from omnibase_infra.nodes.node_board_probe_effect.handlers import _consumer_flow_constants
 from omnibase_infra.services.cost_api import snapshot_cache
 
-for module in (model_cost_api_topics, plan_topics, snapshot_cache, _consumer_flow_constants):
+for module in (model_cost_snapshot_topics, plan_topics, snapshot_cache, _consumer_flow_constants):
     assert Path(module.__file__).resolve().is_relative_to(installed), module.__file__
-topics = load_cost_api_topics()
+topics = model_cost_snapshot_topics.ModelCostSnapshotTopics.from_contract()
 assert SCOPED_WRITE_TOPICS
 assert _consumer_flow_constants.EXPOSURE_TOPIC.startswith("onex.snapshot.")
 assert _consumer_flow_constants.SEAM_DLQ.startswith("onex.dlq.")

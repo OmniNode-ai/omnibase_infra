@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,6 +56,9 @@ def test_primary_dev_disables_the_tenant_carrier_only(
         "deploy_agent.executor._load_runtime_policy_env",
         lambda: {
             "DEV_RUNTIME_MAIN_FOLDED_PROFILES": "tenant-projection",
+            "DEV_RUNTIME_MAIN_FOLDABLE_SERVICES": json.dumps(
+                {"tenant-projection": "tenant-projection-writer"}
+            ),
         },
     )
     config = lane_config_for(EnumRuntimeLane.DEV)
@@ -99,9 +103,7 @@ def test_folded_profile_without_a_gated_service_is_refused(
         "deploy_agent.executor._load_runtime_policy_env",
         lambda: {"DEV_RUNTIME_MAIN_FOLDED_PROFILES": "workers"},
     )
-    with pytest.raises(
-        RuntimeError, match=r"gates no service under \['folded-workers'\]"
-    ):
+    with pytest.raises(RuntimeError, match=r"maps no service for \['workers'\]"):
         lane_config_for(EnumRuntimeLane.DEV)
 
 
@@ -235,9 +237,66 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
             lane=EnumRuntimeLane.DEV,
         )
     retired = {"tenant-projection-writer", *RUNTIME_WRITERS.values()}
-    assert [c[1] for c in calls] == [*["ps"] * len(retired), "stop", "rm", "compose"]
-    assert "omninode-runtime" in calls[-1]
+    census = len(retired)
+    compose_calls = calls[census + 2 :]
+    assert [c[1] for c in calls[: census + 2]] == [*["ps"] * census, "stop", "rm"]
+    assert {c[1] for c in compose_calls} == {"compose"}
+    assert "omninode-runtime" in compose_calls[0]
     for service in retired:
-        assert service not in calls[-1]
+        assert all(service not in c for c in compose_calls)
         assert service not in verify.call_args.args[0]
-        assert f"{service}-a" in calls[len(retired)]
+        assert f"{service}-a" in calls[census]
+
+
+@pytest.mark.parametrize("primary", [True, False])
+def test_compose_activation_uses_policy_after_inherited_and_caller_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    primary: bool,
+) -> None:
+    from deploy_agent import executor as execution
+
+    policy = execution._load_runtime_policy_env()
+    gate = "DEV_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_RUNTIME_PROFILE"
+    monkeypatch.setenv(gate, "runtime")
+    monkeypatch.setattr(
+        execution,
+        "active_dev_instance",
+        lambda: DEFAULT_DEV_INSTANCE if primary else "other",
+    )
+    monkeypatch.setattr(execution, "operator_store_overlay", dict)
+    monkeypatch.setattr(execution, "_lane_env_overlay", dict)
+    monkeypatch.setattr(execution, "_dev_broker_policy_env", lambda env: {})
+    monkeypatch.setattr(execution, "resolve_lane_overlay_dir", lambda env: None)
+    env = execution._compose_env({gate: "full", "DEV_RUNTIME_MAIN_FOLDED_PROFILES": ""})
+    assert env[gate] == (policy[gate] if primary else "runtime")
+    assert (
+        env["DEV_RUNTIME_MAIN_FOLDED_PROFILES"]
+        == policy["DEV_RUNTIME_MAIN_FOLDED_PROFILES"]
+    )
+    if not primary:
+        assert not execution._folded_dev_services(EnumRuntimeLane.DEV)
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        [],
+        {"projection-writer-savings": "../other"},
+        {"projection-writer-savings": ["wrong"]},
+    ],
+)
+def test_malformed_retirement_policy_is_refused_before_any_docker_call(
+    monkeypatch: pytest.MonkeyPatch,
+    mapping: object,
+) -> None:
+    monkeypatch.setattr(
+        "deploy_agent.executor._load_runtime_policy_env",
+        lambda: {
+            "DEV_RUNTIME_MAIN_FOLDED_PROFILES": "projection-writer-savings",
+            "DEV_RUNTIME_MAIN_FOLDABLE_SERVICES": json.dumps(mapping),
+        },
+    )
+    with patch("deploy_agent.executor._run") as run:
+        with pytest.raises(RuntimeError, match="invalid dev foldable service mapping"):
+            DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.DEV)
+    run.assert_not_called()

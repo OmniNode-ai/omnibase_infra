@@ -201,6 +201,13 @@ profiles:
           - projection-writer-savings
           - projection-writer-tenant-credentials
           - projection-writer-tenant-registry
+        foldable_services:
+          tenant-projection: tenant-projection-writer
+          projection-writer-live-events: projection-live-events-writer
+          projection-writer-registration: projection-registration-writer
+          projection-writer-savings: projection-savings-writer
+          projection-writer-tenant-credentials: projection-tenant-credentials-writer
+          projection-writer-tenant-registry: projection-tenant-registry-writer
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof
@@ -210,6 +217,27 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: true
+        # OMN-18087: main's boot bound, join limit, join priority and memory
+        # limit. The compose file references these fail-fast and holds no
+        # literal. ready_bound_seconds is measured: on 2026-11-01 the dev main
+        # runtime took 5 min 44.5 s (344.5 s) from container start to its last
+        # consumer and was still answering 503 at 6 min 27 s (387 s), so 600 s
+        # is 1.55x the slowest boot observed. A boot past it logs its blockers
+        # by name; it never lowers the readiness gate. memory_limit: the
+        # runtime held 1.044 GiB of the old 1.5 GiB limit with 186 consumers,
+        # and the one-runtime plan puts four kernels in this process at
+        # 2,367 MiB, so 3072M is that figure plus ~30% headroom.
+        boot:
+          ready_bound_seconds: 600
+          max_concurrent_contract_attach: 4
+          # Delegation and hook-event consumers subscribe before every other
+          # contract's, in this order.
+          priority_contracts:
+            - node_delegation_orchestrator
+            - node_delegation_chain_ledger_effect
+            - projection_claude_hook_events
+            - projection_hook_ledger
+          memory_limit: 3072M
       effects:
         runtime_id: dev-effects
         runtime_address: runtime://omninode-pc/dev/effects

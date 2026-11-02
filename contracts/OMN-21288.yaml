@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21288
 title: "Projection writers, event consumers and effect processes run as nodes inside the one runtime container"
 summary: >-
-  Folds the primary dev tenant-projection carrier and the five in-process projection writers (live-events, registration, savings, tenant-credentials, tenant-registry) into main, retires their containers through a primary-dev-only overlay, and refuses a restored carrier or writer even with an image-only definition. Eight other dev workloads remain on the shrink-only list; the worker fold is owned by a separate pull request. AC2's final end state remains pending.
+  Folds the primary dev tenant-projection carrier and the five in-process projection writers (live-events, registration, savings, tenant-credentials, tenant-registry) into main, retires their containers through contract-driven profiles in the existing dev-lane definitions, and refuses a restored carrier or writer even with an image-only definition. Eight other dev workloads remain on the shrink-only list; the worker fold is owned by a separate pull request. AC2's final end state remains pending.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -49,6 +49,18 @@ requirements:
       - id: AC7
         statement: |-
           AC7: a planted factory error, a non-ASGI factory result, an unimportable factory, a malformed declaration, an overlapping or runtime-shadowing prefix each raise at boot with nothing mounted, and a failing lifespan makes every request answer 503 -- falsifier: the failing-mount tests in tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py fail at the merge base and pass on the branch
+  - id: req-omn21288-ac8-resolver-mount
+    statement: "One-runtime plan T16: the contract resolver's ASGI factory and path prefix are declared by a runtime contract, so the runtime can serve the resolver on its own HTTP port."
+    acceptance:
+      - id: AC10
+        statement: |-
+          AC10: node_contract_resolver_bridge's contract.yaml declares http_mount (factory omnibase_infra.services.contract_resolver.main:create_mounted_app, path_prefix /api/nodes); loaded through contract discovery and served by the runtime's aiohttp server, GET /api/nodes/health and POST /api/nodes/contract.resolve answer over a real port -- falsifier: tests/integration/handlers/http_mount/test_contract_resolver_mount_omn21288.py fails at the merge base and passes on the branch
+  - id: req-omn21288-ac9-mount-before-wiring
+    statement: "One-runtime plan T16: the mount serves before consumer wiring completes, and a failing factory fails boot instead of serving partly."
+    acceptance:
+      - id: AC9
+        statement: |-
+          AC9: bootstrap() starts the health server and attaches the contracts' http_mount blocks before wire_from_manifest, so a request issued while a planted slow wiring step is still running is answered, and a planted factory error fails boot with exit code 1 before wiring is reached -- falsifier: tests/unit/runtime/test_service_kernel_early_http_mount_omn21288.py fails at the merge base and passes on the branch
   - id: req-omn21288-receipt-mode-ungrouped
     statement: "The receipt-mode caller joins no consumer group, so a hook firing on every command leaves no Empty group on the broker."
     acceptance:
@@ -66,7 +78,7 @@ evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
     command: |-
-      uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+      uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ""
@@ -74,12 +86,12 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn21288-ac1-fixture-refusal
     description: >-
-      Read the dev-stack-runtime-only hook registered in .pre-commit-config.yaml, require its files pattern to match a fixture path, and run its entry. The entry executes the stack tests, including refusal of separate effects processes, workers, event consumers and projection writers. The merge-base control copies the tests and fixtures, but not the hook registration, so the check exits 1 there. It reads the config directly rather than through pre-commit run, whose cold-cache clone of every remote hook repository exceeds the verifier's 30s per-check budget.
+      Read the stack-shape hook registered in .pre-commit-config.yaml, require its files pattern to match a fixture path, and run its entry. The entry executes the stack tests, including refusal of separate effects processes, workers, event consumers and projection writers. The merge-base control copies the tests and fixtures, but not the hook registration, so the check exits 1 there. It reads the config directly rather than through pre-commit run, whose cold-cache clone of every remote hook repository exceeds the verifier's 30s per-check budget.
     source: manual
     checks:
       - check_type: test_passes
         check_value: |-
-          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' tests/fixtures/omn21288/stack_separate_workloads.yml
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "stack-shape"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' tests/fixtures/stack_shape/planted_services.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn21288-ac2-real-dev-stack
@@ -89,7 +101,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: |-
-          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "stack-shape"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
   - id: dod-omn21288-hosted-stack-deploy-check
@@ -99,7 +111,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: |-
-          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "stack-shape"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
   - id: dod-omn21288-ac3-lab-lane-effects-folded-deploy
@@ -179,7 +191,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
   - id: dod-omn21288-tenant-fold-deploy-check
@@ -196,11 +208,11 @@ dod_evidence:
     binds_ac: [AC1, AC2]
   - id: dod-omn21288-runtime-writers-fold
     description: >-
-      Hosted-runner falsifier for the writers fold: the committed dev policy folds the five projection-writer profiles into main only on dev, the fold overlay gates each writer under its folded profile and nothing else, the deploy handler's explicit profile map retires exactly the overlay-gated services before main is recreated (delegation and hook-ledger writers keep their containers), main owns each writer contract only when folded, and the deploy agent disables and retires every folded container by compose labels without removing volumes. These test assertions fail at the merge base, where the writers are still separate containers. The live readback on the dev lane (no writer container, consumer groups Stable, projection tables advancing) is pending the deploy agent's post-merge redeploy.
+      The committed dev policy folds the five projection-writer profiles into main. Their existing dev-lane definitions resolve inactive profiles from the rendered contract; the tenant-only fold overlay declares none of the five writers. The deploy handler and agent retire the mapped containers by compose labels before main is recreated, retaining volumes. Other instances retain runtime and full profiles. The live dev readback is pending the deploy agent post-merge redeploy.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -k "writer or real_dev_stack" -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -k "writer or real_compose_files" -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py -k committed_dev_fold -q --no-cov
@@ -211,11 +223,11 @@ dod_evidence:
     binds_ac: [AC1, AC2]
   - id: dod-omn21288-t5-ac1-head-has-dev-suites-pass
     description: >-
-      T5 AC1, the writers fold's head contains current origin/dev and the full deploy-agent suite and pre-commit over the whole PR diff pass on a lab host. At head 45e694f320b7d632e74a66c21ea04fcdcef68fd3, git merge-base --is-ancestor origin/dev HEAD exits 0 (origin/dev 5eda9ab591dd994d774df1cc86ddb7d9e506aa67). On h051, uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests -m "not lab_overlay" (the deploy-agent-tests CI form) gave 1930 passed, 2 deselected, exit 0 (unit lw-29f6e3c203a04544), and uv run --frozen pre-commit run --from-ref 5eda9ab591dd994d774df1cc86ddb7d9e506aa67 --to-ref 45e694f320b7d632e74a66c21ea04fcdcef68fd3 exited 0 (unit lw-4fe04ecd05644fff). Run with the repository's root environment instead, the suite gave 6 errors in test_queue_depth_omn18144.py (fixture aiohttp_client not found), identical at origin/dev and outside this diff. The hosted check below re-runs the focused files without a broker or a daemon.
+      Hosted checks re-run the fold, stack-shape and retirement regressions against this revision without a broker or daemon. Whole-PR commit hooks and the named lab-run check remain publishing steps; no result from an earlier head is a result for this head.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
@@ -223,7 +235,7 @@ dod_evidence:
     binds_ac: []
   - id: dod-omn21288-t5-ac2-no-event-lost-across-the-swap
     description: >-
-      T5 AC2, no event published during the swap is lost and each is projected once. The writer contracts declare the retired container's consumer under consumer_group_handover (omnimarket dev), and auto-wiring seeds the runtime's group from it (OMN-21753, merged to dev). The hosted check runs the in-process group-offset scenario. The Redpanda scenario, tests/integration/event_bus/test_consumer_group_handover_redpanda_omn21288.py, was run on h201 against the pre-PR slot's broker (the lab dev lane's Redpanda; unit lw-f25bc4569e5e4d65) and errored at setup with KafkaConnectionError, because that broker takes SCRAM-SHA-256 clients only (docker-compose.dev-lane.yml KAFKA_SASL_MECHANISM) and the test opens plaintext clients; it is not in the hosted service-integration-suites list. The broker run and the live row count on one projection are owed to the post-merge dev proof through the deploy agent.
+      The existing consumer-group handover wires writer contracts through the real manifest and dispatch path under the in-memory substrate. The Redpanda overlay scenario exercises partitioned committed offsets and includes the positive control where omitting the declaration loses window events. The live dev projection readback is post-merge through the deploy agent.
     source: manual
     checks:
       - check_type: test_passes
@@ -232,7 +244,7 @@ dod_evidence:
     binds_ac: []
   - id: dod-omn21288-t5-boot-guard-fold-pairing
     description: >-
-      T5 AC3, the dev boot guard never restores a retained image under the overlay of another fold generation. A boot-good snapshot planted from before the fold makes prepare() refuse before any container is replaced, and a failed fold deploy refuses to restore the pre-fold image under the fold overlay (the incident records recovery_verified false); a snapshot of the same generation still restores, and the pre-fold overlay starts the five writers again (rollback by revision). The new file is scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py; two of its tests fail on the parent commit, where the guard records no fold generation.
+      A retained boot-good image captured before the fold is refused under the post-fold policy before replacement or recovery starts. A snapshot of the same fold generation still restores. The revision rollback test restores the writer service scopes together with the pre-fold policy.
     source: manual
     checks:
       - check_type: test_passes
@@ -241,7 +253,7 @@ dod_evidence:
     binds_ac: []
   - id: dod-omn21288-t5-ac3-rollback-by-revision
     description: >-
-      T5 AC3, a rollback across the fold is by revision: the pre-fold image and the pre-fold overlay go back together and the five writer containers return. The unit half is held by test_auto_rollback.py and test_boot_guard_fold_pairing_omn21288.py (in the 1930-pass deploy-agent run at 45e694f320b7d632e74a66c21ea04fcdcef68fd3). The slot half (fold, publish, roll back, publish, row counts per projection) is not available on a pre-PR slot: the slot entrypoint composes infra, dev-lane and prepr only (scripts/runtime_build/prepr_verify_lane.sh COMPOSE_FILES), the prepr overlay starts each writer under profile prepr, and docker-compose.dev-tenant-fold.yml is primary-dev only, so a slot never folds; and the bring-up at 45e694f320b7d632e74a66c21ea04fcdcef68fd3 exited 10 at the workspace build's first-party source audit (h201 unit lw-e9671c9907614357, teardown CLEAN). It is owed to the post-merge dev proof through the deploy agent.
+      Rollback across the fold moves the image and policy together by revision. The auto-rollback and boot-guard tests exercise service selection and recovery refusal across fold generations. The live fold, publish, rollback and row-count proof is pending post-merge through the deploy agent.
     source: manual
     checks:
       - check_type: test_passes
@@ -250,16 +262,16 @@ dod_evidence:
     binds_ac: []
   - id: dod-omn21288-t5-ac4-five-readings
     description: >-
-      T5 AC4, the five readings before and after the fold. No slot reading was taken: the pre-PR slot bring-up at 45e694f320b7d632e74a66c21ea04fcdcef68fd3 exited 10 before any container started (h201 unit lw-e9671c9907614357), and a slot cannot fold (see the AC3 entry). As a read-only reference, dev was read twice 60 s apart on h201 (unit lw-54b86f0dc50746df, 2026-11-02T00:21:48Z and 00:22:49Z): 27 running containers in compose project omnibase-infra, the five writers among them; omninode-runtime memory.current 672374784 and memory.swap.current 10706944 bytes, cpu usage_usec 140447656 then 157531487; live_events +15, savings_estimates +2, claude_hook_events +129 rows inserted or updated, tenant_inference_credentials and tenant_registry_mirror +0; 8085 and 8086 ready and health 200, runtime healthy with 0 restarts. The after readings, with the five containers absent and their projections advancing, are owed to the post-merge dev proof through the deploy agent.
+      Container census, consumer-group state, projection row counts, runtime resource readings and health readings before and after the live fold remain pending the post-merge dev deployment through the deploy agent. The hosted check below covers compose policy and stack-shape regressions only.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
   - id: dod-omn21288-t5-ac5-ready-and-handoff
     description: >-
-      T5 AC5, the PR is out of draft and handed to the landing controller with needs=train at a head with no red context this PR caused. The evidence is the PR watcher's read for that head (python3 pr_state_local.py --pr omnibase_infra#5518, or onex scm pr-checks), recorded in the handoff; a draft is excluded from the watcher, so a stale read is reported as stale. The hosted check re-runs the tests of the guard this change touches.
+      Publishing and landing-controller handoff are owned by the launching lane. A unit check of companion-lane boot supervision is not evidence of merge or dev installation; those readbacks remain pending.
     source: manual
     checks:
       - check_type: test_passes
@@ -290,6 +302,24 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mount_live_port_omn21288.py -k planted_factory_error -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC7]
+  - id: dod-omn21288-ac8-resolver-mount-served
+    description: >-
+      Run the resolver mount tests: the bridge contract.yaml is loaded through discover_contracts_from_paths, its http_mount block is built by the runtime's aiohttp server, and real GET /api/nodes/health and POST /api/nodes/contract.resolve requests on the bound port are answered by the resolver (a bad body answers 422). The tests assert the http_mount declaration the merge-base contract lacks, so the run fails there. No container is created or restarted by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_contract_resolver_mount_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC10]
+  - id: dod-omn21288-ac9-mount-before-wiring
+    description: >-
+      Drive the real bootstrap() with a real ServiceHealth on a free port and a wiring engine that blocks: while it is blocked, the bridge mount answers its health and a resolution (and /health still answers 503 because the runtime is not attached); with a planted factory error bootstrap returns 1 and the wiring engine is never called, and nothing listens on the port. At the merge base the health server starts after wiring, so the request is refused and the wiring engine is reached; the run fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_service_kernel_early_http_mount_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC9]
   - id: dod-omn21288-receipt-mode-ungrouped
     description: "The receipt-mode handler subscribes through subscribe_ungrouped and the in-memory bus shows no named group from it. 14 of the 33 tests in the file fail at the merge base, whose handler joins a receipt-mode-client.<hex12> group."
     source: manual
@@ -333,7 +363,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC8]
 context:
-  remaining_after_this_change: "AC2 end state: eight dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test (effects, worker, projection-api, four consumers, the delegation writer); each leaves the list when its node runs inside the runtime."
-  tenant_fold_proof: "No pre-PR slot can boot docker-compose.dev-tenant-fold.yml: the slot entrypoint composes infra, dev-lane and prepr only, and its workspace build fails the first-party source audit. The fold readings are owed to the post-merge dev proof through the deploy agent. No lane was redeployed by this lane."
-  worker_integration: "The independently owned worker fold must preserve both overlays and union main.folded_profiles to [workers, tenant-projection]; then remove runtime-worker from SEPARATE_SERVICES as well. This branch never changes the worker branch."
-  http_mount_remaining: "T15 omnibase_infra half only. Remaining: (1) the intelligence-api http_mount declaration lives in omniintelligence's node contract, not in this repository; (2) the kernel awaits no mount today: service_kernel.py carries unfixed hardcoded-model-config findings and cannot be edited, so a lifespan failure is a 503 on every route rather than a nonzero exit; (3) retire the intelligence-api container as a deploy step after the mount answers on the runtime's port."
+  remaining_after_this_change: "AC2 end state remains pending the remaining baselined workload folds; the stack-shape data and baseline are unchanged in this revision."
+  tenant_fold_proof: "The live fold readings are post-merge through the deploy agent. This revision's unit and broker proofs do not deploy dev."
+  worker_integration: "The separately owned worker fold must preserve the policy's existing folded profiles and remove its stack-shape baseline entries only when their declarations disappear."
+  http_mount_remaining: "T16 omnibase_infra half only. The resolver's compose service is NOT retired here. The runtime serves the resolver on its own HTTP port (ONEX_HTTP_PORT, 8085 on the dev lane) under /api/nodes, while the compose service keeps answering on 8091. Remaining: (1) the live early-serve request on a proving lane is owed until the prepr-slot hold is released (slot proof owed); (2) point the dashboard proxy at the runtime port and retire the omninode-contract-resolver service in a later deploy step; (3) the intelligence-api http_mount declaration (omniintelligence) and its container retirement."

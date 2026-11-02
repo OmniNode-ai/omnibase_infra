@@ -11,22 +11,74 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_core.models.validation.model_stack_shape_data import (
+    ModelStackShapeData,
+)
+from omnibase_core.validation.checker_stack_shape import check_compose
+from omnibase_core.validation.validator_stack_shape import ValidatorStackShape
 from omnibase_infra.runtime.auto_wiring.profile_ownership import (
     runtime_profile_owns_contract,
 )
 from scripts.render_runtime_policy_env import format_dotenv, load_contract, render_env
 from tests.helpers.lane_overlay_fixtures import load_compose
-from tests.unit.docker.test_dev_stack_runtime_only_omn21288 import (
-    SEPARATE_SERVICES,
-    dev_stack_services,
-    find_out_of_runtime_workloads,
-)
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 OVERLAY = ROOT / "docker/docker-compose.dev-tenant-fold.yml"
+STACK_SHAPE_DATA = ROOT / "config/validation/stack_shape.yaml"
+DEV_COMPOSE_FILES = (
+    ROOT / "docker/docker-compose.infra.yml",
+    ROOT / "docker/docker-compose.dev-lane.yml",
+    OVERLAY,
+)
 FOLDED_KEY = "DEV_RUNTIME_MAIN_FOLDED_PROFILES"
 SERVICE = "tenant-projection-writer"
+
+
+def _env(service: dict) -> dict[str, str]:
+    env = service.get("environment") or {}
+    if isinstance(env, list):
+        return dict(str(e).split("=", 1) for e in env if "=" in str(e))
+    return {str(k): str(v) for k, v in env.items()}
+
+
+def _folded_only(profiles: object) -> bool:
+    return (
+        isinstance(profiles, list)
+        and bool(profiles)
+        and all(str(p).startswith("folded-") for p in profiles)
+    )
+
+
+def dev_stack_services() -> dict[str, dict]:
+    """The dev stack: the base, shared dev overlay and primary-dev fold overlay merged.
+
+    A service gated only under a folded-role profile starts under no profile a dev
+    bring-up requests: its role runs inside main.
+    """
+    merged = dict(load_compose(DEV_COMPOSE_FILES[0]).get("services") or {})
+    for path in DEV_COMPOSE_FILES[1:]:
+        for name, overlay in (load_compose(path).get("services") or {}).items():
+            if overlay is None:  # compose ``!reset null`` removes a service
+                merged.pop(name, None)
+                continue
+            base = dict(merged.get(name) or {})
+            env = {**_env(base), **_env(overlay)}
+            base.update(overlay)
+            if env:
+                base["environment"] = env
+            merged[name] = base
+    policy = render_env(load_contract())
+    for service in merged.values():
+        service["profiles"] = [
+            re.sub(r"\$\{([^:}]+):-([^}]+)\}", lambda m: policy.get(m[1], m[2]), p)
+            for p in service.get("profiles", [])
+        ]
+    return {
+        name: service
+        for name, service in merged.items()
+        if not _folded_only(service.get("profiles"))
+    }
 
 
 def test_policy_folds_tenant_projections_on_primary_dev_only() -> None:
@@ -87,8 +139,27 @@ def test_main_keeps_its_identity_bindings_and_the_carriers_state() -> None:
     ],
 )
 def test_a_restored_carrier_is_refused_even_without_a_build(definition: dict) -> None:
-    assert SERVICE not in SEPARATE_SERVICES
-    assert SERVICE in find_out_of_runtime_workloads({SERVICE: definition})
+    """The stack-shape allowlist refuses the carrier in a compose file that does not baseline it."""
+    data = yaml.safe_load(STACK_SHAPE_DATA.read_text(encoding="utf-8"))
+    allowlist = ModelStackShapeData(
+        runtime_services=frozenset(data["runtime"]["services"]),
+        max_replicas=int(data["runtime"]["max_replicas"]),
+        dependencies=frozenset(data["dependencies"]),
+        one_shots=frozenset(n for n in data["one_shots"] if "*" not in n),
+        lanes={},
+        baseline=(),
+    )
+    assert SERVICE not in allowlist.runtime_services | allowlist.dependencies
+    assert SERVICE not in allowlist.one_shots
+    rules = {r.rule_id: r for r in ValidatorStackShape(root=ROOT).contract.rules}
+    refused = check_compose(
+        allowlist,
+        "docker/docker-compose.restored.yml",
+        {SERVICE: definition},
+        ["dev"],
+        rules,
+    )
+    assert [issue.message for issue in refused if SERVICE in issue.message]
 
 
 @pytest.mark.parametrize(
@@ -122,7 +193,7 @@ def test_fold_overlay_always_triggers_the_stack_gate() -> None:
         hook
         for repo in config["repos"]
         for hook in repo["hooks"]
-        if hook["id"] == "dev-stack-runtime-only"
+        if hook["id"] == "stack-shape"
     ]
     assert len(hooks) == 1
     assert re.search(hooks[0]["files"], str(OVERLAY.relative_to(ROOT)))
@@ -190,33 +261,79 @@ def test_policy_folds_the_runtime_writers_on_primary_dev_only() -> None:
     assert set(RUNTIME_WRITERS) <= set(rendered)
 
 
-def test_overlay_gates_each_folded_profile_and_nothing_else() -> None:
-    gates = _overlay_gates()
-    folded = set(render_env(load_contract())[FOLDED_KEY].split(","))
-    assert set(gates.values()) == folded
+def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
+    policy = load_contract()
+    process = policy.profiles["dev"].processes["main"]
+    rendered = render_env(policy)
+    assert process.foldable_services == {
+        "tenant-projection": SERVICE,
+        **RUNTIME_WRITERS,
+    }
+    assert _overlay_gates() == {SERVICE: "tenant-projection"}
+    definitions = load_compose(DEV_COMPOSE_FILES[1])["services"]
     for profile, service in RUNTIME_WRITERS.items():
-        assert gates[service] == profile
+        assert service not in load_compose(OVERLAY)["services"]
+        key = f"DEV_RUNTIME_MAIN_{service.upper().replace('-', '_')}"
+        assert definitions[service]["profiles"] == [
+            f"${{{key}_RUNTIME_PROFILE:-runtime}}",
+            f"${{{key}_FULL_PROFILE:-full}}",
+        ]
+        assert rendered[f"{key}_RUNTIME_PROFILE"] == f"folded-{profile}-runtime"
+        assert rendered[f"{key}_FULL_PROFILE"] == f"folded-{profile}-full"
         assert service not in dev_stack_services()
-    # The two writers that still run their own consume loop stay in the stack.
     for service in (
         "projection-delegation-writer",
         "projection-claude-hook-events-writer",
     ):
-        assert service not in gates
         assert service in dev_stack_services()
 
 
-def test_deploy_handler_retires_exactly_the_overlay_gated_services() -> None:
-    """The handler's explicit map and the overlay's gates name the same pairs."""
+def test_deploy_handler_retires_exactly_the_policy_services() -> None:
     handler = _handler_profile_map()
-    gates = _overlay_gates()
-    for service, profile in gates.items():
-        assert handler.get(profile) == service, profile
-    # The other direction: the handler may name nothing beyond the overlay's
-    # gates except the two base-stack services folded by profile alone.
-    gated_profiles = set(gates.values())
-    extras = {p: s for p, s in handler.items() if p not in gated_profiles}
-    assert extras == {"effects": "runtime-effects", "workers": "runtime-worker"}
+    mapping = load_contract().profiles["dev"].processes["main"].foldable_services
+    assert handler == {
+        **mapping,
+        "effects": "runtime-effects",
+        "workers": "runtime-worker",
+    }
+
+
+def test_rollback_policy_restores_both_writer_profiles() -> None:
+    policy = load_contract()
+    process = policy.profiles["dev"].processes["main"]
+    rolled_back = process.model_copy(update={"folded_profiles": ("tenant-projection",)})
+    dev = policy.profiles["dev"].model_copy(
+        update={"processes": {**policy.profiles["dev"].processes, "main": rolled_back}}
+    )
+    rendered = render_env(
+        policy.model_copy(update={"profiles": {**policy.profiles, "dev": dev}})
+    )
+    for service in RUNTIME_WRITERS.values():
+        key = f"DEV_RUNTIME_MAIN_{service.upper().replace('-', '_')}"
+        assert rendered[f"{key}_RUNTIME_PROFILE"] == "runtime"
+        assert rendered[f"{key}_FULL_PROFILE"] == "full"
+
+
+@pytest.mark.parametrize("project", ["omnibase-infra", "omnibase-infra-dev-other"])
+def test_shell_compose_policy_scopes_the_writer_gates(project: str) -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'source "{ROOT}/scripts/runtime_build/compose_files.sh"\n'
+            "resolve_lane_overlay_filename() { :; }\n"
+            f'resolve_compose_file_args args "{ROOT}" "{project}"\n'
+            'printf "%s" "$DEV_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_RUNTIME_PROFILE,$DEV_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_FULL_PROFILE"',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == (
+        "folded-projection-writer-savings-runtime,folded-projection-writer-savings-full"
+        if project == "omnibase-infra"
+        else "runtime,full"
+    )
 
 
 @pytest.mark.parametrize("profile", sorted(RUNTIME_WRITER_CONTRACTS))
@@ -231,3 +348,23 @@ def test_folded_writer_contract_attaches_to_main_only_when_folded(profile: str) 
         contract, "main", environ={"ONEX_RUNTIME_FOLDED_PROFILES": folded}
     )
     assert not runtime_profile_owns_contract(contract, "main", environ={})
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        {"unknown-role": "projection-savings-writer"},
+        {"projection-writer-savings": "../writer"},
+        {
+            "projection-writer-savings": "writer",
+            "projection-writer-registration": "writer",
+        },
+    ],
+)
+def test_invalid_fold_service_contract_is_refused(mapping: dict[str, str]) -> None:
+    from pydantic import ValidationError
+
+    from omnibase_infra.models.model_runtime_fold_policy import ModelRuntimeFoldPolicy
+
+    with pytest.raises(ValidationError):
+        ModelRuntimeFoldPolicy(foldable_services=mapping)

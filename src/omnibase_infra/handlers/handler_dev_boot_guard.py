@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import json
 import logging
 import math
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -185,6 +186,43 @@ def _all_healthy(read_containers: Callable[[], list[ModelDevBootContainer]]) -> 
         return all(_healthy(c) for c in read_containers())
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         return False
+
+
+def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> set[str]:
+    """Retirement uses the same contract mapping as the compose gates."""
+    if not folded:
+        return set()
+    mapping = json.loads(policy.get("DEV_RUNTIME_MAIN_FOLDABLE_SERVICES", "{}"))
+    if (
+        not isinstance(mapping, dict)
+        or any(
+            not isinstance(role, str)
+            or not isinstance(service, str)
+            or not re.fullmatch(r"[a-z][a-z0-9-]*", service)
+            for role, service in mapping.items()
+        )
+        or len(set(mapping.values())) != len(mapping)
+    ):
+        raise RuntimeError("invalid dev foldable service mapping")
+    if missing := folded - mapping.keys():
+        raise RuntimeError(f"fold policy maps no service for {sorted(missing)}")
+    return {mapping[profile] for profile in folded}
+
+
+def fold_compose_env(policy: Mapping[str, str], primary: bool) -> dict[str, str]:
+    """Keep compose activation aligned with retirement after all env overlays."""
+    selected = {}
+    for key, value in policy.items():
+        if key.startswith("DEV_RUNTIME_MAIN_"):
+            if key.endswith(("_RUNTIME_PROFILE", "_FULL_PROFILE")):
+                selected[key] = (
+                    value
+                    if primary
+                    else ("runtime" if key.endswith("_RUNTIME_PROFILE") else "full")
+                )
+            elif key.endswith(("_FOLDED_PROFILES", "_FOLDABLE_SERVICES")):
+                selected[key] = value
+    return selected
 
 
 def _folded_profiles(execution: ModuleType) -> tuple[str, ...]:
