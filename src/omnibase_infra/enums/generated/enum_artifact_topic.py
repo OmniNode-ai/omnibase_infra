@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumArtifactTopic(str, Enum):
     """Kafka topic enum for producer: artifact.
@@ -18,9 +20,9 @@ class EnumArtifactTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    CMD_RECONCILE_V1 = "onex.cmd.artifact.reconcile.v1"  # onex.cmd.artifact.reconcile.v1
-    EVT_CHANGE_DETECTED_V1 = "onex.evt.artifact.change-detected.v1"  # onex.evt.artifact.change-detected.v1
-    EVT_IMPACT_ANALYZED_V1 = "onex.evt.artifact.impact-analyzed.v1"  # onex.evt.artifact.impact-analyzed.v1
-    EVT_PR_COMMENT_POSTED_V1 = "onex.evt.artifact.pr-comment-posted.v1"  # onex.evt.artifact.pr-comment-posted.v1
-    EVT_UPDATE_PLAN_CREATED_V1 = "onex.evt.artifact.update-plan-created.v1"  # onex.evt.artifact.update-plan-created.v1
-    EVT_UPDATE_PLAN_EMITTED_V1 = "onex.evt.artifact.update-plan-emitted.v1"  # onex.evt.artifact.update-plan-emitted.v1
+    CMD_RECONCILE_V1 = contract_topic_value('nodes/node_artifact_change_detector_effect/contract.yaml', 'artifact', 'CMD_RECONCILE_V1')  # onex.cmd.artifact.reconcile.v1
+    EVT_CHANGE_DETECTED_V1 = contract_topic_value('nodes/node_artifact_change_detector_effect/contract.yaml', 'artifact', 'EVT_CHANGE_DETECTED_V1')  # onex.evt.artifact.change-detected.v1
+    EVT_IMPACT_ANALYZED_V1 = contract_topic_value('nodes/node_impact_analyzer_compute/contract.yaml', 'artifact', 'EVT_IMPACT_ANALYZED_V1')  # onex.evt.artifact.impact-analyzed.v1
+    EVT_PR_COMMENT_POSTED_V1 = contract_topic_value('nodes/node_artifact_reconciliation_orchestrator/contract.yaml', 'artifact', 'EVT_PR_COMMENT_POSTED_V1')  # onex.evt.artifact.pr-comment-posted.v1
+    EVT_UPDATE_PLAN_CREATED_V1 = contract_topic_value('nodes/node_artifact_reconciliation_orchestrator/contract.yaml', 'artifact', 'EVT_UPDATE_PLAN_CREATED_V1')  # onex.evt.artifact.update-plan-created.v1
+    EVT_UPDATE_PLAN_EMITTED_V1 = contract_topic_value('nodes/node_artifact_reconciliation_orchestrator/contract.yaml', 'artifact', 'EVT_UPDATE_PLAN_EMITTED_V1')  # onex.evt.artifact.update-plan-emitted.v1

@@ -48,12 +48,6 @@ class RegistryInfraNodeRegistrationReducer:
         # Create container and registry
         container = ModelONEXContainer()
         registry = RegistryInfraNodeRegistrationReducer(container)
-
-        # Create reducer instance
-        reducer = registry.create_reducer()
-
-        # Use reducer
-        result = await reducer.process(input_data)
         ```
     """
 
@@ -100,18 +94,6 @@ class RegistryInfraNodeRegistrationReducer:
             container: ONEX dependency injection container
         """
         self._container = container
-
-    def create_reducer(self) -> NodeRegistrationReducer:
-        """Create a NodeRegistrationReducer instance.
-
-        Returns:
-            Configured NodeRegistrationReducer instance.
-        """
-        from omnibase_infra.nodes.node_registration_reducer.node import (
-            NodeRegistrationReducer,
-        )
-
-        return NodeRegistrationReducer(self._container)
 
 
 __all__ = ["RegistryInfraNodeRegistrationReducer"]

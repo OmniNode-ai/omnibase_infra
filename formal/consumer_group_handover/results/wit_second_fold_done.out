@@ -1,0 +1,499 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 65 and seed 3310117000245034048 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/tmp.gVTXu7HTnr/ConsumerGroupHandover.tla
+Parsing file /tmp/tlc-7543341905695166247/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-7543341905695166247/Integers.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-7543341905695166247/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-7543341905695166247/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-7543341905695166247/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ConsumerGroupHandover
+Linting of module ConsumerGroupHandover
+Starting... (2026-11-02 06:39:52)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-02 06:39:53.
+Error: Invariant SecondFoldWitness is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 0
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 2: <Publish line 158, col 3 to line 161, col 66 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 1
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 3: <Publish line 158, col 3 to line 161, col 66 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 2
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 4: <Publish line 158, col 3 to line 161, col 66 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 3
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 5: <Publish line 158, col 3 to line 161, col 66 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 4
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 6: <Publish line 158, col 3 to line 161, col 66 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 5
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 7: <Publish line 158, col 3 to line 161, col 66 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 8: <Process("old") line 165, col 3 to line 176, col 83 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 1, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 0, 0, 0, 0, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<1, 0, 0, 0, 0, 0>>
+
+State 9: <Process("old") line 165, col 3 to line 176, col 83 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 2, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 0, 0, 0, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<1, 1, 0, 0, 0, 0>>
+
+State 10: <Process("old") line 165, col 3 to line 176, col 83 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 3, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 0, 0, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, 0, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 0, 0, 0>>
+
+State 11: <Ask line 199, col 3 to line 205, col 57 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 3, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 0, 0, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, 0, -1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 0, 0, 0>>
+
+State 12: <Process("old") line 165, col 3 to line 176, col 83 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 13: <Fence line 211, col 3 to line 217, col 57 of module ConsumerGroupHandover>
+/\ phase = "fenced"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> -1]
+/\ cur = "old"
+/\ fenced = {"old", "new"}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 14: <Copy line 233, col 3 to line 237, col 57 of module ConsumerGroupHandover>
+/\ phase = "copied"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> 4]
+/\ cur = "old"
+/\ fenced = {"old", "new"}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 15: <Start line 242, col 3 to line 249, col 43 of module ConsumerGroupHandover>
+/\ phase = "started"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> 4]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {"new"}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 16: <Record line 252, col 3 to line 256, col 57 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> 4]
+/\ cur = "new"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {"new"}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 17: <Ask line 199, col 3 to line 205, col 57 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> 4]
+/\ cur = "new"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {"new"}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "old"
+/\ ops = 2
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 18: <Fence line 211, col 3 to line 217, col 57 of module ConsumerGroupHandover>
+/\ phase = "fenced"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> 4]
+/\ cur = "new"
+/\ fenced = {"old", "new"}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "old"
+/\ ops = 2
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 19: <Copy line 233, col 3 to line 237, col 57 of module ConsumerGroupHandover>
+/\ phase = "copied"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> 4]
+/\ cur = "new"
+/\ fenced = {"old", "new"}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "old"
+/\ ops = 2
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 20: <Start line 242, col 3 to line 249, col 43 of module ConsumerGroupHandover>
+/\ phase = "started"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 4, new |-> 4]
+/\ cur = "new"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 0, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, 0, 1, -1, -1>>
+/\ want = "old"
+/\ ops = 2
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 0, 0>>
+
+State 21: <Process("old") line 165, col 3 to line 176, col 83 of module ConsumerGroupHandover>
+/\ phase = "started"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 5, new |-> 4]
+/\ cur = "new"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 1, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, 0, 1, 2, -1>>
+/\ want = "old"
+/\ ops = 2
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 1, 0>>
+
+State 22: <Record line 252, col 3 to line 256, col 57 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 5, new |-> 4]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 1, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, 0, 1, 2, -1>>
+/\ want = "old"
+/\ ops = 2
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 1, 0>>
+
+State 23: <Ask line 199, col 3 to line 205, col 57 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 5, new |-> 4]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 1, 0>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, 0, 1, 2, -1>>
+/\ want = "new"
+/\ ops = 3
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 1, 0>>
+
+State 24: <Process("old") line 165, col 3 to line 176, col 83 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 6, new |-> 4]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 1, 1>>
+/\ pub = 6
+/\ up = {"old"}
+/\ stamp = <<0, 0, 0, 1, 2, 3>>
+/\ want = "new"
+/\ ops = 3
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 1, 1>>
+
+State 25: <Fence line 211, col 3 to line 217, col 57 of module ConsumerGroupHandover>
+/\ phase = "fenced"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 6, new |-> 4]
+/\ cur = "old"
+/\ fenced = {"old", "new"}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 1, 1>>
+/\ pub = 6
+/\ up = {}
+/\ stamp = <<0, 0, 0, 1, 2, 3>>
+/\ want = "new"
+/\ ops = 3
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 1, 1>>
+
+State 26: <Copy line 233, col 3 to line 237, col 57 of module ConsumerGroupHandover>
+/\ phase = "copied"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 6, new |-> 6]
+/\ cur = "old"
+/\ fenced = {"old", "new"}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 1, 1>>
+/\ pub = 6
+/\ up = {}
+/\ stamp = <<0, 0, 0, 1, 2, 3>>
+/\ want = "new"
+/\ ops = 3
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 1, 1>>
+
+State 27: <Start line 242, col 3 to line 249, col 43 of module ConsumerGroupHandover>
+/\ phase = "started"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 6, new |-> 6]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 1, 1>>
+/\ pub = 6
+/\ up = {"new"}
+/\ stamp = <<0, 0, 0, 1, 2, 3>>
+/\ want = "new"
+/\ ops = 3
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 1, 1>>
+
+State 28: <Record line 252, col 3 to line 256, col 57 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 6, new |-> 6]
+/\ cur = "new"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 1, 1, 1, 1, 1>>
+/\ pub = 6
+/\ up = {"new"}
+/\ stamp = <<0, 0, 0, 1, 2, 3>>
+/\ want = "new"
+/\ ops = 3
+/\ consCrashes = 0
+/\ eff = <<1, 1, 1, 1, 1, 1>>
+
+411234 states generated, 185090 distinct states found, 27130 states left on queue.
+The depth of the complete state graph search is 28.
+Finished in 03s at (2026-11-02 06:39:55)
