@@ -28,12 +28,51 @@ evidence_requirements:
     command: "deploy: curl -fsS https://pypi.org/pypi/mcp/2.3.0/json -o /dev/null"
 dod_evidence:
   - id: dod-wheel-create-app
-    description: "create_app returns an application from the resolved SDK."
+    description: "Build the product wheel, install it without the lock in a fresh environment, and create an application with a registered tool from outside the checkout. The base wheel fails because its FastMCP import is absent from the resolved SDK."
     source: generated
     binds_ac: [AC1]
     checks:
-      - check_type: test_passes
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py -q --no-cov -k 'create_app or declared_floor'"
+      - check_type: command
+        check_value: |
+          set -eu
+          export PYTHONDONTWRITEBYTECODE=1
+          probe_dir="$(mktemp -d)"
+          trap 'rm -rf "$probe_dir"' EXIT
+          uv build --wheel --out-dir "$probe_dir/dist"
+          uv venv --python 3.12 "$probe_dir/venv"
+          uv pip install --python "$probe_dir/venv/bin/python" "$probe_dir"/dist/*.whl
+          cd "$probe_dir"
+          "$probe_dir/venv/bin/python" -I - <<'PY'
+          import importlib.metadata
+          from pathlib import Path
+          from types import SimpleNamespace
+
+          import omnibase_infra
+          from omnibase_infra.handlers.mcp.transport_streamable_http import (
+              TransportMCPStreamableHttp,
+          )
+
+          package_path = Path(omnibase_infra.__file__).resolve()
+          assert "site-packages" in package_path.parts, package_path
+          tool = SimpleNamespace(
+              name="mcp_resolution_smoke",
+              description="Registers a tool through the installed MCP SDK.",
+              parameters=[],
+          )
+          transport = TransportMCPStreamableHttp()
+          app = transport.create_app(
+              tools=[tool], tool_executor=lambda name, arguments: {"tool": name}
+          )
+          assert app is transport.app
+          assert transport._tool_handlers[tool.name]() == {"tool": tool.name}
+          print(
+              "MCP_WHEEL_APP_READBACK",
+              "mcp=" + importlib.metadata.version("mcp"),
+              "package=" + str(package_path),
+              "app=" + type(app).__name__,
+              "tool=" + tool.name,
+          )
+          PY
   - id: dod-src-imports-resolve
     description: "Every mcp import under src resolves and a planted nonexistent import is detected."
     source: generated
