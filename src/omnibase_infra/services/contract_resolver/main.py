@@ -127,9 +127,6 @@ def create_app(
         description=API_DESCRIPTION,
         version=API_VERSION,
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
     )
 
     # Configure CORS — fail-fast if not configured
@@ -197,20 +194,10 @@ def create_app(
     return app
 
 
-# Module-level app instance is not supported since container is required.
-# For production usage, use create_app() with proper configuration:
-#
-# Example:
-#     from omnibase_core.container import ModelONEXContainer
-#     from omnibase_infra.services.contract_resolver import create_app
-#
-#     container = ModelONEXContainer()
-#     app = create_app(
-#         container=container,
-#         cors_origins=["https://dashboard.example.invalid"],
-#     )
-#     uvicorn.run(app, host="0.0.0.0", port=8091)
-app: FastAPI | None = None
+def create_mounted_app() -> FastAPI:
+    """The resolver for the runtime's ``http_mount``; CORS_ORIGINS or none (OMN-21288)."""
+    origins = os.environ.get("CORS_ORIGINS", "").split(",")
+    return create_app(ModelONEXContainer(), [o.strip() for o in origins if o.strip()])
 
 
-__all__ = ["API_TITLE", "API_VERSION", "app", "create_app"]
+__all__ = ["API_TITLE", "API_VERSION", "create_app", "create_mounted_app"]
