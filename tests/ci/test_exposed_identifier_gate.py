@@ -38,7 +38,13 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 )
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-GATE = REPO_ROOT / "scripts" / "validation" / "check_exposed_identifiers.py"
+# The rule runs from omnibase_core (hook exposed-identifier-gate); this repo ships
+# only the denylist it is handed.
+CORE_GATE_MODULE = (
+    "omnibase_core.nodes.node_exposed_identifiers_check_compute."
+    "runtime_exposed_identifiers_check"
+)
+GATE_CMD = (sys.executable, "-m", CORE_GATE_MODULE)
 REAL_DENYLIST = (
     REPO_ROOT / "scripts" / "validation" / "exposed_identifiers_denylist.json"
 )
@@ -95,8 +101,7 @@ def _mint(tmp_path: Path, *literals: str) -> Path:
 def _run(target: Path, denylist: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
-            sys.executable,
-            str(GATE),
+            *GATE_CMD,
             "--denylist",
             str(denylist),
             "--root",
@@ -398,7 +403,15 @@ def test_incident_replay_omn17288(tmp_path: Path) -> None:
 def test_the_whole_repository_is_clean() -> None:
     """The standing regression -- the check that runs on every PR and every commit."""
     result = subprocess.run(
-        [sys.executable, str(GATE), "--mode", "blocking", "--scope", "all"],
+        [
+            *GATE_CMD,
+            "--denylist",
+            str(REAL_DENYLIST),
+            "--mode",
+            "blocking",
+            "--scope",
+            "all",
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -412,70 +425,28 @@ def test_the_whole_repository_is_clean() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# AC7 -- cross-repo parity.
+# AC7 -- cross-repo parity of the denylist.
 # --------------------------------------------------------------------------- #
 
-# The scanner and its denylist ship byte-identical in omnimarket and
-# omnibase_infra -- the two PUBLIC repos the OMN-17288 occurrence map names. These
-# digests are the SAME two strings in both repos' copies of this test, so drift is
-# visible to a one-line grep across the pair.
+# The scanner is omnibase_core's, so every consumer runs the same code at its own
+# core pin. The denylist is still this repo's file, and the digest below is the
+# one string to compare across the public repos that carry one.
 #
-# Honest limit, stated rather than implied: this pin fails in the repo being
-# EDITED, which forces whoever changes the scanner to update the pin and notice the
-# other copy. It does not, by itself, prove the other repo was updated too. A hard
-# cross-repo gate would have omnibase_infra CI resolve omnimarket's live dev HEAD --
-# and OMN-17292 is an open ticket about exactly that coupling reddening every infra
-# PR whenever omnimarket merges something unrelated. Adding a second instance of an
-# anti-pattern the team just filed against would trade a real problem for a worse
-# one, so the weaker-but-local check is deliberate.
-PINNED_SCANNER_SHA256 = (
-    "3bcae6e1d4c884ec9cc21d76ad75ef2a394ae5376b0f3fa8263f3ba607ce6826"
-)
+# OMN-18024 moved this pin, and DELIBERATELY moved it in this repo only. The six
+# entries added here denylist cloud identifiers that omnimarket still carries in
+# its own tree, so copying them across today would red every omnimarket PR rather
+# than protect anything. omnimarket's denylist takes these entries once its own
+# occurrences are scrubbed.
 PINNED_DENYLIST_SHA256 = (
     "7a8b65958ddbff276de9ac1089ad15f823f8391633f98d51d1f1e4bfdcb98d4a"
 )
 
-# OMN-18024 moved this pin, and DELIBERATELY moved it in this repo only. The six
-# entries added here denylist cloud identifiers that omnimarket still carries in
-# its own tree (its leaked-literals header enumerates the account id in
-# plaintext, and its test fixtures hold both k3s instance ids), so copying them
-# across today would red every omnimarket PR rather than protect anything. The
-# pair is therefore drifted on purpose: omnimarket's copy of this test pins its
-# own unchanged file and stays green, and its denylist takes these entries once
-# its own occurrences are scrubbed. Recorded here rather than left for a reader
-# to discover, because a silent drift is the failure mode the parity pin exists
-# to make visible.
 
-
-def test_cross_repo_fingerprint_pin() -> None:
-    scanner = hashlib.sha256(GATE.read_bytes()).hexdigest()
+def test_cross_repo_denylist_pin() -> None:
     denylist = hashlib.sha256(REAL_DENYLIST.read_bytes()).hexdigest()
-    assert scanner == PINNED_SCANNER_SHA256, (
-        "check_exposed_identifiers.py changed. Apply the SAME edit to the other "
-        "public repo's copy (omnimarket <-> omnibase_infra), then update "
-        f"PINNED_SCANNER_SHA256 in BOTH copies of this test to {scanner}."
-    )
     assert denylist == PINNED_DENYLIST_SHA256, (
         "exposed_identifiers_denylist.json changed. A denylist entry added in one "
         "public repo but not the other leaves that repo unguarded against the very "
         "identifier someone just decided was forbidden. Apply the same edit to the "
         f"other repo, then update PINNED_DENYLIST_SHA256 in both to {denylist}."
     )
-
-
-def test_fingerprint_subcommand_reports_both_digests() -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(GATE),
-            "--denylist",
-            str(REAL_DENYLIST),
-            "--print-fingerprint",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert PINNED_SCANNER_SHA256 in result.stdout, result.stdout
-    assert PINNED_DENYLIST_SHA256 in result.stdout, result.stdout

@@ -2418,7 +2418,7 @@ wheels = [
 [[package]]
 name = "omnibase-core"
 version = "0.47.62"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261101203942-2080333acfaf#2080333acfaf6c076313be3ceadea9bc0394aaee" }
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261102080237-7e087d566f24#7e087d566f24448c4b9039e9d80d5ff33a36fd83" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2541,7 +2541,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.3.0,<3.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261101203942-2080333acfaf" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261102080237-7e087d566f24" },
     { name = "omnibase-spi", specifier = "==0.23.7" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },

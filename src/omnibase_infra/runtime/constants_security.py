@@ -101,20 +101,20 @@ TRUSTED_HANDLER_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
 # Why omniclaude. is included:
 # - omniclaude provides PluginClaude, a first-party domain plugin registered via
 #   pyproject.toml entry_points (onex.domain_plugins group)
-# - Without this prefix, RegistryDomainPlugin.discover_from_entry_points() rejects
+# - Without this prefix, the registry's domain-plugin discovery rejects
 #   the entry point with status namespace_rejected (OMN-2047)
 # - omniclaude is a first-party package maintained in the same monorepo ecosystem
 #
 # Why omniintelligence. is included:
 # - omniintelligence provides PluginIntelligence, a first-party domain plugin
 #   registered via pyproject.toml entry_points (onex.domain_plugins group)
-# - Without this prefix, discover_from_entry_points() rejects it (OMN-2192)
+# - Without this prefix, the domain-plugin discovery rejects it (OMN-2192)
 # - omniintelligence is a first-party package in the OmniNode ecosystem
 #
 # Why omnimemory. is included:
 # - omnimemory provides PluginMemory, a first-party domain plugin registered
 #   via pyproject.toml entry_points (onex.domain_plugins group)
-# - Without this prefix, discover_from_entry_points() rejects the entry point
+# - Without this prefix, the domain-plugin discovery rejects the entry point
 #   with status namespace_rejected (OMN-6829)
 # - omnimemory is a first-party package in the OmniNode ecosystem
 #
@@ -136,7 +136,7 @@ TRUSTED_PLUGIN_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
 # PEP 621 entry_points group name for domain plugin discovery.
 #
 # This is the group name used in pyproject.toml [project.entry-points] to register
-# domain plugins for automatic discovery via importlib.metadata.entry_points().
+# domain plugins for automatic discovery via the importlib.metadata entry-point API.
 #
 # Example pyproject.toml usage:
 #   [project.entry-points."onex.domain_plugins"]

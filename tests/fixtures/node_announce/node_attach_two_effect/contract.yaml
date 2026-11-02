@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_attach_two_effect"
+node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: "Fixture contract for the boot attach report (OMN-21590)"
+runtime_profiles: [main]
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.platform.attach-two.v1"
+  publish_topics:
+    - "onex.evt.platform.attach-two-done.v1"
+handler_routing:
+  routing_strategy: payload_type_match
+  handlers:
+    - handler:
+        name: HandlerAttachFixture
+        module: omnibase_infra.handlers.handler_attach_fixture
