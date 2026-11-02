@@ -49,8 +49,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "omn19812"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "chain-canary-c28-consumer-flow.yml"
 
-AUDIT = "local.omnibase_infra.node_gateway_link_health_projection_compute.consume.1.0.0"
+AUDIT = "local.omnibase_infra.node_ledger_projection_compute.consume.1.6.1"
 REDUCER = "local.omnimarket.projection_consumer_flow.consume.1.0.1"
+
+#: Each kind's topic as the grader under test names it, so a row built here
+#: follows the grader's table and the node contract instead of repeating a literal.
+KIND_TOPIC = {kind: topic for kind, _prefix, topic, _counter in probe.KINDS}
+AUDIT_TOPIC = KIND_TOPIC["audit_projection_consumer"]
+REDUCER_TOPIC = KIND_TOPIC["publishing_reducer"]
 
 
 def _row(
@@ -71,15 +77,15 @@ def _sample(i: int) -> list[dict[str, Any]]:
     return [
         _row(
             AUDIT,
-            "onex.evt.omnibase-infra.gateway-heartbeat.v1",
+            AUDIT_TOPIC,
             start,
-            n_in=2,
+            n_in=4,
             n_out=0,
-            state="STALLED",
+            state="CONSUMING",
         ),
         _row(
             REDUCER,
-            "onex.evt.platform.node-heartbeat.v1",
+            REDUCER_TOPIC,
             start,
             n_in=565,
             n_out=565,
@@ -87,7 +93,7 @@ def _sample(i: int) -> list[dict[str, Any]]:
         ),
         _row(
             "local.omnimarket.other.consume.1.0.0",
-            "onex.evt.x.v1",
+            "onex.evt.omnimarket.projection-consumer-flow-applied.v1",
             start,
             n_in=0,
             n_out=0,
@@ -168,6 +174,17 @@ def _green() -> dict[str, Any]:
 
 def _failed(rec: probe.Record) -> set[str]:
     return {c.name for c in rec.checks if not c.ok}
+
+
+def test_the_grader_topics_are_the_node_contract_topics() -> None:
+    contract = (
+        REPO_ROOT / "src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml"
+    )
+    declared = yaml.safe_load(contract.read_text(encoding="utf-8"))[
+        "consumer_flow_topics"
+    ]
+    assert declared["audit_projection"] == AUDIT_TOPIC
+    assert declared["publishing_reducer"] == REDUCER_TOPIC
 
 
 def test_the_green_observation_passes_on_every_clause() -> None:
