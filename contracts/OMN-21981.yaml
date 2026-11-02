@@ -26,6 +26,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -p no:cacheprovider
+  - id: dod-002
+    description: "The cause, reproduced: graded with the pre-fix declared list (anthropic, openai), the deployed shape with openai_compatible customer-only fails on exactly the line C12 run 41406642460 printed: parity/customer_only_exemptions_are_declared_here: customer_only=['anthropic', 'openai', 'openai_compatible'] declared=['anthropic', 'openai']."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -p no:cacheprovider -k test_the_pre_fix_declared_list_reproduces_the_board_red
   - id: dod-deploy
     description: "Deploy probe: the C12 grader on the PR branch (read from GitHub by branch name) declares openai_compatible among CUSTOMER_ONLY_PROVIDERS. The grader runs from the checked-out repository on the scheduled workflow, so the branch content is what the next scheduled run grades with after merge; the hourly C12 run on dev reading success is the live readback."
     source: generated

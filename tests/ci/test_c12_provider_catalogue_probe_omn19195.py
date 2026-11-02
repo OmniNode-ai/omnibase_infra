@@ -97,6 +97,23 @@ def test_the_deployed_openai_compatible_row_is_a_declared_customer_only_provider
 
 
 @pytest.mark.unit
+def test_the_pre_fix_declared_list_reproduces_the_board_red(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cause, pinned: graded with the list the probe declared before
+    OMN-21981, the deployed shape fails on exactly the line C12 run 41406642460
+    printed on dev-201."""
+    monkeypatch.setattr(probe, "CUSTOMER_ONLY_PROVIDERS", ("anthropic", "openai"))
+    record = probe.grade(_with_openai_compatible(_healthy()))
+    assert record.verdict == "fail"
+    assert record.failures == [
+        "parity/customer_only_exemptions_are_declared_here: "
+        "customer_only=['anthropic', 'openai', 'openai_compatible'] "
+        "declared=['anthropic', 'openai']"
+    ]
+
+
+@pytest.mark.unit
 def test_openai_compatible_backed_by_a_house_rung_still_grades_fail() -> None:
     """Declaring it customer-only does not let a house rung back it."""
     obs = _with_openai_compatible(_healthy())
