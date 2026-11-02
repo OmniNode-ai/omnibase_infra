@@ -895,12 +895,14 @@ MIGRATION_LOCK_OWNER_PID=""
 # proof that WE hold it. A psql error is reported as not-held. $$ is 1 in every
 # runner container, so the tag is shared with runners of other databases on this
 # server: the holder session must also be connected to THIS run's database
-# (OMN-21928).
+# (OMN-21928). The key is matched by its two words, never as classid * 2^32 +
+# objid: that product overflows bigint for any other session's lock whose high
+# word is 2^31 or more, and the probe then errors and reads as not-held.
 migration_lock_held() {
   _mlh_granted="$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc \
     "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
        WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
-         AND l.classid::bigint * 4294967296 + l.objid::bigint = ${FORWARD_MIGRATION_LOCK_ID}
+         AND l.classid = (${FORWARD_MIGRATION_LOCK_ID}::bigint >> 32)::oid AND l.objid = (${FORWARD_MIGRATION_LOCK_ID}::bigint & 4294967295)::oid
          AND a.datname = '${PGDB}' AND a.application_name = '${MIGRATION_LOCK_TAG}';" 2>/dev/null)" || return 1
   [ "$_mlh_granted" = "1" ]
 }
@@ -974,7 +976,7 @@ acquire_migration_lock() {
 # session on the lock id, so the cause is read from the failure itself.
 assert_migration_lock_still_held() {
   if ! kill -0 "$MIGRATION_LOCK_OWNER_PID" 2>/dev/null || ! migration_lock_held; then
-    echo "[forward-migration] FATAL: advisory lock ${FORWARD_MIGRATION_LOCK_ID} was lost before ${1} -- the holder session died mid-run and migrations above may have run unserialized (holder pid ${MIGRATION_LOCK_OWNER_PID}, tag ${MIGRATION_LOCK_TAG}, sessions on the lock: $(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc "SELECT coalesce(string_agg(coalesce(a.application_name, '?') || ' db=' || l.database || ' granted=' || l.granted, '; '), 'none') FROM pg_locks l LEFT JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.locktype = 'advisory' AND l.classid::bigint * 4294967296 + l.objid::bigint = ${FORWARD_MIGRATION_LOCK_ID};" 2>&1))" >&2
+    echo "[forward-migration] FATAL: advisory lock ${FORWARD_MIGRATION_LOCK_ID} was lost before ${1} -- the holder session died mid-run and migrations above may have run unserialized (holder pid ${MIGRATION_LOCK_OWNER_PID}, tag ${MIGRATION_LOCK_TAG}, sessions on the lock: $(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc "SELECT coalesce(string_agg(coalesce(a.application_name, '?') || ' db=' || l.database || ' granted=' || l.granted, '; '), 'none') FROM pg_locks l LEFT JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.locktype = 'advisory' AND l.classid = (${FORWARD_MIGRATION_LOCK_ID}::bigint >> 32)::oid AND l.objid = (${FORWARD_MIGRATION_LOCK_ID}::bigint & 4294967295)::oid;" 2>&1))" >&2
     exit 1
   fi
 }
