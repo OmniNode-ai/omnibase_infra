@@ -971,12 +971,13 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         + FENCED_RUN_TRACE_RLS_IDS
         + FENCED_LOCAL_ENVIRONMENT_RLS_IDS
         + FENCED_DELEGATION_CAPABILITY_MAP_RLS_IDS
+        + FENCED_SKILL_LIFECYCLE_RLS_IDS
     ), (
         "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
         "OMN-20154 provider_quota_state, OMN-19793 eval-run, OMN-20242 "
         "delegation_dispositions, OMN-20613 budget_applied_events, OMN-19987 "
-        "run_trace, OMN-19988 local_environment and OMN-20169 capability-map RLS "
-        "holds are not the expected ids"
+        "run_trace, OMN-19988 local_environment, OMN-20169 capability-map and "
+        "OMN-21933 skill_executions RLS holds are not the expected ids"
     )
 
 
