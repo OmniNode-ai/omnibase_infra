@@ -136,6 +136,7 @@ from omnibase_infra.enums import (
     EnumSecurityRuleId,
     EnumValidationSeverity,
 )
+from omnibase_infra.models.network_binding import load_network_binding_settings
 from omnibase_infra.models.security import (
     ModelHandlerSecurityPolicy,
     ModelSecurityError,
@@ -151,10 +152,6 @@ _MAX_DNS_LABEL_LENGTH = 63
 
 # Maximum total domain length (RFC 1035: 253 characters)
 _MAX_DOMAIN_LENGTH = 253
-
-# Valid port range (1-65535)
-_MIN_PORT = 1
-_MAX_PORT = 65535
 
 # Known URL schemes for more robust URL detection
 # urlparse() may interpret "hostname:port" as having a "scheme" of the hostname,
@@ -566,7 +563,8 @@ class SecurityMetadataValidator:
             if port_str is not None:
                 try:
                     port = int(port_str)
-                    if port < _MIN_PORT or port > _MAX_PORT:
+                    bounds = load_network_binding_settings()
+                    if not bounds.tcp_port_min <= port <= bounds.tcp_port_max:
                         errors.append(
                             ModelSecurityError(
                                 code=EnumSecurityRuleId.INVALID_DOMAIN_PATTERN.value,
@@ -574,7 +572,7 @@ class SecurityMetadataValidator:
                                 message=(
                                     f"Invalid domain pattern at index {i}{context}: "
                                     f"port {port} is out of valid range "
-                                    f"({_MIN_PORT}-{_MAX_PORT})."
+                                    f"({bounds.tcp_port_min}-{bounds.tcp_port_max})."
                                 ),
                                 severity=EnumValidationSeverity.ERROR,
                             )
