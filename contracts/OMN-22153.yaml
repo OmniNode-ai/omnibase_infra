@@ -54,7 +54,7 @@ dod_evidence:
           grep -q 'omninode-intelligence @ file:///workspace/sibling-repos/omniintelligence' <<<"$dockerfile"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22153-ac3-mount-in-the-built-tag
-    description: Hosted-runner probe reads the omniintelligence node contract from GitHub at the dev-merge tag that holds omniintelligence#1202 and requires its http_mount declaration, the surface the T15 live check on port 8085 answers from. The HTTP 200 reads of /api/v1/health and /api/v1/patterns on the dev lane are taken by the lane after the deploy and reported on the ticket.
+    description: Hosted-runner probe requires omniintelligence in first_party_sources.yaml at the checked-out commit (absent at the merge base) and reads the omniintelligence node contract from GitHub at its newest dev-merge tag, the tag the dev image stages, and requires its http_mount declaration, the surface the T15 live check on port 8085 answers from. The HTTP 200 reads of /api/v1/health and /api/v1/patterns on the dev lane are taken by the lane after the deploy and reported on the ticket.
     source: manual
     binds_ac:
       - AC3
@@ -62,6 +62,9 @@ dod_evidence:
       - check_type: command
         check_value: |-
           set -eu;
-          doc="$(gh api "repos/OmniNode-ai/omniintelligence/contents/src/omniintelligence/nodes/node_pattern_storage_effect/contract.yaml?ref=dev-20261102114831-8b5209d38346" --jq .content | base64 -d)";
+          grep -q 'repo: omniintelligence' src/omnibase_infra/validation/first_party_sources.yaml;
+          tag="$(gh api repos/OmniNode-ai/omniintelligence/git/matching-refs/tags/dev- --jq '.[].ref' | sed 's#refs/tags/##' | sort | tail -n 1)";
+          test -n "$tag";
+          doc="$(gh api "repos/OmniNode-ai/omniintelligence/contents/src/omniintelligence/nodes/node_pattern_storage_effect/contract.yaml?ref=$tag" --jq .content | base64 -d)";
           grep -q '^http_mount:' <<<"$doc"
         cwd: ${OMNI_HOME}/omnibase_infra
