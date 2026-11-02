@@ -20,7 +20,33 @@ def _apply(pg: EphemeralPostgres, path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("initial_shape", ["fresh", "missing-columns", "legacy-flat"])
+def _seed_populated_incomplete_table(pg: EphemeralPostgres) -> None:
+    seed = pg.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        """
+        CREATE TABLE public.skill_executions (
+            event_id UUID, run_id UUID, event_type TEXT, skill_name TEXT,
+            repo_id TEXT, correlation_id UUID, emitted_at TIMESTAMPTZ, status TEXT
+        );
+        INSERT INTO public.skill_executions
+            (event_id, run_id, event_type, skill_name, repo_id,
+             correlation_id, emitted_at, status)
+        VALUES ('00000000-0000-0000-0000-000000000011',
+                '00000000-0000-0000-0000-000000000012', 'completed',
+                'legacy-row', 'omnibase_infra',
+                '00000000-0000-0000-0000-000000000013',
+                '2026-01-01T00:00:00Z', 'success');
+        """,
+    )
+    assert seed.returncode == 0, seed.stderr
+
+
+@pytest.mark.parametrize(
+    "initial_shape",
+    ["fresh", "missing-columns", "populated-missing-columns", "legacy-flat"],
+)
 def test_writer_holds_select_insert_update_after_the_vendored_migrations(
     ephemeral_postgres: EphemeralPostgres,
     initial_shape: str,
@@ -33,6 +59,8 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
             "CREATE TABLE public.skill_executions (event_id UUID)",
         )
         assert seed.returncode == 0, seed.stderr
+    elif initial_shape == "populated-missing-columns":
+        _seed_populated_incomplete_table(ephemeral_postgres)
     elif initial_shape == "legacy-flat":
         _apply(ephemeral_postgres, _FORWARD / "048_create_skill_executions.sql")
         seed = ephemeral_postgres.psql(
@@ -69,6 +97,33 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
         )
         assert probe.returncode == 0, probe.stderr
         assert probe.stdout.strip() == expected, privilege
+
+    unrelated = ephemeral_postgres.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-At",
+        "-c",
+        """
+        CREATE ROLE lifecycle_unrelated NOLOGIN;
+        GRANT USAGE ON SCHEMA public TO lifecycle_unrelated;
+        SELECT has_table_privilege(
+            'lifecycle_unrelated', 'public.skill_executions', 'SELECT')
+            OR has_table_privilege(
+                'lifecycle_unrelated', 'public.skill_executions', 'INSERT')
+            OR has_table_privilege(
+                'lifecycle_unrelated', 'public.skill_executions', 'UPDATE');
+        """,
+    )
+    assert unrelated.returncode == 0, unrelated.stderr
+    assert "f" in unrelated.stdout.splitlines(), unrelated.stdout
+    unrelated_read = ephemeral_postgres.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "SET ROLE lifecycle_unrelated; SELECT * FROM public.skill_executions",
+    )
+    assert unrelated_read.returncode != 0
+    assert "permission denied" in unrelated_read.stderr
 
     # Exercise the declared principal, including the projection's conflict path.
     write = ephemeral_postgres.psql(
@@ -128,7 +183,11 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
             f"bound={'NULL' if tenant is None else tenant} visible={1 if tenant == 'omninode' else 0}"
             in visible.stdout.splitlines()
         ), visible.stdout
-    for tenant_setting in ((), ("-c", "SET app.tenant_id = 'another-tenant'")):
+    for tenant_setting in (
+        (),
+        ("-c", "SET app.tenant_id = 'another-tenant'"),
+        ("-c", "SET app.tenant_id = ''"),
+    ):
         denied_write = ephemeral_postgres.psql(
             "-v",
             "ON_ERROR_STOP=1",
@@ -156,7 +215,7 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
     )
     assert posture.returncode == 0, posture.stderr
     assert posture.stdout.strip() == "t"
-    if initial_shape == "legacy-flat":
+    if initial_shape in {"legacy-flat", "populated-missing-columns"}:
         legacy = ephemeral_postgres.psql(
             "-At",
             "-c",
@@ -180,6 +239,35 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
         )
         assert legacy_visible.returncode == 0, legacy_visible.stderr
         assert "legacy=1" in legacy_visible.stdout.splitlines(), legacy_visible.stdout
+    if initial_shape == "populated-missing-columns":
+        reconciled = ephemeral_postgres.psql(
+            "-At",
+            "-c",
+            """
+            SELECT run_id = '00000000-0000-0000-0000-000000000012'::uuid
+                AND event_type = 'completed' AND status = 'success'
+                AND repo_id = 'omnibase_infra'
+                AND correlation_id = '00000000-0000-0000-0000-000000000013'::uuid
+                AND emitted_at = '2026-01-01T00:00:00Z'::timestamptz
+                AND received_at IS NOT NULL AND started_emit_failed = FALSE
+                AND skill_id IS NULL AND args_count IS NULL
+                AND duration_ms IS NULL AND error_type IS NULL AND session_id IS NULL
+            FROM public.skill_executions WHERE skill_name = 'legacy-row'
+            """,
+            "-c",
+            """
+            SELECT string_agg(attname, ',' ORDER BY attname)
+            FROM pg_catalog.pg_attribute
+            WHERE attrelid = 'public.skill_executions'::regclass
+                AND attnum > 0 AND NOT attisdropped AND attnotnull;
+            """,
+        )
+        assert reconciled.returncode == 0, reconciled.stderr
+        assert reconciled.stdout.splitlines() == [
+            "t",
+            "correlation_id,emitted_at,event_id,event_type,received_at,repo_id,"
+            "run_id,skill_name,tenant_id",
+        ]
     denied = ephemeral_postgres.psql(
         "-v",
         "ON_ERROR_STOP=1",
@@ -188,6 +276,55 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
     )
     assert denied.returncode != 0
     assert "permission denied" in denied.stderr
+
+
+@pytest.mark.parametrize(
+    ("mutation_sql", "constraint", "row_count"),
+    [
+        (
+            "UPDATE public.skill_executions SET event_type = 'invalid'",
+            "skill_executions_event_type_check",
+            "1",
+        ),
+        (
+            "UPDATE public.skill_executions SET status = 'invalid'",
+            "skill_executions_status_check",
+            "1",
+        ),
+        (
+            "INSERT INTO public.skill_executions SELECT * FROM public.skill_executions",
+            "skill_executions_pkey",
+            "2",
+        ),
+    ],
+    ids=["invalid-event-type", "invalid-status", "duplicate-event-id"],
+)
+def test_populated_reconciliation_refuses_invalid_constraints_without_losing_rows(
+    ephemeral_postgres: EphemeralPostgres,
+    mutation_sql: str,
+    constraint: str,
+    row_count: str,
+) -> None:
+    _seed_populated_incomplete_table(ephemeral_postgres)
+    mutation = ephemeral_postgres.psql("-v", "ON_ERROR_STOP=1", "-c", mutation_sql)
+    assert mutation.returncode == 0, mutation.stderr
+    result = ephemeral_postgres.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-f",
+        str(_VENDOR / "0001_create_skill_executions.sql"),
+    )
+    assert result.returncode != 0
+    assert constraint in result.stderr
+    readback = ephemeral_postgres.psql(
+        "-At",
+        "-c",
+        "SELECT count(*) FROM public.skill_executions"
+        " WHERE event_id = '00000000-0000-0000-0000-000000000011'"
+        " AND skill_name = 'legacy-row'",
+    )
+    assert readback.returncode == 0, readback.stderr
+    assert readback.stdout.strip() == row_count
 
 
 def test_deploy_chain_targets_public_with_a_different_search_path(
