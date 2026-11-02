@@ -28,8 +28,9 @@ def test_the_bare_group_round_trips_through_a_dumped_model() -> None:
 
 
 @pytest.mark.parametrize(
-    "bad", ["agent-observability-postgres\n", "agent observability", ""]
+    "bad",
+    ["agent-observability-postgres\n", "agent observability", "", ".", "..", "..."],
 )
-def test_a_group_name_with_a_newline_or_space_is_refused(bad: str) -> None:
+def test_a_group_name_with_whitespace_or_only_dots_is_refused(bad: str) -> None:
     with pytest.raises(ValidationError):
         ModelConsumerGroupHandover(from_group_id=bad, from_auto_offset_reset="earliest")

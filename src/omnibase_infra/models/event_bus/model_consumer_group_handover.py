@@ -82,7 +82,8 @@ class ModelConsumerGroupHandover(BaseModel):
     from_group_id: str | None = Field(
         default=None,
         min_length=1,
-        pattern=r"^[A-Za-z0-9._-]+$",
+        # At least one character that is not a dot, so "." and ".." are refused.
+        pattern=r"^\.*[A-Za-z0-9_-][A-Za-z0-9._-]*$",
         description=(
             "The retired consumer group by name, for a group that is not built "
             "from service, node and version. Used as it is in every environment."

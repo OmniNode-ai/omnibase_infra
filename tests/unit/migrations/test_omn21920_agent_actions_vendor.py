@@ -198,10 +198,22 @@ def test_the_sql_gate_is_live_positive_control() -> None:
 
 
 @pytest.mark.parametrize(
-    "mutation", ["principal", "privileges", "schema", "source_hash"]
+    ("mutation", "failure", "message"),
+    [
+        # The writer principal is gone, so the extractor cannot find its grants.
+        ("principal", KeyError, "tenant_projection_writer"),
+        # The grant is present but the check refuses it on privileges, schema or hash.
+        ("privileges", AssertionError, "agent_actions"),
+        ("schema", AssertionError, "agent_actions"),
+        ("source_hash", AssertionError, "0{64}"),
+    ],
 )
 def test_catalog_grant_check_refuses_a_misplaced_or_stale_grant(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    failure: type[Exception],
+    message: str,
 ) -> None:
     """Names elsewhere in a catalog do not establish a valid writer grant."""
     catalog = yaml.safe_load((_CATALOGS / "local.yaml").read_text(encoding="utf-8"))
@@ -221,5 +233,5 @@ def test_catalog_grant_check_refuses_a_misplaced_or_stale_grant(
         catalog["source"]["sha256"] = "0" * 64
     (tmp_path / "local.yaml").write_text(yaml.safe_dump(catalog), encoding="utf-8")
     monkeypatch.setattr(sys.modules[__name__], "_CATALOGS", tmp_path)
-    with pytest.raises((AssertionError, KeyError)):
+    with pytest.raises(failure, match=message):
         test_every_rendered_catalog_carries_the_seven_grants("local")
