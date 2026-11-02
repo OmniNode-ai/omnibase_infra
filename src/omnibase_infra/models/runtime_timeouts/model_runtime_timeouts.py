@@ -7,7 +7,7 @@ this module. The model has no field defaults, so a block that omits a value
 fails to load rather than falling back to a literal. Every field is strict: a
 fractional or float-typed value for an integer field, and a boolean or a
 non-finite value for a float field, is refused rather than truncated or coerced.
-The file is resolved beside this module with ``Path(__file__)``, never through
+The file is resolved beside this module (``Path(__file__)``, or the zip archive holding it), never through
 ``importlib.resources``, so importing the package does not touch the resource
 loader (``test_model_imports_do_not_read_the_contract`` pins that). The file ships with the wheel because hatchling includes
 every file under ``src/omnibase_infra`` (``[tool.hatch.build.targets.wheel]``).
@@ -15,6 +15,7 @@ every file under ``src/omnibase_infra`` (``[tool.hatch.build.targets.wheel]``).
 
 from __future__ import annotations
 
+import zipfile
 from functools import cache
 from importlib.resources.abc import Traversable
 from pathlib import Path
@@ -25,7 +26,26 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
-_TIMEOUTS_RESOURCE: Traversable = Path(__file__).with_name("runtime_timeouts.yaml")
+
+def _declared_resource() -> Traversable:
+    """Resolve the YAML beside this module, from a directory or a zip import.
+
+    ``__file__`` of a module imported from a zipped wheel is a path inside the
+    archive, which ``Path`` cannot open; the archive is found by walking up to the
+    first regular file and the entry is addressed through ``zipfile.Path``.
+    """
+    beside = Path(__file__).with_name("runtime_timeouts.yaml")
+    if beside.is_file():
+        return beside
+    archive = beside.parent
+    while not archive.is_file() and archive != archive.parent:
+        archive = archive.parent
+    if not archive.is_file():
+        return beside
+    return zipfile.Path(archive, beside.relative_to(archive).as_posix())
+
+
+_TIMEOUTS_RESOURCE: Traversable = _declared_resource()
 
 
 class ModelRuntimeTimeouts(BaseModel):
