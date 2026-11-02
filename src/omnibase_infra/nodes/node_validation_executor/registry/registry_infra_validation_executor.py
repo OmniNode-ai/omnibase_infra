@@ -31,7 +31,6 @@ class RegistryInfraValidationExecutor:
         >>> from omnibase_core.models.container import ModelONEXContainer
         >>> container = ModelONEXContainer()
         >>> registry = RegistryInfraValidationExecutor(container)
-        >>> node = registry.create_executor()
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:
@@ -41,18 +40,6 @@ class RegistryInfraValidationExecutor:
             container: ONEX dependency injection container.
         """
         self._container = container
-
-    def create_executor(self) -> NodeValidationExecutor:
-        """Create a NodeValidationExecutor instance.
-
-        Returns:
-            Configured NodeValidationExecutor instance.
-        """
-        from omnibase_infra.nodes.node_validation_executor.node import (
-            NodeValidationExecutor,
-        )
-
-        return NodeValidationExecutor(self._container)
 
 
 __all__: list[str] = ["RegistryInfraValidationExecutor"]

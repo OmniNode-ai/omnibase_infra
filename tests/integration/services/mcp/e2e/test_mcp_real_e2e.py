@@ -3,12 +3,12 @@
 """Real MCP E2E integration tests using actual MCP SDK client and server.
 
 These tests use the REAL MCP SDK - not mocks. They start an actual MCP server
-using FastMCP and connect to it using the real MCP client (streamable_http_client).
+using MCPServer and connect to it using the real MCP client (streamable_http_client).
 
 This validates:
 - Real MCP protocol compliance (initialize handshake, tools/list, tools/call)
 - Real HTTP transport with actual TCP sockets
-- Real tool registration and execution through FastMCP
+- Real tool registration and execution through MCPServer
 - Proper JSON-RPC message flow
 
 The tests require an available port and use background threads for the server.
@@ -102,10 +102,10 @@ def wait_for_server(host: str, port: int, timeout: float = 10.0) -> bool:
 
 
 class MCPServerFixture:
-    """Wrapper for a real FastMCP server running in a background thread.  # ai-slop-ok: pre-existing
+    """Wrapper for a real MCPServer server running in a background thread.  # ai-slop-ok: pre-existing
 
     This class manages the lifecycle of a real MCP server using the MCP SDK's
-    FastMCP class, running it via uvicorn in a background thread.
+    MCPServer class, running it via uvicorn in a background thread.
 
     The MCP SDK's streamable_http_app() creates a Starlette app with a route
     at `/mcp`, so the client URL is `http://host:port/mcp`.
@@ -176,14 +176,10 @@ class MCPServerFixture:
     def _run_server(self) -> None:
         """Run the uvicorn server (called from background thread)."""
         import uvicorn
-        from mcp.server.fastmcp import FastMCP
+        from mcp.server.mcpserver import MCPServer
 
-        # Create FastMCP server
-        mcp = FastMCP(
-            "ONEX Real E2E Test Server",
-            stateless_http=True,
-            json_response=True,
-        )
+        # Create MCPServer server
+        mcp = MCPServer("ONEX Real E2E Test Server")
 
         # Reference to parent for tool execution tracking
         parent = self
@@ -233,7 +229,7 @@ class MCPServerFixture:
 
         # The MCP SDK's streamable_http_app() returns a Starlette app with
         # a route at /mcp. We use this directly without Mount wrapper.
-        app = mcp.streamable_http_app()
+        app = mcp.streamable_http_app(stateless_http=True, json_response=True)
 
         # Run uvicorn server
         config = uvicorn.Config(
@@ -281,7 +277,7 @@ async def create_mcp_client(url: str) -> AsyncIterator[ClientSession]:
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
-    async with streamable_http_client(url) as (read_stream, write_stream, _):
+    async with streamable_http_client(url) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             # Initialize the session (required by MCP protocol)
             await session.initialize()
@@ -310,7 +306,7 @@ class TestRealMCPInitialize:
         async with create_mcp_client(mcp_server_fixture.url) as session:
             # If we get here, initialization succeeded
             # Check server capabilities
-            capabilities = session.get_server_capabilities()
+            capabilities = session.server_capabilities
             assert capabilities is not None, "Server must return capabilities"
             # MCP servers must report tools capability
             assert capabilities.tools is not None, "Server must support tools"
@@ -466,15 +462,17 @@ class TestRealMCPErrorHandling:
     ) -> None:
         """Calling nonexistent tool returns error result.
 
-        The MCP SDK returns a CallToolResult with isError=True for
+        The MCP SDK returns a CallToolResult with is_error=True for
         unknown tools, rather than raising an exception. This test
         verifies this behavior.
         """
         async with create_mcp_client(mcp_server_fixture.url) as session:
             result = await session.call_tool("nonexistent_tool_xyz_12345", {})
 
-            # The SDK returns a result with isError=True
-            assert result.isError is True, "Expected isError=True for nonexistent tool"
+            # The SDK returns a result with is_error=True
+            assert result.is_error is True, (
+                "Expected is_error=True for nonexistent tool"
+            )
             assert result.content, "Expected error content"
             first_content = result.content[0]
             assert hasattr(first_content, "text"), "Expected text content"
@@ -560,19 +558,18 @@ class TestRealMCPProtocolCompliance:
         async with streamable_http_client(mcp_server_fixture.url) as (
             read_stream,
             write_stream,
-            _,
         ):
             async with ClientSession(read_stream, write_stream) as session:
                 # Initialize and capture result
                 init_result = await session.initialize()
 
                 # Should have protocol version
-                assert init_result.protocolVersion, (
+                assert init_result.protocol_version, (
                     "Server must report protocol version"
                 )
                 # Protocol version should be a valid string
-                assert isinstance(init_result.protocolVersion, str)
-                assert len(init_result.protocolVersion) > 0
+                assert isinstance(init_result.protocol_version, str)
+                assert len(init_result.protocol_version) > 0
 
     async def test_server_reports_server_info(
         self,
@@ -588,18 +585,17 @@ class TestRealMCPProtocolCompliance:
         async with streamable_http_client(mcp_server_fixture.url) as (
             read_stream,
             write_stream,
-            _,
         ):
             async with ClientSession(read_stream, write_stream) as session:
                 init_result = await session.initialize()
 
                 # Should have server info
-                assert init_result.serverInfo, "Server must report server info"
-                assert init_result.serverInfo.name, "Server must have a name"
+                assert init_result.server_info, "Server must report server info"
+                assert init_result.server_info.name, "Server must have a name"
                 # Our test server is named "ONEX Real E2E Test Server"
                 assert (
-                    "ONEX" in init_result.serverInfo.name
-                    or "Test" in init_result.serverInfo.name
+                    "ONEX" in init_result.server_info.name
+                    or "Test" in init_result.server_info.name
                 )
 
     async def test_tool_input_schema_is_valid_json_schema(
@@ -615,7 +611,7 @@ class TestRealMCPProtocolCompliance:
 
             for tool in result.tools:
                 # Each tool should have an input schema
-                schema = tool.inputSchema
+                schema = tool.input_schema
                 assert schema is not None, f"Tool {tool.name} must have input schema"
                 # Schema should be a dict (JSON Schema object)
                 assert isinstance(schema, dict), (
@@ -631,7 +627,7 @@ class TestRealMCPProtocolCompliance:
 
 
 class MCPConsulServerFixture:
-    """Wrapper for a real FastMCP server that discovers tools from Consul.  # ai-slop-ok: pre-existing
+    """Wrapper for a real MCPServer server that discovers tools from Consul.  # ai-slop-ok: pre-existing
 
     This class manages the lifecycle of a real MCP server that discovers
     tools from Consul instead of using locally-registered test tools.
@@ -768,14 +764,10 @@ class MCPConsulServerFixture:
     def _run_server(self) -> None:
         """Run the uvicorn server (called from background thread)."""
         import uvicorn
-        from mcp.server.fastmcp import FastMCP
+        from mcp.server.mcpserver import MCPServer
 
-        # Create FastMCP server
-        mcp = FastMCP(
-            "ONEX Consul E2E Test Server",
-            stateless_http=True,
-            json_response=True,
-        )
+        # Create MCPServer server
+        mcp = MCPServer("ONEX Consul E2E Test Server")
 
         # Reference to parent for discovered tools
         parent = self
@@ -824,7 +816,7 @@ class MCPConsulServerFixture:
 
                 return tool_handler
 
-            # Register the tool with FastMCP
+            # Register the tool with MCPServer
             handler = make_tool_handler(tool_name, tool_info)
             mcp.tool(name=tool_name, description=tool_desc)(handler)
 
@@ -840,7 +832,7 @@ class MCPConsulServerFixture:
                 return "No MCP-enabled tools discovered from service registry"
 
         # Get the Starlette app
-        app = mcp.streamable_http_app()
+        app = mcp.streamable_http_app(stateless_http=True, json_response=True)
 
         # Run uvicorn server
         config = uvicorn.Config(
@@ -989,8 +981,8 @@ class TestRealMCPWithConsul:
             first_tool = result.tools[0]
             assert first_tool.name, "Tool must have name"
             assert first_tool.description, "Tool must have description"
-            assert first_tool.inputSchema is not None, "Tool must have input schema"
-            assert isinstance(first_tool.inputSchema, dict), (
+            assert first_tool.input_schema is not None, "Tool must have input schema"
+            assert isinstance(first_tool.input_schema, dict), (
                 "Input schema must be a dict"
             )
 
@@ -1094,7 +1086,7 @@ class TestRealMCPWithConsul:
             pytest.skip("No MCP-enabled tools discovered from service registry")
 
         async with create_mcp_client(mcp_consul_server_fixture.url) as session:
-            capabilities = session.get_server_capabilities()
+            capabilities = session.server_capabilities
             assert capabilities is not None, "Server must return capabilities"
             assert capabilities.tools is not None, "Server must support tools"
 

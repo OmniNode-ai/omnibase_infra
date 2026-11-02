@@ -398,7 +398,7 @@ class TestMcpAppCreation:
 
         Verifies:
         - App is created successfully
-        - Tools are registered with the FastMCP server
+        - Tools are registered with the MCPServer server
         - App is a valid ASGI application (Starlette or MCPAuthMiddleware wrapper)
 
         Note:

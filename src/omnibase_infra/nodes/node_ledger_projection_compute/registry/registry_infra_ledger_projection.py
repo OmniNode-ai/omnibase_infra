@@ -21,11 +21,6 @@ Usage:
 
     # Get the node class for DI resolution
     node_class = RegistryInfraLedgerProjection.get_node_class()
-
-    # Create node instance with container
-    from omnibase_core.container import ModelONEXContainer
-    container = ModelONEXContainer()
-    node = RegistryInfraLedgerProjection.create_node(container)
     ```
 
 Related Tickets:
@@ -65,8 +60,6 @@ class RegistryInfraLedgerProjection:
         )
 
         container = ModelONEXContainer()
-        node = RegistryInfraLedgerProjection.create_node(container)
-        intent = node.compute(event_message)
         ```
     """
 
@@ -88,30 +81,6 @@ class RegistryInfraLedgerProjection:
             ```
         """
         return NodeLedgerProjectionCompute
-
-    @staticmethod
-    def create_node(container: ModelONEXContainer) -> NodeLedgerProjectionCompute:
-        """Create a NodeLedgerProjectionCompute instance with the given container.
-
-        Factory method for creating properly-configured node instances.
-        Prefer this method over direct instantiation for consistency
-        and future extensibility.
-
-        Args:
-            container: ONEX dependency injection container.
-
-        Returns:
-            Configured NodeLedgerProjectionCompute instance.
-
-        Example:
-            ```python
-            from omnibase_core.container import ModelONEXContainer
-
-            container = ModelONEXContainer()
-            node = RegistryInfraLedgerProjection.create_node(container)
-            ```
-        """
-        return NodeLedgerProjectionCompute(container)
 
 
 __all__ = [

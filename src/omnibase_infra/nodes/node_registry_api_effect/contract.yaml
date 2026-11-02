@@ -20,6 +20,9 @@ node_version:
   minor: 0
   patch: 1
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
+  purity: side_effect
 description: >
   EFFECT node wrapping the Registry Discovery API. Provides contract-driven configuration for the FastAPI service that exposes node registrations for dashboard consumption. Discovery is projection-based (PostgreSQL); Consul instance discovery was removed (OMN-9545). All operational limits, paths, and behaviour are defined here rather than as hardcoded constants.
 
@@ -62,6 +65,17 @@ config:
   postgres_query_timeout_seconds: 30
   # Widget mapping cache behaviour
   widget_mapping_cache_enabled: true
+  # HTTP application composition; separate from registry request dispatch.
+  cost_api_binding:
+    handler:
+      name: "HandlerCostApiDependencies"
+      module: "omnibase_infra.handlers.handler_cost_api_dependencies"
+  # Cost API: topics whose latest projection snapshot backs the cost routes.
+  # Injected into the route handlers through create_app (OMN-21736).
+  cost_snapshot_topics:
+    summary: onex.snapshot.projection.cost.summary.v1
+    by_repo: onex.snapshot.projection.cost.by_repo.v1
+    token_usage: onex.snapshot.projection.cost.token_usage.v1
 # ---------------------------------------------------------------------------
 # IO operations (EFFECT node specific)
 # ---------------------------------------------------------------------------
@@ -154,39 +168,66 @@ handler_routing:
       handler:
         name: "HandlerRegistryApiListNodes"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_nodes"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
     - operation: "get_node"
       handler:
         name: "HandlerRegistryApiGetNode"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_node"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
     - operation: "get_widget_mapping"
       handler:
         name: "HandlerRegistryApiGetWidgetMapping"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_widget_mapping"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
     - operation: "get_discovery"
       handler:
         name: "HandlerRegistryApiGetDiscovery"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_discovery"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
     - operation: "get_health"
       handler:
         name: "HandlerRegistryApiGetHealth"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_health"
         handler_type: "HTTP"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
     - operation: "list_contracts"
       handler:
         name: "HandlerRegistryApiListContracts"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_contracts"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
     - operation: "get_contract"
       handler:
         name: "HandlerRegistryApiGetContract"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_contract"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
     - operation: "list_topics"
       handler:
         name: "HandlerRegistryApiListTopics"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_list_topics"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
     - operation: "get_topic"
       handler:
         name: "HandlerRegistryApiGetTopic"
         module: "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_topic"
+      input_model:
+        name: "ModelRegistryApiRequest"
+        module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_request"
 # ---------------------------------------------------------------------------
 # Capabilities
 # ---------------------------------------------------------------------------
