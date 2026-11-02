@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 name: "node_attach_three_effect"
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 contract_version:
   major: 1
   minor: 0

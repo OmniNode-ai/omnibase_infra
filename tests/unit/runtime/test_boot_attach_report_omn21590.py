@@ -11,6 +11,7 @@ manifest and the attach report with sorted keys. A diff of one byte fails.
 
 from __future__ import annotations
 
+import difflib
 import json
 import shutil
 from pathlib import Path
@@ -56,25 +57,27 @@ def _entry_points(root: Path) -> list[MagicMock]:
 
 async def _manifest_and_report_json(root: Path = CONTRACTS) -> str:
     discover_contracts_cache_clear()
-    with patch(
-        "omnibase_infra.handlers.handler_package_announcer.entry_points",
-        return_value=_entry_points(root),
-    ):
-        manifest = discover_contracts()
-    bus = MagicMock(spec=ProtocolEventBusLike)
-    bus.subscribe = AsyncMock(return_value=AsyncMock())
-    with patch(
-        "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
-        return_value=HandlerAttachFixture,
-    ):
-        report = await wire_from_manifest(
-            manifest=manifest,
-            dispatch_engine=MessageDispatchEngine(),
-            event_bus=bus,
-            environment="local",
-            subscribe_immediately=True,
-        )
-    discover_contracts_cache_clear()
+    try:
+        with patch(
+            "omnibase_infra.handlers.handler_package_announcer.entry_points",
+            return_value=_entry_points(root),
+        ):
+            manifest = discover_contracts()
+        bus = MagicMock(spec=ProtocolEventBusLike)
+        bus.subscribe = AsyncMock(return_value=AsyncMock())
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=HandlerAttachFixture,
+        ):
+            report = await wire_from_manifest(
+                manifest=manifest,
+                dispatch_engine=MessageDispatchEngine(),
+                event_bus=bus,
+                environment="local",
+                subscribe_immediately=True,
+            )
+    finally:
+        discover_contracts_cache_clear()
     text = json.dumps(
         {
             "manifest": json.loads(manifest.model_dump_json()),
@@ -83,7 +86,23 @@ async def _manifest_and_report_json(root: Path = CONTRACTS) -> str:
         sort_keys=True,
         indent=2,
     )
-    return text.replace(str(root.resolve()), "<fixtures>")
+    # The manifest may carry the path as built (``root``) or resolved (a symlinked
+    # temporary directory); both forms are redacted.
+    for form in {str(root), str(root.resolve())}:
+        text = text.replace(form, "<fixtures>")
+    return text
+
+
+def _changed_lines(produced: str) -> list[str]:
+    """The lines on which the produced report and the golden differ."""
+    golden = GOLDEN.read_text(encoding="utf-8")
+    return [
+        line
+        for line in difflib.unified_diff(
+            golden.splitlines(), (produced + "\n").splitlines(), lineterm="", n=0
+        )
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    ]
 
 
 @pytest.mark.unit
@@ -105,15 +124,36 @@ def test_the_golden_names_every_fixture_contract() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_planted_violation_a_changed_contract_changes_the_report(
+async def test_planted_violation_a_changed_contract_changes_only_its_hash(
     tmp_path: Path,
 ) -> None:
-    """Control: the comparison is sensitive to a change in a contract's bytes."""
+    """Control: a byte change in one contract moves exactly that contract's content hash."""
     root = tmp_path / "node_announce"
     shutil.copytree(CONTRACTS, root)
     changed = root / NAMES[0] / "contract.yaml"
     changed.write_bytes(changed.read_bytes() + b"# a comment moves the content hash\n")
 
-    produced = await _manifest_and_report_json(root)
+    changed_lines = _changed_lines(await _manifest_and_report_json(root))
 
-    assert produced + "\n" != GOLDEN.read_text(encoding="utf-8")
+    assert len(changed_lines) == 2
+    assert all("contract_content_hash" in line for line in changed_lines)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_planted_violation_a_changed_topic_changes_the_report(
+    tmp_path: Path,
+) -> None:
+    """Control: a semantic change (a subscribed topic) shows in the report, not only in a hash."""
+    root = tmp_path / "node_announce"
+    shutil.copytree(CONTRACTS, root)
+    changed = root / NAMES[0] / "contract.yaml"
+    text = changed.read_text(encoding="utf-8")
+    assert "attach-one.v1" in text
+    changed.write_text(
+        text.replace("attach-one.v1", "attach-one-changed.v1"), encoding="utf-8"
+    )
+
+    changed_lines = _changed_lines(await _manifest_and_report_json(root))
+
+    assert any("attach-one-changed.v1" in line for line in changed_lines)

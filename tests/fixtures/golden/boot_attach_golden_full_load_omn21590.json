@@ -3,7 +3,7 @@
     "contracts": [
       {
         "compatibility_publish_topics": [],
-        "contract_content_hash": "121b3057b8dd956cc448c7d00e1dd956f61875fd406fa2984b1faece2322be75",
+        "contract_content_hash": "b3d7b929c6ff0ab71e0ae30f3e60b42daf80059051d62f0dc3b3145be9f4181f",
         "contract_path": "<fixtures>/node_attach_one_effect/contract.yaml",
         "contract_version": {
           "major": 1,
@@ -58,7 +58,7 @@
       },
       {
         "compatibility_publish_topics": [],
-        "contract_content_hash": "58438ba2f0c81eb0c15acd11c9964eefaeeff11387fa4c5afb0292ee4a91d7a2",
+        "contract_content_hash": "35bd44a43bc6ed122cfd152602aba49f20c1bbbcc306b53e5f2b7014d5d63892",
         "contract_path": "<fixtures>/node_attach_two_effect/contract.yaml",
         "contract_version": {
           "major": 1,
@@ -113,7 +113,7 @@
       },
       {
         "compatibility_publish_topics": [],
-        "contract_content_hash": "ef31b2058d1de82b337347fa7a4b406f9c8c191bb17549d09827c415ca25ea27",
+        "contract_content_hash": "8f30caea210a2a39e9b84fd508f42b536893d5edf22b3ee3ad4845c68a4a0c2f",
         "contract_path": "<fixtures>/node_attach_three_effect/contract.yaml",
         "contract_version": {
           "major": 1,

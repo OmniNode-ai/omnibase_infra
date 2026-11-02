@@ -6,6 +6,8 @@ node_name: node_package_announce_effect
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
 description: Boot step 0. Announce every installed package's contracts on the bound bus and build the node catalog the runtime reads.
 runtime_profiles: [local-dev]
 input_model:
