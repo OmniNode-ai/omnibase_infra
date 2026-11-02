@@ -2370,17 +2370,11 @@ entries:
     family: O
     content_sha1: 83593063a8a1631428973cae27ca9553b487457b
   - path: src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py
-    family: M
-    content_sha1: 0a9e1755428cf7e1a5f58ba223043e249f162670
-  - path: src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py
     family: O
     content_sha1: 4bdf7220650c68fdaf3ce4007c8a6631cf47d06c
   - path: src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py
     family: O
     content_sha1: ad4c5d6850be855e646291269c3b7e11f5353962
-  - path: src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py
-    family: M
-    content_sha1: 29cb4a2fe216ef53a4d145c8df65e30e66187844
   - path: src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py
     family: O
     content_sha1: 3691c2c66bb34a0d7f2e0493a7e8af19c54130c6
@@ -2389,25 +2383,16 @@ entries:
     content_sha1: 9ec908a614c2390d3d72cd9854500c159db4faf9
   - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
     family: M
-    content_sha1: 093c17c9e85e5a3b2b1611ad9eab339c17397daa
-  - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
-    family: M
     content_sha1: 2852a0b0c68fb80c16a733833450fa990797cf96
   - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
     family: M
     content_sha1: 2d35bca62ac6783047adb3932dfa94184fadd455
-  - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
-    family: M
-    content_sha1: 7cf83d637a2681ea50bcfbf1506178b3a89e7d7b
   - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
     family: O
     content_sha1: 9ec908a614c2390d3d72cd9854500c159db4faf9
   - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
     family: O
     content_sha1: e0afaa7064148122426f76c12069e46e7c9f0a05
-  - path: src/omnibase_infra/adapters/llm/adapter_llm_provider_openai.py
-    family: M
-    content_sha1: e6fa88acde1dc60d958e3cc942b4ae20b3421932
   - path: src/omnibase_infra/adapters/llm/adapter_llm_provider_openai.py
     family: O
     content_sha1: 83593063a8a1631428973cae27ca9553b487457b
@@ -2425,22 +2410,10 @@ entries:
     content_sha1: e99c3e6e18bdd38687d08f40ab9bfc6ecbe543df
   - path: src/omnibase_infra/adapters/llm/adapter_summarization_enrichment.py
     family: M
-    content_sha1: 5ba9b9e0c0162b3d02a9490bd85047773400a71a
-  - path: src/omnibase_infra/adapters/llm/adapter_summarization_enrichment.py
-    family: M
     content_sha1: ce7dabbe4d5451a3eabca420ffd0bd6fedc479ce
-  - path: src/omnibase_infra/adapters/llm/adapter_summarization_enrichment.py
-    family: M
-    content_sha1: d10570283faa75222afb272e4a47f8fa5a99382b
   - path: src/omnibase_infra/adapters/llm/adapter_summarization_enrichment.py
     family: O
     content_sha1: 9ec908a614c2390d3d72cd9854500c159db4faf9
-  - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
-    family: M
-    content_sha1: 0e4db5aff324cff4b8101d3a1a60cff9de4ba366
-  - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
-    family: M
-    content_sha1: 2618867c7da40edf36b7b79d219d59bc8e339a43
   - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
     family: M
     content_sha1: 2b763227b73072ba97ad7a6fe8234f90970666b6
@@ -3161,54 +3134,6 @@ entries:
   - path: src/omnibase_infra/nodes/node_invariant_evaluate_compute/evaluator_invariant.py
     family: O
     content_sha1: 2f66bf68a925eaff850ac926f6fbf58fd5e8f057
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 38d2b7c964b563bd5574a5d6d454f51eeb25c594
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 38d2b7c964b563bd5574a5d6d454f51eeb25c594
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 55eef37db7f3053a7cb5e2d1c0a7cf03f855fcda
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 55eef37db7f3053a7cb5e2d1c0a7cf03f855fcda
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 55eef37db7f3053a7cb5e2d1c0a7cf03f855fcda
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 57613dc1401a323367a36f597dc39d316b7862ea
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 5b371b0d3a5d8cc9dad17778b4e54b023f61c7a7
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 5b371b0d3a5d8cc9dad17778b4e54b023f61c7a7
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 5b371b0d3a5d8cc9dad17778b4e54b023f61c7a7
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: 66f2e1903b354e1a03f32d65243a3c2b402bea7a
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: a4b3ab28b60e62f8166a30610fcddd5157240875
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: ae878eadfeb3bcadbb2f03f08fe7095a7e57a4d4
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: c9f9db3fb71aadb5ca1099e43a7f9a545378f3dc
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: de89283a308cb3ee3b26be3c1a805e5a8cde93eb
-  - path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
-    family: O
-    content_sha1: de89283a308cb3ee3b26be3c1a805e5a8cde93eb
   - path: src/omnibase_infra/nodes/node_llm_embedding_effect/models/model_llm_embedding_request.py
     family: M
     content_sha1: be2cb68ac9fb7edbc9acd04982f98be7e554e72a
@@ -3288,32 +3213,11 @@ entries:
     family: O
     content_sha1: de1ec7cbd9c294e9b9b4ddced19b9f613a18f896
   - path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py
-    family: M
-    content_sha1: 1f9244a57dbde70e3e400e9e8641033a368bd094
-  - path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py
-    family: M
-    content_sha1: 4fea6d5a5360e65cb93127c308331492d4c820f2
-  - path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py
-    family: M
-    content_sha1: 78259d8f2e1b9e8731bb2f27c709972b89c09ecc
-  - path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py
-    family: M
-    content_sha1: cc62a41f158739da7b0cc3949352071b93416d74
-  - path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py
-    family: M
-    content_sha1: dfb64dcbcd5d2ccf0f0442cfc943042663ad1f8d
-  - path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py
-    family: M
-    content_sha1: fd600636c1232bfdb4cd7410e7d19f6c9ce66c2b
-  - path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py
     family: O
     content_sha1: 9ad77d81957e8ba6e536716f1b6686a54a4f022b
   - path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py
     family: O
     content_sha1: b3f05df4b6e1739741bab00142526ac31a6a1cc2
-  - path: src/omnibase_infra/nodes/node_savings_estimation_compute/models/model_savings_estimation_input.py
-    family: M
-    content_sha1: 0c726cae63345cff2cf10e74edd674a0f9179914
   - path: src/omnibase_infra/nodes/node_scope_extract_compute/handlers/handler_scope_extract.py
     family: P
     content_sha1: 60ba4b2daa4ed4d070fec06687e249e0e6f9ee45
@@ -3344,9 +3248,6 @@ entries:
   - path: src/omnibase_infra/nodes/node_vector_store_effect/handlers/handler_vector_upsert.py
     family: O
     content_sha1: ebe035b02ebeec12c7497e69b086bf6094ad5be1
-  - path: src/omnibase_infra/nodes/node_waste_detection_compute/analyzers/analyzer_model_overkill.py
-    family: M
-    content_sha1: ca1f386ee8abaa585b536b5e458a98cefa500282
   - path: src/omnibase_infra/observability/adapter_pipeline_alert_bridge.py
     family: O
     content_sha1: 6d4d7271a67411fc2a61a8c1ff86c62de0c3bb4e
@@ -3707,9 +3608,6 @@ entries:
   - path: src/omnibase_infra/services/session_registry/decision_embedder.py
     family: O
     content_sha1: 98e251966a9af238e9ff58f3d12acb8787b578f6
-  - path: src/omnibase_infra/services/session_registry/decision_search.py
-    family: M
-    content_sha1: 4f853d37a6c51fa102b42d2ea0e775233f336d84
   - path: src/omnibase_infra/services/session_registry/decision_search.py
     family: O
     content_sha1: 98e251966a9af238e9ff58f3d12acb8787b578f6
@@ -6502,13 +6400,7 @@ entries:
     content_sha1: 134ef0ebc4cbb536ff16c8c6f7b0f83266eb88b7
   - path: tests/unit/nodes/node_savings_estimation_compute/test_handler_savings_correlation.py
     family: M
-    content_sha1: 156ff6af15521ab2b6096133be2aecee358a29b5
-  - path: tests/unit/nodes/node_savings_estimation_compute/test_handler_savings_correlation.py
-    family: M
     content_sha1: 453c61e48693d1b900141af263653b1917249e16
-  - path: tests/unit/nodes/node_savings_estimation_compute/test_handler_savings_correlation.py
-    family: M
-    content_sha1: ad6c17664394d63ee971d489c752d6ec505cd6fa
   - path: tests/unit/nodes/node_savings_estimation_compute/test_handler_savings_correlation.py
     family: M
     content_sha1: c6c6d3478a5969b68a2ec7a21c397168eacedeb2
@@ -7421,9 +7313,6 @@ entries:
   - path: tests/unit/services/observability/static_context_attribution/test_utilization_scorer.py
     family: E-LAN
     content_sha1: 5805e4298c94ad0bda9c4dda61d802a575de7e2d
-  - path: tests/unit/services/session_registry/test_decision_search.py
-    family: M
-    content_sha1: caa8b532b1d7523a4d9e35cdd712534745f4ea30
   - path: tests/unit/services/test_service_llm_endpoint_health.py
     family: E-LAN
     content_sha1: 173933c19284e086d7ea251d2493b834253cb974
