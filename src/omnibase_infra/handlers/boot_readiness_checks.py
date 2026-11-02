@@ -84,7 +84,7 @@ def verify_roster_partition(
         excluded=tuple(sorted(excluded)),
         unaccounted=tuple(sorted(names - attempted - excluded)),
         in_both=tuple(sorted(attempted & excluded)),
-        foreign=tuple(sorted((attempted | excluded) - names)),
+        foreign=tuple(sorted(attempted.union(excluded) - names)),
     )
 
 
