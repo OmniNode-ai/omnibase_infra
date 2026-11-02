@@ -86,11 +86,12 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
-from omnibase_infra.protocols.protocol_registration_projection_pool import (
-    ProtocolRegistrationProjectionPool,
-)
 
 logger = logging.getLogger(__name__)
+
+# Pool type the registration reader borrows connections from; node packages
+# import this name so they never import the database driver themselves.
+type RegistrationProjectionPool = asyncpg.Pool
 
 
 class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
@@ -140,7 +141,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
         ...     print("Node is active")
     """
 
-    def __init__(self, pool: ProtocolRegistrationProjectionPool) -> None:
+    def __init__(self, pool: RegistrationProjectionPool) -> None:
         """Initialize reader with connection pool.
 
         Args:
