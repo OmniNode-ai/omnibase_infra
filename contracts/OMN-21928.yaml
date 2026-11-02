@@ -116,7 +116,7 @@ dod_evidence:
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py -q -n 0 --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21928-ac8-forward-migration-lock-holder
-    description: Hosted-runner deploy probe reads the runner from GitHub at the checked-out commit and requires the per-file lock guard, so a checkout without the change fails it. The real-PostgreSQL proof is the test file, run on a lab host and cited in the pull request body.
+    description: Hosted-runner deploy probe reads the runner from GitHub at the checked-out commit and requires the lost-lock failure that names the step, so a checkout without the change fails it. The real-PostgreSQL proof is the test file, run on a lab host and cited in the pull request body.
     source: manual
     binds_ac:
       - AC8
@@ -125,5 +125,5 @@ dod_evidence:
         check_value: |-
           set -eu;
           doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/run-forward-migrations.sh?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
-          grep -q '^guard_migration_lock_at_step() {$' <<<"$doc"
+          grep -q 'advisory lock .* was lost before' <<<"$doc"
         cwd: ${OMNI_HOME}/omnibase_infra
