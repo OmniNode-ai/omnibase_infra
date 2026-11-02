@@ -72,10 +72,9 @@ def configure_tracing() -> bool:
         resource = Resource.create({"service.name": service_name})
         provider = TracerProvider(resource=resource)
 
-        # Phoenix accepts OTLP HTTP on its main port (6006 by default).
-        # The OTLPSpanExporter appends /v1/traces automatically.
-        exporter = OTLPSpanExporter(endpoint=endpoint)
-        provider.add_span_processor(BatchSpanProcessor(exporter))
+        # Phoenix takes OTLP HTTP on its main port; endpoint= is used verbatim, so add the path.
+        url = f"{endpoint.rstrip('/').removesuffix('/v1/traces')}/v1/traces"
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=url)))
 
         trace.set_tracer_provider(provider)
 
