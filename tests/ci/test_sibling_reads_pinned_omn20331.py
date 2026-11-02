@@ -55,6 +55,9 @@ PINNED_WORKFLOWS = (
 # resolver step (omnimarket-contract-pin.yaml, OMN-17427 pin resolver, the
 # paired-PR resolver of node-migration-sync.yml) or is a sha already pinned in place.
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
+# OMN-17292: omnimarket is the one sibling pinned by release tag. The release
+# train writes it overnight; no lane and no bot writes a commit sha for it.
+RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 REPOSITORY = re.compile(r"^\s*repository: OmniNode-ai/(\w+)\s*$")
 REF = re.compile(r"^\s*ref: (\S+)")
 USES = re.compile(r"uses: OmniNode-ai/((\w+)/\.github/\S+)@(\S+)")
@@ -75,7 +78,8 @@ def _checkout_refs(text: str) -> list[tuple[int, str, str | None]]:
 
 
 def test_pins_are_full_shas_and_omnimarket_matches_contract_pin() -> None:
-    assert all(HEX40.fullmatch(v) for v in PINS.values())
+    assert all(HEX40.fullmatch(v) for k, v in PINS.items() if k != "omnimarket")
+    assert RELEASE_TAG.fullmatch(PINS["omnimarket"]), PINS["omnimarket"]
     contract_pin = yaml.safe_load(
         (REPO_ROOT / ".github" / "omnimarket-contract-pin.yaml").read_text()
     )["omnimarket_contract_ref"]
@@ -89,6 +93,12 @@ def test_sibling_checkout_refs_are_the_pin(name: str) -> None:
     for lineno, repo, ref in _checkout_refs(text):
         if ref is None or ref in {"dev", "main"}:
             bad.append(f"{name}:{lineno} {repo} ref={ref}")
+        elif (
+            repo == "omnimarket"
+            and not ref.startswith("${{")
+            and not RELEASE_TAG.fullmatch(ref)
+        ):
+            bad.append(f"{name}:{lineno} omnimarket ref={ref} is not a release tag")
         elif HEX40.fullmatch(ref):
             # a sha that predates the pin file is tolerated only when it is not a
             # branch-tip read; the migrated sites carry the pin comment

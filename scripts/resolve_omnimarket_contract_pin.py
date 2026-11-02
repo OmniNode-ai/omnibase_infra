@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Resolve the pinned omnimarket contract SHA for the grants derivation gate.
+"""Resolve the pinned omnimarket contract release tag for the grants derivation gate.
 
 OMN-17292. This replaces the OMN-15703 "live-resolve omnimarket dev HEAD" step
 in ``Application Database Domain Enforcement (OMN-15361)``.
@@ -15,7 +15,11 @@ what let one upstream merge red every open PR in the repo at once.
 
 Freshness has not been dropped, only moved off the per-PR path: the pin is
 advanced by ``.github/workflows/omnimarket-contract-pin-refresh.yml``, which
-regenerates the grants in the same commit and opens a PR.
+follows omnimarket's newest release tag once a day, after the overnight release
+train (``release-train-nightly.yml``), regenerates the grants in the same commit
+and opens a PR. The pin is a release tag and never a commit sha: a release is
+created only by the train (or by a one-off grant), so the pin moves once per
+release and no pull request is opened per omnimarket merge.
 """
 
 from __future__ import annotations
@@ -30,7 +34,15 @@ PIN_PATH = (
     Path(__file__).resolve().parents[1] / ".github" / "omnimarket-contract-pin.yaml"
 )
 EXPECTED_REPOSITORY = "OmniNode-ai/omnimarket"
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# An omnimarket RELEASE tag, written by auto-tag-on-merge when a release PR
+# merges. The per-merge ``dev-<UTC>-<sha12>`` tags do not match: they move with
+# every merge, which is the coupling this pin removes.
+_RELEASE_TAG_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+# The pin a PR moves AWAY from was committed under the base's own rules, and
+# before OMN-17292 those rules wrote a commit sha. The forward-only proof only
+# needs the commit that predecessor names, so it may read a sha there; the pin
+# this run derives from is still a release tag and nothing else.
+_COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # STDLIB ONLY -- deliberately, and load-bearing. In .github/workflows/ci.yml this
 # script runs as bare `python3` inside `Application Database Domain Enforcement
@@ -63,12 +75,17 @@ def _parse_pin_fields(text: str) -> dict[str, str]:
     return fields
 
 
-def resolve_pin(pin_path: Path = PIN_PATH) -> str:
-    """Return the pinned omnimarket commit SHA, or raise ``ValueError``.
+def resolve_pin(pin_path: Path = PIN_PATH, *, predecessor: bool = False) -> str:
+    """Return the pinned omnimarket release tag, or raise ``ValueError``.
 
-    Fails closed on anything that is not a full 40-hex commit SHA. A branch or
-    tag here would silently reintroduce the moving-input coupling this pin
-    exists to remove, so it is rejected rather than resolved.
+    Fails closed on anything that is not a ``vX.Y.Z`` release tag. A branch, a
+    per-merge dev tag or a commit sha here would either reintroduce the
+    moving-input coupling this pin exists to remove or be a pin written by hand
+    or by a bot, so it is rejected rather than resolved.
+
+    With ``predecessor=True`` (the base revision's pin, read only to prove the
+    advance is forward-only) a 40-hex commit sha is also returned: that value
+    was committed under the base's rules and names an immutable commit.
     """
     if not pin_path.is_file():
         raise ValueError(f"missing omnimarket contract pin file: {pin_path}")
@@ -82,11 +99,14 @@ def resolve_pin(pin_path: Path = PIN_PATH) -> str:
         )
 
     ref = fields.get("omnimarket_contract_ref")
-    if ref is None or not _SHA_RE.fullmatch(ref):
+    if ref is not None and predecessor and _COMMIT_SHA_RE.fullmatch(ref):
+        return ref
+    if ref is None or not _RELEASE_TAG_RE.fullmatch(ref):
         raise ValueError(
-            f"omnimarket_contract_ref must be a full 40-hex commit sha, got {ref!r}. "
-            "A branch or tag would make the grants derivation depend on a moving "
-            "foreign branch tip again (OMN-17292)."
+            f"omnimarket_contract_ref must be an omnimarket release tag (vX.Y.Z), "
+            f"got {ref!r}. A branch would make the grants derivation depend on a "
+            "moving foreign branch tip again, and a commit sha is a pin written "
+            "by hand or by a bot rather than the release train's tag (OMN-17292)."
         )
     return ref
 
@@ -100,25 +120,30 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Pin file to read (default: the committed one). CI passes the base "
             "revision's copy here to read the pin a PR is moving away from, so "
-            "both sides of a forward-only proof use this same validated parser."
+            "both sides of a forward-only proof use this same validated parser. "
+            "Any file other than the committed pin is read as that predecessor."
         ),
     )
     args = parser.parse_args(argv)
 
     try:
-        ref = resolve_pin(args.pin_file)
+        # Compare fully resolved paths on both sides, so any spelling of the
+        # committed pin (relative, absolute, a symlink, or the pin itself being a
+        # symlink) is tag-only and publishes ref=.
+        committed = args.pin_file.resolve() == PIN_PATH.resolve()
+        ref = resolve_pin(args.pin_file, predecessor=not committed)
     except (OSError, ValueError) as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1
 
     # Only the committed pin is a step OUTPUT. Resolving some other file (the
     # base revision's copy, during the forward-only proof) must not also publish
-    # a `sha=` output, or the step that reads a base pin would advertise it as
+    # a `ref=` output, or the step that reads a base pin would advertise it as
     # though it were the ref this run derives from.
     github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output and args.pin_file == PIN_PATH:
+    if github_output and committed:
         with open(github_output, "a", encoding="utf-8") as output:
-            output.write(f"sha={ref}\n")
+            output.write(f"ref={ref}\n")
     print(ref)
     return 0
 
