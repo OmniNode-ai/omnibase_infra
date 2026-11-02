@@ -72,7 +72,11 @@ def _generated_enum_topics() -> set[str]:
             continue
         module = importlib.import_module(f"{package.__name__}.{info.name}")
         for value in vars(module).values():
-            if isinstance(value, type) and issubclass(value, Enum) and value is not Enum:
+            if (
+                isinstance(value, type)
+                and issubclass(value, Enum)
+                and value is not Enum
+            ):
                 topics.update(str(member.value) for member in value)
     return topics
 
@@ -116,7 +120,10 @@ def encode_topics(text: str, contracts: Iterable[Any]) -> str:
     """Replace every topic in ``text`` with its ``${topic:<ref>}`` token."""
     reverse = {topic: ref for ref, topic in contract_topic_refs(contracts).items()}
     reverse.update(
-        {topic: f"synthetic:{family}" for family, topic in SYNTHETIC_PROBE_TOPICS.items()}
+        {
+            topic: f"synthetic:{family}"
+            for family, topic in SYNTHETIC_PROBE_TOPICS.items()
+        }
     )
     unreferenced: set[str] = set()
 
