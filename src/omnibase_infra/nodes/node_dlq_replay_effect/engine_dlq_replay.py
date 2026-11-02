@@ -442,6 +442,15 @@ def should_replay(
     if message.error_type in NON_RETRYABLE_ERRORS:
         return (False, f"Non-retryable error type: {message.error_type}")
 
+    # OMN-21324: the consume boundary DLQs under the wrapper's class name, so
+    # the cause is only in the message. Without this clause a refused command
+    # was replayed five times and terminalized six times.
+    if EnumNonRetryableErrorCategory.is_non_retryable_text(message.failure_reason):
+        return (
+            False,
+            f"Non-retryable error type in failure reason: {message.error_type}",
+        )
+
     if config.filter_start_time or config.filter_end_time:
         try:
             failure_dt = parse_datetime_with_timezone(message.failure_timestamp)
