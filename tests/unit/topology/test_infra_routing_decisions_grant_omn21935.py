@@ -68,9 +68,26 @@ def test_the_shipped_instance_grants_select_insert_update(profile: str) -> None:
 
 
 @pytest.mark.parametrize("profile", _PROFILES)
+def test_the_shipped_instance_grants_schema_usage(profile: str) -> None:
+    topology = load_topology_profile(profile)
+    principal = topology.databases["omnibase_infra"].principals[_PRINCIPAL]
+    assert any(
+        grant.object_type is EnumDatabaseGrantObjectType.SCHEMA
+        and grant.schema == "public"
+        and {p.value for p in grant.privileges} == {"USAGE"}
+        for grant in principal.grants
+    )
+
+
+@pytest.mark.parametrize("profile", _PROFILES)
 def test_the_runtime_binding_check_accepts_the_declaration(profile: str) -> None:
     topology = load_topology_profile(profile)
-    _resolve_projection_database_target((_declaration().table,), topology)
+    target = _resolve_projection_database_target((_declaration().table,), topology)
+    (table_target,) = target.table_targets
+    assert table_target.write_binding is not None
+    assert table_target.write_binding.principal == _PRINCIPAL
+    assert table_target.read_binding is not None
+    assert table_target.read_binding.principal == _PRINCIPAL
 
 
 @pytest.mark.parametrize("profile", _PROFILES)
