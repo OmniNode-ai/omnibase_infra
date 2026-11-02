@@ -11,19 +11,65 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_core.models.validation.model_stack_shape_data import (
+    ModelStackShapeData,
+)
+from omnibase_core.validation.checker_stack_shape import check_compose
+from omnibase_core.validation.validator_stack_shape import ValidatorStackShape
 from scripts.render_runtime_policy_env import format_dotenv, load_contract, render_env
 from tests.helpers.lane_overlay_fixtures import load_compose
-from tests.unit.docker.test_dev_stack_runtime_only_omn21288 import (
-    SEPARATE_SERVICES,
-    dev_stack_services,
-    find_out_of_runtime_workloads,
-)
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 OVERLAY = ROOT / "docker/docker-compose.dev-tenant-fold.yml"
+STACK_SHAPE_DATA = ROOT / "config/validation/stack_shape.yaml"
+DEV_COMPOSE_FILES = (
+    ROOT / "docker/docker-compose.infra.yml",
+    ROOT / "docker/docker-compose.dev-lane.yml",
+    OVERLAY,
+)
 FOLDED_KEY = "DEV_RUNTIME_MAIN_FOLDED_PROFILES"
 SERVICE = "tenant-projection-writer"
+
+
+def _env(service: dict) -> dict[str, str]:
+    env = service.get("environment") or {}
+    if isinstance(env, list):
+        return dict(str(e).split("=", 1) for e in env if "=" in str(e))
+    return {str(k): str(v) for k, v in env.items()}
+
+
+def _folded_only(profiles: object) -> bool:
+    return (
+        isinstance(profiles, list)
+        and bool(profiles)
+        and all(str(p).startswith("folded-") for p in profiles)
+    )
+
+
+def dev_stack_services() -> dict[str, dict]:
+    """The dev stack: the base, shared dev overlay and primary-dev fold overlay merged.
+
+    A service gated only under a folded-role profile starts under no profile a dev
+    bring-up requests: its role runs inside main.
+    """
+    merged = dict(load_compose(DEV_COMPOSE_FILES[0]).get("services") or {})
+    for path in DEV_COMPOSE_FILES[1:]:
+        for name, overlay in (load_compose(path).get("services") or {}).items():
+            if overlay is None:  # compose ``!reset null`` removes a service
+                merged.pop(name, None)
+                continue
+            base = dict(merged.get(name) or {})
+            env = {**_env(base), **_env(overlay)}
+            base.update(overlay)
+            if env:
+                base["environment"] = env
+            merged[name] = base
+    return {
+        name: service
+        for name, service in merged.items()
+        if not _folded_only(service.get("profiles"))
+    }
 
 
 def test_policy_folds_tenant_projections_on_primary_dev_only() -> None:
@@ -84,8 +130,27 @@ def test_main_keeps_its_identity_bindings_and_the_carriers_state() -> None:
     ],
 )
 def test_a_restored_carrier_is_refused_even_without_a_build(definition: dict) -> None:
-    assert SERVICE not in SEPARATE_SERVICES
-    assert SERVICE in find_out_of_runtime_workloads({SERVICE: definition})
+    """The stack-shape allowlist refuses the carrier in a compose file that does not baseline it."""
+    data = yaml.safe_load(STACK_SHAPE_DATA.read_text(encoding="utf-8"))
+    allowlist = ModelStackShapeData(
+        runtime_services=frozenset(data["runtime"]["services"]),
+        max_replicas=int(data["runtime"]["max_replicas"]),
+        dependencies=frozenset(data["dependencies"]),
+        one_shots=frozenset(n for n in data["one_shots"] if "*" not in n),
+        lanes={},
+        baseline=(),
+    )
+    assert SERVICE not in allowlist.runtime_services | allowlist.dependencies
+    assert SERVICE not in allowlist.one_shots
+    rules = {r.rule_id: r for r in ValidatorStackShape(root=ROOT).contract.rules}
+    refused = check_compose(
+        allowlist,
+        "docker/docker-compose.restored.yml",
+        {SERVICE: definition},
+        ["dev"],
+        rules,
+    )
+    assert [issue.message for issue in refused if SERVICE in issue.message]
 
 
 @pytest.mark.parametrize(
@@ -119,7 +184,7 @@ def test_fold_overlay_always_triggers_the_stack_gate() -> None:
         hook
         for repo in config["repos"]
         for hook in repo["hooks"]
-        if hook["id"] == "dev-stack-runtime-only"
+        if hook["id"] == "stack-shape"
     ]
     assert len(hooks) == 1
     assert re.search(hooks[0]["files"], str(OVERLAY.relative_to(ROOT)))
