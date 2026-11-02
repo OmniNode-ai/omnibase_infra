@@ -5,8 +5,11 @@ switch of the compaction measurement plan (section 3 and section 4, tasks CM.10
 and CM.16) may be built against this model under the four conditions below.
 
 Reviewed against the committed TLC output in this directory, bound to
-`model.sha256` (the sha256 of `CompactionReplayRun.tla`, then each cfg in sorted
-order). TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802), `-workers 2`, Java
+`model.sha256` (the sha256 of `CompactionReplayRun.tla`, then each cfg, each
+`results/*.out` and this file, in that order). Each `.out` opens with a header line
+naming the cfg and spec digests of the run that wrote it. CI runs no TLC (no java
+there), so the evidence is the recorded run plus those bindings, regenerated on a
+lab host. TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802), `-workers 2`, Java
 Adoptium 17 in `eclipse-temurin:17-jre-alpine` on lab host h051, run by
 `uv run python tests/formal/test_compaction_replay_run_model.py --regenerate`,
 tla2tools.jar sha256 `936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88`.
@@ -16,11 +19,12 @@ tla2tools.jar sha256 `936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e
 | Model.cfg | pass all eight invariants and Terminates | No error has been found, 0 states left on queue | 676134 |
 | mut_terminal_unique.cfg | counterexample | UniqueTerminal violated | 54 |
 | mut_killswitch.cfg | counterexample | NoOnAfterTrip violated | 471 |
-| mut_boundary_read.cfg | counterexample | NoReadAfterBoundary violated | 28 |
-| mut_infra_removal.cfg | counterexample | MatchedRemoval violated | 3578 |
-| mut_fork_restore.cfg | counterexample | ForkRestore violated | 234 |
+| mut_boundary_read.cfg | counterexample | NoReadAfterBoundary violated | 21 |
+| mut_infra_removal.cfg | counterexample | MatchedRemoval violated | 3611 |
+| mut_fork_restore.cfg | counterexample | ForkRestore violated | 222 |
 | mut_terminal_kind.cfg | counterexample | KindMatchesCause violated | 23 |
 | mut_prefix_once.cfg | counterexample | OnePrefixOneSnapshot violated | 6 |
+| mut_no_fairness.cfg | counterexample | Terminates violated (stuttering, no fairness) | 48147 |
 
 What the model covers, each invariant broken by its own mutant with every
 invariant of Model.cfg still enabled:
@@ -61,4 +65,7 @@ close by extending the model first:
    the case; matched removal is the property, not the storage.
 
 Liveness: `Terminates` (every run key gets a terminal row) holds under weak
-fairness of `Next`; retries are bounded by `MaxAttempts`.
+fairness of `Next`; retries are bounded by `MaxAttempts`. `mut_no_fairness.cfg`
+checks `SpecNoFair`, the same model without `WF_vars(Next)`, and TLC reports a
+stuttering counterexample to `Terminates`, so the property is falsifiable and the
+fairness assumption is what it rests on.

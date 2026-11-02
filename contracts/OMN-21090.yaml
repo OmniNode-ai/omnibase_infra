@@ -46,7 +46,7 @@ evidence_requirements:
     description: "Real migration apply, replay, column types and runtime privileges."
     command: "ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_current_context_vendor_omn21090.py -q"
   - kind: "tests"
-    description: "The committed TLC results of the replay-run model, bound to the digest of the spec and cfg files."
+    description: "The committed TLC results of the replay-run model, bound to the digest of the spec, cfg files, result outputs and verdict."
     command: "uv run pytest tests/formal/test_compaction_replay_run_model.py -q"
 emergency_bypass:
   enabled: false
@@ -94,7 +94,7 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC5"]
   - id: "dod-omn21090-ac6-replay-run-model-holds"
-    description: "The committed TLC output of Model.cfg reports no error with no states left on queue and lists all eight invariants and the Terminates property, bound to the current digest of the spec and cfg files. Fails at the merge base, where formal/compaction_replay_run does not exist. The result files were produced by uv run python tests/formal/test_compaction_replay_run_model.py --regenerate on a lab host."
+    description: "The committed TLC output of Model.cfg reports no error with no states left on queue and lists all eight invariants and the Terminates property, bound to the current digest of the spec, cfg files, result outputs and verdict. Fails at the merge base, where formal/compaction_replay_run does not exist. The result files were produced by uv run python tests/formal/test_compaction_replay_run_model.py --regenerate on a lab host."
     source: "manual"
     checks:
       - check_type: "test_passes"
@@ -102,7 +102,7 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC6"]
   - id: "dod-omn21090-ac7-replay-run-mutants-break"
-    description: "Each of the seven mutant configurations, among them mut_terminal_unique and mut_killswitch, has a committed TLC counterexample against its own invariant while keeping every invariant of Model.cfg enabled. Fails at the merge base, where no mutant result exists."
+    description: "Each of the eight mutant configurations, among them mut_terminal_unique and mut_killswitch, has a committed TLC counterexample against its own invariant while keeping every invariant of Model.cfg enabled. Fails at the merge base, where no mutant result exists."
     source: "manual"
     checks:
       - check_type: "test_passes"

@@ -1,8 +1,9 @@
+# cfg mut_boundary_read.cfg sha256 b5a6e3c45b529d81a68add4e0263d4d05f843ab9acb48c8052115c9066474628 spec CompactionReplayRun.tla sha256 eac311817793ff766051b089942a861377a84606feb939684a89cb93a2ec6913
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 127 and seed -8388595287790552162 with 2 workers on 80 cores with 30688MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
-Parsing file /tmp/tmpk0sw5eho/CompactionReplayRun.tla
+Running breadth-first search Model-Checking with fp 17 and seed 345957131274147452 with 2 workers on 80 cores with 30688MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/tmplu07_act/CompactionReplayRun.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
 Parsing file /tmp/Sequences.tla
@@ -10,10 +11,10 @@ Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module CompactionReplayRun
-Starting... (2026-11-02 04:15:00)
+Starting... (2026-11-02 09:38:30)
 Implied-temporal checking--satisfiability problem has 2 branches.
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-02 04:15:01.
+Finished computing initial states: 1 distinct state generated at 2026-11-02 09:38:31.
 Error: Invariant NoReadAfterBoundary is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -92,7 +93,7 @@ State 4: <Read line 108, col 3 to line 116, col 81 of module CompactionReplayRun
 /\ incidents = {}
 /\ attempt = (<<c1, stock>> :> 1 @@ <<c1, mod>> :> 0)
 
-34 states generated, 28 distinct states found, 19 states left on queue.
+24 states generated, 21 distinct states found, 15 states left on queue.
 The depth of the complete state graph search is 4.
-The average outdegree of the complete state graph is 4 (minimum is 2, the maximum 5 and the 95th percentile is 5).
-Finished in 00s at (2026-11-02 04:15:01)
+The average outdegree of the complete state graph is 4 (minimum is 4, the maximum 4 and the 95th percentile is 4).
+Finished in 00s at (2026-11-02 09:38:31)

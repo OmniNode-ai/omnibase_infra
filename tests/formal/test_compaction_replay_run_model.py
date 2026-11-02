@@ -2,12 +2,16 @@
 # SPDX-License-Identifier: MIT
 """TLC evidence for the compaction replay-run model (OMN-21090, plan task CM.0).
 
-The model passes every invariant, each mutant configuration fails the invariant
-it is named for with every invariant still enabled, and a design-review verdict
-is recorded, against the content digest of the spec and cfg files. The
-assertions read the committed ``results/<cfg stem>.out``; the digest test ties
-those files to the spec and cfgs as they stand, so a changed model with stale
-results fails here. To regenerate ``results/`` on a lab host with java or
+The model passes every invariant and ``Terminates``, each mutant configuration
+fails the property it is named for with every invariant still enabled, and a
+design-review verdict is recorded, against the content digest of the spec, the
+cfg files, every ``results/*.out`` and the verdict. The assertions read the
+committed ``results/<cfg stem>.out``; each output opens with a header naming the
+cfg and spec digests of the run that produced it, so an output swapped between
+configs or left over from an older model fails here, and the digest test ties
+the whole set together, so a hand-edited output without a regenerate fails too.
+This is a recorded-result check: CI has no java and runs no TLC, so the
+regenerate on a lab host is what produces the evidence. To regenerate ``results/`` on a lab host with java or
 docker (a shell script has no canonical location in this repository, so the
 runner lives here, as it does for the host bring-up model)::
 
@@ -15,9 +19,9 @@ runner lives here, as it does for the host bring-up model)::
         uv run python tests/formal/test_compaction_replay_run_model.py --regenerate
 
 It runs Model.cfg (which must pass) and each mut_*.cfg (each must violate the
-invariant it is named for) into results/<cfg stem>.out, writes the sha256 of the
-spec then the cfg files in sorted order to results/model.sha256, prints one
-verdict line per config, and exits 1 when any config does not behave as expected.
+property it is named for) into results/<cfg stem>.out behind a header line, writes
+the digest (see ``_digest``) to results/model.sha256, prints one verdict line per
+config, and exits 1 when any config does not behave as expected.
 """
 
 from __future__ import annotations
@@ -45,7 +49,13 @@ EXPECTED_VIOLATIONS = {
     "mut_fork_restore": "Invariant ForkRestore is violated.",
     "mut_terminal_kind": "Invariant KindMatchesCause is violated.",
     "mut_prefix_once": "Invariant OnePrefixOneSnapshot is violated.",
+    "mut_no_fairness": "Temporal properties were violated.",
 }
+
+HEADER = re.compile(
+    r"^# cfg (?P<cfg>\S+) sha256 (?P<cfg_sha>[0-9a-f]{64})"
+    r" spec (?P<spec>\S+) sha256 (?P<spec_sha>[0-9a-f]{64})$"
+)
 
 #: The invariants the plan's CM.0 names, each with the mutant that must break it.
 INVARIANT_MUTANTS = {
@@ -59,12 +69,24 @@ INVARIANT_MUTANTS = {
 }
 
 
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _digest() -> str:
+    """sha256 of the spec, each cfg, each result output and the verdict, in that order."""
     h = hashlib.sha256()
     h.update((MODEL_DIR / SPEC).read_bytes())
     for cfg in sorted(MODEL_DIR.glob("*.cfg")):
         h.update(cfg.read_bytes())
+    for out in sorted(RESULTS.glob("*.out")):
+        h.update(out.read_bytes())
+    h.update((RESULTS / "design_review_verdict.txt").read_bytes())
     return h.hexdigest()
+
+
+def _header(cfg_stem: str) -> str:
+    return f"# cfg {cfg_stem}.cfg sha256 {_sha(MODEL_DIR / f'{cfg_stem}.cfg')} spec {SPEC} sha256 {_sha(MODEL_DIR / SPEC)}"
 
 
 def _cfg_invariants(cfg_stem: str) -> list[str]:
@@ -85,6 +107,15 @@ def test_model_cfg_holds_every_invariant_and_terminates() -> None:
     assert "Model checking completed. No error has been found." in out
     assert "0 states left on queue." in out
     assert "PROPERTIES Terminates" in (MODEL_DIR / "Model.cfg").read_text()
+    assert "temporal properties for the complete state space" in out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("cfg", sorted(["Model", *EXPECTED_VIOLATIONS]))
+def test_each_result_is_bound_to_its_own_cfg_and_spec(cfg: str) -> None:
+    first = (RESULTS / f"{cfg}.out").read_text().splitlines()[0]
+    assert HEADER.match(first), f"{cfg}.out opens without a cfg/spec header"
+    assert first == _header(cfg)
 
 
 @pytest.mark.unit
@@ -115,6 +146,17 @@ def test_model_states_every_invariant_with_a_mutant_that_breaks_it() -> None:
 @pytest.mark.parametrize("mutant", sorted(EXPECTED_VIOLATIONS))
 def test_mutant_keeps_every_invariant_checked(mutant: str) -> None:
     assert _cfg_invariants(mutant) == _cfg_invariants("Model")
+    assert "PROPERTIES Terminates" in (MODEL_DIR / f"{mutant}.cfg").read_text()
+
+
+@pytest.mark.unit
+def test_terminates_is_broken_only_by_dropping_fairness() -> None:
+    model = (MODEL_DIR / "Model.cfg").read_text()
+    mutant = (MODEL_DIR / "mut_no_fairness.cfg").read_text()
+    assert model.replace("SPECIFICATION Spec\n", "SPECIFICATION SpecNoFair\n") == mutant
+    spec = (MODEL_DIR / SPEC).read_text()
+    assert "Spec == Init /\\ [][Next]_vars /\\ WF_vars(Next)" in spec
+    assert "SpecNoFair == Init /\\ [][Next]_vars\n" in spec
 
 
 @pytest.mark.unit
@@ -171,7 +213,7 @@ def _regenerate() -> int:
     status = 0
     for cfg in sorted(MODEL_DIR.glob("*.cfg")):
         out = _run_tlc(jar, cfg.stem)
-        (RESULTS / f"{cfg.stem}.out").write_text(out)
+        (RESULTS / f"{cfg.stem}.out").write_text(f"{_header(cfg.stem)}\n{out}")
         if cfg.stem == "Model":
             ok = "Model checking completed. No error has been found." in out
         else:

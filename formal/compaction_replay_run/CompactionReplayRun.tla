@@ -11,7 +11,7 @@
    KindMatchesCause (distinct terminal kinds) invariant mut_terminal_kind (KindGuard=FALSE)
    OnePrefixOneSnapshot (one build per case)  invariant  mut_prefix_once (OncePrefixGuard=FALSE)
    TypeOK (all variables stay in their types) invariant (checked on Model)
-   Terminates (every run key gets a terminal) temporal  (checked on Model) *)
+   Terminates (every run key gets a terminal) temporal  mut_no_fairness (SpecNoFair, no WF_vars(Next)) *)
 EXTENDS Naturals, FiniteSets
 CONSTANTS Cases, Arms, Sessions, Boundary, MaxT, MaxAttempts,
           UniqueTerminalGuard, KillGuard, BoundaryGuard, RemovalGuard,
@@ -181,6 +181,9 @@ Next == ReplayNext \/ LiveNext
 
 \* With all guards on, changing steps consume finite progress; fairness suffices.
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
+
+\* The mutation that must break Terminates: without fairness a run may stutter forever.
+SpecNoFair == Init /\ [][Next]_vars
 
 UniqueTerminal == \A r \in RunKeys: termRows[r] <= 1
 NoReadAfterBoundary == \A r \in RunKeys: maxRead[r] <= Boundary
