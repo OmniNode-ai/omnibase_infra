@@ -20,6 +20,7 @@ import pytest
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums import EnumInjectionScope
+from omnibase_core.errors.error_service_resolution import ServiceResolutionError
 from omnibase_infra.handlers.registration_storage import (
     handler_registration_storage_postgres as module,
 )
@@ -200,5 +201,7 @@ def test_config_without_dsn_or_host_fails_to_load() -> None:
 
 @pytest.mark.unit
 def test_handler_refuses_a_container_without_the_config() -> None:
-    with pytest.raises(Exception, match="ModelRegistrationStoragePostgresConfig"):
+    with pytest.raises(
+        ServiceResolutionError, match="ModelRegistrationStoragePostgresConfig"
+    ):
         HandlerRegistrationStoragePostgres(ModelONEXContainer())
