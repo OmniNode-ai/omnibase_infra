@@ -40,9 +40,9 @@ requirements:
   - id: req-omn21288-ac6-topic-baseline
     statement: "The dev lane's topic-spec count per boot is recorded before the boot-provisioning change, held as data, and a boot that grows it fails a check."
     acceptance:
-      - id: AC8
+      - id: AC21288291
         statement: |-
-          AC8: the before reading (dev topics, partitions, groups, zero-consumer groups, memory and the per-boot topic spec count) is recorded with read times beside the plan's figures -- falsifier: re-read the numbers from the broker admin endpoint and show they match within the tolerance for a live bus
+          AC21288291: the before reading (dev topics, partitions, groups, zero-consumer groups, memory and the per-boot topic spec count) is recorded with read times beside the plan's figures -- falsifier: re-read the numbers from the broker admin endpoint and show they match within the tolerance for a live bus
       - id: AC9
         statement: |-
           AC9: a planted extra topic spec at boot fails the check -- falsifier: uv run pytest of the new test with one spec appended to the boot provisioning list fails, and passes without it
@@ -209,7 +209,7 @@ dod_evidence:
         check_value: |-
           grep -c 'read_at: "2026-11-01T23:29:24Z"' config/boot_topic_specs.yaml
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC8]
+    binds_ac: [AC21288291]
   - id: dod-omn21288-ac7-planted-spec-fails
     description: >-
       The test builds the provisioning list through TopicProvisioner, discovers one extra spec from a real standalone manifest at boot and requires the planted list to be over the committed record by one while the unplanted list is within it. The baseline validator must raise ValueError for the planted list. The test file is new on this branch, so the run fails at the merge base.
@@ -232,7 +232,7 @@ dod_evidence:
     description: >-
       Reject impossible calendar dates, non-UTC timestamps and malformed measurement SHAs while accepting a real leap day. This exercises the typed baseline record loaded from the committed data file.
     source: manual
-    binds_ac: [AC8]
+    binds_ac: [AC21288291]
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -k 'read_time or measured_at' -q --no-cov -p no:cacheprovider
