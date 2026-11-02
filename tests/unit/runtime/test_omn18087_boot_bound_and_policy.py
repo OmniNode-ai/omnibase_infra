@@ -95,7 +95,7 @@ def test_the_renderer_writes_main_policy_and_the_committed_env_matches() -> None
     assert rendered["DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"] == ",".join(
         boot.priority_contracts
     )
-    assert rendered["DEV_RUNTIME_MAIN_MEMORY_LIMIT"] == boot.memory_limit
+    assert rendered["DEV_RUNTIME_MAIN_MEMORY"] == boot.memory_limit
     assert POLICY_ENV_PATH.read_text(encoding="utf-8") == renderer.format_dotenv(
         rendered
     )
@@ -108,7 +108,7 @@ def test_a_process_that_declares_no_boot_policy_renders_none() -> None:
         key
         for key in rendered
         if key.startswith("DEV_RUNTIME_EFFECTS_")
-        and key.endswith(("_READY_BOUND_SECONDS", "_MEMORY_LIMIT"))
+        and key.endswith(("_READY_BOUND_SECONDS", "_MEMORY"))
     ]
 
 
@@ -116,7 +116,7 @@ def test_main_has_no_memory_literal_in_any_compose_file() -> None:
     main = _compose(INFRA_COMPOSE)["services"]["omninode-runtime"]
     memory = main["deploy"]["resources"]["limits"]["memory"]
 
-    assert memory.startswith("${DEV_RUNTIME_MAIN_MEMORY_LIMIT:?")
+    assert memory.startswith("${DEV_RUNTIME_MAIN_MEMORY:?")
     assert "1536M" not in str(main)
 
 

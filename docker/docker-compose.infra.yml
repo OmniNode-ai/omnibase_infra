@@ -1256,7 +1256,7 @@ services:
       resources:
         limits:
           cpus: '1.0'
-          memory: ${DEV_RUNTIME_MAIN_MEMORY_LIMIT:?runtime policy contract must set DEV_RUNTIME_MAIN_MEMORY_LIMIT}
+          memory: ${DEV_RUNTIME_MAIN_MEMORY:?runtime policy contract must set DEV_RUNTIME_MAIN_MEMORY}
         reservations:
           cpus: '0.25'
           memory: 256M

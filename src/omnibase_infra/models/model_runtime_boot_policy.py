@@ -53,7 +53,7 @@ class ModelRuntimeBootPolicy(BaseModel):
                 self.max_concurrent_contract_attach
             ),
             f"{prefix}_BOOT_PRIORITY_CONTRACTS": ",".join(self.priority_contracts),
-            f"{prefix}_MEMORY_LIMIT": self.memory_limit,
+            f"{prefix}_MEMORY": self.memory_limit,
         }
 
 

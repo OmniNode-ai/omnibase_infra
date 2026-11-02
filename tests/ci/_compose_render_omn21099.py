@@ -131,7 +131,7 @@ def _compose_environment(
     for key in (
         "DEV_REDPANDA_MEMORY",
         "DEV_REDPANDA_MEM_LIMIT",
-        "DEV_RUNTIME_MAIN_MEMORY_LIMIT",
+        "DEV_RUNTIME_MAIN_MEMORY",
     ):
         if key in environment and policy.get(key):
             environment[key] = str(policy[key])
