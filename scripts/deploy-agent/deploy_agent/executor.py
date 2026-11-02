@@ -4751,8 +4751,15 @@ class DeployExecutor:
                 lane=lane,
                 force_recreate=False,
             )
+            # OMN-18143: every image was built above; compose must not build
+            # them again inside the up ceiling.
             self._compose_up(
-                Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
+                Phase.RUNTIME,
+                Scope.RUNTIME,
+                [],
+                on_phase_update,
+                lane=lane,
+                compose_may_build=False,
             )
             self._deploy_gateway_lane(
                 on_phase_update,
@@ -4788,7 +4795,9 @@ class DeployExecutor:
                     git_ref=git_ref,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
-        self._compose_up(phase, scope, services, on_phase_update, lane=lane)
+        self._compose_up(
+            phase, scope, services, on_phase_update, lane=lane, compose_may_build=False
+        )
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
         # recreating is a self-inflicted delivery gap.
@@ -6246,6 +6255,7 @@ class DeployExecutor:
         extra_env: Mapping[str, str] | None = None,
         force_recreate: bool = True,
         build: bool = True,
+        compose_may_build: bool = True,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
 
@@ -6289,14 +6299,9 @@ class DeployExecutor:
             )
             # The migration one-shots are not gated on any healthcheck, so they
             # keep the flat phase bound.
-            if build:
-                self._ensure_runtime_migrations_ready(
-                    lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
-                )
-            else:
-                self._ensure_runtime_migrations_ready(
-                    lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=False
-                )
+            self._ensure_runtime_migrations_ready(
+                lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=build
+            )
             # OMN-19911: then the control-plane one-shots whose declaration
             # moved, BEFORE the services that rely on what they configure.
             self.rerun_changed_oneshots(
@@ -6352,19 +6357,11 @@ class DeployExecutor:
         # Running`, and the same dry-run with `--force-recreate --pull always`
         # reports it `Recreated`. The flag was the whole cause; there was no
         # config drift to respond to.
-        #
-        # This is the same conclusion `converge_deps` already reached for the
-        # recovery path below ("--force-recreate is deliberately ABSENT,
-        # because convergence must start what is missing and leave what is
-        # already running alone"). The two now agree.
         if force_recreate:
             cmd.append("--force-recreate")
-        if not build:
+        if not build or not compose_may_build:
             cmd.append("--no-build")
-        cmd += [
-            "--pull",
-            "never" if scope == Scope.RUNTIME or not build else "always",
-        ]
+        cmd += ["--pull", "never" if scope == Scope.RUNTIME or not build else "always"]
         # OMN-9455: runtime scope must pass --no-deps so compose cannot recreate
         # the core infra services (postgres/redpanda/valkey/infisical) declared
         # as depends_on targets of the runtime services.
