@@ -64,6 +64,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.handlers.model_ttl_value_cell import ModelTtlValueCell
 from omnibase_spi.protocols.storage import ProtocolVectorStoreHandler
 
 logger = logging.getLogger(__name__)
@@ -189,8 +190,9 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._initialized: bool = False
         # Health check caching
-        self._cached_health: ModelVectorHealthStatus | None = None
-        self._health_cache_time: float = 0.0
+        self._health_cache: ModelTtlValueCell[ModelVectorHealthStatus] = (
+            ModelTtlValueCell(ttl_seconds=_HEALTH_CACHE_TTL_SECONDS)
+        )
 
     @property
     def handler_type(self) -> str:
@@ -303,8 +305,7 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
             self._client = None
         self._initialized = False
         # Clear health cache
-        self._cached_health = None
-        self._health_cache_time = 0.0
+        self._health_cache.discard()
         logger.info("HandlerQdrant shutdown complete")
 
     async def close(self) -> None:
@@ -1074,11 +1075,9 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
         """
         # Return cached result if recent
         current_time = time.time()
-        if (
-            self._cached_health is not None
-            and current_time - self._health_cache_time < _HEALTH_CACHE_TTL_SECONDS
-        ):
-            return self._cached_health
+        cached = self._health_cache.fresh(current_time)
+        if cached is not None:
+            return cached
 
         start_time = time.time()
 
@@ -1110,8 +1109,7 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
             )
 
             # Cache the result
-            self._cached_health = health
-            self._health_cache_time = current_time
+            self._health_cache.store(health, current_time)
 
             return health
         except Exception as e:  # noqa: BLE001 — boundary: returns degraded response
