@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
+import yaml
 
 from omnibase_infra.handlers.placement import (
     EnumPlacementHealthVerdict,
@@ -26,6 +27,9 @@ from omnibase_infra.handlers.placement import (
     ModelPlacementPolicy,
     ModelPlacementReplayEvent,
 )
+from omnibase_infra.nodes.node_placement_runtime_effect.registry.registry_infra_placement_runtime import (
+    RegistryInfraPlacementRuntime,
+)
 
 from .conftest import BlackholeProxy, EtcdProcess
 
@@ -34,6 +38,10 @@ pytestmark = [pytest.mark.integration, pytest.mark.timeout(120)]
 PROC = Path(__file__).with_name("placement_runtime_proc.py")
 FAILOVER_TARGET_S = 10.0
 FENCE_BOUND_S = 5.0
+CONTRACT = (
+    Path(__file__).resolve().parents[4]
+    / "src/omnibase_infra/nodes/node_placement_runtime_effect/contract.yaml"
+)
 
 
 class RecordingNode:
@@ -74,9 +82,13 @@ _Nodes = dict[str, tuple[Literal["any", "primary"], RecordingNode]]
 
 
 def _runtime(runtime_id: str, endpoint: str, nodes: _Nodes) -> HandlerPlacementRuntime:
-    runtime = HandlerPlacementRuntime(
+    settings = RegistryInfraPlacementRuntime.settings_from_contract(
+        yaml.safe_load(CONTRACT.read_text()), "inmemory"
+    )
+    runtime = RegistryInfraPlacementRuntime(
+        adapter=HandlerPlacementEtcd(endpoint), settings=settings
+    ).build(
         runtime_id=runtime_id,
-        adapter=HandlerPlacementEtcd(endpoint),
         nodes={
             name: (
                 ModelPlacementPolicy(mode=mode, failover_target_s=FAILOVER_TARGET_S),

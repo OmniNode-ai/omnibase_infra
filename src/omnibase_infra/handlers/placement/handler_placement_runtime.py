@@ -20,22 +20,11 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Mapping
+from contextlib import AbstractAsyncContextManager
 from typing import Protocol, runtime_checkable
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import InfraConnectionError
-from omnibase_infra.handlers.placement.handler_placement_election import (
-    HandlerPlacementElection,
-)
-from omnibase_infra.handlers.placement.handler_placement_etcd import (
-    HandlerPlacementEtcd,
-)
-from omnibase_infra.handlers.placement.handler_placement_serving import (
-    read_serving_report,
-)
-from omnibase_infra.handlers.placement.handler_placement_session import (
-    HandlerPlacementSession,
-)
 from omnibase_infra.handlers.placement.model_placement_command import (
     ModelPlacementCommand,
 )
@@ -44,6 +33,18 @@ from omnibase_infra.handlers.placement.model_placement_policy import (
 )
 from omnibase_infra.handlers.placement.model_placement_serving_report import (
     ModelPlacementServingReport,
+)
+from omnibase_infra.models.model_placement_serving_request import (
+    ModelPlacementServingRequest,
+)
+from omnibase_infra.protocols.protocol_placement_election import (
+    ProtocolPlacementElection,
+)
+from omnibase_infra.protocols.protocol_placement_serving_reader import (
+    ProtocolPlacementServingReader,
+)
+from omnibase_infra.protocols.protocol_placement_session import (
+    ProtocolPlacementSession,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,43 +68,39 @@ class ProtocolPlacedNode(Protocol):
 
 
 class HandlerPlacementRuntime:
-    """Places one runtime's loaded nodes according to their placement policy."""
+    """Places one runtime's loaded nodes according to their placement policy.
+
+    Every collaborator arrives through the constructor: the registry in
+    ``node_placement_runtime_effect`` builds the session, the elections and the
+    serving reader, and the contract profile supplies every timing.
+    """
 
     def __init__(
         self,
         *,
         runtime_id: str,
-        adapter: HandlerPlacementEtcd,
+        session: ProtocolPlacementSession,
+        elections: Mapping[str, ProtocolPlacementElection],
         nodes: Mapping[str, tuple[ModelPlacementPolicy, ProtocolPlacedNode]],
-        ttl_s: int = 4,
-        margin_s: float = 1.5,
-        keepalive_interval_s: float = 1.0,
-        campaign_interval_s: float = 0.25,
-        fence_tick_s: float = 0.1,
+        serving_reader: ProtocolPlacementServingReader,
+        lock: AbstractAsyncContextManager[None],
+        min_serving: int,
+        keepalive_interval_s: float,
+        campaign_interval_s: float,
+        fence_tick_s: float,
     ) -> None:
         self._runtime_id = runtime_id
-        self._adapter = adapter
-        self._nodes = dict(nodes)
+        self._session = session
+        self._elections = elections
+        self._nodes = nodes
+        self._serving_reader = serving_reader
+        self._min_serving = min_serving
         self._keepalive_interval_s = keepalive_interval_s
         self._campaign_interval_s = campaign_interval_s
         self._fence_tick_s = fence_tick_s
-        self._session = HandlerPlacementSession(
-            adapter=adapter,
-            runtime_id=runtime_id,
-            node_names=sorted(self._nodes),
-            ttl_s=ttl_s,
-            margin_s=margin_s,
-        )
-        self._elections = {
-            name: HandlerPlacementElection(
-                adapter=adapter, session=self._session, node_name=name
-            )
-            for name, (policy, _) in self._nodes.items()
-            if policy.mode == "primary"
-        }
         self._started: dict[str, int] = {}
         self._tasks: list[asyncio.Task[None]] = []
-        self._lock = asyncio.Lock()
+        self._lock = lock
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -143,11 +140,18 @@ class HandlerPlacementRuntime:
         )
 
     async def serving_report(
-        self, *, min_serving: int = 2
+        self, *, min_serving: int | None = None
     ) -> ModelPlacementServingReport:
-        return await read_serving_report(
-            self._adapter, expected_nodes=sorted(self._nodes), min_serving=min_serving
+        return await self._serving_reader(
+            expected_nodes=sorted(self._nodes),
+            min_serving=self._min_serving if min_serving is None else min_serving,
         )
+
+    async def handle(
+        self, request: ModelPlacementServingRequest
+    ) -> ModelPlacementServingReport:
+        """Answer one placement decision: the per-node serving report."""
+        return await self.serving_report(min_serving=request.min_serving)
 
     async def start(self) -> None:
         for name, (policy, node) in self._nodes.items():
@@ -221,7 +225,7 @@ class HandlerPlacementRuntime:
                     await self._acquire(name, election)
             await asyncio.sleep(self._campaign_interval_s)
 
-    async def _acquire(self, name: str, election: HandlerPlacementElection) -> None:
+    async def _acquire(self, name: str, election: ProtocolPlacementElection) -> None:
         node = self._nodes[name][1]
         epoch = election.epoch
         await node.rebuild(epoch)

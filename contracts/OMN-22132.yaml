@@ -1,0 +1,54 @@
+schema_version: 1.0.0
+ticket_id: OMN-22132
+title: HandlerPlacementRuntime takes its dependencies by constructor injection and leaves the handler_di baseline
+summary: The placement runtime handler receives its session, elections, serving reader, lock and timings through its constructor; RegistryInfraPlacementRuntime is the composition root and the node contract carries the timings per binding profile.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-placement-runtime-di
+    statement: handler_placement_runtime.py builds none of its dependencies and holds no timing literal, and its baseline entry is deleted.
+    acceptance:
+      - id: AC1
+        statement: The seven handler-di-gate findings of handler_placement_runtime.py are fixed in code and its baseline line is deleted in the same change.
+      - id: AC2
+        statement: The handler behaves as before on the existing tests and a new test builds it through DI on the in-memory and Redpanda-overlay profiles.
+      - id: AC3
+        statement: The merged change is in the dev lane image running on the lab.
+      - id: AC4
+        statement: One placement decision is answered on the dev lane after the merge and the handler-di-gate hook run over the whole tree reports the baseline one entry shorter.
+evidence_requirements:
+  - kind: tests
+    description: The handler built through DI on both profiles and the registry over an in-memory store.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/placement -q --no-cov
+dod_evidence:
+  - id: dod-handler-di-gate
+    description: The hook exits 0 on the file and over the whole tree, and the baseline no longer lists the file.
+    source: generated
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pre-commit run handler-di-gate --all-files
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "! grep -q handler_placement_runtime.py .onex_ratchets/handler_di_baseline.txt"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-placement-runtime-two-profiles
+    description: The handler is built from fakes and through the registry on the in-memory and Redpanda profiles.
+    source: generated
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/placement/test_handler_placement_runtime_di_omn22132.py -q --no-cov
+  - id: dod-deploy-placement-registry
+    description: The deployed runtime container carries the placement registry and reads both contract profiles, a probe against the live container that fails before this change.
+    source: manual
+    binds_ac:
+      - AC3
+      - AC4
+    checks:
+      - check_type: command
+        check_value: PROBE='import yaml, pathlib; from omnibase_infra.nodes.node_placement_runtime_effect.registry.registry_infra_placement_runtime import RegistryInfraPlacementRuntime as R; import omnibase_infra.nodes.node_placement_runtime_effect as n; c = yaml.safe_load((pathlib.Path(n.__file__).parent / "contract.yaml").read_text()); assert {R.settings_from_contract(c, p).ttl_s for p in ("inmemory", "redpanda")} == {4, 6}'; if docker inspect ${RUNTIME_CONTAINER:-omninode-runtime} >/dev/null 2>&1; then docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "$PROBE"; else env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "$PROBE"; fi
+        cwd: ${OMNI_HOME}/omnibase_infra
