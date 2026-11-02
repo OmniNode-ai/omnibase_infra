@@ -447,6 +447,14 @@ def test_same_fixture_is_red_once_the_runtime_config_opts_in(tmp_path: Path) -> 
     assert "opens no dynamic contract listener" not in result.stdout
 
 
+def test_probe_names_the_opt_in_before_asserting_a_live_group(tmp_path: Path) -> None:
+    """OMN-20079: with the switch on the step says so, then still requires the group."""
+    result = _run_probe(tmp_path, [(_GROUP, 1)], runtime_config=_ENABLED)
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    assert "contract_hotload.enabled is true" in result.stdout
+    assert f"live consumer group {_GROUP} (1 member) on {_TOPIC}" in result.stdout
+
+
 def test_probe_fails_when_the_opted_in_group_has_no_member(tmp_path: Path) -> None:
     _assert_no_live_group(_run_probe(tmp_path, [(_GROUP, 0)], runtime_config=_ENABLED))
 

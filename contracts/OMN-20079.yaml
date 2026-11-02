@@ -30,7 +30,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q -n 0 --no-cov -p no:randomly -k "live_group or no_group_owns or no_member or recorded_real_broker"
+        check_value: uv run --frozen pytest tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q -n 0 --no-cov -p no:randomly -k "names_the_opt_in or live_group or no_group_owns or no_member or recorded_real_broker"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
