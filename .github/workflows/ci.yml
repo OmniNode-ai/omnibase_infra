@@ -619,8 +619,10 @@ jobs:
       # build the pull request's own wheel, install it into a clean virtual
       # environment WITHOUT the lock (mcp resolves to the highest version the
       # declared range admits, as it does for a PyPI install) and build the
-      # streamable HTTP MCP application. On a commit that imports a module the
-      # resolved SDK no longer ships, the last step fails with ImportError.
+      # streamable HTTP MCP application with one registered tool, so the tool
+      # registration path runs against the resolved SDK. On a commit that
+      # imports a module the resolved SDK no longer ships, the last step fails
+      # with ImportError.
       - name: Build wheel for MCP resolution check
         run: uv build --wheel --out-dir "$RUNNER_TEMP/dist"
 
@@ -639,8 +641,17 @@ jobs:
               TransportMCPStreamableHttp,
           )
 
+
+          class _SmokeTool:
+              """Minimal tool definition so registration runs against the resolved SDK."""
+
+              name = "mcp_resolution_smoke"
+              description = "Registers one tool through the installed MCP SDK."
+              parameters: list[object] = []
+
+
           app = TransportMCPStreamableHttp().create_app(
-              tools=[], tool_executor=lambda name, arguments: None
+              tools=[_SmokeTool()], tool_executor=lambda name, arguments: None
           )
           assert app is not None
           print("create_app returned", type(app).__name__)
