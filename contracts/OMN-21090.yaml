@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-21090"
 title: "Claude Code context service and delegation adapter (compaction mod)"
-summary: "This repository change vendors the per-session current-context projection's migrations ahead of its omnimarket writer node (TA.13, boundary algorithm step 5): node_projection_compaction_current_context/0000 creates omninode_internal.compaction_current_context and 0001 delivers the omninode_runtime grant on the table and its cursor sequence. omnimarket#4430 declares the relation and sequence in omnimarket's ownership manifest and carries no SQL, so these are interim vendored files, digest-pinned until the writer node carries them. Adds checksum-bound ledger rows and migration classes, one interim grant declaration named in the OMN-18863 expiry module, and the regenerated topology instances and rendered catalogs, the same shape the compaction_receipts vendor used. The epic criteria are read through the Linear API on child tickets and are not bound by this contract."
+summary: "This repository change vendors the per-session current-context projection's migrations ahead of its omnimarket writer node (TA.13, boundary algorithm step 5): node_projection_compaction_current_context/0000 creates omninode_internal.compaction_current_context and 0001 delivers the omninode_runtime grant on the table and its cursor sequence. omnimarket#4430 declares the relation and sequence in omnimarket's ownership manifest and carries no SQL, so these are interim vendored files, digest-pinned until the writer node carries them. Adds checksum-bound ledger rows and migration classes, one interim grant declaration named in the OMN-18863 expiry module, and the regenerated topology instances and rendered catalogs, the same shape the compaction_receipts vendor used. The epic criteria are read through the Linear API on child tickets and are not bound by this contract. A later change adds formal/compaction_replay_run, the TLA+ model of the replay-run lifecycle (plan task CM.0), with its committed TLC results and a test that binds them to the model digest."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -25,6 +25,19 @@ requirements:
       - id: "AC5"
         statement: |-
           AC5: every Track E ticket under this epic is Done with its own criteria met -- falsifier: a child ticket of this epic in track E not in state Done, read through the Linear API
+  - id: "req-omn21090-cm0-replay-run-model"
+    statement: |-
+      The TLA+ model of the compaction replay-run lifecycle in formal/compaction_replay_run passes every invariant on Model.cfg, each mutant configuration violates its own invariant with every invariant still enabled, and the committed TLC results are bound to the digest of the spec and cfg files.
+    acceptance:
+      - id: "AC6"
+        statement: |-
+          AC6: the model checks the invariants "at most one terminal per run key", "no arm reads after the boundary instant", "a case removed for an infrastructure fault is removed from every arm", "a fork rerun restores the snapshot state" and "after the kill switch trips, no later session is assigned `on`" with no counterexample -- falsifier: `uv run python tests/formal/test_compaction_replay_run_model.py --regenerate` reports an unexpected result on `Model.cfg`
+      - id: "AC7"
+        statement: |-
+          AC7: each mutant (second terminal allowed; `on` after a tripped switch) produces a counterexample against its own invariant -- falsifier: the same command reports no violation on `mut_terminal_unique.cfg` or on `mut_killswitch.cfg`
+      - id: "AC8"
+        statement: |-
+          AC8: CM.10 and CM.16 are not ready until the CM.0 pull request is merged with those results -- falsifier: a CM.10 or CM.16 pull request opened before it
 evidence_requirements:
   - kind: "tests"
     description: "Byte pins, ledger checksums, classes, absence of fences and the interim grant declaration."
@@ -32,6 +45,9 @@ evidence_requirements:
   - kind: "tests"
     description: "Real migration apply, replay, column types and runtime privileges."
     command: "ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_current_context_vendor_omn21090.py -q"
+  - kind: "tests"
+    description: "The committed TLC results of the replay-run model, bound to the digest of the spec, cfg files, result outputs and verdict."
+    command: "uv run pytest tests/formal/test_compaction_replay_run_model.py -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -77,3 +93,27 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py tests/unit/migrations/test_omn21336_compaction_receipts_vendor.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC5"]
+  - id: "dod-omn21090-ac6-replay-run-model-holds"
+    description: "The committed TLC output of Model.cfg reports no error with no states left on queue and lists all eight invariants and the Terminates property, bound to the current digest of the spec, cfg files, result outputs and verdict. Fails at the merge base, where formal/compaction_replay_run does not exist. The result files were produced by uv run python tests/formal/test_compaction_replay_run_model.py --regenerate on a lab host."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/formal/test_compaction_replay_run_model.py -q -k 'digest or holds_every_invariant or states_every_invariant'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC6"]
+  - id: "dod-omn21090-ac7-replay-run-mutants-break"
+    description: "Each of the eight mutant configurations, among them mut_terminal_unique and mut_killswitch, has a committed TLC counterexample against its own invariant while keeping every invariant of Model.cfg enabled. Fails at the merge base, where no mutant result exists."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/formal/test_compaction_replay_run_model.py -q -k 'mutant or recorded_result'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC7"]
+  - id: "dod-omn21090-ac8-replay-run-gates-cm10-cm16"
+    description: "This repository's part: the merged results and the design-review verdict that name CM.10 and CM.16 as the tasks gated on them. Whether a CM.10 or CM.16 pull request was opened before this one merged is read from the pull request history and is not bound here."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/formal/test_compaction_replay_run_model.py -q -k 'verdict'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC8"]
