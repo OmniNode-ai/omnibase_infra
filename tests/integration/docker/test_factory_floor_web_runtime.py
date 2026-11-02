@@ -223,9 +223,15 @@ def test_factory_floor_web_runtime() -> None:
                             policy
                         ]
                         body = response.read().decode()
+                        # No status, including the dot-file 404, may carry a private file's content.
+                        for private in (
+                            content[".publish.tmp"],
+                            content["reports/decision-map/.publish.tmp"],
+                        ):
+                            assert private not in body, (method, path)
                         if method == "HEAD":
                             assert not body
-                        elif method == "GET" and expected_body is not None:
+                        if method == "GET" and expected_body is not None:
                             assert body == expected_body, (path, body)
                     LOGGER.info("PASS: %s %s", method, path)
         finally:

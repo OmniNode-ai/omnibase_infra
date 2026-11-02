@@ -61,7 +61,7 @@ def _compose_config(
     env_values: dict[str, str], *extra: str, compose: Path = COMPOSE
 ) -> subprocess.CompletedProcess[str]:
     # The ambient environment stays (the container tooling needs its own wiring to run at all); only the
-    # three deployment values are replaced, so one set in the caller's shell can never satisfy a refusal test.
+    # four deployment values are replaced, so one set in the caller's shell can never satisfy a refusal test.
     # --env-file os.devnull stops Compose reading a .env beside the compose file, so a stray one cannot either.
     env = {k: v for k, v in os.environ.items() if k not in REQUIRED}
     env.update(env_values)
@@ -282,16 +282,21 @@ def test_only_the_decision_map_directory_may_load_two_pinned_cdn_scripts() -> No
     default, scoped = policies
     assert "http" not in default
     assert f"script-src 'self' 'unsafe-inline' {cdn} {elk};" in scoped
-    assert scoped.count("http") == 2
+    # Exactly the two pinned URLs appear as origins, however the policy is spaced or ordered.
+    assert re.findall(r"https?://\S+?(?=[;\s]|$)", scoped) == [cdn, elk]
+    assert "://" not in default
     block = _location_block(conf, "location /reports/decision-map/ {")
     assert scoped in block
     assert "limit_except GET HEAD" in block
     assert 'Cache-Control "no-store"' in block
     assert 'X-Content-Type-Options "nosniff"' in block
-    # A regex location wins over a plain prefix only unless the prefix is `^~`, so a plain prefix keeps the
-    # dot-file rule in force for the directory.
-    assert "location ^~" not in conf
-    assert re.search(r"location\s+~\s+/\\\.\s*\{\s*return 404;", conf)
+    # A regex location wins over a plain prefix only unless the prefix is `^~`, so the directory stays under
+    # the dot-file rule while its location has no modifier. Read from the parsed tree, not raw text.
+    locations = _children(_server(), "location")
+    (directory,) = [loc for loc in locations if loc[0][-1] == "/reports/decision-map/"]
+    assert directory[0] == ["location", "/reports/decision-map/"]
+    (dotfiles,) = [loc for loc in locations if loc[0][1:] == ["~", "/\\."]]
+    assert [s[0] for s in _body(dotfiles)] == [["return", "404"]]
 
 
 def test_nginx_parser_sees_a_header_hidden_after_a_nested_block() -> None:
@@ -326,7 +331,7 @@ def test_compose_refusal_ignores_a_dotenv_beside_the_compose_file(
     )
     done = _compose_config({}, compose=copy)
     assert done.returncode != 0, done.stdout
-    # Compose reports whichever missing value it interpolates first, so any of the three proves the .env
+    # Compose reports whichever missing value it interpolates first, so any of the four proves the .env
     # beside the compose file did not satisfy the refusal.
     assert any(
         f"required variable {name} is missing a value" in done.stderr
