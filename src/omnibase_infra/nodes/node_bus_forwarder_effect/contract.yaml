@@ -410,6 +410,10 @@ capabilities:
     description: "Handlers deserialize serialized outer event envelopes before reading payload."
   - name: "contract_declared_lane_mirror"
     description: "Mirrors the contract-declared hook topic set from the declared source lane's broker to every declared mirror lane's broker, at-least-once with a durable per-envelope marker, and never mirrors a topic outside that set."
+  - name: "lane_mirror_source_from_container"
+    description: "OMN-21950: an overlay may select lane_mirror_source_bus {source: container}; the lane mirror then reads the hosting runtime's own ProtocolEventBus resolved from its container (in-memory by default, a hosted bus where the overlay registers one) and the node constructs no bus adapter for that leg."
+  - name: "lane_mirror_tenant_topics"
+    description: "OMN-21950: a lane_mirror tenant_topics member is republished under the runtime tenant's physical topic resolved by resolve_physical_topic, so two runtimes mirroring one command topic onto a shared bus write two tenant topics; every other declared topic keeps its canonical name."
   - name: "verified_inbound_payload_tenant_stamp"
     description: "Inbound gateway consumption overwrites payload[\"tenant_id\"] with the config-bound gateway tenant slug (canonical shared-helper shape; no separate tenant_slug key) before local republish."
 metadata:

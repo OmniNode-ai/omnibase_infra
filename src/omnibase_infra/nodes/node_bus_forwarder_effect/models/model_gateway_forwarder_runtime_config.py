@@ -7,6 +7,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_container_source_bus import (
+    ModelGatewayContainerSourceBus,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forwarder_config import (
     ModelGatewayForwarderConfig,
 )
@@ -37,8 +40,19 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
     # The contract NAMES lanes; this is where this deployment says which
     # broker each named lane is. Both stay None when the contract declares no
     # lane_mirror.
-    lane_mirror_source_bus: ModelKafkaEventBusConfig | None = None
+    # OMN-21950: the source leg is either a resolved Kafka leg or the selector
+    # ``{source: container}``, which means the hosting runtime's own
+    # ``ProtocolEventBus`` (in-memory by default, a hosted bus where the overlay
+    # says so). The overlay chooses; the node constructs no adapter for it.
+    lane_mirror_source_bus: (
+        ModelKafkaEventBusConfig | ModelGatewayContainerSourceBus | None
+    ) = None
     lane_mirror_buses: dict[str, ModelKafkaEventBusConfig] = {}
+
+    @property
+    def lane_mirror_source_from_container(self) -> bool:
+        """True when the overlay selects the hosting runtime's bus as source."""
+        return isinstance(self.lane_mirror_source_bus, ModelGatewayContainerSourceBus)
 
     @model_validator(mode="after")
     def _validate_resolved_legs(self) -> ModelGatewayForwarderRuntimeConfig:
@@ -197,6 +211,11 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
                 f"declare: {undeclared}"
             )
 
+        if isinstance(self.lane_mirror_source_bus, ModelGatewayContainerSourceBus):
+            # The runtime's own bus has no broker address to compare and no
+            # offset policy to configure here: commit ordering is the mirror's
+            # own (publish, mark, then commit) whatever bus it reads.
+            return
         source_endpoint = self.lane_mirror_source_bus.bootstrap_servers
         for lane, bus in self.lane_mirror_buses.items():
             if bus.bootstrap_servers == source_endpoint:

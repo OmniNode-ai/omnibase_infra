@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21950
+title: "The bus forwarder takes its source bus through the container and publishes under the runtime tenant's topic: first pull request with the RED test and the in-memory source support"
+summary: The forwarder runtime config accepts lane_mirror_source_bus {source container}, which selects the hosting runtime's own ProtocolEventBus resolved from its container, and the lane mirror publishes contract-declared tenant_topics under the runtime tenant's physical topic through resolve_physical_topic. The core check, the reverse flow and the lab step are later pull requests.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21950-forwarder-source-and-tenant-topic
+    statement: The forwarder reads its source from the container-resolved bus and the lane mirror writes the runtime tenant's topic.
+    acceptance:
+      - id: AC1
+        statement: "AC1: constructing the forwarder runtime config with an in-memory source raises on the base commit and succeeds after the change -- falsifier: uv run pytest tests/unit/nodes/node_bus_forwarder_effect -k \"in_memory_source or source_bus_container\" -q red on the base and green on the head"
+      - id: AC2
+        statement: "AC2: a lane-mirror record from two tenants lands on two different tenant topics and each request reaches only its originating tenant's ingress -- falsifier: uv run pytest tests/unit/nodes/node_bus_forwarder_effect -k tenant_topic -q"
+      - id: AC3
+        statement: "AC3: the lane records in a comment whether any existing omnibase_core validation script or the two stage-1 checks of OMN-21433 already fails a config model or handler constructor that names a concrete bus type, from reading their implementations -- falsifier: the comment on this ticket cites the files read and the result"
+evidence_requirements:
+  - kind: tests
+    description: The focused forwarder tests pin the container source and the tenant topic mapping.
+    command: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect -q --no-cov -k "in_memory_source or source_bus_container or tenant_topic"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21950-ac1-in-memory-source
+    description: The runtime config accepts the container-selected source; the config test fails with a ValidationError on dev before this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect -q --no-cov -k "in_memory_source or source_bus_container"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21950-ac2-tenant-topic
+    description: Two runtimes on their own in-memory buses mirror one command topic onto a shared parent bus and each tenant ingress receives only its own request.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect -q --no-cov -k tenant_topic
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21950-ac3-stage1-read
+    description: The stage-1 read is recorded in the pull request body as a table of the files read and the result; this check reruns the focused tests the record sits beside.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect -q --no-cov -k "in_memory_source or source_bus_container or tenant_topic"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
