@@ -2366,12 +2366,6 @@ entries:
   - path: scripts/worktree_reaper.py
     family: O
     content_sha1: 83593063a8a1631428973cae27ca9553b487457b
-  - path: src/omnibase_infra/adapters/adapter_onex_tool_execution.py
-    family: O
-    content_sha1: 4f52db47a029cd28025b2e860c83eff85820cdb3
-  - path: src/omnibase_infra/adapters/adapter_onex_tool_execution.py
-    family: O
-    content_sha1: e68b076a42b2c312fcbc74deddb96e64105b997d
   - path: src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py
     family: M
     content_sha1: 0a9e1755428cf7e1a5f58ba223043e249f162670
@@ -2561,24 +2555,6 @@ entries:
   - path: src/omnibase_infra/cli/receipt_mode.py
     family: O
     content_sha1: c370f5a0e6d2e7fd369634a4837ed07f4e463913
-  - path: src/omnibase_infra/cli/service_demo_reset.py
-    family: O
-    content_sha1: 174b1b0e388647c93274837286ff8429ff3a4196
-  - path: src/omnibase_infra/cli/service_demo_reset.py
-    family: O
-    content_sha1: 1a5d799b907b13f216ed5efc084b1628d5b768c9
-  - path: src/omnibase_infra/cli/service_demo_reset.py
-    family: O
-    content_sha1: 1a5d799b907b13f216ed5efc084b1628d5b768c9
-  - path: src/omnibase_infra/cli/service_demo_reset.py
-    family: O
-    content_sha1: 2dd56f56264961308b92cf8d455d691debf4449a
-  - path: src/omnibase_infra/cli/service_demo_reset.py
-    family: O
-    content_sha1: c01bcea18bce93d5868441c9d0cdbc0d5409ccda
-  - path: src/omnibase_infra/cli/service_demo_reset.py
-    family: O
-    content_sha1: d1ce26ea050e6d419545af784817aea11979cd35
   - path: src/omnibase_infra/cli/skill_terminal_publish.py
     family: F
     content_sha1: f27465a37ef2882a851cfb3be317a970f7643ced
@@ -2849,12 +2825,6 @@ entries:
   - path: src/omnibase_infra/gateway/client/gateway_transport_httpx.py
     family: O
     content_sha1: 71bad0b581f71b60e71035077134f75840910323
-  - path: src/omnibase_infra/handlers/done_write_receipt_guard.py
-    family: O
-    content_sha1: 670648931ae08efc609f546e33ae4f8d0d31534c
-  - path: src/omnibase_infra/handlers/done_write_receipt_guard.py
-    family: O
-    content_sha1: e6775bfeb04bdd04cd62e47a7c8a49f3bebcd815
   - path: src/omnibase_infra/handlers/handler_broker_principal_list.py
     family: O
     content_sha1: 8ed033c287d025376baa2d12cbcbe8f60b528fe4
@@ -2867,18 +2837,6 @@ entries:
   - path: src/omnibase_infra/handlers/handler_dev_boot_guard.py
     family: O
     content_sha1: fbee3430ede4142b7a9c6cf3bed58181c18641a4
-  - path: src/omnibase_infra/handlers/handler_dev_lane_branch_install.py
-    family: O
-    content_sha1: 4800686f4711c62710035c7e50d9c38cdc0df8b6
-  - path: src/omnibase_infra/handlers/handler_dev_lane_branch_install.py
-    family: O
-    content_sha1: f5814bce0845eaa08478ac9409d98e9730baae57
-  - path: src/omnibase_infra/handlers/handler_dev_lane_pin.py
-    family: O
-    content_sha1: 6ff1ebd91829f7d5547e40697addd8dbbc71b0c4
-  - path: src/omnibase_infra/handlers/handler_dev_lane_pin.py
-    family: O
-    content_sha1: a6e44dd9cc2643aee23ee353876454d72a1728ae
   - path: src/omnibase_infra/handlers/handler_filesystem.py
     family: O
     content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33
@@ -3512,9 +3470,6 @@ entries:
   - path: src/omnibase_infra/runtime/overlay/overlay_from_env.py
     family: F
     content_sha1: 9df38b3537a3eec3587f7bbcb52c2d951209cf0f
-  - path: src/omnibase_infra/runtime/projector_shell.py
-    family: O
-    content_sha1: d22c56336ba1f16488885288bc2584cc1843601d
   - path: src/omnibase_infra/runtime/protocol_lifecycle_executor.py
     family: O
     content_sha1: 2e1d2c97e5128f5e9c03e55333e7fb71dc03770e
@@ -3566,9 +3521,6 @@ entries:
   - path: src/omnibase_infra/runtime/runtime_local_ingress.py
     family: O
     content_sha1: 04777091d927ebb01e65a116324407fd0fd8beee
-  - path: src/omnibase_infra/runtime/runtime_scheduler.py
-    family: O
-    content_sha1: df7511efae6e508f12f36c0eae827535ab225368
   - path: src/omnibase_infra/runtime/service_pattern_b_broker.py
     family: O
     content_sha1: 02cf760e71a1ad4603c756c867c40f421e63c4eb
@@ -3587,15 +3539,6 @@ entries:
   - path: src/omnibase_infra/runtime/service_terminal_event_consumer.py
     family: O
     content_sha1: feea82ded64d08e25d03858ee43c60f213c3d3d8
-  - path: src/omnibase_infra/runtime/transition_notification_outbox.py
-    family: O
-    content_sha1: 76b66dfa17aeb2805da8f3b2ba5871a75775c576
-  - path: src/omnibase_infra/runtime/transition_notification_outbox.py
-    family: O
-    content_sha1: d22c56336ba1f16488885288bc2584cc1843601d
-  - path: src/omnibase_infra/runtime/transition_notification_publisher.py
-    family: O
-    content_sha1: e68b076a42b2c312fcbc74deddb96e64105b997d
   - path: src/omnibase_infra/runtime/util_schema_fingerprint.py
     family: P
     content_sha1: 7a5139f4d880048b4fa4e28706242c1bcec02aba

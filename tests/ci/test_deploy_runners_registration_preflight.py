@@ -39,7 +39,7 @@ def boundary(tmp_path: Path) -> tuple[dict[str, str], Path]:
     )
     programs = {
         "ssh": r"""
-            import os, subprocess, sys
+            import os, re, subprocess, sys
             from pathlib import Path
             root = Path(os.environ["RUNNER_TEST_ROOT"])
             command = sys.argv[2]
@@ -53,10 +53,12 @@ def boundary(tmp_path: Path) -> tuple[dict[str, str], Path]:
                 print("true")
             elif "docker top" in command:
                 print("0")
+            elif "status=dead" in command:
+                pass  # OMN-21807: the host lists no Dead container
             elif "docker ps" in command:
                 print("omninode-runner-2 running")
             elif "--force-recreate" in command:
-                command = command.replace("cd /home/jonah/.omnibase/runners", "cd " + str(root))
+                command = re.sub(r"cd \S+/\.omnibase/runners", "cd " + str(root), command)
                 sys.exit(subprocess.run(["bash", "-c", command], check=False).returncode)
         """,
         "docker": r"""
