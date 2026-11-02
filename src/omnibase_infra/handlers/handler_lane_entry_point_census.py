@@ -58,9 +58,17 @@ def lane_projects(manifest_path: Path) -> dict[str, str]:
     return result
 
 
+def _is_launched(argv: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
+    """True when argv starts with the launcher prefix, its program compared by basename."""
+    if len(argv) < len(prefix):
+        return False
+    head = argv[0].rsplit("/", 1)[-1] == prefix[0].rsplit("/", 1)[-1]
+    return head and argv[1 : len(prefix)] == prefix[1:]
+
+
 def entry_point_of(argv: tuple[str, ...], launcher_prefix: tuple[str, ...]) -> str:
     """Name the command after the launcher prefix: ``python -m pkg.mod`` or the program."""
-    if launcher_prefix and argv[: len(launcher_prefix)] == launcher_prefix:
+    if launcher_prefix and _is_launched(argv, launcher_prefix):
         argv = argv[len(launcher_prefix) :]
     if not argv:
         return ""

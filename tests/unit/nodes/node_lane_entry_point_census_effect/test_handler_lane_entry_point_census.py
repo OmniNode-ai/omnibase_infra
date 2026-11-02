@@ -46,7 +46,9 @@ def test_planted_python_dash_m_container_is_reported_by_name() -> None:
     planted = next(e for e in lane_a.containers if e.container == PLANTED)
     assert planted.verdict == "remove"
     assert planted.entry_point.startswith("python -m ")
-    assert planted.command.startswith("tini -- /app/entrypoint-runtime.sh python -m ")
+    assert planted.command.startswith(
+        "/usr/bin/tini -- /app/entrypoint-runtime.sh python -m "
+    )
 
 
 def test_every_runtime_image_container_lists_its_command() -> None:
@@ -157,3 +159,10 @@ def test_live_read_refuses_when_inspect_prints_no_array(
     monkeypatch.setattr(handler_module, "_docker", lambda *_: replies.pop(0))
     with pytest.raises(ValueError, match="docker inspect exited 1"):
         handler_module.read_live_inspection("", None)
+
+
+def test_launcher_is_matched_by_program_basename() -> None:
+    prefix = ("/usr/bin/tini", "--", "/app/entrypoint-runtime.sh")
+    argv = ("tini", "--", "/app/entrypoint-runtime.sh", "onex-runtime")
+    assert entry_point_of(argv, prefix) == "onex-runtime"
+    assert entry_point_of(("tini", "x", "onex-runtime"), prefix) == "tini"

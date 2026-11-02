@@ -6,11 +6,12 @@
 # the image runs one command, `onex-runtime`, and every other command reads as an
 # entry point to remove.
 schema_version: "1.0.0"
-# An image reference matching any of these is a runtime-image container.
+# An image reference matching any of these is a runtime-image container: compose
+# builds every service that runs the runtime image under <project>-<service>.
 runtime_image_patterns:
-  - '(^|[/-])runtime(:|@|$)'
+  - '-(omninode-runtime|runtime-effects|runtime-worker|runtime-canary|omninode-contract-resolver|projection-[a-z-]+|[a-z-]+-consumer|[a-z-]+-forwarder)$'
 # The image entrypoint's wrapper tokens, stripped before the command is graded.
-launcher_prefix: [tini, "--", /app/entrypoint-runtime.sh]
+launcher_prefix: [/usr/bin/tini, "--", /app/entrypoint-runtime.sh]
 allowed_commands:
   - onex-runtime
 # Entry points the table reports as one row.

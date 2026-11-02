@@ -5,9 +5,9 @@
       "Status": "running"
     },
     "Config": {
-      "Image": "runtime:dev",
+      "Image": "proj-a-omninode-runtime",
       "Entrypoint": [
-        "tini",
+        "/usr/bin/tini",
         "--",
         "/app/entrypoint-runtime.sh"
       ],
@@ -25,9 +25,9 @@
       "Status": "running"
     },
     "Config": {
-      "Image": "runtime:dev",
+      "Image": "proj-a-runtime-effects",
       "Entrypoint": [
-        "tini",
+        "/usr/bin/tini",
         "--",
         "/app/entrypoint-runtime.sh"
       ],
@@ -45,9 +45,9 @@
       "Status": "running"
     },
     "Config": {
-      "Image": "runtime:dev",
+      "Image": "proj-a-runtime-worker",
       "Entrypoint": [
-        "tini",
+        "/usr/bin/tini",
         "--",
         "/app/entrypoint-runtime.sh"
       ],
@@ -65,9 +65,9 @@
       "Status": "running"
     },
     "Config": {
-      "Image": "runtime:dev",
+      "Image": "proj-a-context-audit-consumer",
       "Entrypoint": [
-        "tini",
+        "/usr/bin/tini",
         "--",
         "/app/entrypoint-runtime.sh"
       ],
@@ -87,9 +87,9 @@
       "Status": "running"
     },
     "Config": {
-      "Image": "omnimarket-runtime:dev",
+      "Image": "proj-a-projection-delegation-writer",
       "Entrypoint": [
-        "tini",
+        "/usr/bin/tini",
         "--",
         "/app/entrypoint-runtime.sh"
       ],
@@ -109,9 +109,9 @@
       "Status": "running"
     },
     "Config": {
-      "Image": "runtime:dev",
+      "Image": "proj-a-omninode-contract-resolver",
       "Entrypoint": [
-        "tini",
+        "/usr/bin/tini",
         "--",
         "/app/entrypoint-runtime.sh"
       ],
@@ -150,9 +150,9 @@
       "Status": "running"
     },
     "Config": {
-      "Image": "runtime:dev",
+      "Image": "proj-b-omninode-runtime",
       "Entrypoint": [
-        "tini",
+        "/usr/bin/tini",
         "--",
         "/app/entrypoint-runtime.sh"
       ],
