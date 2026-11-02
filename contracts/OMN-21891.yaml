@@ -1,0 +1,80 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21891
+title: A stack-shape check refuses any compose service that is not the runtime, a declared dependency, a one-shot or a baselined entry, on every lane
+summary: The omnibase_infra half of the allowlist stack-shape check. config/validation/stack_shape.yaml holds the runtime, the dependencies, the one-shots, the glob that finds every compose file and a shrink-only baseline grouped per service, each entry naming a ticket; it names no lane and no compose file, and omnibase_core's ValidatorStackShape judges it. The dev-stack-runtime-only hook and its deny-list test are replaced by the stack-shape hook over every docker/docker-compose*.yml and by a CI job that runs on every pull request.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21891-allowlist
+    statement: Every service of every lane's compose files is the runtime, a declared dependency, a one-shot or a baselined entry, so a copy of projection-claude-hook-events-writer or of cost-estimator-web is refused by name.
+    acceptance:
+      - id: AC1
+        statement: "AC1: every service outside the runtime, declared dependencies, one-shots and baseline is refused in every lane's compose files (the data file's glob finds them all), with a planted copy of projection-claude-hook-events-writer and of cost-estimator-web each reported by name -- falsifier: uv run pytest tests/unit/validation/test_checker_stack_shape.py -q"
+  - id: req-omn21891-baseline
+    statement: The baseline only shrinks, so a stale entry fails and a new service with its own baseline entry is refused once the data file exists on the merge base.
+    acceptance:
+      - id: AC2
+        statement: "AC2: a baseline entry whose service no longer exists fails, and once the baseline file exists on the merge base an entry absent from the merge base fails, so a new service plus its baseline entry is refused -- falsifier: uv run pytest tests/unit/validation/test_checker_stack_shape.py -q -k baseline"
+  - id: req-omn21891-ci-job
+    statement: A CI job runs the check on every pull request with no path filter, no needs and no if, and the pre-commit hook covers every compose file.
+    acceptance:
+      - id: AC3
+        statement: "AC3: a new required CI job runs the check unconditionally on every PR so a baseline-only PR is judged too -- falsifier: a planted scratch-branch PR adding only a baseline entry shows the job red"
+  - id: req-omn21891-replicas
+    statement: Every replica of the runtime service counts, from replicas, scale and deploy.replicas.
+    acceptance:
+      - id: AC4
+        statement: "AC4: the check counts every replica of a service from replicas, scale and deploy.replicas, so the runtime service at replicas 2 fails -- falsifier: uv run pytest tests/unit/validation/test_checker_stack_shape.py -q -k replicas"
+evidence_requirements:
+  - kind: tests
+    description: The planted services, the baseline ratchet, the replica count and the CI and hook wiring over the fixture stacks and the real compose files.
+    command: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21891-ac1-allowlist
+    description: The two planted copies are each reported by name over fixture stacks, a copy of each is refused in every compose file the glob finds, and the real compose files hold only allowed services. At the merge base config/validation/stack_shape.yaml does not exist, so the real-file tests fail there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21891-ac2-baseline
+    description: A baseline entry for a removed service fails, a count that disagrees with the files fails, an entry without a ticket fails, and against a git base revision holding the data file a new service plus its baseline entry, or a raised count, is refused while a shrinking baseline passes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k baseline
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21891-ac3-ci-job-unconditional
+    description: The stack-shape job in .github/workflows/ci.yml has no if, needs or path filter and the workflow's pull_request trigger has none, and the stack-shape hook is registered over every compose file. The scratch-branch PR in the ticket's falsifier is not opened by this lane; the workflow is read instead.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k "hook or ci_job"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21891-ac4-replicas
+    description: The runtime service at replicas 2, scale 2, deploy.replicas 2 or a deploy.replicas default of 2 fails, and at replicas 1 it passes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k replicas
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn21891-core-pin-deploy
+    description: Hosted-runner check that the omnibase-core pin that carries ValidatorStackShape, its commit and the locked version agree and the recorded runner identity matches this checkout. It needs no Docker daemon, private runtime or credentials and fails for the previous pin.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_runner_image_identity.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
