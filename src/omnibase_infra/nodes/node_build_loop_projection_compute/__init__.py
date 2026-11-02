@@ -20,13 +20,9 @@ from omnibase_infra.nodes.node_build_loop_projection_compute.models import (
 from omnibase_infra.nodes.node_build_loop_projection_compute.node import (
     NodeBuildLoopProjectionCompute,
 )
-from omnibase_infra.nodes.node_build_loop_projection_compute.registry import (
-    RegistryInfraBuildLoopProjection,
-)
 
 __all__ = [
     "HandlerBuildLoopProjection",
     "ModelPayloadBuildLoopAppend",
     "NodeBuildLoopProjectionCompute",
-    "RegistryInfraBuildLoopProjection",
 ]
