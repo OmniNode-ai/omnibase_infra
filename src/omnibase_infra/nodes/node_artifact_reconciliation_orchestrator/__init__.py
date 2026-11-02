@@ -11,7 +11,6 @@ Available Exports:
     - NodeArtifactReconciliationOrchestrator: The declarative orchestrator node
     - HandlerPlanToPRComment: Posts update plans as GitHub PR comments
     - HandlerPlanToYaml: Serializes update plans to YAML for event emission
-    - RegistryInfraArtifactReconciliationOrchestrator: DI registry
 
 Tracking:
     - OMN-3944: Task 7 — Reconciliation ORCHESTRATOR Node
@@ -29,9 +28,6 @@ from omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.models impor
 from omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.node import (
     NodeArtifactReconciliationOrchestrator,
 )
-from omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.registry import (
-    RegistryInfraArtifactReconciliationOrchestrator,
-)
 
 __all__: list[str] = [
     "HandlerPlanToPRComment",
@@ -39,5 +35,4 @@ __all__: list[str] = [
     "ModelPRCommentResult",
     "ModelYamlEmitResult",
     "NodeArtifactReconciliationOrchestrator",
-    "RegistryInfraArtifactReconciliationOrchestrator",
 ]

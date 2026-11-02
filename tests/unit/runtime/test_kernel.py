@@ -1259,6 +1259,109 @@ class TestBootstrap:
         assert "auto_wired_joins" in order
         assert order.index("plugin_consumers") < order.index("auto_wired_joins")
 
+    @pytest.mark.parametrize("selected", [False, True], ids=["main", "node-bound"])
+    async def test_bootstrap_hands_the_host_process_a_selection_scoped_service(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        selected: bool,
+    ) -> None:
+        """OMN-18087: a node-bound process joins no consumer group of the main runtime.
+
+        The writer and the main runtime read one ``runtime_config.yaml`` under one
+        ``KAFKA_INSTANCE_ID``; the service name the host process and the plugin
+        consumers derive their groups from is the only part that differs between
+        them. Runs ``bootstrap`` and reads what it handed to both.
+        """
+        from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
+        from omnibase_infra.runtime.models.model_domain_plugin_config import (
+            ModelDomainPluginConfig,
+        )
+        from omnibase_infra.runtime.models.model_domain_plugin_result import (
+            ModelDomainPluginResult,
+        )
+
+        contract_name = "node_registration_orchestrator"
+        monkeypatch.setenv("LLM_CODER_URL", "http://127.0.0.1:9/v1")
+        monkeypatch.delenv("ONEX_RUNTIME_NODE_SELECTION", raising=False)
+        monkeypatch.delenv("ONEX_RUNTIME_NODE_EXCLUSION", raising=False)
+        if selected:
+            monkeypatch.setenv("ONEX_RUNTIME_NODE_SELECTION", contract_name)
+        manifest = ModelAutoWiringManifest(
+            contracts=(
+                ModelDiscoveredContract(
+                    name=contract_name,
+                    node_type="ORCHESTRATOR_GENERIC",
+                    contract_version=ModelContractVersion(major=1, minor=1, patch=0),
+                    contract_path=Path("/fake/contract.yaml"),
+                    entry_point_name=contract_name,
+                    package_name="omnibase_infra",
+                    event_bus=ModelEventBusWiring(
+                        subscribe_topics=("onex.evt.platform.node-introspection.v1",),
+                        publish_topics=(),
+                    ),
+                    handler_routing=None,
+                ),
+            ),
+            errors=(),
+        )
+        plugin_services: list[str] = []
+        original_start_consumers = PluginLlm.start_consumers
+
+        async def record_plugin_identity(
+            self: PluginLlm, config: ModelDomainPluginConfig
+        ) -> ModelDomainPluginResult:
+            assert config.node_identity is not None
+            plugin_services.append(config.node_identity.service)
+            return await original_start_consumers(self, config)
+
+        async def fake_wire_from_manifest(**kwargs: object) -> ModelAutoWiringReport:
+            return ModelAutoWiringReport(results=(), duplicates=())
+
+        async def fake_subscribe_wired_contract_topics(
+            **kwargs: object,
+        ) -> dict[str, tuple[str, ...]]:
+            return {}
+
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.wire_from_manifest",
+                side_effect=fake_wire_from_manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.subscribe_wired_contract_topics",
+                side_effect=fake_subscribe_wired_contract_topics,
+            ),
+            patch.object(PluginLlm, "start_consumers", new=record_plugin_identity),
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
+        ):
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+        host_config = mock_runtime_host.call_args.kwargs["config"]
+        node_name = host_config["node_name"]
+        assert node_name
+        assert plugin_services, "the plugin consumers were never started"
+        if selected:
+            assert host_config["service_name"] != node_name
+            assert host_config["service_name"].startswith(node_name)
+            assert host_config["service_name"].endswith(contract_name)
+        else:
+            assert host_config["service_name"] == node_name
+        assert plugin_services == [host_config["service_name"]]
+
     async def test_bootstrap_fails_when_kafka_configured_without_bootstrap_servers(
         self,
         mock_wire_infrastructure: MagicMock,
