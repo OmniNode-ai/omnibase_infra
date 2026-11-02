@@ -26,7 +26,7 @@ Three legs, each guarded here against silent reversion:
    honor OMNIBASE_OPERATOR_ENV_FILE, and the runner compose bind-mounts the
    host operator env read-only at a neutral path. Root-phase init copies it
    into runner-owned credentials storage before job steps run (never under
-   /home/runner/.omnibase, whose state/ subtree must stay runner-writable
+   ~/.omnibase of the runner user, whose state/ subtree must stay runner-writable
    for receipts).
 """
 
@@ -38,6 +38,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from tests.ci._runner_compose_text import RUNNER_HOME, read_runner_compose
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_BUILD = REPO_ROOT / "scripts" / "runtime_build"
@@ -59,7 +61,7 @@ LANE_PORT_VARS = {
 
 
 def _deploy_runner_service() -> dict[str, Any]:
-    compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+    compose = yaml.safe_load(read_runner_compose(COMPOSE_FILE))
     return compose["services"]["omninode-deploy-runner"]  # type: ignore[no-any-return]
 
 
@@ -195,7 +197,7 @@ def test_compose_deploy_runner_provisions_operator_env_readonly() -> None:
     env = svc["environment"]
     assert (
         env.get("OMNIBASE_OPERATOR_ENV_FILE")
-        == "/home/runner/.runner-creds/operator.env"
+        == RUNNER_HOME + "/.runner-creds/operator.env"
     ), (
         "deploy runner must point OMNIBASE_OPERATOR_ENV_FILE at the "
         "runner-owned root-phase-init copy, not the raw host-owner mount"
@@ -204,7 +206,7 @@ def test_compose_deploy_runner_provisions_operator_env_readonly() -> None:
     assert re.search(
         r'install -o "\$\$\{runner_uid\}" -g "\$\$\{runner_gid\}" -m 0400\s+\\\s+'
         r"/run/omnibase-operator\.env "
-        r"/home/runner/\.runner-creds/operator\.env",
+        + re.escape(RUNNER_HOME + "/.runner-creds/operator.env"),
         entrypoint,
     ), (
         "deploy runner root-phase init must copy the unreadable-by-runner "
@@ -220,11 +222,11 @@ def test_compose_deploy_runner_provisions_operator_env_readonly() -> None:
         f"DEPLOY_RUNNER_OPERATOR_ENV_FILE (got {op_binds[0]!r}) -- a silent "
         f"default lets docker create a directory at a bogus host path"
     )
-    # Never mounted under /home/runner/.omnibase: docker would create
+    # Never mounted under the runner home's .omnibase: docker would create
     # root-owned intermediate dirs and break the runner-writable
     # ~/.omnibase/state receipt tree.
-    home_omnibase = [v for v in volumes if "/home/runner/.omnibase" in v]
+    home_omnibase = [v for v in volumes if RUNNER_HOME + "/.omnibase" in v]
     assert not home_omnibase, (
-        f"operator env must not be mounted under /home/runner/.omnibase: "
+        f"operator env must not be mounted under {RUNNER_HOME}/.omnibase: "
         f"{home_omnibase}"
     )

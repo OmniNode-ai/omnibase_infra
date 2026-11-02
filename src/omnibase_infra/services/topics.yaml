@@ -66,3 +66,11 @@ topics:
   - onex.evt.deploy.dev-tag-heartbeat.v1
   - onex.evt.deploy.dev-lane-drift.v1
   - onex.dlq.omnibase-infra.deploy-command.v1
+  # --- Provisioned topics that no node contract declares (OMN-21689) ---
+  # ALL_PROVISIONED_SUFFIXES registers these, and platform_topic_suffixes.py
+  # reads them from the generated topic enums this manifest feeds.
+  - onex.evt.pattern.discovered.v1
+  - onex.cmd.omniclaude.brainstorming.v1
+  - onex.cmd.omniclaude.checkpoint.v1
+  - onex.cmd.omniclaude.release.v1
+  - onex.cmd.omniclaude.rrh.v1

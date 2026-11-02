@@ -1251,6 +1251,24 @@ def _build_source_build_args(
     ]
 
 
+def _first_party_audit_args(lane: EnumRuntimeLane, declared_pr: str) -> list[str]:
+    """The audit's build-context build arguments; empty without a declaration (OMN-21928)."""
+    # The checker is loaded by path from the clone being built: the agent's own
+    # ``omnibase_infra`` is a released wheel that need not carry it.
+    if not declared_pr:
+        return []
+    path = (
+        Path(REPO_DIR) / "src/omnibase_infra/validation/checker_first_party_sources.py"
+    )
+    spec = importlib.util.spec_from_file_location("first_party_checker", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load the first-party source checker from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return cast("list[str]", module.audit_build_args(lane.value, declared_pr))
+
+
 def _decode_stream(stream: str | bytes | None) -> str:
     """Render a captured subprocess stream as text, whatever it came back as.
 
@@ -2672,11 +2690,7 @@ def _compose_service_states(
 ) -> dict[str, tuple[str, int | None]]:
     result = subprocess.run(
         [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            lane_config_for(lane).compose_project,
+            *_compose_argv(lane),
             "ps",
             "-a",
             "--format",
@@ -2740,6 +2754,17 @@ def _container_image_id(container_name: str) -> str | None:
         )
         return None
     return observed
+
+
+def _compose_argv(lane: EnumRuntimeLane) -> list[str]:
+    """``docker compose`` under the lane's files and project, ahead of any verb."""
+    return [
+        "docker",
+        "compose",
+        *_compose_file_args(lane),
+        "-p",
+        lane_config_for(lane).compose_project,
+    ]
 
 
 def _service_satisfied(state: str, exit_code: int | None) -> bool:
@@ -2866,11 +2891,7 @@ def _oneshot_log_tail(lane: EnumRuntimeLane, service: str, *, lines: int = 5) ->
     """Return the one-shot's last log lines with URL credentials redacted."""
     result = _run(
         [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            lane_config_for(lane).compose_project,
+            *_compose_argv(lane),
             "logs",
             "--no-color",
             "--tail",
@@ -3393,6 +3414,9 @@ class DeployExecutor:
         # without this the terminal event named one repository's commit and left
         # the other three to be inferred from the image.
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-21928: <repo>#<number>@<head sha> of the open pull request this
+        # rebuild declares; rebuild_scope sets it from the signed command.
+        self.declared_pr = ""
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
         # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
         # stages, so every RUN after it takes the value as build environment
@@ -4184,11 +4208,7 @@ class DeployExecutor:
 
         config = lane_config_for(lane)
         recreate = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "runtime",
             "up",
@@ -4495,11 +4515,7 @@ class DeployExecutor:
             )
 
             validate_cmd = [
-                "docker",
-                "compose",
-                *_compose_file_args(lane),
-                "-p",
-                config.compose_project,
+                *_compose_argv(lane),
                 "--profile",
                 profile,
                 "config",
@@ -4610,6 +4626,7 @@ class DeployExecutor:
         build_source: BuildSource | str = BuildSource.RELEASE,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
+        declared_pr: str = "",
     ) -> list[str]:
         # OMN-16442: no self-update here. This method runs inside an accepted
         # job, after preflight/git/compose_gen/seed; a re-exec from this point
@@ -4622,6 +4639,7 @@ class DeployExecutor:
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
         # OMN-18057: residue is per-rebuild, not per-process.
         self.reset_deploy_observations()
+        self.declared_pr = declared_pr
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).
@@ -4733,8 +4751,15 @@ class DeployExecutor:
                 lane=lane,
                 force_recreate=False,
             )
+            # OMN-18143: every image was built above; compose must not build
+            # them again inside the up ceiling.
             self._compose_up(
-                Phase.RUNTIME, Scope.RUNTIME, [], on_phase_update, lane=lane
+                Phase.RUNTIME,
+                Scope.RUNTIME,
+                [],
+                on_phase_update,
+                lane=lane,
+                compose_may_build=False,
             )
             self._deploy_gateway_lane(
                 on_phase_update,
@@ -4770,7 +4795,9 @@ class DeployExecutor:
                     git_ref=git_ref,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
-        self._compose_up(phase, scope, services, on_phase_update, lane=lane)
+        self._compose_up(
+            phase, scope, services, on_phase_update, lane=lane, compose_may_build=False
+        )
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
         # recreating is a self-inflicted delivery gap.
@@ -5428,29 +5455,29 @@ class DeployExecutor:
 
         The guard STAYS. This passes the pin the operator supplied; it does not
         weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
-        deliberately NOT substituted with a fallback ref — nothing is exported
-        and the script refuses in its own words, which is the correct outcome
-        for a caller that has no pin to offer.
-
-        OMN-17135: ``deploy_ref`` pins ONE repository. The CI path
-        (``runtime-rebuild-trigger.yml`` → ``trigger_rebuild_on_merge.py``)
-        constrains the published ``git_ref`` to a lowercase hex commit SHA of
-        **omnibase_infra**, and that commit exists in no sibling — so RT-1
-        aborted on the first one it tried (``ERROR: omnibase_core: cannot
-        resolve ref '<infra sha>'``, exit 4) and every CI-triggered agent
-        rebuild failed by construction, 13 seconds after acceptance (job
-        ``a5b200d5``, 2026-09-09T21:02Z). ``sibling_fallback_ref`` is the ref
-        each sibling resolves for itself instead: the declared tracking head.
-        Manual requests carrying ``git_ref=origin/dev`` are unaffected, because
-        the fallback engages only where the primary names no commit.
-
-        Returns repo → the commit SHA RT-1 actually resolved for that sibling,
-        read back from the expected-refs manifest this call pins the location of.
-        The path is named explicitly, under the same ``~/.omnibase/state``
-        convention the script's own default uses but with a distinct
-        agent-and-pid basename, so two concurrent callers cannot read each
-        other's manifest and neither can collide with the script's default.
         """
+        # deliberately NOT substituted with a fallback ref — nothing is exported
+        # and the script refuses in its own words, which is the correct outcome
+        # for a caller that has no pin to offer.
+        #
+        # OMN-17135: ``deploy_ref`` pins ONE repository. The CI path
+        # (``runtime-rebuild-trigger.yml`` → ``trigger_rebuild_on_merge.py``)
+        # constrains the published ``git_ref`` to a lowercase hex commit SHA of
+        # **omnibase_infra**, and that commit exists in no sibling — so RT-1
+        # aborted on the first one it tried (``ERROR: omnibase_core: cannot
+        # resolve ref '<infra sha>'``, exit 4) and every CI-triggered agent
+        # rebuild failed by construction, 13 seconds after acceptance (job
+        # ``a5b200d5``, 2026-09-09T21:02Z). ``sibling_fallback_ref`` is the ref
+        # each sibling resolves for itself instead: the declared tracking head.
+        # Manual requests carrying ``git_ref=origin/dev`` are unaffected, because
+        # the fallback engages only where the primary names no commit.
+        #
+        # Returns repo → the commit SHA RT-1 actually resolved for that sibling,
+        # read back from the expected-refs manifest this call pins the location of.
+        # The path is named explicitly, under the same ``~/.omnibase/state``
+        # convention the script's own default uses but with a distinct
+        # agent-and-pid basename, so two concurrent callers cannot read each
+        # other's manifest and neither can collide with the script's default.
         script = Path(repo_dir) / "scripts" / "runtime_build" / "stage_workspace.sh"
         if not script.exists():
             raise RuntimeError(
@@ -5580,6 +5607,11 @@ class DeployExecutor:
             build_source,
             expected_build_source=expected_build_source,
         )
+        # OMN-21928: a declared open pull request names the first-party audit's
+        # build context. The policy data (first_party_sources.yaml, read from the
+        # clone being built) names the lanes that may declare; any other lane is
+        # refused here, before staging or any docker side effect.
+        validated_args += _first_party_audit_args(runtime_lane, self.declared_pr)
 
         selected_source = _coerce_build_source(build_source, layer="deploy-agent")
         omni_home = os.environ.get("OMNI_HOME", "").strip()
@@ -5800,14 +5832,17 @@ class DeployExecutor:
         """
         config = lane_config_for(lane)
         cmd = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
         ]
-        if profile:
-            cmd += ["--profile", profile]
+        # OMN-18143: `up` enables the profile of a service named on its
+        # command line; `config --hash` does not. Naming `cost-estimator-web`
+        # (profile `cost-estimator`) under `--profile runtime` aborted job
+        # da6bc43b with `no such service`. The wildcard is compose's own
+        # "every profile the model declares" and leaves a service's hash
+        # unchanged, so no profile list is written here to drift from the
+        # compose files. The `["*"]` form keeps exactly the requested profile.
+        if wanted := ("*" if list(services) != ["*"] else profile):
+            cmd += ["--profile", wanted]
         cmd += ["config", "--hash", ",".join(services)]
         result = _run(
             cmd, timeout=CONFIG_HASH_TIMEOUT_SECONDS, env=_compose_env(extra_env)
@@ -5830,11 +5865,7 @@ class DeployExecutor:
         """The rendered `core` profile, as compose's own canonical JSON."""
         config = lane_config_for(lane)
         cmd = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "core",
             "config",
@@ -6012,11 +6043,7 @@ class DeployExecutor:
         """
         config = lane_config_for(lane)
         return [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "runtime",
             "up",
@@ -6228,6 +6255,7 @@ class DeployExecutor:
         extra_env: Mapping[str, str] | None = None,
         force_recreate: bool = True,
         build: bool = True,
+        compose_may_build: bool = True,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
 
@@ -6261,6 +6289,7 @@ class DeployExecutor:
         # cancel a live recreate. Every other phase's execution is unchanged.
         deps_phase = scope == Scope.CORE
         timeout = 0
+        rolling = False
         if scope == Scope.RUNTIME:
             # OMN-18057: derived from the compose model, never a bare constant.
             budget = runtime_compose_up_budget(lane, expected)
@@ -6270,14 +6299,9 @@ class DeployExecutor:
             )
             # The migration one-shots are not gated on any healthcheck, so they
             # keep the flat phase bound.
-            if build:
-                self._ensure_runtime_migrations_ready(
-                    lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
-                )
-            else:
-                self._ensure_runtime_migrations_ready(
-                    lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=False
-                )
+            self._ensure_runtime_migrations_ready(
+                lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=build
+            )
             # OMN-19911: then the control-plane one-shots whose declaration
             # moved, BEFORE the services that rely on what they configure.
             self.rerun_changed_oneshots(
@@ -6295,16 +6319,15 @@ class DeployExecutor:
                         f"{self.cloud_migration_failure}; every requested service needs "
                         "omninode_cloud, refusing an empty service scope"
                     )
+            # OMN-22006: compose converges each service alone; nothing is forced.
+            rolling = build and bool(requested_services)
+            force_recreate = force_recreate and not rolling
         elif not deps_phase:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
         if scope is Scope.RUNTIME and "omninode-runtime" in requested_services:
             self._retire_folded_dev_tenant_projections(lane, config)
         cmd = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             profile,
             "up",
@@ -6334,19 +6357,11 @@ class DeployExecutor:
         # Running`, and the same dry-run with `--force-recreate --pull always`
         # reports it `Recreated`. The flag was the whole cause; there was no
         # config drift to respond to.
-        #
-        # This is the same conclusion `converge_deps` already reached for the
-        # recovery path below ("--force-recreate is deliberately ABSENT,
-        # because convergence must start what is missing and leave what is
-        # already running alone"). The two now agree.
         if force_recreate:
             cmd.append("--force-recreate")
-        if not build:
+        if not build or not compose_may_build:
             cmd.append("--no-build")
-        cmd += [
-            "--pull",
-            "never" if scope == Scope.RUNTIME or not build else "always",
-        ]
+        cmd += ["--pull", "never" if scope == Scope.RUNTIME or not build else "always"]
         # OMN-9455: runtime scope must pass --no-deps so compose cannot recreate
         # the core infra services (postgres/redpanda/valkey/infisical) declared
         # as depends_on targets of the runtime services.
@@ -6379,7 +6394,23 @@ class DeployExecutor:
             )
         else:
             try:
-                result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
+                # OMN-22006: one service per `up`, each running before the next
+                # is touched; compose recreates only a service whose config hash
+                # or image id moved, so no two runtimes are ever stopped together.
+                steps = [
+                    [*cmd[: -len(requested_services)], x] for x in requested_services
+                ]
+                for step in steps if rolling else [cmd]:
+                    result = _run(step, timeout=timeout, env=_compose_env(extra_env))
+                    if result.returncode != 0 or (
+                        rolling
+                        and not verify_containers_up(
+                            step[-1:],
+                            timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS,
+                            lane=lane,
+                        )[0]
+                    ):
+                        break
             except subprocess.TimeoutExpired:
                 compose_up_error = (
                     f"docker compose up exceeded its {timeout}s ceiling for phase "
@@ -6421,11 +6452,7 @@ class DeployExecutor:
             )
             for name in stuck:
                 recovery_cmd = [
-                    "docker",
-                    "compose",
-                    *_compose_file_args(lane),
-                    "-p",
-                    config.compose_project,
+                    *_compose_argv(lane),
                     "up",
                     "-d",
                     "--no-deps",
@@ -6619,11 +6646,7 @@ class DeployExecutor:
                 planned.reason.value,
             )
             cmd = [
-                "docker",
-                "compose",
-                *_compose_file_args(lane),
-                "-p",
-                config.compose_project,
+                *_compose_argv(lane),
                 "--profile",
                 "runtime",
                 "up",
@@ -6709,11 +6732,7 @@ class DeployExecutor:
         fingerprint = read_checkout_migration_fingerprint()
         config = lane_config_for(lane)
         base_cmd = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "runtime",
             "up",
@@ -6812,11 +6831,7 @@ class DeployExecutor:
                     if consumers:
                         stopped = _run(
                             [
-                                "docker",
-                                "compose",
-                                *_compose_file_args(lane),
-                                "-p",
-                                config.compose_project,
+                                *_compose_argv(lane),
                                 "--profile",
                                 "runtime",
                                 "stop",
@@ -7422,11 +7437,7 @@ class DeployExecutor:
         budget = runtime_health_probe_budget(lane, service)
         config = lane_config_for(lane)
         argv = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "runtime",
             "up",

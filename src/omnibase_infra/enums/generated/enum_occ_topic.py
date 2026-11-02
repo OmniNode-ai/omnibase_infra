@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumOccTopic(str, Enum):
     """Kafka topic enum for producer: occ.
@@ -18,4 +20,4 @@ class EnumOccTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_NIGHTLY_PROMOTION_V1 = "onex.evt.occ.nightly-promotion.v1"  # onex.evt.occ.nightly-promotion.v1
+    EVT_NIGHTLY_PROMOTION_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'occ', 'EVT_NIGHTLY_PROMOTION_V1')  # onex.evt.occ.nightly-promotion.v1

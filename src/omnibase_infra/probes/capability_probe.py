@@ -33,6 +33,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -40,7 +42,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DEFAULT_CAPABILITIES_FILE = Path.home() / ".claude" / ".onex_capabilities"
-PROBE_TTL_SECONDS = 300  # 5 minutes
+PROBE_TTL_SECONDS = RUNTIME_TIMEOUTS.capability_probe_ttl_seconds
+_PROBE_SECONDS = RUNTIME_TIMEOUTS.capability_probe_seconds
 
 TierName = Literal["standalone", "event_bus", "full_onex"]
 
@@ -50,7 +53,7 @@ TierName = Literal["standalone", "event_bus", "full_onex"]
 # ---------------------------------------------------------------------------
 
 
-def socket_check(host: str, port: int, timeout: float = 1.0) -> bool:
+def socket_check(host: str, port: int, timeout: float = _PROBE_SECONDS) -> bool:
     """Return True if a TCP connection to host:port succeeds within timeout.
 
     Args:
@@ -68,7 +71,7 @@ def socket_check(host: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def kafka_reachable(servers: str, timeout: float = 1.0) -> bool:
+def kafka_reachable(servers: str, timeout: float = _PROBE_SECONDS) -> bool:
     """Return True if any Kafka bootstrap server is reachable.
 
     Args:
@@ -96,7 +99,7 @@ def kafka_reachable(servers: str, timeout: float = 1.0) -> bool:
     return False
 
 
-def http_health_check(url: str, timeout: float = 1.0) -> bool:
+def http_health_check(url: str, timeout: float = _PROBE_SECONDS) -> bool:
     """Return True if HTTP GET to url returns 2xx.
 
     Args:
@@ -121,8 +124,8 @@ def http_health_check(url: str, timeout: float = 1.0) -> bool:
 def probe_platform_tier(
     kafka_servers: str = "",
     intelligence_url: str = os.environ.get("INTELLIGENCE_URL", ""),
-    kafka_timeout: float = 1.0,
-    intel_timeout: float = 1.0,
+    kafka_timeout: float = _PROBE_SECONDS,
+    intel_timeout: float = _PROBE_SECONDS,
 ) -> TierName:
     """Probe available services and return the detected tier.
 
@@ -135,15 +138,11 @@ def probe_platform_tier(
     Returns:
         One of "standalone", "event_bus", or "full_onex".
     """
-    kafka_ok = kafka_reachable(kafka_servers, timeout=kafka_timeout)
-
-    if not kafka_ok:
+    if not kafka_reachable(kafka_servers, timeout=kafka_timeout):
         return "standalone"
 
     intel_health = f"{intelligence_url.rstrip('/')}/health"
-    intel_ok = http_health_check(intel_health, timeout=intel_timeout)
-
-    if intel_ok:
+    if http_health_check(intel_health, timeout=intel_timeout):
         return "full_onex"
 
     return "event_bus"

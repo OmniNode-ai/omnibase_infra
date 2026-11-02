@@ -287,6 +287,7 @@ databases:
               - run_trace
               - savings_estimates
               - skill_execution_snapshots
+              - skill_executions
               - tenant_inference_credentials
               - usage_by_model_day
               - usage_by_model_day_calls
@@ -381,6 +382,7 @@ databases:
           - object_type: TABLE
             objects:
               - delegation_workflow_state
+              - infra_routing_decisions
               - pr_landing_workflow_state
               - session_phase_state
             privileges:
@@ -447,5 +449,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 73287d4ed505f751a36564696ee8ca6488c7fff5a289fc8e0088ac61c95eafda
+  sha256: b27c61e8801134deb58ecf11d2133c92c76bc73865795a5996c82a9c8e841473
 topology_instance: local
