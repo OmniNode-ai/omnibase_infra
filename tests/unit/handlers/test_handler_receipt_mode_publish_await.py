@@ -186,13 +186,15 @@ def test_every_subscription_exists_before_synchronous_publish_reply(
     assert events == (
         ModelReceiptModeEvent(topic=ACTION_TOPIC, payload={"action": action}),
     )
-    receipt_groups = {
-        group for topic, group in groups[0] if topic in (PROGRESS_TOPIC, ACTION_TOPIC)
+    # OMN-21288 T30: a one-shot receipt-mode call joins no consumer group, so a hook
+    # firing on every command leaves no Empty group on the broker.
+    named_groups = {
+        group
+        for topic, group in groups[0]
+        if topic in (PROGRESS_TOPIC, ACTION_TOPIC)
+        and not group.startswith("ungrouped.")
     }
-    assert len(receipt_groups) == 1
-    group = receipt_groups.pop()
-    assert group.startswith("receipt-mode-client.")
-    assert len(group.removeprefix("receipt-mode-client.")) == 12
+    assert named_groups == set()
 
 
 def test_deadline_returns_collected_progress_and_ignores_malformed_messages() -> None:
@@ -250,25 +252,19 @@ def test_publish_failure_unsubscribes_every_topic_and_closes(
     error_type: type[Exception],
 ) -> None:
     bus = EventBusInmemory()
-    original_subscribe = bus.subscribe
+    original_subscribe = bus.subscribe_ungrouped
     unsubscribes: list[AsyncMock] = []
     close = AsyncMock(wraps=bus.close)
 
     async def subscribe(
         topic: str,
-        *,
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
-        group_id: str,
     ) -> Callable[[], Awaitable[None]]:
-        unsubscribe = AsyncMock(
-            wraps=await original_subscribe(
-                topic, on_message=on_message, group_id=group_id
-            )
-        )
+        unsubscribe = AsyncMock(wraps=await original_subscribe(topic, on_message))
         unsubscribes.append(unsubscribe)
         return unsubscribe
 
-    monkeypatch.setattr(bus, "subscribe", subscribe)
+    monkeypatch.setattr(bus, "subscribe_ungrouped", subscribe)
     error = error_type("publish failed")
     monkeypatch.setattr(bus, "publish", AsyncMock(side_effect=error))
     monkeypatch.setattr(bus, "close", close)
@@ -325,21 +321,17 @@ def test_deadline_cleans_up_and_returns_only_collected_progress(
         )
 
     _respond(bus, responder)
-    subscribe = bus.subscribe
+    subscribe = bus.subscribe_ungrouped
     publish = bus.publish
     unsubscribes: list[AsyncMock] = []
 
     async def subscribe_and_track(
         topic: str,
-        *,
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
-        group_id: str,
     ) -> Callable[[], Awaitable[None]]:
         if stage == "subscribe" and unsubscribes:
             await asyncio.sleep(10)
-        unsubscribe = AsyncMock(
-            wraps=await subscribe(topic, on_message=on_message, group_id=group_id)
-        )
+        unsubscribe = AsyncMock(wraps=await subscribe(topic, on_message))
         unsubscribes.append(unsubscribe)
         return unsubscribe
 
@@ -349,7 +341,7 @@ def test_deadline_cleans_up_and_returns_only_collected_progress(
             await asyncio.sleep(10)
 
     close = AsyncMock(wraps=bus.close)
-    monkeypatch.setattr(bus, "subscribe", subscribe_and_track)
+    monkeypatch.setattr(bus, "subscribe_ungrouped", subscribe_and_track)
     monkeypatch.setattr(bus, "publish", publish_then_wait)
     monkeypatch.setattr(bus, "close", close)
     started = time.monotonic()
@@ -415,7 +407,7 @@ def test_default_lane_binding_covers_construction_through_cleanup(
     bus = EventBusInmemory()
     original_start = bus.start
     original_close = bus.close
-    original_subscribe = bus.subscribe
+    original_subscribe = bus.subscribe_ungrouped
     stages: list[str] = []
 
     def from_bootstrap(bootstrap: str) -> EventBusInmemory:
@@ -436,16 +428,10 @@ def test_default_lane_binding_covers_construction_through_cleanup(
 
     async def subscribe(
         topic: str,
-        *,
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
-        group_id: str,
-        auto_offset_reset: str | None = None,
     ) -> Callable[[], Awaitable[None]]:
-        assert auto_offset_reset == "latest"
         assert bound_lane_client_transport() is transport
-        unsubscribe = await original_subscribe(
-            topic, on_message=on_message, group_id=group_id
-        )
+        unsubscribe = await original_subscribe(topic, on_message)
 
         async def checked_unsubscribe() -> None:
             assert bound_lane_client_transport() is transport
@@ -467,7 +453,7 @@ def test_default_lane_binding_covers_construction_through_cleanup(
     monkeypatch.setattr(handler_module.EventBusKafka, "from_bootstrap", from_bootstrap)
     monkeypatch.setattr(bus, "start", start)
     monkeypatch.setattr(bus, "close", close)
-    monkeypatch.setattr(bus, "subscribe", subscribe)
+    monkeypatch.setattr(bus, "subscribe_ungrouped", subscribe)
     events = HandlerReceiptModePublishAwait().publish_and_await(
         topic=COMMAND_TOPIC,
         command_type=COMMAND_TYPE,

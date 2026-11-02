@@ -78,8 +78,8 @@ _DEFAULT_SUPPLEMENTARY_SOURCES: tuple[Path, ...] = ()
 # runtime/service_kernel.py (OMN-11996) are generated from a contract source
 # rather than a Python AST (OMN-13202). omnimarket is not a build dependency of
 # omnibase_infra, so its contract.yaml cannot be read directly in CI.
-_DEFAULT_TOPIC_MANIFEST_ROOTS: tuple[Path, ...] = (
-    _REPO_ROOT / "src" / "omnibase_infra" / "runtime",
+_DEFAULT_TOPIC_MANIFEST_ROOTS: tuple[Path, ...] = tuple(
+    _REPO_ROOT / "src" / "omnibase_infra" / d for d in ("runtime", "cli", "services")
 )
 
 # Pattern for stale-file detection (only these may be removed)

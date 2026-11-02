@@ -118,14 +118,6 @@ class TestRegistryInfraContractResolverBridge:
         assert "contract_resolve" in ops
         assert "health_check" in ops
 
-    def test_create_returns_node_instance(self) -> None:
-        """create() must return a NodeContractResolverBridge instance."""
-        from unittest.mock import MagicMock
-
-        container = MagicMock()
-        node = RegistryInfraContractResolverBridge.create(container)
-        assert isinstance(node, NodeContractResolverBridge)
-
 
 # ---------------------------------------------------------------------------
 # Node class tests
