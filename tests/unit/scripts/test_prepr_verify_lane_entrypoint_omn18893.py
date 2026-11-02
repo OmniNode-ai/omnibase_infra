@@ -32,6 +32,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -973,14 +974,19 @@ def test_the_entrypoint_never_writes_a_rendered_configuration() -> None:
     )
 
 
-def test_a_dirty_sibling_is_refused_rather_than_recorded() -> None:
-    """Recording a discrepancy does not make an artifact reproducible."""
+def test_a_dirty_target_is_refused_twice_and_no_sibling_working_tree_is_read() -> None:
+    """The target is refused when dirty, early and again at staging.
+
+    A sibling is staged at a dev-merge tag out of the object store (OMN-21928),
+    so its working tree never reaches the image and its dirt is not a reason to
+    refuse; the target is archived from its commit and must still be clean.
+    """
     body = _entrypoint_code()
-    assert "EXIT_REFUSED_DIRTY_WORKTREE" in body
-    assert body.count("EXIT_REFUSED_DIRTY_WORKTREE") >= 2, (
-        "only one dirty-tree refusal exists. Both the target and each sibling "
-        "must be refused when dirty: a dirty sibling puts content belonging "
-        "to no commit into an image whose receipt names one."
+    assert body.count("EXIT_REFUSED_DIRTY_WORKTREE") >= 3, (
+        "the target must be refused when dirty both before staging and at staging."
+    )
+    assert "SIBLING_DIRTY" not in body, (
+        "a sibling working tree is tracked again; a sibling is staged from a tag."
     )
 
 
@@ -1259,3 +1265,184 @@ def test_every_slot_service_is_built_with_the_workspace_args_and_up_never_builds
     up_lines = [ln for ln in body.splitlines() if " up -d " in ln]
     assert up_lines, "no `up -d` found; the pin would pass vacuously"
     assert all("--no-build" in ln for ln in up_lines), up_lines
+
+
+# ---------------------------------------------------------------------------
+# OMN-21928: siblings are staged at dev-merge tags, the target at its branch
+# ---------------------------------------------------------------------------
+
+FIRST_PARTY_CHECKER = (
+    REPO_ROOT / "src/omnibase_infra/validation/checker_first_party_sources.py"
+)
+fps = _load("checker_first_party_sources_omn21928_entrypoint", FIRST_PARTY_CHECKER)
+
+
+def _git_in(cwd: Path, *args: str) -> str:
+    from omnibase_core.validators.no_unguarded_git_subprocess import (
+        scrub_git_location_env,
+    )
+
+    done = subprocess.run(
+        ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", *args],
+        cwd=cwd,
+        env=scrub_git_location_env(os.environ),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return done.stdout.strip()
+
+
+def _repo_with_tags(path: Path, name: str) -> dict[str, str]:
+    """A clone with an older dev-merge tag, a newer one, and a commit past both."""
+    path.mkdir(parents=True)
+    _git_in(path, "init", "-q", "-b", "dev")
+    commits: dict[str, str] = {}
+    for label, stamp in (("old", "20261030100000"), ("new", "20261031100000")):
+        _git_in(path, "commit", "-q", "--allow-empty", "-m", f"{name} {label}")
+        commits[label] = _git_in(path, "rev-parse", "HEAD")
+        _git_in(path, "tag", f"dev-{stamp}-{commits[label][:12]}")
+    _git_in(path, "commit", "-q", "--allow-empty", "-m", f"{name} past the tags")
+    commits["head"] = _git_in(path, "rev-parse", "HEAD")
+    commits["new_tag"] = f"dev-20261031100000-{commits['new'][:12]}"
+    return commits
+
+
+def _siblings_of_the_manifest() -> list[str]:
+    done = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'source "{RUNTIME_BUILD / "sibling_clone_manifest.sh"}"; '
+            'printf "%s\\n" "${SIBLING_VENDORED_REPOS[@]}"',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in done.stdout.splitlines() if line]
+
+
+def test_entrypoint_stages_siblings_at_dev_tag_not_at_the_clone_head(
+    tmp_path: Path,
+) -> None:
+    """The plan names, per sibling, the newest dev-merge tag and its commit.
+
+    Each canonical clone is left a commit past its newest tag, so staging the
+    clone's HEAD (the old behaviour, which the image audit refuses as ``branch``)
+    gives a different commit than staging the tag. The clones are unchanged.
+    """
+    registry = tmp_path / "registry_root"
+    clones = {
+        repo: _repo_with_tags(registry / repo, repo)
+        for repo in _siblings_of_the_manifest()
+    }
+    worktree = tmp_path / "ticket" / "omnibase_infra"
+    worktree.mkdir(parents=True)
+    _git_in(worktree, "init", "-q", "-b", "omn-21928-fixture")
+    _git_in(worktree, "commit", "-q", "--allow-empty", "-m", "target")
+    home = tmp_path / "home"
+    home.mkdir()
+    done = subprocess.run(
+        [
+            "bash",
+            str(ENTRYPOINT),
+            "--slot",
+            "1",
+            "--worktree",
+            str(worktree),
+            "--staging-root",
+            str(tmp_path / "stage"),
+            "--reason",
+            "OMN-21928 plan proof",
+            "--plan-only",
+        ],
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(home),
+            "OMNI_HOME": str(registry),
+            "ONEX_LANE_LOCK_DIR": str(tmp_path / "locks"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    lines = done.stdout.splitlines()
+    plan = json.loads("\n".join(lines[lines.index("{") :]))
+    assert plan["target_branch"] == "omn-21928-fixture"
+    assert set(plan["siblings"]) == set(clones)
+    for repo, commits in clones.items():
+        assert plan["siblings"][repo] == {
+            "tag": commits["new_tag"],
+            "commit": commits["new"],
+        }, repo
+        assert plan["siblings"][repo]["commit"] != commits["head"]
+        assert _git_in(registry / repo, "rev-parse", "HEAD") == commits["head"]
+
+
+def test_entrypoint_stages_siblings_at_dev_tag_refuses_a_clone_without_one(
+    tmp_path: Path,
+) -> None:
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    _git_in(clone, "init", "-q", "-b", "dev")
+    _git_in(clone, "commit", "-q", "--allow-empty", "-m", "untagged")
+    with pytest.raises(ValueError, match="no dev-merge tag"):
+        fps.newest_dev_merge_tag_of(clone, fps.load_contract())
+
+
+def test_entrypoint_stages_siblings_at_dev_tag_refuses_a_tag_naming_another_commit(
+    tmp_path: Path,
+) -> None:
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    _git_in(clone, "init", "-q", "-b", "dev")
+    _git_in(clone, "commit", "-q", "--allow-empty", "-m", "a")
+    _git_in(clone, "tag", "dev-20261031100000-" + "0" * 12)
+    with pytest.raises(ValueError, match="names"):
+        fps.newest_dev_merge_tag_of(clone, fps.load_contract())
+
+
+def test_entrypoint_stages_siblings_at_dev_tag_and_binds_the_target_to_its_branch(
+    tmp_path: Path,
+) -> None:
+    """The staging record the image audit reads: tags for siblings, a branch for the target."""
+    out = tmp_path / "sibling-vcs-provenance.json"
+    tag = "dev-20261031100000-" + "a" * 12
+    commit = "a" * 40
+    fps.write_slot_staging_record(
+        out,
+        target_commit="b" * 40,
+        target_branch="omn-18087-t6-carry",
+        siblings={"omnibase_core": (tag, commit)},
+    )
+    record = json.loads(out.read_text(encoding="utf-8"))
+    assert record["siblings"]["omnibase_core"] == {
+        "vcs_ref": commit,
+        "vcs_dirty": False,
+        "vcs_branch": "HEAD",
+        "dev_merge_tag": tag,
+    }
+    assert record["build_context"] == {
+        "omnibase_infra": {
+            "vcs_ref": "b" * 40,
+            "vcs_dirty": False,
+            "vcs_branch": "omn-18087-t6-carry",
+            "dev_merge_tag": "",
+        }
+    }
+
+
+def test_entrypoint_stages_siblings_at_dev_tag_and_names_the_declared_slot_context() -> (
+    None
+):
+    """The build arg carries the context the policy data declares, not a literal."""
+    body = _entrypoint_code()
+    assert "FIRST_PARTY_BUILD_CONTEXT=${SLOT_AUDIT_CONTEXT}" in body
+    assert "pre_pr_slot_context" in body
+    assert "pre-pr-slot" not in body, (
+        "the entrypoint spells the slot context name instead of reading it from "
+        "first_party_sources.yaml"
+    )

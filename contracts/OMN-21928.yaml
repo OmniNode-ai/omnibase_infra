@@ -1,0 +1,84 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21928
+title: The pre-PR slot build stages siblings at dev-merge tags and binds the target repo to the branch under test, so the first-party audit lets an unmerged omnibase_infra branch build on a slot
+summary: prepr_verify_lane.sh stages omnibase-core and omnibase-spi at their newest dev-merge tag and writes a staging record that binds the target to the branch and commit under test. first_party_sources.yaml declares build contexts; the pre-PR slot context accepts a branch-staged target, the dev-lane context and every sibling keep the dev-merge-tag rule.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21928-slot-staging
+    statement: The slot build stages siblings at their newest dev-merge tag and records the target at the branch and commit under test.
+    acceptance:
+      - id: AC1
+        statement: "AC1: prepr_verify_lane.sh stages omnibase-core and omnibase-spi at their newest dev-merge tag and writes a staging record that binds the target repo to the branch and commit under test -- falsifier: uv run pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -k stages_siblings_at_dev_tag"
+  - id: req-omn21928-audit-contexts
+    statement: The first-party audit accepts a branch-staged target only in a build context that the policy data declares for a pre-PR slot, and never relaxes a sibling.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the audit accepts a branch-staged target only where the build context is declared a pre-PR slot in first_party_sources.yaml, and the same record in the dev-lane context still fails with kind branch -- falsifier: uv run pytest tests/unit/validation -q -k first_party_slot_context_negative_control"
+      - id: AC3
+        statement: "AC3: a sibling staged from a branch fails the audit in the slot context as well -- falsifier: uv run pytest tests/unit/validation -q -k sibling_branch_still_fails_on_slot"
+      - id: AC4
+        statement: "AC4: the slot context name and the target rule come from the policy data file and changing the data changes the audit result with no code change -- falsifier: uv run pytest tests/unit/validation -q -k declared_context"
+  - id: req-omn21928-slot-build
+    statement: The slot image build passes the first-party audit for the branch under test on a lab slot.
+    acceptance:
+      - id: AC5
+        statement: "AC5: prepr_verify_lane.sh --slot 1 on h201 at the OMN-18087 t6-carry head completes the image build past the first-party audit (not exit 10) and prepr_teardown_slot.sh --slot 1 then reads CLEAN, with the commands and exit codes in the pull request body -- falsifier: the pull request body lacks the audit line for omnibase-infra with kind branch accepted in the slot context, or the teardown verdict"
+evidence_requirements:
+  - kind: tests
+    description: The staging, audit-context and declared-data tests of this change.
+    command: uv run --frozen pytest tests/unit/validation/test_first_party_slot_context_omn21928.py tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q --no-cov -k "first_party_slot_context or sibling_branch_still_fails_on_slot or declared_context or stages_siblings_at_dev_tag"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21928-ac1-slot-stages-siblings-at-tags
+    description: The slot entrypoint plans each sibling at its newest dev-merge tag, not at the clone head, and the staging record binds the target to its branch and commit; at the merge base the plan names no siblings and the record function does not exist.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q --no-cov -k stages_siblings_at_dev_tag
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21928-ac2-slot-context-negative-control
+    description: The same branch-staged target record passes in the declared pre-PR slot context and fails with kind branch in the dev-lane context.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation -q --no-cov -k first_party_slot_context_negative_control
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21928-ac3-sibling-branch-fails-on-slot
+    description: A sibling staged from a branch fails the audit in the slot context, and in a context whose data accepts a branch for the target.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation -q --no-cov -k sibling_branch_still_fails_on_slot
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21928-ac4-declared-context
+    description: Renaming the slot context or changing its target rule in the policy data changes the audit result with no code change.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation -q --no-cov -k declared_context
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21928-ac5-deploy-probe-policy-data
+    description: Hosted-runner deploy probe reads the policy data from GitHub at the checked-out commit and requires the pre-PR slot context declaration, so a checkout without the change fails it. The slot build itself ran on h201 slot 1 and its commands and exit codes are in the pull request body.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/validation/first_party_sources.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q '^pre_pr_slot_context: pre-pr-slot$' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra

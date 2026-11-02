@@ -77,9 +77,17 @@
           "tag": { "type": "string" },
           "commit": { "type": "string" },
           "install_url": { "type": "string" },
-          "detail": { "type": "string" }
+          "detail": { "type": "string" },
+          "accepted_in": {
+            "type": "string",
+            "description": "The build context (first_party_sources.yaml build_contexts) whose target rule accepted a non-tag kind for the build-context package; empty when the kind needed no acceptance (OMN-21928)."
+          }
         }
       }
+    },
+    "first_party_build_context": {
+      "type": "string",
+      "description": "The named build context the first-party source audit ran in (OMN-21928); the dev lane runs in the policy's default_context."
     },
     "proofs": {
       "type": "array",

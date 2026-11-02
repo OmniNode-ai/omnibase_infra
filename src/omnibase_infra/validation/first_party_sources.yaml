@@ -18,6 +18,17 @@
 #                  dev-merge tag and installed from that staged tree.
 #   build-context  the repository whose Docker build context is the image.
 #
+# build_contexts (OMN-21928): the build contexts an audit may run in, by name.
+# The audit runs in default_context unless the build names another with the
+# FIRST_PARTY_BUILD_CONTEXT build arg. A context changes ONE rule: which kinds
+# beyond a dev-merge tag the TARGET (the package installed with
+# install: build-context) may resolve to. A vendored sibling needs a dev-merge
+# tag in every context, so no entry here can relax a sibling. The dev lane builds
+# in default_context, which accepts only a dev-merge tag. A pre-PR slot builds an
+# unmerged branch of the target repository, so its context accepts the target
+# staged from a branch; pre_pr_slot_context names that context for the slot
+# entrypoint (scripts/runtime_build/prepr_verify_lane.sh).
+#
 # omnibase_compat is not a first-party package of the dev lane (OMN-21284): it is
 # being retired, it has no dev-merge tags and gets none, and until its last
 # consumer drops it the image takes it from the lock like any other dependency.
@@ -40,3 +51,10 @@ packages:
   - distribution: omnibase-infra
     repo: omnibase_infra
     install: build-context
+default_context: dev-lane
+pre_pr_slot_context: pre-pr-slot
+build_contexts:
+  - name: dev-lane
+    target_accepts: []
+  - name: pre-pr-slot
+    target_accepts: [branch]
