@@ -894,13 +894,14 @@ MIGRATION_LOCK_OWNER_PID=""
 # application_name is what makes this specific: "somebody holds it" is not
 # proof that WE hold it. A psql error is reported as not-held. $$ is 1 in every
 # runner container, so the tag is shared with runners of other databases on this
-# server: the lock must also be one of THIS database's (OMN-21928).
+# server: the holder session must also be connected to THIS run's database
+# (OMN-21928).
 migration_lock_held() {
   _mlh_granted="$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -tAc \
     "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
        WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
          AND l.classid::bigint * 4294967296 + l.objid::bigint = ${FORWARD_MIGRATION_LOCK_ID}
-         AND l.database = a.datid AND a.application_name = '${MIGRATION_LOCK_TAG}';" 2>/dev/null)" || return 1
+         AND a.datname = '${PGDB}' AND a.application_name = '${MIGRATION_LOCK_TAG}';" 2>/dev/null)" || return 1
   [ "$_mlh_granted" = "1" ]
 }
 
