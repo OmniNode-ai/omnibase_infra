@@ -99,13 +99,30 @@ def test_no_other_omnibase_infra_principal_is_granted_it(profile: str) -> None:
         assert not any(_TABLE in grant.objects for grant in principal.grants)
 
 
-@pytest.mark.parametrize("profile", _PROFILES)
-def test_removing_the_declaration_removes_the_grant(profile: str) -> None:
-    """Negative control: the grant exists because the declaration does."""
-    topology = load_topology_profile(profile)
-    derived = derive_table_grants(topology, (), database_ref="omnibase_infra")
-    assert not any(
-        _TABLE in grant.objects
+def _derived_tables(profile: str, declarations) -> set[str]:
+    derived = derive_table_grants(
+        load_topology_profile(profile), declarations, database_ref="omnibase_infra"
+    )
+    return {
+        table
         for grants in derived.grants.values()
         for grant in grants
+        for table in grant.objects
+    }
+
+
+@pytest.mark.parametrize("profile", _PROFILES)
+def test_removing_only_the_declaration_removes_only_its_grant(profile: str) -> None:
+    """Negative control: every other omnibase_infra declaration keeps its grant."""
+    others = tuple(
+        d
+        for d in STATE_IO_TABLE_DECLARATIONS
+        if d.table.database_ref == "omnibase_infra" and d.table.name != _TABLE
     )
+    assert others
+    with_it = _derived_tables(profile, (*others, _declaration()))
+    without_it = _derived_tables(profile, others)
+    assert _TABLE in with_it
+    assert _TABLE not in without_it
+    assert with_it - {_TABLE} == without_it
+    assert without_it == {d.table.name for d in others}

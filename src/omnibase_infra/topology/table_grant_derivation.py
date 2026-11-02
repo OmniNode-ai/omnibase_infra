@@ -199,7 +199,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             schema="public",
             migration="docker/migrations/forward/080_create_infra_routing_decisions.sql",
             access="read_write",
-            role="infra_routing_decisions",
+            role="state",
         ),
     ),
 )
