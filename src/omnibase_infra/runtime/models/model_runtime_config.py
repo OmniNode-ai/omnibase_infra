@@ -18,15 +18,6 @@ Currently Used by kernel.py:
     - shutdown.grace_period_seconds: Used for graceful shutdown timeout
     - local_ingress: Used by RuntimeHostProcess to bind local command ingress
 
-Reserved for Future Use:
-    - contract_version, name, description: Metadata fields for contract versioning
-    - event_bus.type: Reserved for Kafka/other event bus implementations
-    - event_bus.max_history: Reserved for event history buffer sizing
-    - event_bus.circuit_breaker_threshold: Reserved for fault tolerance configuration
-    - protocols.enabled (alias: handlers.enabled): Reserved for dynamic protocol loading
-    - logging.level, logging.format: Reserved for contract-driven logging
-      (currently kernel.py uses ONEX_LOG_LEVEL env var directly)
-
 Environment Variable Overrides:
     ONEX_GROUP_ID     - Overrides group_id/consumer_group
     ONEX_ENVIRONMENT  - Overrides event_bus.environment
@@ -53,6 +44,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.gateway.models import ModelGatewayConfig
 from omnibase_infra.models.model_boot_subscriptions_config import (
     ModelBootSubscriptionsConfig,
+)
+from omnibase_infra.models.model_contract_hotload_config import (
+    ModelContractHotloadConfig,
 )
 from omnibase_infra.runtime.models.model_contract_registry_config import (
     ModelContractRegistryConfig,
@@ -93,6 +87,7 @@ class ModelRuntimeConfig(BaseModel):
         local_ingress: Local Unix-socket command ingress configuration [ACTIVE]
         pattern_b_broker: Pattern B broker configuration [ACTIVE]
         boot_subscriptions: Which auto-wired contracts join at boot [ACTIVE]
+        contract_hotload: Contract hot-load switch, off by default [ACTIVE]
 
     Field Status Legend:
         [ACTIVE]   - Currently used by kernel.py
@@ -185,6 +180,10 @@ class ModelRuntimeConfig(BaseModel):
     boot_subscriptions: ModelBootSubscriptionsConfig = Field(
         default_factory=ModelBootSubscriptionsConfig,
         description="Which auto-wired contracts join at boot (OMN-18087)",
+    )
+    contract_hotload: ModelContractHotloadConfig = Field(
+        default_factory=ModelContractHotloadConfig,
+        description="Contract hot-load switch, off by default (OMN-20079)",
     )
 
 
