@@ -22,6 +22,7 @@ node_version:
 node_type: "EFFECT_GENERIC"
 descriptor:
   node_archetype: effect
+  purity: side_effect
 description: >
   EFFECT node wrapping the Registry Discovery API. Provides contract-driven configuration for the FastAPI service that exposes node registrations for dashboard consumption. Discovery is projection-based (PostgreSQL); Consul instance discovery was removed (OMN-9545). All operational limits, paths, and behaviour are defined here rather than as hardcoded constants.
 
@@ -36,10 +37,6 @@ output_model:
   name: "ModelRegistryApiResponse"
   module: "omnibase_infra.nodes.node_registry_api_effect.models.model_registry_api_response"
   description: "Output envelope for registry API effect operations."
-# The archetype the core no-io-outside-effects validator reads (OMN-21736).
-descriptor:
-  node_archetype: effect
-  purity: side_effect
 # ---------------------------------------------------------------------------
 # Contract-Driven Configuration
 # Replaces all hardcoded constants in services/registry_api/registry_discovery.py
