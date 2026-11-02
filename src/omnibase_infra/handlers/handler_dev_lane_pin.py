@@ -25,9 +25,8 @@ compose file of a governed lane, which is what keeps the store, shared with the
 prod agent unit, from carrying a dev pin into a prod container. A ``PROD_*`` key
 is refused by name.
 
-NO DEFAULTS (rule 8). The store, the ledger and the ledger writer have none, so
-the handler never writes a file or a ledger the caller did not name. Values are
-image references, never secrets, and a value that is not one is refused.
+NO DEFAULTS (rule 8). The store, ledger and ledger writer have none, so nothing is written
+that the caller did not name. Values are image references, never secrets, and others are refused.
 
 Command line::
 
@@ -62,6 +61,7 @@ from omnibase_infra.models.model_dev_lane_pin_result import ModelDevLanePinResul
 from omnibase_infra.models.model_dev_lane_pin_set_request import (
     ModelDevLanePinSetRequest,
 )
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 
 #: The one lane a pin is set on.
 DEV_LANE = "dev"
@@ -78,8 +78,8 @@ _IMAGE_REFERENCE = re.compile(
 )
 _TICKET = re.compile(r"^OMN-\d+$")
 _LANE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_LEDGER_TIMEOUT_SECONDS = 330
-_DOCKER_TIMEOUT_SECONDS = 60
+_LEDGER_TIMEOUT_SECONDS = TIMEOUTS.dev_lane_ledger_seconds
+_DOCKER_TIMEOUT_SECONDS = TIMEOUTS.dev_lane_docker_seconds
 _ACTOR = "script:dev-lane-pin"
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]

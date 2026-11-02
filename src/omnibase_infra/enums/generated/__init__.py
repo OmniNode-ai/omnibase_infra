@@ -9,20 +9,24 @@
 # To regenerate, run:
 #   uv run python scripts/generate_topic_enums.py
 #
-from .enum_artifact_topic import EnumArtifactTopic
-from .enum_github_topic import EnumGithubTopic
-from .enum_occ_topic import EnumOccTopic
-from .enum_omnibase_infra_topic import EnumOmnibaseInfraTopic
-from .enum_omniclaude_topic import EnumOmniclaudeTopic
-from .enum_omniintelligence_topic import EnumOmniintelligenceTopic
-from .enum_omnimarket_topic import EnumOmnimarketTopic
-from .enum_omnimemory_topic import EnumOmnimemoryTopic
-from .enum_omninode_topic import EnumOmninodeTopic
-from .enum_onex_change_control_topic import EnumOnexChangeControlTopic
-from .enum_platform_topic import EnumPlatformTopic
-from .enum_projection_topic import EnumProjectionTopic
-from .enum_router_topic import EnumRouterTopic
-from .enum_rsd_topic import EnumRsdTopic
-from .enum_skill_topic import EnumSkillTopic
-from .enum_steel_onslaught_topic import EnumSteelOnslaughtTopic
-from .enum_validation_topic import EnumValidationTopic
+from .enum_artifact_topic import EnumArtifactTopic as EnumArtifactTopic
+from .enum_deploy_topic import EnumDeployTopic as EnumDeployTopic
+from .enum_git_topic import EnumGitTopic as EnumGitTopic
+from .enum_github_topic import EnumGithubTopic as EnumGithubTopic
+from .enum_linear_topic import EnumLinearTopic as EnumLinearTopic
+from .enum_occ_topic import EnumOccTopic as EnumOccTopic
+from .enum_omnibase_infra_topic import EnumOmnibaseInfraTopic as EnumOmnibaseInfraTopic
+from .enum_omniclaude_topic import EnumOmniclaudeTopic as EnumOmniclaudeTopic
+from .enum_omniintelligence_topic import EnumOmniintelligenceTopic as EnumOmniintelligenceTopic
+from .enum_omnimarket_topic import EnumOmnimarketTopic as EnumOmnimarketTopic
+from .enum_omnimemory_topic import EnumOmnimemoryTopic as EnumOmnimemoryTopic
+from .enum_omninode_topic import EnumOmninodeTopic as EnumOmninodeTopic
+from .enum_onex_change_control_topic import EnumOnexChangeControlTopic as EnumOnexChangeControlTopic
+from .enum_pattern_topic import EnumPatternTopic as EnumPatternTopic
+from .enum_platform_topic import EnumPlatformTopic as EnumPlatformTopic
+from .enum_projection_topic import EnumProjectionTopic as EnumProjectionTopic
+from .enum_router_topic import EnumRouterTopic as EnumRouterTopic
+from .enum_rsd_topic import EnumRsdTopic as EnumRsdTopic
+from .enum_skill_topic import EnumSkillTopic as EnumSkillTopic
+from .enum_steel_onslaught_topic import EnumSteelOnslaughtTopic as EnumSteelOnslaughtTopic
+from .enum_validation_topic import EnumValidationTopic as EnumValidationTopic

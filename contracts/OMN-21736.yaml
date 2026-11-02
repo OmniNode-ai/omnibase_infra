@@ -1,0 +1,113 @@
+schema_version: 1.0.0
+ticket_id: OMN-21736
+title: 'omnibase_infra contracts_and_di literal_topic burn-down, slice rf1300-c2: topics come from the node contract or overlay through DI'
+summary: The three cost-snapshot projection topics live in config.cost_snapshot_topics of the registry API node contract. A shared ModelCostSnapshotTopics validates them; the contract-declared HandlerCostApiDependencies binds the model and pool before installing cost routes. Service code imports shared models rather than node internals.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21736-cost-snapshot-topics-from-contract
+    statement: The cost API snapshot topics are declared in the registry API node contract and injected into the cost handlers; no topic literal remains in the touched code.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the contracts_and_di count for literal_topic over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule'
+      - id: AC2
+        statement: 'AC2: every moved topic is taken through an injected parameter bound from the node contract or overlay and none remains hard-coded in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths'
+      - id: AC3
+        statement: 'AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body'
+evidence_requirements:
+  - kind: tests
+    description: The contract binding and injection tests pass, and the checker finds no literal_topic in the slice paths.
+    command: uv run pytest tests/unit/nodes/node_registry_api_effect/test_cost_snapshot_topics_omn21736.py tests/integration/api/test_cost_api_routes.py -q -p no:cacheprovider
+dod_evidence:
+  - id: dod-001
+    description: The contracts_and_di checker reports no literal_topic finding in the slice paths.
+    source: generated
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: |
+          uv run python - <<'PYTHON'
+          from pathlib import Path
+          from omnibase_core.validation.validator_contracts_and_di import ValidatorContractsAndDi
+          targets = [Path(p) for p in (
+              "src/omnibase_infra/services/cost_api",
+              "src/omnibase_infra/services/registry_api/main.py",
+              "src/omnibase_infra/nodes/node_registry_api_effect",
+              "src/omnibase_infra/models/model_cost_snapshot_topics.py",
+              "src/omnibase_infra/handlers/handler_cost_api_dependencies.py",
+          )]
+          assert all(p.exists() for p in targets), targets
+          result = ValidatorContractsAndDi().validate(targets)
+          findings = [i for i in result.issues if i.rule_name == "literal_topic"]
+          assert not findings, findings
+          print("PASS: zero literal_topic findings across the cost API slice and shared bindings")
+          PYTHON
+  - id: dod-002
+    description: The topics are read from the node contract and injected into the cost handlers through create_app and the route dependency.
+    source: generated
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_registry_api_effect/test_cost_snapshot_topics_omn21736.py tests/integration/api/test_cost_api_routes.py -q -p no:cacheprovider
+  - id: dod-003
+    description: 'Lab runtime proof: the registry app serves all three cost snapshot routes over loopback HTTP with contract-bound topics; the same isolated probe runs on a hosted runner without Docker or a database.'
+    source: generated
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: |
+          set -eu
+          probe_dir=$(mktemp -d)
+          trap 'if test -n "${probe_pid:-}"; then kill "$probe_pid" 2>/dev/null || true; wait "$probe_pid" 2>/dev/null || true; fi; rm -rf "$probe_dir"' EXIT
+          uv run python - "$probe_dir/port" >"$probe_dir/server.log" 2>&1 <<'PYTHON' &
+          import socket
+          import sys
+          from pathlib import Path
+          import uvicorn
+          from omnibase_core.container import ModelONEXContainer
+          from omnibase_infra.services.registry_api.main import create_app
+          from omnibase_infra.services.cost_api.snapshot_cache import store_latest_snapshot
+          app = create_app(container=ModelONEXContainer(), cors_origins=["http://testserver"], cost_api_pool=object())
+          topics = app.state.cost_snapshot_topics
+          store_latest_snapshot(topics.summary, "24h", {"total_cost_usd": "2.000000", "total_tokens": 20, "session_count": 2})
+          store_latest_snapshot(topics.by_repo, "24h", {"rows": [{"repo_name": "lab-readback", "cost_usd": "1.0", "total_tokens": 5}]})
+          store_latest_snapshot(topics.token_usage, "24h", {"rows": [{"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7}]})
+          listener = socket.socket()
+          listener.bind(("127.0.0.1", 0))
+          listener.listen()
+          Path(sys.argv[1]).write_text(str(listener.getsockname()[1]))
+          uvicorn.Server(uvicorn.Config(app, log_level="error")).run(sockets=[listener])
+          PYTHON
+          probe_pid=$!
+          for attempt in $(seq 1 100); do
+            if test -s "$probe_dir/port"; then break; fi
+            if ! kill -0 "$probe_pid" 2>/dev/null; then cat "$probe_dir/server.log"; exit 1; fi
+            sleep 0.1
+          done
+          port=$(cat "$probe_dir/port")
+          for route in summary by-repo token-usage; do
+            curl --fail --silent --show-error --retry 5 --retry-connrefused --retry-delay 1 --max-time 10 "http://127.0.0.1:$port/api/costs/$route" > "$probe_dir/$route.json"
+          done
+          uv run python - "$probe_dir" <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          results = {name: json.loads((root / (name + ".json")).read_text()) for name in ("summary", "by-repo", "token-usage")}
+          assert results["summary"]["total_tokens"] == 20, results
+          assert results["by-repo"]["items"][0]["name"] == "lab-readback", results
+          assert results["token-usage"]["total_tokens"] == 7, results
+          print(json.dumps({"status": "PASS", "transport": "loopback HTTP", "routes": results}, sort_keys=True))
+          PYTHON
+  - id: dod-004
+    description: Snapshot configuration rejects malformed topics, injected topics override populated contract topics, and unbound topic dependencies return a structured 503.
+    source: generated
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_registry_api_effect/test_cost_snapshot_topics_omn21736.py -k 'invalid_snapshot_topics or unbound_snapshot_topics or summary_route_reads_the_injected_topic' -q -p no:cacheprovider
