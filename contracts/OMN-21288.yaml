@@ -49,6 +49,13 @@ requirements:
       - id: AC7
         statement: |-
           AC7: a planted factory error, a non-ASGI factory result, an unimportable factory, a malformed declaration, an overlapping or runtime-shadowing prefix each raise at boot with nothing mounted, and a failing lifespan makes every request answer 503 -- falsifier: the failing-mount tests in tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py fail at the merge base and pass on the branch
+  - id: req-omn21288-receipt-mode-ungrouped
+    statement: "The receipt-mode caller joins no consumer group, so a hook firing on every command leaves no Empty group on the broker."
+    acceptance:
+      - id: AC21288102
+        statement: "AC21288102: the receipt-mode publish-and-await handler subscribes with subscribe_ungrouped and mints no receipt-mode-client group -- falsifier: the 14 tests that fail at the base in tests/unit/handlers/test_handler_receipt_mode_publish_await.py do not pass on the branch"
+      - id: AC21288105
+        statement: "AC21288105: the focused handler tests and integration exchange pass, the handler and integration test pass ruff, and the handler passes mypy -- falsifier: any of the focused test, lint, format or type checks exits nonzero"
   - id: req-omn21288-ac8-handover-model
     statement: "One-runtime plan T8: a checked TLA+ model of the consumer-group offset handover across a fold, a rollback and a second fold, with a mutant for each invariant."
     acceptance:
@@ -211,6 +218,39 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mount_live_port_omn21288.py -k planted_factory_error -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC7]
+  - id: dod-omn21288-receipt-mode-ungrouped
+    description: "The receipt-mode handler subscribes through subscribe_ungrouped and the in-memory bus shows no named group from it. 14 of the 33 tests in the file fail at the merge base, whose handler joins a receipt-mode-client.<hex12> group."
+    source: manual
+    binds_ac: [AC21288102]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21288-receipt-mode-ungrouped-precommit
+    description: "Run the focused handler and in-memory integration exchange, then check lint, formatting and types directly. These hosted checks avoid cold installation and execution of the whole repository's pre-commit hook graph inside one 180-second check. Repository pre-commit hooks still run before the commit; this evidence does not claim to rerun that full graph. The exchange asserts no named reply group while the command is handled and refuses stale replies with a matching invocation."
+    source: manual
+    binds_ac: [AC21288105]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py tests/integration/handlers/test_receipt_mode_exchange_omn21341.py -k 'not kafka' -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen ruff check src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py tests/integration/handlers/test_receipt_mode_exchange_omn21341.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen ruff format --check src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py tests/integration/handlers/test_receipt_mode_exchange_omn21341.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen mypy src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21288-receipt-mode-ungrouped-deploy-probe
+    description: "Hosted-runner deployment check: load the deployed handler by its adapter import spec and exchange real bus envelopes over the in-memory transport. A stale reply with the current invocation must not be replayed, the immediate progress and action must arrive, no named reply group may be active, and the client must close. The named-group assertion fails with the merge-base handler. No running lane, broker credentials or lab rollout is claimed by this hosted check; the Kafka variant is also run on the lab broker."
+    source: manual
+    binds_ac: [AC21288102]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_receipt_mode_exchange_omn21341.py -k inmemory -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21288-ac8-handover-model
     description: >-
       formal/consumer_group_handover/results holds TLC output for the base model (no error, 0 states left on queue), the writers configuration, six mutant configurations that each report their named invariant violated, and four witnesses that report fold, rollback, second fold and a writer replay reachable, bound to model.sha256, with the verdict line T8 quotes. The test file and the formal directory do not exist at the merge base.
