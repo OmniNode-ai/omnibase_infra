@@ -741,6 +741,11 @@ requirements:
         statement: INFRA_DEV_TAG selects the infra clone tag; with no value the clone still selects dev.
       - id: AC17427547803
         statement: STAGE_DEV_TAGS=1 passes DEPLOY_REF=origin/dev and no explicit sibling SHA pins to stage_workspace.sh; an empty value retains the pinned build.
+  - id: req-omn17427-c29-throttle-test-isolation
+    statement: The C29 throttle-retry test records only the probe's own backoff sleeps, not sleeps from other threads sharing the process-global time module.
+    acceptance:
+      - id: AC17427650001
+        statement: 'A sleep made outside the probe is not recorded by the test fixture, and the probe retry assertions still hold -- falsifier: uv run pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q fails at the merge base on test_a_sleep_outside_the_probe_is_not_recorded'
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -3387,3 +3392,11 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q --no-cov
         cwd: .
     binds_ac: [AC17427547801, AC17427547802, AC17427547803]
+  - id: dod-omn17427-c29-throttle-test-isolation
+    description: The throttle-retry test fixture swaps the probe's own time reference, so a sleep from another thread is not recorded; the new test fails against the former global patch.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac: [AC17427650001]
