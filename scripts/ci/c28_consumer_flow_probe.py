@@ -27,9 +27,9 @@ WHAT IS MEASURED, CLAUSE BY CLAUSE -- the readback's own clauses
              sampled ``--samples`` times ``--sample-interval`` apart. The two
              subscription kinds the proof sentence names by hand must each
              have an INSTRUMENTED row in every sample: the audit-purpose
-             projection consumer (``node_gateway_link_health_projection_compute``,
-             whose contract declares ``consumer_purpose: audit`` -- the kind
-             that produced no row at all when OMN-17214 was filed) and the
+             projection consumer (``node_ledger_projection_compute``, whose
+             contract declares ``consumer_purpose: audit``; a gateway-off lab
+             lane feeds it, OMN-21916) and the
              publishing reducer (``projection_consumer_flow``). Instrumented
              means integer in/out counters and a state other than UNKNOWN. The
              window must ADVANCE across the samples, so a row retained from
@@ -167,8 +167,8 @@ LIVE_WINDOW_SQL: Final[str] = (
 KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
     (
         "audit_projection_consumer",
-        "local.omnibase_infra.node_gateway_link_health_projection_compute.consume.",
-        "onex.evt.omnibase-infra.gateway-heartbeat.v1",
+        "local.omnibase_infra.node_ledger_projection_compute.consume.",
+        "onex.evt.platform.node-heartbeat.v1",
         "messages_in",
     ),
     (
