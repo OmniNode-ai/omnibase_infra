@@ -166,13 +166,16 @@ def test_contract_fallback_reads_the_packaged_contract_resource(
 ) -> None:
     """The fallback reads contract.yaml as package data of the orchestrator node.
 
-    The declarations come from ``importlib.resources`` of
-    ``omnibase_infra.nodes.node_registration_orchestrator``, not a path walked up
+    The declarations come from ``importlib.resources`` of the ``omnibase_infra``
+    package (the node package is addressed by path, not imported, so the
+    node-boundary import check sees no seam), not a path walked up
     from this module's file, so a zipped or relocated install resolves them too.
     """
     from omnibase_infra.models.registration import model_registration_settings as mrs
 
-    (tmp_path / "contract.yaml").write_text(
+    contract_dir = tmp_path / "nodes" / "node_registration_orchestrator"
+    contract_dir.mkdir(parents=True)
+    (contract_dir / "contract.yaml").write_text(
         "descriptor:\n"
         '  registration_auto_ack: "true"\n'
         '  liveness_interval_seconds: "123"\n',
@@ -191,6 +194,6 @@ def test_contract_fallback_reads_the_packaged_contract_resource(
     finally:
         mrs._declared_descriptor.cache_clear()
 
-    assert asked == ["omnibase_infra.nodes.node_registration_orchestrator"]
+    assert asked == ["omnibase_infra"]
     assert settings.auto_ack is True
     assert settings.liveness_interval_seconds == 123

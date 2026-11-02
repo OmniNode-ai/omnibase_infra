@@ -16,6 +16,12 @@
 #   FACTORY_FLOOR_BIND_ADDR  the host's tailnet address (the address the port is published on)
 #   FACTORY_FLOOR_PORT       the published port
 #   FACTORY_FLOOR_SERVE_DIR  the host directory the publish node writes into (mounted read-only)
+#   FACTORY_FLOOR_ACCESS_DIR the host directory the publish node writes the operator-only allowed-address include
+#                            into (mounted read-only at /etc/nginx/access; OMN-22119). It is a sibling of the serve
+#                            directory, never inside it, and it must exist and be writable by the publishing user
+#                            before the first `up` (a directory the container runtime creates itself is root's).
+#                            Until the publish has written the include there, /reports/decision-quality/ answers
+#                            403 to everyone.
 #
 # Bring up (on the serving host, env file in place):
 #   docker compose --env-file <host env file> -f docker/docker-compose.factory-floor-web.yml up -d
@@ -38,6 +44,7 @@ services:
       - "${FACTORY_FLOOR_BIND_ADDR:?set FACTORY_FLOOR_BIND_ADDR to the host tailnet address}:${FACTORY_FLOOR_PORT:?set FACTORY_FLOOR_PORT}:8080"
     volumes:
       - ${FACTORY_FLOOR_SERVE_DIR:?set FACTORY_FLOOR_SERVE_DIR}:/srv/site:ro
+      - ${FACTORY_FLOOR_ACCESS_DIR:?set FACTORY_FLOOR_ACCESS_DIR}:/etc/nginx/access:ro
       - type: bind
         source: ./factory-floor-web/nginx.conf
         target: /etc/nginx/nginx.conf

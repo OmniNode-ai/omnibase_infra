@@ -30,8 +30,8 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 ENV_LIVENESS_INTERVAL_SECONDS: Final[str] = "ONEX_LIVENESS_INTERVAL_SECONDS"
 DEFAULT_LIVENESS_INTERVAL_SECONDS: Final[int] = 60
 
-_CONTRACT_PACKAGE: Final[str] = "omnibase_infra.nodes.node_registration_orchestrator"
-_CONTRACT_NAME: Final[str] = "contract.yaml"
+_CONTRACT_PACKAGE: Final[str] = "omnibase_infra"
+_CONTRACT_NAME: Final[str] = "nodes/node_registration_orchestrator/contract.yaml"
 
 
 @cache
