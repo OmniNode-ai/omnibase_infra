@@ -3539,9 +3539,6 @@ entries:
   - path: src/omnibase_infra/runtime/protocol_lockfile.py
     family: F
     content_sha1: 38fdc25ae265256b964a94f26d78ff06b954756a
-  - path: src/omnibase_infra/runtime/protocols/protocol_delegation_dispatch_port.py
-    family: O
-    content_sha1: 26993c4381c6cc42f8682b07ac1f89df93efe791
   - path: src/omnibase_infra/runtime/render_bifrost_delegation_contract.py
     family: O
     content_sha1: 18841baeb8d460c0fdf519a101d2363d4c136df3

@@ -48,6 +48,10 @@ from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngres
 from omnibase_infra.runtime.service_delegation_dispatch_port import (
     RuntimeDelegationDispatchPort,
 )
+from tests.helpers.cli_registry_stand_in import (
+    install_stand_in_registry,
+    wiring_authority,
+)
 
 # ---------------------------------------------------------------------------
 # Locate the gate script so tests can import its public check_route_coverage()
@@ -616,6 +620,8 @@ async def _k6_dispatch(
         "resolve_bounded_delegation_route",
         _resolve,
     )
+    # OMN-21604: no budget arguments below, so the class's declared budget applies.
+    install_stand_in_registry(monkeypatch, wiring_authority())
     port = RuntimeDelegationDispatchPort(
         event_bus=bus,  # type: ignore[arg-type]
         routes={
