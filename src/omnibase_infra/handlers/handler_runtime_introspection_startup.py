@@ -118,9 +118,6 @@ class HandlerRuntimeIntrospectionStartup:
                 reason=EnumIntrospectionReason.STARTUP,
                 correlation_id=correlation_id,
             )
-            if request.announcements and event_bus is not None:
-                await self._publish_announced(service, request, event_bus, build_events)
-
             # Record time for throttle tracking immediately after publish
             last_time = time.monotonic()
 
@@ -142,6 +139,20 @@ class HandlerRuntimeIntrospectionStartup:
                 },
             )
             return not_published
+
+        # Runtime presence has succeeded. Optional announced-node publishing
+        # must not erase its throttle timestamp or suppress its heartbeat.
+        if request.announcements and event_bus is not None:
+            try:
+                await self._publish_announced(service, request, event_bus, build_events)
+            except Exception as e:
+                logger.exception(
+                    "Failed to publish announced node introspection",
+                    extra={
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
         return ModelRuntimeIntrospectionStartupResult(
             published=True, last_introspection_time=last_time
         )

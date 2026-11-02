@@ -439,23 +439,29 @@ class TestStartupHandlerWithAnnouncements:
         assert json.loads(value)["node_name"] == "node_example_effect"
 
     @pytest.mark.asyncio
-    async def test_bus_failure_is_not_a_publish(self) -> None:
+    async def test_bus_failure_preserves_runtime_publish(self) -> None:
         bus = make_bus()
         bus.publish_envelope.side_effect = RuntimeError("bus down")
         handler = HandlerRuntimeIntrospectionStartup()
+        service = make_service()
 
         result = await handler.handle(
             make_request((make_announcement(),)),
-            service=make_service(),
+            service=service,
             config=make_config(),
             event_bus=bus,
             build_events=HandlerRegistrationFromAnnouncement.build_events,
         )
 
-        assert not result.published
+        assert result.published
+        assert result.last_introspection_time is not None
+        service.publish_introspection.assert_awaited_once()
+        bus.publish_envelope.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_service_that_cannot_report_identity_is_not_a_publish(self) -> None:
+    async def test_missing_announcement_identity_preserves_runtime_publish(
+        self,
+    ) -> None:
         class ServiceWithoutIdentity:
             async def publish_introspection(
                 self,
@@ -480,10 +486,43 @@ class TestStartupHandlerWithAnnouncements:
             build_events=HandlerRegistrationFromAnnouncement.build_events,
         )
 
-        assert not result.published
+        assert result.published
+        assert result.last_introspection_time is not None
 
 
 class TestHeartbeatAfterBoot:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure_boundary", ["identity", "announcement_publish"])
+    async def test_announcement_failure_preserves_runtime_heartbeat_and_throttle(
+        self, failure_boundary: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        service = make_service()
+        bus = EventBusInmemory()
+        if failure_boundary == "identity":
+            service.get_introspection_data.side_effect = RuntimeError(
+                "identity unavailable"
+            )
+        else:
+            bus.publish_envelope = AsyncMock(side_effect=RuntimeError("bus down"))
+        process = make_process(service, (make_announcement(),), bus)
+        try:
+            await process.start()
+            assert process.is_running
+            service.publish_introspection.assert_awaited_once()
+            service.start_heartbeat_task.assert_awaited_once()
+            first = process._last_introspection_time
+            assert first is not None
+            await process._publish_introspection_with_jitter(correlation_id=uuid4())
+            assert process._last_introspection_time == first
+            service.publish_introspection.assert_awaited_once()
+            assert any(
+                record.message == "Failed to publish announced node introspection"
+                and record.exc_info
+                for record in caplog.records
+            )
+        finally:
+            await process.stop()
+
     @pytest.mark.asyncio
     async def test_heartbeat_started_once_without_announcements(self) -> None:
         service = make_service()
@@ -615,3 +654,19 @@ async def test_runtime_presence_precedes_announced_nodes() -> None:
     )
     assert result.published
     assert order == ["runtime", "announcement"]
+
+
+@pytest.mark.asyncio
+async def test_announced_node_publish_propagates_cancellation() -> None:
+    service = make_service()
+    bus = make_bus()
+    bus.publish_envelope.side_effect = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await HandlerRuntimeIntrospectionStartup().handle(
+            make_request((make_announcement(),)),
+            service=service,
+            config=make_config(),
+            event_bus=bus,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
+    service.publish_introspection.assert_awaited_once()
