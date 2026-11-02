@@ -175,32 +175,42 @@ def render_table(censuses: tuple[ModelLaneEntryPointCensus, ...]) -> str:
     return "\n\n".join(blocks)
 
 
-def _docker(args: list[str], docker_host: str, timeout_seconds: int | None) -> str:
+def _docker(
+    args: list[str], docker_host: str, timeout_seconds: int | None
+) -> subprocess.CompletedProcess[str]:
     base = ["docker", "--host", docker_host] if docker_host else ["docker"]
-    completed = subprocess.run(
+    return subprocess.run(
         [*base, *args],
         capture_output=True,
         text=True,
         timeout=timeout_seconds,
         check=False,
     )
-    if completed.returncode != 0:
-        raise ValueError(
-            f"docker {args[0]} exited {completed.returncode}: {completed.stderr.strip()[:300]}"
-        )
-    return completed.stdout
 
 
 def read_live_inspection(
     docker_host: str, timeout_seconds: int | None
 ) -> list[dict[str, object]]:
-    """Inspect every container through read-only ``docker ps`` and ``docker inspect``."""
-    ids = _docker(
-        ["ps", "-a", "-q", "--no-trunc"], docker_host, timeout_seconds
-    ).split()
+    """Inspect every container through read-only ``docker ps`` and ``docker inspect``.
+
+    A container removed between the listing and the inspection makes ``docker inspect``
+    exit non-zero while it still prints the others; those are kept, and only a call that
+    prints no array at all is a refusal.
+    """
+    listed = _docker(["ps", "-a", "-q", "--no-trunc"], docker_host, timeout_seconds)
+    if listed.returncode != 0:
+        raise ValueError(
+            f"docker ps exited {listed.returncode}: {listed.stderr.strip()[:300]}"
+        )
+    ids = listed.stdout.split()
     if not ids:
         return []
-    parsed = json.loads(_docker(["inspect", *ids], docker_host, timeout_seconds))
+    inspected = _docker(["inspect", *ids], docker_host, timeout_seconds)
+    if inspected.returncode != 0 and not inspected.stdout.lstrip().startswith("["):
+        raise ValueError(
+            f"docker inspect exited {inspected.returncode}: {inspected.stderr.strip()[:300]}"
+        )
+    parsed = json.loads(inspected.stdout)
     if not isinstance(parsed, list):
         raise ValueError("docker inspect did not return an array")
     return parsed

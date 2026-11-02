@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
 
+from omnibase_infra.handlers import handler_lane_entry_point_census as handler_module
 from omnibase_infra.handlers.handler_lane_entry_point_census import (
     HandlerLaneEntryPointCensus,
     entry_point_of,
@@ -128,3 +130,30 @@ def test_entry_point_of(argv: tuple[str, ...], expected: str) -> None:
 def test_fixture_is_the_recorded_inspect_shape() -> None:
     data = json.loads(FIXTURE.read_text(encoding="utf-8"))
     assert {"Name", "Config", "State"} <= set(data[0])
+
+
+def _completed(
+    stdout: str, returncode: int = 0, stderr: str = ""
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+
+def test_live_read_keeps_the_containers_inspect_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kept = json.loads(FIXTURE.read_text(encoding="utf-8"))[:2]
+    replies = [
+        _completed("aaa\nbbb\ngone\n"),
+        _completed(json.dumps(kept), 1, "error: no such object: gone"),
+    ]
+    monkeypatch.setattr(handler_module, "_docker", lambda *_: replies.pop(0))
+    assert handler_module.read_live_inspection("", None) == kept
+
+
+def test_live_read_refuses_when_inspect_prints_no_array(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replies = [_completed("aaa\n"), _completed("", 1, "daemon unreachable")]
+    monkeypatch.setattr(handler_module, "_docker", lambda *_: replies.pop(0))
+    with pytest.raises(ValueError, match="docker inspect exited 1"):
+        handler_module.read_live_inspection("", None)
