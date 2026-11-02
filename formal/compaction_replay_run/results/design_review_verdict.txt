@@ -1,0 +1,71 @@
+# Design-review verdict: compaction replay-run lifecycle (OMN-21090, plan task CM.0)
+
+Verdict: **PASS with conditions.** The replay-run lifecycle and the live kill
+switch of the compaction measurement plan (section 3 and section 4, tasks CM.10
+and CM.16) may be built against this model under the four conditions below.
+
+Reviewed against the committed TLC output in this directory, bound to
+`model.sha256` (the sha256 of `CompactionReplayRun.tla`, then each cfg, each
+`results/*.out` and this file, in that order). Each `.out` opens with a header line
+naming the cfg and spec digests of the run that wrote it. CI runs no TLC (no java
+there), so the evidence is the recorded run plus those bindings, regenerated on a
+lab host. TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802), `-workers 2`, Java
+Adoptium 17 in `eclipse-temurin:17-jre-alpine` on lab host h051, run by
+`uv run python tests/formal/test_compaction_replay_run_model.py --regenerate`,
+tla2tools.jar sha256 `936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88`.
+
+| Config | Expected | TLC result | Distinct states |
+| --- | --- | --- | --- |
+| Model.cfg | pass all eight invariants and Terminates | No error has been found, 0 states left on queue | 676134 |
+| mut_terminal_unique.cfg | counterexample | UniqueTerminal violated | 54 |
+| mut_killswitch.cfg | counterexample | NoOnAfterTrip violated | 471 |
+| mut_boundary_read.cfg | counterexample | NoReadAfterBoundary violated | 21 |
+| mut_infra_removal.cfg | counterexample | MatchedRemoval violated | 3611 |
+| mut_fork_restore.cfg | counterexample | ForkRestore violated | 222 |
+| mut_terminal_kind.cfg | counterexample | KindMatchesCause violated | 23 |
+| mut_prefix_once.cfg | counterexample | OnePrefixOneSnapshot violated | 6 |
+| mut_no_fairness.cfg | counterexample | Terminates violated (stuttering, no fairness) | 48147 |
+
+What the model covers, each invariant broken by its own mutant with every
+invariant of Model.cfg still enabled:
+
+- one terminal row per run key (case and arm), including a late second writer;
+- no arm reads a source record after the boundary instant, and a refused read is a
+  terminal `fail`, not a skipped warning;
+- an infrastructure fault that survives its retries removes the case from every
+  arm, taking back cells an arm had already counted;
+- a retried run restores the snapshot, never the dirty worktree of its last attempt;
+- a cap stop and an infrastructure fault are different terminal kinds, and a cap
+  stop does not remove the case;
+- one prefix and one snapshot per case, shared by both arms;
+- after two incidents with distinct dedup keys trip the switch, no later session is
+  assigned `on`.
+
+Conditions, which are limits of the model that the builders must meet in code or
+close by extending the model first:
+
+1. **One case in the bounds.** Two cases did not finish in ten minutes at over a
+   million distinct states, because the replay and live sub-machines multiply. Each
+   invariant is per case, so one case with two arms exercises each of them, but
+   independence between cases is not checked. CM.10 keeps the per-case removal a
+   per-case operation.
+2. **The trip is atomic with the second incident.** The model flips the switch in
+   the same step that records the second distinct key. CM.16 must make counting the
+   incident and flipping the arm one write (or fence assignment on a re-read of the
+   count); a read-count-then-flip gap is not modelled and would let one more `on`
+   in. Block pairing and balance are not modelled either; CM.16's own tests hold them.
+3. **The second terminal is a mutation action.** `DuplicateTerminal` is the late or
+   redelivered writer that exists only when `UniqueTerminalGuard` is FALSE. The
+   guarded model has no such action, so CM.10 must write the terminal as a keyed
+   insert that refuses a second row (a unique constraint on the run key), not as a
+   check followed by an insert.
+4. **Cells are the analysis set.** The model takes a removed case's cells out of
+   one `analysis` set. CM.12 must derive inclusion from the terminals and the removal
+   list at report time, or delete the cells, with the same result for every arm of
+   the case; matched removal is the property, not the storage.
+
+Liveness: `Terminates` (every run key gets a terminal row) holds under weak
+fairness of `Next`; retries are bounded by `MaxAttempts`. `mut_no_fairness.cfg`
+checks `SpecNoFair`, the same model without `WF_vars(Next)`, and TLC reports a
+stuttering counterexample to `Terminates`, so the property is falsifiable and the
+fairness assumption is what it rests on.

@@ -921,3 +921,9 @@ fenced_node_migrations:
   # ruling. No lane release is added here.
   - id: "node:node_projection_delegation_capability_map:0002_force_rls_delegation_capability_cells.sql"
     ticket: "OMN-20169"
+  # OMN-21933: 0002 enables FORCE ROW LEVEL SECURITY on skill_executions and
+  # replaces the table's tenant policy. 0001 (the create) applies on every lane.
+  # Release is a separate operator-sequenced step that needs an operator ruling.
+  # No lane release is added here.
+  - id: "node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql"
+    ticket: "OMN-21933"
