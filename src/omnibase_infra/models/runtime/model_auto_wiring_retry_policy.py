@@ -14,7 +14,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-__all__ = ["ModelAutoWiringRetryPolicy"]
+__all__ = [
+    "BOUNDARY_DLQ_MAX_ATTEMPTS",
+    "NOT_READY_REATTACH_MAX_ATTEMPTS",
+    "ModelAutoWiringRetryPolicy",
+]
 
 
 class ModelAutoWiringRetryPolicy(BaseModel):
@@ -38,3 +42,8 @@ class ModelAutoWiringRetryPolicy(BaseModel):
             "(OMN-15215)."
         ),
     )
+
+
+_POLICY = ModelAutoWiringRetryPolicy()
+BOUNDARY_DLQ_MAX_ATTEMPTS = _POLICY.boundary_dlq_max_attempts
+NOT_READY_REATTACH_MAX_ATTEMPTS = _POLICY.not_ready_reattach_max_attempts
