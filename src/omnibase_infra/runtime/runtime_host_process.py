@@ -105,6 +105,9 @@ from omnibase_infra.gateway import (
 )
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.model_contract_hotload_config import (
+    ModelContractHotloadConfig,
+)
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
@@ -1947,6 +1950,12 @@ class RuntimeHostProcess:
 
         assert_venv_purity()
 
+        # Step 0c: Resolve the contract hot-load gate once (OMN-20079). A switch that
+        # is on in an environment the declared allowlist does not name (or in an
+        # unset environment), or a malformed block, fails the boot here, before
+        # architecture validation, the event bus or any wiring.
+        self._resolve_contract_hotload_gate()
+
         # Step 1: Validate architecture compliance FIRST (OMN-1138)
         # This runs before event bus starts or handlers are wired to ensure
         # clean failure without partial state if validation fails
@@ -2089,7 +2098,7 @@ class RuntimeHostProcess:
         # Subscribes to onex.evt.platform.node-registration.v1 AFTER the dispatch
         # engine is frozen. Routes incoming events to on_contract_registered()
         # then live materializes the handler into the frozen engine.
-        # No-op when KafkaContractSource is not configured.
+        # No-op unless contract_hotload.enabled is true (OMN-20079).
         await self._start_dynamic_contract_listener()
 
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
@@ -5839,6 +5848,17 @@ class RuntimeHostProcess:
         self._container = ModelONEXContainer()
         return self._container
 
+    def _resolve_contract_hotload_gate(self) -> ModelContractHotloadConfig:
+        """Read ``contract_hotload`` once; start() step 0c decides, later steps follow."""
+        gate = getattr(self, "_contract_hotload_gate", None)
+        gate = gate or ModelContractHotloadConfig.from_runtime_config(
+            getattr(self, "_config", None),
+            os.getenv("ONEX_ENVIRONMENT", ""),
+            self._get_environment_from_config(),
+        )
+        self._contract_hotload_gate = gate
+        return gate
+
     def _get_environment_from_config(self) -> str:
         """Extract environment setting from config with consistent fallback.
 
@@ -6145,6 +6165,13 @@ class RuntimeHostProcess:
             )
             return
 
+        # Guard: contract hot loading is off unless the runtime config opts in
+        # (OMN-20079). contract-registered.v1 would otherwise cache and
+        # materialize any parseable contract it carries.
+        if not self._resolve_contract_hotload_gate().enabled:
+            logger.info("Baseline hot-load subscriptions off: not enabled")
+            return
+
         # Guard: only wire if KafkaContractSource is active
         if self._kafka_contract_source is None:
             logger.debug(
@@ -6352,14 +6379,18 @@ class RuntimeHostProcess:
         events through on_contract_registered() then live handler materialization.
 
         No-op when:
+        - ``contract_hotload.enabled`` is not true (the default; OMN-20079)
         - _event_bus is None
 
-        The runtime trusts events on this topic as pre-validated by omnimarket.
-        No local policy enforcement — only cache + materialize.
+        Once enabled, events on this topic are trusted as pre-validated.
 
         .. versionadded:: 0.9.4
             Added as part of OMN-11247 post-freeze dynamic contract registration.
         """
+        if not self._resolve_contract_hotload_gate().enabled:
+            logger.info("Dynamic contract listener off: contract_hotload not enabled")
+            return
+
         if self._event_bus is None:
             logger.debug("Skipping dynamic contract listener: no event bus available")
             return
@@ -6393,29 +6424,7 @@ class RuntimeHostProcess:
             ModelEventBusRecoveryConfig,
         )
 
-        config_context = ModelInfraErrorContext.with_correlation(
-            transport_type=EnumInfraTransportType.RUNTIME,
-            operation="dynamic_contract_listener.recovery_config",
-        )
-        event_bus_config = (self._config or {}).get("event_bus", {})
-        if not isinstance(event_bus_config, dict):
-            raise ProtocolConfigurationError(
-                "runtime config 'event_bus' must be a mapping",
-                context=config_context,
-            )
-        recovery_config = event_bus_config.get("recovery")
-        try:
-            recovery = (
-                ModelEventBusRecoveryConfig.model_validate(recovery_config)
-                if recovery_config is not None
-                else ModelEventBusRecoveryConfig.from_contract()
-            )
-        except ValidationError as exc:
-            raise ProtocolConfigurationError(
-                "invalid event_bus.recovery configuration for the dynamic "
-                f"contract listener: {sanitize_error_message(exc)}",
-                context=config_context,
-            ) from exc
+        recovery = ModelEventBusRecoveryConfig.from_runtime_config(self._config)
         delay = recovery.initial_backoff_seconds
         while True:
             try:
