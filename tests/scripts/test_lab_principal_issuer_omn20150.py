@@ -144,8 +144,17 @@ def test_the_issuer_takes_its_grants_from_the_derived_file_not_the_policy_file()
         for r in derived
     }
     templated = [g for g in declaration.grants if g.templated]
+    # The ledger writer topic is written by its principal; the compaction replies are
+    # read by theirs (OMN-22103). A topic the principal owns is created for it either way,
+    # since the broker does not auto-create topics.
     assert [(g.name, g.create_topic) for g in templated] == [
-        ("onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1", True)
+        (
+            "onex.cmd.omniintelligence.context-compaction-package-for-{principal}.v1",
+            True,
+        ),
+        ("onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1", True),
+        ("onex.evt.omnimarket.context-compaction-fallback-for-{principal}.v1", True),
+        ("onex.evt.omnimarket.context-compaction-prepared-for-{principal}.v1", True),
     ]
     assert declaration.digest != hashlib.sha256(GRANTS.read_bytes()).hexdigest()
 
@@ -569,8 +578,11 @@ def test_issuance_creates_the_user_applies_every_declared_grant_and_records_it(
         declaration.grants
     )
     assert broker.topic_calls == [
-        f"onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1"
+        g.for_principal(principal).name for g in declaration.grants if g.create_topic
     ]
+    assert f"onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1" in (
+        broker.topic_calls
+    )
     assert broker.acl_argvs == [
         [principal, g.resource, g.name, g.pattern, *g.operations]
         for declared in declaration.grants
@@ -767,8 +779,10 @@ def test_apply_grants_updates_every_issued_principal_in_the_lane(
         for principal in expected
     ]
     assert apply_broker.topic_calls == [
-        f"onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1"
+        g.for_principal(principal).name
         for principal in expected
+        for g in declaration.grants
+        if g.create_topic
     ]
     assert apply_broker.acl_argvs == [
         [principal, g.resource, g.name, g.pattern, *g.operations]
