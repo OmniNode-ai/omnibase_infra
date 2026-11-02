@@ -169,3 +169,51 @@ def test_runtime_boot_gate_name_matches_the_workflows() -> None:
     boot = _load(REUSABLE_BOOT)["jobs"]["boot"]
     inner = boot["name"].replace("${{ inputs.mode }}", "compose")
     assert f"{CALLER} / {inner}" == RUNTIME_BOOT_SMOKE_COMPOSE_GATE
+
+
+STACK_SHAPE_GATE = "Stack Shape (OMN-21891)"
+
+
+def _without(jobs: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
+    return [j for j in jobs if j["name"] != name]
+
+
+def test_stack_shape_gate_is_strict() -> None:
+    assert STACK_SHAPE_GATE in STRICT_GATE_JOBS
+    assert STACK_SHAPE_GATE not in SKIPPABLE_GATE_JOBS
+
+
+def test_stack_shape_gate_name_matches_ci_job() -> None:
+    """A rename in ci.yml would leave the gate absent on every PR."""
+    job = _load(CI_WORKFLOW)["jobs"]["stack-shape"]
+    assert job["name"] == STACK_SHAPE_GATE
+    assert "if" not in job
+    assert "needs" not in job
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
+def test_stack_shape_missing_job_never_passes(event: str) -> None:
+    """Absent is PENDING, which the poller turns into FAILURE at its deadline."""
+    jobs = _without(_gates_green(), STACK_SHAPE_GATE)
+    assert len(jobs) == len(_gates_green()) - 1  # positive control: the job was there
+    code, report = evaluate(
+        jobs, strict_gates=strict_gates_for_event(event), sweep_external=False
+    )
+    assert code == EXIT_PENDING, report
+    assert STACK_SHAPE_GATE in report
+
+
+@pytest.mark.parametrize("conclusion", ["skipped", "failure", "cancelled", "timed_out"])
+def test_stack_shape_non_success_fails(conclusion: str) -> None:
+    jobs = _without(_gates_green(), STACK_SHAPE_GATE) + [
+        _job(STACK_SHAPE_GATE, conclusion)
+    ]
+    code, report = _pull_request(jobs)
+    assert code == EXIT_FAILURE, report
+    assert STACK_SHAPE_GATE in report.split("strict-gate failures:")[1]
+
+
+def test_stack_shape_success_passes() -> None:
+    code, report = _pull_request(_gates_green())
+    assert code == EXIT_SUCCESS, report
+    assert f"- {STACK_SHAPE_GATE}: completed/success" in report
