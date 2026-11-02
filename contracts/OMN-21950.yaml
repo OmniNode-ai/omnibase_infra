@@ -56,7 +56,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv run --frozen pytest tests/integration/nodes/node_bus_forwarder_effect/test_forwarder_container_source_omn21950.py -q --no-cov && gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_bus_forwarder_effect/models/model_gateway_forwarder_runtime_config.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -qF 'def lane_mirror_source_from_container'
+        check_value: uv run --frozen pytest tests/integration/nodes/node_bus_forwarder_effect/test_forwarder_container_source_omn21950.py -q --no-cov && gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_bus_forwarder_effect/models/model_gateway_forwarder_runtime_config.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'def lane_mirror_source_from_container' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
