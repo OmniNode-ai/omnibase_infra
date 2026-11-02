@@ -4,13 +4,15 @@
 # Ticket: OMN-2552
 name: "node_reward_binder_effect"
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 contract_version:
   major: 1
   minor: 0
   patch: 1
 node_version: "1.0.1"
 description: >
-  EFFECT node that emits structured reward events to Kafka after ScoringReducer produces an EvaluationResult. Publishes two event types in order: RewardAssignedEvent and PolicyStateUpdatedEvent. This is the only node in the objective pipeline that performs I/O. No scoring logic — only emits what ScoringReducer produced. (RunEvaluatedEvent removed in OMN-2929 — canonical event now in node_evidence_collection_effect.)
+  EFFECT node that emits structured reward events to Kafka after ScoringReducer produces an EvaluationResult. Publishes two event types in order: RewardAssignedEvent and PolicyStateUpdatedEvent. This is the only node in the objective pipeline that performs I/O. No scoring logic — only emits what ScoringReducer produced. (RunEvaluatedEvent removed in OMN-2929 — canonical event now in node_evidence_collection_effect.) The unreferenced node registry package was removed in OMN-21784; HandlerRewardBinder is resolved through the handler_routing block below.
 
 input_model:
   name: "ModelRewardBinderInput"
@@ -46,7 +48,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-24"
-  updated: "2026-06-30"
+  updated: "2026-11-01"
   ticket: "OMN-7334"
   topic_registry_source: "omnibase_infra.topics SUFFIX_OMNIMEMORY_REWARD_ASSIGNED and SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED"
   tags:

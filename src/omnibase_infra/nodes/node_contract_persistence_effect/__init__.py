@@ -81,16 +81,9 @@ from omnibase_infra.nodes.node_contract_persistence_effect.node import (
     NodeContractPersistenceEffect,
 )
 
-# Export registry
-from omnibase_infra.nodes.node_contract_persistence_effect.registry import (
-    RegistryInfraContractPersistenceEffect,
-)
-
 __all__: list[str] = [
     # Node
     "NodeContractPersistenceEffect",
-    # Registry
-    "RegistryInfraContractPersistenceEffect",
     # Handlers
     "HandlerPostgresCleanupTopics",
     "HandlerPostgresContractUpsert",

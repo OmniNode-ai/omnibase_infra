@@ -628,6 +628,13 @@ for repo in "${REPOS[@]}"; do
   fi
 done
 
+# OMN-17305: the reconcile runs --proven. A default run installs the omnimarket
+# clone HEAD, which the pull above has just advanced past the floor, and pull-all
+# never restamps the floor, so the onex wrapper then refuses every
+# evidence-minting command (OMN-17309) until a host reconcile or an onboarding
+# run stamps a new floor. --proven installs the floor's own commit, an ancestor
+# of the clone HEAD that the CLI drift guard accepts (OMN-18814), and stamps
+# nothing. The floor moves only through the host reconcile.
 _reconciler="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
 
 if [[ "$_any_repo_ok" -eq 0 ]]; then
@@ -640,7 +647,7 @@ else
   echo "   (bounded at ${DRIFT_REPAIR_TIMEOUT_SECONDS}s -- OMN-15590; override with PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS)"
   _drift_rc=0
   _run_bounded "$DRIFT_REPAIR_TIMEOUT_SECONDS" \
-    bash "$_reconciler" --workspace "$OMNI_HOME" \
+    bash "$_reconciler" --workspace "$OMNI_HOME" --proven \
     || _drift_rc=$?
 
   if [[ "$_drift_rc" -eq 0 ]]; then
@@ -676,7 +683,7 @@ else
     echo "# OmnimarketDriftError until this is fixed. Run it directly and"
     echo "# read the error (the reconciler names the exact failing command):"
     echo "#"
-    echo "#   bash $_reconciler --workspace $OMNI_HOME"
+    echo "#   bash $_reconciler --workspace $OMNI_HOME --proven"
     echo "#"
     echo "# See OMN-17190 / OMN-15590 / OMN-15242 / OMN-14060 for context."
     echo "############################################################"
