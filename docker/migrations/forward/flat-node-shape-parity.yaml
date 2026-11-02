@@ -64,6 +64,8 @@ tables:
     status: identical
   log_entries:
     status: identical
+  skill_executions:
+    status: identical
   swarm_runs:
     status: identical
   baselines_comparisons:

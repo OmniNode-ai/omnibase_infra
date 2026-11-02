@@ -291,6 +291,7 @@ databases:
               - run_trace
               - savings_estimates
               - skill_execution_snapshots
+              - skill_executions
               - tenant_inference_credentials
               - usage_by_model_day
               - usage_by_model_day_calls
@@ -451,5 +452,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: aed573147d531e3095323eed6fe4ecfa00efd8209b13665d436cf6c85ecfd150
+  sha256: 3ba03aba17c18441c0dca5d9f7025bbcb1e4b58c3a095aa8cf75b5f6ef8097bf
 topology_instance: local

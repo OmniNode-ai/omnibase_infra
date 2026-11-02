@@ -97,7 +97,10 @@ def test_neither_form_complete_is_refused(fields: dict[str, str]) -> None:
         ModelConsumerGroupHandover(from_auto_offset_reset="earliest", **fields)
 
 
-@pytest.mark.parametrize("group_id", ["", " ", "has space", "tab\tname", "a\nb"])
+@pytest.mark.parametrize(
+    "group_id",
+    ["", " ", "has space", "tab\tname", "a\nb", f"{_OLD_GROUP}\n", f"{_OLD_GROUP}\r\n"],
+)
 def test_a_group_id_that_is_not_a_kafka_group_name_is_refused(group_id: str) -> None:
     with pytest.raises(ValidationError):
         ModelConsumerGroupHandover(
@@ -114,3 +117,11 @@ def test_an_unknown_field_is_still_refused() -> None:
                 "from_topic": "x",
             }
         )
+
+
+def test_unvalidated_incomplete_model_raises_an_explicit_error() -> None:
+    handover = ModelConsumerGroupHandover.model_construct(
+        from_auto_offset_reset="earliest"
+    )
+    with pytest.raises(ValueError, match="a handover declares either"):
+        handover.source_group("dev")

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,8 @@ _TABLES = (
     "agent_status_events",
 )
 _SHIPPED_PROFILES = sorted(path.stem for path in _INSTANCES.glob("*.yaml"))
+_CATALOG_PROFILES = sorted(path.stem for path in _CATALOGS.glob("*.yaml"))
+_WRITER_TABLES = {*_TABLES, "agent_routing_decisions"}
 
 
 def _statements(filename: str) -> str:
@@ -58,6 +61,7 @@ def _writer_tables(instance: Path) -> set[str]:
         table
         for grant in grants
         if grant["object_type"] == "TABLE"
+        and grant.get("schema") == "public"
         and set(grant["privileges"]) == {"INSERT", "SELECT", "UPDATE"}
         for table in grant["objects"]
     }
@@ -119,7 +123,7 @@ def test_the_grant_migration_grants_exactly_the_six_tables_and_no_delete() -> No
 
 @pytest.mark.parametrize("profile", _SHIPPED_PROFILES)
 def test_every_shipped_instance_grants_the_writer_all_six_tables(profile: str) -> None:
-    assert set(_TABLES) <= _writer_tables(_INSTANCES / f"{profile}.yaml")
+    assert _writer_tables(_INSTANCES / f"{profile}.yaml") >= _WRITER_TABLES
 
 
 def test_the_shipped_instances_are_found() -> None:
@@ -127,17 +131,43 @@ def test_the_shipped_instances_are_found() -> None:
     assert len(_SHIPPED_PROFILES) >= 3
 
 
-@pytest.mark.parametrize("profile", _SHIPPED_PROFILES)
-def test_every_rendered_catalog_carries_the_six_grants(profile: str) -> None:
-    catalog = (_CATALOGS / f"{profile}.yaml").read_text(encoding="utf-8")
-    for table in _TABLES:
-        assert re.search(rf"\b{table}\b", catalog), f"{profile}: {table}"
+@pytest.mark.parametrize("profile", _CATALOG_PROFILES)
+def test_every_rendered_catalog_carries_the_seven_grants(profile: str) -> None:
+    path = _CATALOGS / f"{profile}.yaml"
+    assert _writer_tables(path) >= _WRITER_TABLES, profile
+    catalog = yaml.safe_load(path.read_text(encoding="utf-8"))
+    source = catalog["source"]
+    assert (
+        source["sha256"]
+        == hashlib.sha256((_ROOT / source["path"]).read_bytes()).hexdigest()
+    )
+    assert (
+        source["profile_catalog_sha256"]
+        == hashlib.sha256(
+            (_ROOT / source["profile_catalog_path"]).read_bytes()
+        ).hexdigest()
+    )
 
 
-def test_the_grant_check_is_live_positive_control() -> None:
-    """A topology without a table is seen as missing it."""
-    tables = _writer_tables(_INSTANCES / "local.yaml") - {"agent_status_events"}
-    assert not set(_TABLES) <= tables
+def test_all_shipped_catalog_profiles_are_checked() -> None:
+    from omnibase_infra.topology import SUPPORTED_TOPOLOGY_PROFILES
+
+    assert set(_CATALOG_PROFILES) == SUPPORTED_TOPOLOGY_PROFILES
+
+
+def test_the_grant_check_is_live_positive_control(tmp_path: Path) -> None:
+    """Remove a relation from the document before exercising the extractor."""
+    topology = yaml.safe_load((_INSTANCES / "local.yaml").read_text(encoding="utf-8"))
+    grants = topology["databases"]["application"]["principals"][
+        "tenant_projection_writer"
+    ]["grants"]
+    for grant in grants:
+        if "agent_status_events" in grant.get("objects", []):
+            grant["objects"].remove("agent_status_events")
+    path = tmp_path / "local.yaml"
+    path.write_text(yaml.safe_dump(topology), encoding="utf-8")
+    assert "agent_status_events" not in _writer_tables(path)
+    assert not _writer_tables(path) >= _WRITER_TABLES
 
 
 @pytest.mark.parametrize("filename", [_CREATE, _GRANT])
@@ -165,3 +195,31 @@ def test_the_sql_gate_is_live_positive_control() -> None:
     broken = sql.replace("public.agent_actions", "tenant.agent_actions")
     assert broken != sql
     assert lint_application_database_sql(broken, load_topology_profile("local")) != ()
+
+
+@pytest.mark.parametrize(
+    "mutation", ["principal", "privileges", "schema", "source_hash"]
+)
+def test_catalog_grant_check_refuses_a_misplaced_or_stale_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    """Names elsewhere in a catalog do not establish a valid writer grant."""
+    catalog = yaml.safe_load((_CATALOGS / "local.yaml").read_text(encoding="utf-8"))
+    principals = catalog["databases"]["application"]["principals"]
+    writer = principals["tenant_projection_writer"]
+    if mutation == "principal":
+        principals["unrelated_writer"] = principals.pop("tenant_projection_writer")
+    elif mutation == "privileges":
+        for grant in writer["grants"]:
+            if "agent_actions" in grant.get("objects", []):
+                grant["privileges"] = ["SELECT"]
+    elif mutation == "schema":
+        for grant in writer["grants"]:
+            if "agent_actions" in grant.get("objects", []):
+                grant["schema"] = "omninode_internal"
+    else:
+        catalog["source"]["sha256"] = "0" * 64
+    (tmp_path / "local.yaml").write_text(yaml.safe_dump(catalog), encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "_CATALOGS", tmp_path)
+    with pytest.raises((AssertionError, KeyError)):
+        test_every_rendered_catalog_carries_the_seven_grants("local")

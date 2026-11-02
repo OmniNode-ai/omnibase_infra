@@ -121,6 +121,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "agent_detection_failures": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_execution_logs": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_status_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
+    "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
 }
 
 _SKIP_REASON = (
