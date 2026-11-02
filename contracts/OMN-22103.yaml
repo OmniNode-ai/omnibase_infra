@@ -53,6 +53,16 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_dispatch_result_applier_principal_topic_omn22103.py tests/unit/runtime/test_dispatch_result_applier_topic_routing.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22103-applier-integration
+    description: >-
+      The applier, built from a contract that declares the reply topic in parts, delivers an emitted principal topic to the real in-memory bus under that topic and not under the terminal topic.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_dispatch_result_applier_principal_topic_integration_omn22103.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22103-deploy-source
     description: >-
       Deploy probe. GitHub serves the checked-out commit with the applier's call to the declared-principal-topic match. The read fails on a tree without it, including origin/dev. This proves source identity only, not a running deployment.
