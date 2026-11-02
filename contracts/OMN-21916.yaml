@@ -1,0 +1,58 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21916"
+title: "C28 consumer flow grades an audit-purpose consumer that a lab lane without a gateway feeds"
+summary: "C28's kinds clause graded node_gateway_link_health_projection_compute on onex.evt.omnibase-infra.gateway-heartbeat.v1 as its audit-purpose projection consumer. The lab dev lane runs no gateway since #5485 turned its gateway-deploy phase off, so nothing produces that topic and the consumer counts zero in every window: the probe read messages_in per row across the samples: [0, 0] and C28 stayed red. The audit kind is now node_ledger_projection_compute on onex.evt.platform.node-heartbeat.v1, an audit-purpose consumer whose topic every lab runtime produces; the dev lane's exposure read messages_in 4 for it and 0 for the gateway consumer at 2026-11-02T08:53:43Z. The node contract declares the topic, and the script grader the workflow runs for parity names the same kinds table, which a unit test holds equal to the node's. This PR covers the c28-consumer-flow check of the ticket; chain-canary and c16-receipt-identity are not covered here."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21916-c28-audit-kind
+    statement: "C28's audit kind names an audit-purpose projection consumer whose subscribed topic a lab lane without a gateway produces, and the node and its parity grader read the same kinds table."
+    acceptance:
+      - id: AC1
+        statement: "AC1: each of the three checks has a stated cause with the probe's own output and read time -- falsifier: the cited command, rerun on a lab host, prints the same observation"
+      - id: AC2
+        statement: "AC2: each cause carries a classification (ours, dashboard, cloud-owned, check defect) with the owner role for a non-ours cause -- falsifier: the cited file or object shows who owns it"
+      - id: AC3
+        statement: "AC3: every ours cause has a fix pull request with a Lab line, red before and green after on the branch, or names the exact blocking object -- falsifier: a pytest that fails on origin/dev and passes on the branch, run on a lab slot through lab-run"
+evidence_requirements:
+  - kind: tests
+    description: "The C28 kinds clause passes on the dev lane's recorded gateway-off rows, the audit kind is an audit consumer of its declared topic, and the parity grader reads the node's kinds."
+    command: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "The node and script C28 suites pass on the retargeted kind and the regenerated recorded fixture."
+    command: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect tests/ci/test_c28_consumer_flow_probe.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-omn21916-ac1-c28-cause
+    description: "C28 cause: the audit kind grades the gateway link-health consumer, which reads messages_in [0, 0] on the gateway-off dev lane. Fails at the merge base with that observation; passes once the audit kind is the ledger projection."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider -k gateway_off"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21916-ac2-check-defect
+    description: "C28 classification: a check defect in this repository's probe (ours). The node's kinds table and the parity grader name one audit kind, an audit consumer of its contract-declared topic, and the gateway-off rows grade green. Fails at the merge base, where the audit kind reads messages_in [0, 0]."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_audit_kind_omn21916.py -q -p no:cacheprovider -k 'parity or gateway_off'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21916-ac3-c28-suites
+    description: "The regression and the C28 node and script suites pass at the PR head. Fails at the merge base, where the regression reads messages_in [0, 0]."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect tests/ci/test_c28_consumer_flow_probe.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21916-deploy-probe
+    description: "Post-deploy point read on the dev lane: the consumer-flow exposure answers with rows, so the ledger projection rows the audit kind grades are readable. Hosted CI has no lane container, so only the local Done gate runs it; it binds no criterion."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "curl -sf --max-time 30 http://localhost:3002/projection/onex.snapshot.projection.consumer-flow.v1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

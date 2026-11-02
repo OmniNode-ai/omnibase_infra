@@ -49,7 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "omn19812"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "chain-canary-c28-consumer-flow.yml"
 
-AUDIT = "local.omnibase_infra.node_gateway_link_health_projection_compute.consume.1.0.0"
+AUDIT = "local.omnibase_infra.node_ledger_projection_compute.consume.1.6.1"
 REDUCER = "local.omnimarket.projection_consumer_flow.consume.1.0.1"
 
 
@@ -71,11 +71,11 @@ def _sample(i: int) -> list[dict[str, Any]]:
     return [
         _row(
             AUDIT,
-            "onex.evt.omnibase-infra.gateway-heartbeat.v1",
+            "onex.evt.platform.node-heartbeat.v1",
             start,
-            n_in=2,
+            n_in=4,
             n_out=0,
-            state="STALLED",
+            state="CONSUMING",
         ),
         _row(
             REDUCER,
@@ -87,7 +87,7 @@ def _sample(i: int) -> list[dict[str, Any]]:
         ),
         _row(
             "local.omnimarket.other.consume.1.0.0",
-            "onex.evt.x.v1",
+            "onex.evt.omnimarket.projection-consumer-flow-applied.v1",
             start,
             n_in=0,
             n_out=0,
