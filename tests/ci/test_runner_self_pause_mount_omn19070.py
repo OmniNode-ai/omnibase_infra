@@ -6,7 +6,7 @@ Why this exists. ``docker/runners/runner-job-started.sh`` refuses a job when
 the runner's disk is under the 5 GB admission floor, counts consecutive
 refusals, and at the backoff threshold stops its own container so the listener
 stops taking jobs. That last step needs the pause-marker directory bind-mounted
-at ``/home/runner/.onex-disk-admission-pause``. Without it the hook logs
+at the runner home's ``.onex-disk-admission-pause``. Without it the hook logs
 ``self-pause skipped ... not mounted`` and returns 0, so a starved runner keeps
 accepting and failing jobs.
 
@@ -40,11 +40,12 @@ import pytest
 import yaml
 
 from scripts.ci.ci_summary_gate import evaluate_external_sweep
+from tests.ci._runner_compose_text import RUNNER_HOME, read_runner_compose
 
 _DOCKER_DIR = Path(__file__).resolve().parents[2] / "docker"
 _RUNNER_COMPOSE_FILES = sorted(_DOCKER_DIR.glob("docker-compose.runners*.yml"))
 _HOOK_TARGET = "/opt/onex-runner-hooks"
-_PAUSE_TARGET = "/home/runner/.onex-disk-admission-pause"
+_PAUSE_TARGET = RUNNER_HOME + "/.onex-disk-admission-pause"
 _HOST_105_LEG = "arm64-verify-proof (host-105)"
 
 
@@ -70,7 +71,7 @@ def _load(path: Path) -> dict[str, Any]:
     # _ComposeLoader extends SafeLoader; the extra constructors only unwrap
     # compose override tags.
     data: dict[str, Any] = yaml.load(
-        path.read_text(encoding="utf-8"),
+        read_runner_compose(path),
         Loader=_ComposeLoader,  # noqa: S506
     )
     return data
