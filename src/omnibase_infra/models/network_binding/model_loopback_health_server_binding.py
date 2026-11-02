@@ -23,7 +23,7 @@ class ModelLoopbackHealthServerBinding(BaseModel):
     """
 
     health_check_host: str = Field(
-        default=load_network_binding_settings().loopback_address,
+        default_factory=lambda: load_network_binding_settings().loopback_address,
         description=(
             "Host/IP for health check server binding. The default is the loopback "
             "address, which restricts access to the local machine. For container or "

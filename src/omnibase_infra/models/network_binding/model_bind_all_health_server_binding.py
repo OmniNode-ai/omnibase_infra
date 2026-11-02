@@ -23,7 +23,7 @@ class ModelBindAllHealthServerBinding(BaseModel):
     """
 
     health_check_host: str = Field(
-        default=load_network_binding_settings().bind_all_address,
+        default_factory=lambda: load_network_binding_settings().bind_all_address,
         description=(
             "Host/IP for health check server binding. The default is the bind-all "
             "address so the container's health probe can reach the server; override "

@@ -47,7 +47,7 @@ class ModelMCPServerConfig(BaseModel):
         default=True, description="Whether to enable Kafka for hot reload"
     )
     http_host: str = Field(
-        default=load_network_binding_settings().bind_all_address,
+        default_factory=lambda: load_network_binding_settings().bind_all_address,
         description="Host to bind the MCP HTTP server",
     )
     http_port: int = Field(
