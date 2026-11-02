@@ -55,6 +55,12 @@ RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
 BEGIN_MARKER = "# ---- BEGIN canonical forward-migration advisory lock (OMN-15291) ----"
 END_MARKER = "# ---- END canonical forward-migration advisory lock (OMN-15291) ----"
 
+# A CALL of the held-ness assertion (it always carries a step label), as opposed
+# to its definition `assert_migration_lock_still_held() {`. Matching the call
+# shape rather than an exact label keeps a reworded label from changing what is
+# counted, and keeps the strip helpers from touching anything but calls.
+ASSERT_CALL = re.compile(r'^\s*assert_migration_lock_still_held\s+"')
+
 # The migration applied by the live proofs. The 3s pg_sleep is the critical
 # section: long enough that a genuinely concurrent second runner is
 # observably inside it too. It is deliberately NOT idempotent:
@@ -133,9 +139,7 @@ def strip_lock_block(text: str) -> str:
     end = next(i for i, ln in enumerate(lines) if ln.strip() == END_MARKER)
     remaining = lines[:start] + lines[end + 1 :]
     # The lock-free runner has no lock to assert on either.
-    return "".join(
-        ln for ln in remaining if ln.strip() != "assert_migration_lock_still_held"
-    )
+    return "".join(ln for ln in remaining if not ASSERT_CALL.match(ln))
 
 
 # --------------------------------------------------------------------------
@@ -176,16 +180,60 @@ def test_lock_is_never_acquired_through_a_one_shot_psql() -> None:
         )
 
 
-def test_runner_asserts_the_lock_survived_the_whole_run() -> None:
-    calls = [
-        ln
-        for ln in _runner_text().splitlines()
-        if ln.strip() == "assert_migration_lock_still_held"
+def _code_lines(text: str) -> list[str]:
+    """The runner's lines with blank lines and comments dropped, stripped."""
+    return [
+        ln.strip()
+        for ln in text.splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
     ]
-    assert len(calls) == 1, (
-        "expected exactly one final `assert_migration_lock_still_held` call so a "
-        "holder session that died mid-run fails the runner instead of flipping "
-        f"the migration-gate sentinel HEALTHY (found {len(calls)})"
+
+
+def test_runner_asserts_the_lock_survived_the_whole_run() -> None:
+    """The last act before the sentinel is TRUE is the held-ness assertion."""
+    code = _code_lines(_runner_text())
+    sentinel_at = [i for i, ln in enumerate(code) if "Setting sentinel TRUE" in ln]
+    assert len(sentinel_at) == 1, (
+        f"expected exactly one `Setting sentinel TRUE` step (found {len(sentinel_at)})"
+    )
+    assert sentinel_at[0] > 0 and ASSERT_CALL.match(code[sentinel_at[0] - 1]), (
+        "the line before the sentinel step must be an `assert_migration_lock_still_held` "
+        "call, so a holder session that died mid-run fails the runner instead of "
+        f"flipping the migration-gate sentinel HEALTHY (found {code[sentinel_at[0] - 1]!r})"
+    )
+
+
+def test_runner_asserts_the_lock_before_each_file_it_applies() -> None:
+    """OMN-21928: a lost lock stops the run at the next file, in both apply loops.
+
+    The live proof covers the service loop only, so this pins the node-migration
+    loop statically: every `apply <file>...` step is immediately preceded by the
+    assertion, and the runner has both loops.
+    """
+    code = _code_lines(_runner_text())
+    applies = [
+        i
+        for i, ln in enumerate(code)
+        if ln.startswith('echo "[forward-migration]   apply ')
+    ]
+    assert len(applies) >= 2, (
+        "expected the service-loop and the node-migration-loop `apply` steps "
+        f"(found {len(applies)})"
+    )
+    unguarded = [code[i] for i in applies if not ASSERT_CALL.match(code[i - 1])]
+    assert not unguarded, (
+        "these apply steps are not immediately preceded by "
+        f"`assert_migration_lock_still_held`: {unguarded}"
+    )
+
+
+def test_lock_assertion_calls_are_exactly_the_apply_steps_and_the_sentinel() -> None:
+    """No stray call: one per apply step plus the single final one."""
+    code = _code_lines(_runner_text())
+    calls = [ln for ln in code if ASSERT_CALL.match(ln)]
+    applies = [ln for ln in code if ln.startswith('echo "[forward-migration]   apply ')]
+    assert len(calls) == len(applies) + 1, (
+        f"expected {len(applies)} per-file calls plus the final one, found {len(calls)}"
     )
 
 
@@ -614,6 +662,10 @@ def _resuming_signal_variant(text: str) -> str:
             out.append(COMBINED_SIGNAL_TRAP)
         elif line.startswith("trap 'release_migration_lock; echo"):
             continue  # the terminating signal handler is what we are removing
+        elif ASSERT_CALL.match(line):
+            # The pre-fix runner predates the per-file held-ness assertion,
+            # which would otherwise stop the resumed run at 002 (OMN-21928).
+            continue
         else:
             out.append(line)
     return "".join(out)
