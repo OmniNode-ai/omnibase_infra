@@ -22,6 +22,8 @@ Sites pinned by this module:
 * ``scripts/hooks/prepush_smart_tests.sh`` -- the OMN-13973 governed selector's
   ``BASE_SHA`` range (structural ratchet; the shell hook is not importable).
 * ``scripts/validate-kafka-schema-handshake.py`` -- ``_changed_module_prefixes``.
+* ``omnibase_core`` ``NodeReleaseIdentityGatherEffect`` -- the core runtime behind
+  the ``check-release-identity`` hook, which replaced the local script.
 """
 
 from __future__ import annotations
@@ -33,6 +35,12 @@ from types import ModuleType
 
 import pytest
 
+from omnibase_core.models.nodes.release_identity_check.model_release_identity_gather_input import (
+    ModelReleaseIdentityGatherInput,
+)
+from omnibase_core.nodes.node_release_identity_gather_effect.handler import (
+    NodeReleaseIdentityGatherEffect,
+)
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from scripts.ci.check_deploy_scope_dod import (
     FAIL_NO_EVIDENCE,
@@ -242,6 +250,43 @@ def test_kafka_schema_handshake_range_is_merge_base_anchored() -> None:
     assert forbidden not in source
     # Positive control: the forbidden literal is exactly what the assertion reads.
     assert forbidden in source.replace("merge_base]", '"origin/main"]')
+
+
+@pytest.mark.unit
+def test_core_release_identity_empty_branch_diff_does_not_fall_back_to_a_peers_files(
+    tmp_path: Path,
+) -> None:
+    """Core's release-identity gatherer must stay merge-base anchored.
+
+    Replaces the deleted local ``_collect_changed_files`` regression: a branch with
+    no commits of its own changed nothing, so the gatherer must not report the
+    PEER's ``src/`` landings, which would arm the version gate against a branch that
+    touched no packaged source.
+    """
+    repo = _build_stale_base_repo(tmp_path, branch_commits=False)
+    _write(repo, "pyproject.toml", '[project]\nname = "x"\nversion = "1.0.1"\n')
+    _git(repo, "add", "pyproject.toml")
+    _git(repo, "commit", "-q", "-m", "chore: declare a version")
+    _git(repo, "tag", "v1.0.0")
+    # Positive control: the three-dot set is only the version file, and the two-dot
+    # form on this same fixture DOES surface the peer's file.
+    assert _git(repo, "diff", "--name-only", "origin/dev...HEAD").split() == [
+        "pyproject.toml"
+    ]
+    assert _PEER_DEPLOY_SCOPED in _two_dot(repo, "origin/dev")
+
+    facts = NodeReleaseIdentityGatherEffect().handle(
+        ModelReleaseIdentityGatherInput(repo_root=str(repo), base="origin/dev")
+    )
+    assert facts.changed_files == ("pyproject.toml",)
+    assert _PEER_DEPLOY_SCOPED not in (facts.changed_files or ())
+
+    # And the gatherer still sees this branch's own UNCOMMITTED edit.
+    (repo / "docs" / "base.md").write_text("locally edited\n", encoding="utf-8")
+    facts = NodeReleaseIdentityGatherEffect().handle(
+        ModelReleaseIdentityGatherInput(repo_root=str(repo), base="origin/dev")
+    )
+    assert facts.changed_files == ("pyproject.toml", "docs/base.md")
 
 
 @pytest.mark.unit
