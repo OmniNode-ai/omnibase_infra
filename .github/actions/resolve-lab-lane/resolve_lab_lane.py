@@ -82,6 +82,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from typing import Any
 
 URL_RE = re.compile(r"^https?://(?P<host>[A-Za-z0-9.-]+):(?P<port>[0-9]{1,5})/?$")
@@ -251,12 +252,27 @@ def deploy_agent_busy_reason(snapshot: Mapping[str, Any]) -> str | None:
     return f"{ahead} command(s) queued"
 
 
+# OMN-21866: the busy test for a lane that ANSWERS (wait-while-busy only). The
+# rule lives in node_lab_lane_compose_busy_compute: its contract lists the settle
+# stages that are not a compose deploy, and its handler decides. The import needs
+# the package, so the action runs this path under ``uv run`` (action.yml); the
+# no-answer wait keeps the shared test above and counts every settle (OMN-20509).
+def compose_busy_reason(snapshot: Mapping[str, Any]) -> str | None:
+    from omnibase_infra.handlers import handler_lab_lane_compose_busy as handler
+    from omnibase_infra.models.health import model_lab_lane_compose_busy_request as m
+
+    shared = deploy_agent_busy_reason(snapshot)
+    request = m.ModelLabLaneComposeBusyRequest.from_agent_snapshot(snapshot, shared)
+    return handler.HandlerLabLaneComposeBusy().handle(request).busy_reason or None
+
+
 def _busy_agents(
     candidates: Sequence[Mapping[str, Any]],
     timeout: float,
     note: str = "",
     *,
     unreadable: list[str] | None = None,
+    test: Callable[[Mapping[str, Any]], str | None] = deploy_agent_busy_reason,
 ) -> dict[str, str]:
     """Lane name -> busy detail for every candidate whose agent reads busy now."""
     busy: dict[str, str] = {}
@@ -264,7 +280,7 @@ def _busy_agents(
         snapshot = read_deploy_agent(candidate["deploy_agent_url"], timeout)
         if snapshot is None and unreadable is not None:
             unreadable.append(candidate["name"])
-        reason = deploy_agent_busy_reason(snapshot) if snapshot is not None else None
+        reason = test(snapshot) if snapshot is not None else None
         if reason is not None:
             busy[candidate["name"]] = (
                 f"{candidate['name']} agent {candidate['deploy_agent_url']}: "
@@ -313,11 +329,9 @@ def _say(line: str) -> None:
 
 
 def _env_value(value: Any) -> str:
-    return (
-        json.dumps(value, separators=(",", ":"))
-        if isinstance(value, list)
-        else str(value)
-    )
+    if isinstance(value, list):
+        return json.dumps(value, separators=(",", ":"))
+    return str(value)
 
 
 def main(environ: Mapping[str, str] | None = None) -> int:
@@ -357,6 +371,7 @@ def main(environ: Mapping[str, str] | None = None) -> int:
         and all(field in candidate for field in require)
         and "deploy_agent_url" in candidate
     ]
+    probe = partial(http_health, timeout=timeout)
     # Before the lane check: it spends its probe timeouts first, and a settle
     # that ends inside them leaves an idle agent behind (OMN-20509).
     pre_busy = (
@@ -364,17 +379,12 @@ def main(environ: Mapping[str, str] | None = None) -> int:
         if wait_budget > 0
         else {}
     )
-    lane, tried = choose_lane(
-        lanes, require, lambda url: http_health(url, timeout), match
-    )
+    lane, tried = choose_lane(lanes, require, probe, match)
     waited: float | None = None
     wait_detail = ""
     total_budget = wait_budget
-    wait_while_busy = env.get("LANE_DEPLOY_WAIT_WHILE_BUSY", "").lower() in {
-        "true",
-        "1",
-        "yes",
-    }
+    while_busy = env.get("LANE_DEPLOY_WAIT_WHILE_BUSY", "").lower()
+    wait_while_busy = while_busy in {"true", "1", "yes"}
     if lane is not None and wait_budget > 0 and wait_while_busy:
         if "deploy_agent_url" not in lane:
             _say(
@@ -384,7 +394,8 @@ def main(environ: Mapping[str, str] | None = None) -> int:
         else:
             started = time.monotonic()
             unreadable: list[str] = []
-            busy = _busy_agents([lane], timeout, unreadable=unreadable)
+            lane_busy = partial(_busy_agents, [lane], timeout, test=compose_busy_reason)
+            busy = lane_busy(unreadable=unreadable)
             if unreadable and not busy:
                 _say(
                     f"::warning::lab lane {lane['name']} deploy agent is unreadable; "
@@ -414,12 +425,10 @@ def main(environ: Mapping[str, str] | None = None) -> int:
                         return 1
                     time.sleep(min(poll, remaining))
                     unreadable = []
-                    busy = _busy_agents([lane], timeout, unreadable=unreadable)
+                    busy = lane_busy(unreadable=unreadable)
                 waited = time.monotonic() - started
                 wait_budget = max(0.0, wait_budget - waited)
-                lane, tried = choose_lane(
-                    lanes, require, lambda url: http_health(url, timeout), match
-                )
+                lane, tried = choose_lane(lanes, require, probe, match)
                 end_reason = (
                     f"lane {lane['name']} answers"
                     if lane is not None
@@ -466,9 +475,7 @@ def main(environ: Mapping[str, str] | None = None) -> int:
                 end_reason = "budget exhausted"
                 break
             time.sleep(min(poll, remaining))
-            lane, tried = choose_lane(
-                lanes, require, lambda url: http_health(url, timeout), match
-            )
+            lane, tried = choose_lane(lanes, require, probe, match)
         if waited is not None:
             waited = already_waited + time.monotonic() - started
             if lane is not None:

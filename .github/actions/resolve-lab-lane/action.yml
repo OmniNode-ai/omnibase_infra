@@ -43,4 +43,11 @@ runs:
         LANE_MATCH: ${{ inputs.match }}
         LANE_DEPLOY_WAIT_SECONDS: ${{ inputs.deploy-wait-seconds }}
         LANE_DEPLOY_WAIT_WHILE_BUSY: ${{ inputs.wait-while-busy }}
-      run: python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"
+      # OMN-21866: the wait-while-busy test is node_lab_lane_compose_busy_compute's
+      # handler, so that mode runs in the repository's environment; every other
+      # mode stays on the bare python3 a sparse checkout of this directory has.
+      run: |
+        case "${LANE_DEPLOY_WAIT_WHILE_BUSY,,}" in
+          true|1|yes) exec uv run --frozen python "${GITHUB_ACTION_PATH}/resolve_lab_lane.py" ;;
+        esac
+        exec python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"

@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21866
+title: "C16's deploy wait does not count a k3s lab-overlay settle as a compose deploy"
+summary: C16 runs 41370897700 and 41383900853 ended RED at the 2400 s deploy wait because the dev-201 deploy agent read busy for the whole budget; between compose jobs its only not-deploying window is a settling / lab_overlay read with no active job, which the wait counted as a deploy.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21866-overlay-settle
+    statement: When the C16 lane answers, the resolver's wait-while-busy path proceeds on a k3s lab_overlay settle with no compose job, and still waits out every compose deploy, every other settle stage and a queued command on an idle agent; a silent lane still waits out any settle.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: The cause of the missing terminal is named from a live readback of the dev lane bus and runtime logs for the failing correlation ids, and a regression test built from the recorded run data fails on the broken code and passes on the fix -- falsifier: uv run pytest on the named regression test in the owning repository, failing on origin/dev before the fix'
+evidence_requirements:
+  - kind: tests
+    description: The resolver driven against the dev-201 agent bodies read live on 2026-11-02 (settling / lab_overlay, then the next compose job), with a fake clock and no network.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_overlay_settle_omn21866.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21866-ac1-overlay-settle
+    description: AC1 regression drives the resolver with the recorded lab_overlay settle; at the merge base it waits the full 2400 s budget and exits 1 with state=settling, as C16 run 41370897700 did.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_overlay_settle_omn21866.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
