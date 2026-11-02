@@ -189,7 +189,7 @@ dod_evidence:
     binds_ac: [AC2401]
   - id: dod-omn21288-t24-dev-lane-numbers
     description: >-
-      The census handler run over the recorded live dev-lane inspection (read-only against the lab host, 2026-11-01) reports the container and onex-runtime counts the PR body states. The live command and its result are in the PR body's Lab line.
+      The census run on the dev lane (read-only against the lab host, 2026-11-02T00:30Z), recorded as its table rows, reads 16 runtime-image containers with 4 on onex-runtime, 6 on python -m omnimarket handler_*, 4 on python -m consumer, 1 uvicorn and 1 omnimarket-projection-api; the plan's 17 counted one more (the lane-mirror forwarder), absent from the matched set of this run. The live command and its result are in the PR body's Lab line.
     source: manual
     checks:
       - check_type: test_passes
