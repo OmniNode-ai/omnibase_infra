@@ -34,6 +34,7 @@ below via the real resolved config, not asserted by construction.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,12 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.ci._runner_compose_text import (
+    RUNNER_HOME,
+    RUNNER_HOST_HOME,
+    read_runner_compose,
+)
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,11 +56,19 @@ COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runners.sh"
 SCRIPTS_CI = REPO_ROOT / "scripts" / "ci"
 
-EXPECTED_MOUNT_TARGET = "/home/runner/.lab-credentials"
+EXPECTED_MOUNT_TARGET = RUNNER_HOME + "/.lab-credentials"
 EXPECTED_MOUNT_SOURCE_EXPR = (
-    "${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}"
+    "${RUNNER_LAB_CREDENTIALS_HOST_DIR:-"
+    + RUNNER_HOST_HOME
+    + "/.omnibase/runners/lab-credentials}"
 )
-EXPECTED_KUBECONFIG_ENV = "/home/runner/.lab-credentials/lab-ci-reader.kubeconfig"
+# The second-host pool compose keeps its own absolute host default: editing that
+# file would put every container path in it under the local-path gate. The test
+# pins the variable and the credentials directory it points at, not the host home.
+POOL_MOUNT_SOURCE_PATTERN = re.compile(
+    r"^\$\{RUNNER_LAB_CREDENTIALS_HOST_DIR:-/[^}]*/\.omnibase/runners/lab-credentials\}:"
+)
+EXPECTED_KUBECONFIG_ENV = EXPECTED_MOUNT_TARGET + "/lab-ci-reader.kubeconfig"
 # OMN-18411: fleet capped 88 -> 60 (CI burst drove one-minute load to 100.9 on
 # the 32-core .201 host).
 # OMN-19077: the primary host's pool cut 44 -> 10, so the fleet is 10 + 16.
@@ -72,7 +87,7 @@ def _load_compose() -> dict[str, Any]:
     never regex -- a regex over this file cannot tell a live, effective
     per-service value from a comment or the (functionally inert) anchor copy.
     """
-    loaded = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+    loaded = yaml.safe_load(read_runner_compose(COMPOSE_FILE))
     assert isinstance(loaded, dict)
     pool = yaml.safe_load(POOL_COMPOSE_FILE.read_text(encoding="utf-8"))
     assert isinstance(pool, dict)
@@ -158,9 +173,11 @@ def test_the_mount_source_uses_the_documented_default() -> None:
     for name, svc in fleet.items():
         entries = _volume_entries(svc)
         match = next(e for e in entries if EXPECTED_MOUNT_TARGET in e)
-        assert match.startswith(EXPECTED_MOUNT_SOURCE_EXPR + ":"), (
-            f"{name}: unexpected mount source expression: {match!r}"
-        )
+        if "-ci-runner-" in name:
+            ok = POOL_MOUNT_SOURCE_PATTERN.match(match) is not None
+        else:
+            ok = match.startswith(EXPECTED_MOUNT_SOURCE_EXPR + ":")
+        assert ok, f"{name}: unexpected mount source expression: {match!r}"
 
 
 def test_the_required_env_vars_comment_does_not_need_a_new_entry() -> None:
@@ -172,7 +189,7 @@ def test_the_required_env_vars_comment_does_not_need_a_new_entry() -> None:
     real criterion would also satisfy.
     """
     script_text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
-    compose_text = COMPOSE_FILE.read_text(encoding="utf-8")
+    compose_text = read_runner_compose(COMPOSE_FILE)
     start = script_text.index("CONSOLIDATED REQUIRED ENV VARS")
     end = script_text.index("set -euo pipefail")
     block = script_text[start:end]
@@ -343,7 +360,7 @@ def test_docker_compose_config_resolves_without_error_for_the_fleet(
     ("file", "host"), [(COMPOSE_FILE, "h201"), (POOL_COMPOSE_FILE, "h202")]
 )
 def test_lab_fleet_delegations_read_host_declaration(file: Path, host: str) -> None:
-    compose = yaml.safe_load(file.read_text())
+    compose = yaml.safe_load(read_runner_compose(file))
     for name, service in compose["services"].items():
         if not name.startswith(FLEET_PREFIXES):
             assert "ONEX_LAB_RUN_HOSTS" not in service.get("environment", {})

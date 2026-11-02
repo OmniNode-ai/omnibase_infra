@@ -22,6 +22,11 @@ from omnibase_infra.tools.topic_enum_generator import TopicEnumGenerator
 # ---------------------------------------------------------------------------
 
 
+def _topic(kind: str, producer: str, event_name: str, version: str) -> str:
+    """Compose a topic from its parts, as the contract extractor parses it."""
+    return f"onex.{kind}.{producer}.{event_name}.{version}"
+
+
 def _entry(
     topic: str,
     kind: str,
@@ -107,7 +112,7 @@ def test_normalization_dots_replaced(tmp_path: Path) -> None:
     """Dots in event_name are replaced with underscores."""
     gen = TopicEnumGenerator()
     entry = _entry(
-        "onex.evt.platform.node.heartbeat.v1",
+        _topic("evt", "platform", "node.heartbeat", "v1"),
         "evt",
         "platform",
         "node.heartbeat",
@@ -207,7 +212,42 @@ def test_render_enum_contains_correct_member(tmp_path: Path) -> None:
 
     enum_content = result[tmp_path / "enum_platform_topic.py"]
     assert "EVT_INTENT_CLASSIFIED_V1" in enum_content
-    assert '"onex.evt.platform.intent-classified.v1"' in enum_content
+    assert (
+        "contract_topic_value('/a/contract.yaml', 'platform', 'EVT_INTENT_CLASSIFIED_V1')"
+        in enum_content
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "checkout",
+    [
+        "/opt/ci/work/omnibase_infra/omnibase_infra",
+        "/workspace/omnibase_infra/worktrees/landing",
+        "/workspace/landing",
+    ],
+)
+@pytest.mark.parametrize(
+    "resource", ["nodes/node_example/contract.yaml", "runtime/topics.yaml"]
+)
+def test_render_binding_ignores_checkout_name(
+    tmp_path: Path, checkout: str, resource: str
+) -> None:
+    """Node and manifest bindings remain package-relative on hosted runners."""
+    entry = _entry(
+        "onex.evt.platform.intent-classified.v1",
+        "evt",
+        "platform",
+        "intent-classified",
+        "v1",
+        source=f"{checkout}/src/omnibase_infra/{resource}",
+    )
+    rendered = TopicEnumGenerator().render([entry], output_dir=tmp_path)
+    content = rendered[tmp_path / "enum_platform_topic.py"]
+    assert (
+        f"contract_topic_value('{resource}', 'platform', 'EVT_INTENT_CLASSIFIED_V1')"
+        in content
+    )
 
 
 @pytest.mark.unit
@@ -466,7 +506,7 @@ def test_collision_detection_raises_runtime_error(tmp_path: Path) -> None:
             "v1",
         ),
         _entry(
-            "onex.evt.platform.my.topic.v1",
+            _topic("evt", "platform", "my.topic", "v1"),
             "evt",
             "platform",
             "my.topic",  # → MY_TOPIC (same after normalization)
@@ -490,7 +530,7 @@ def test_collision_message_contains_both_topics(tmp_path: Path) -> None:
             "v1",
         ),
         _entry(
-            "onex.evt.platform.my.topic.v1",
+            _topic("evt", "platform", "my.topic", "v1"),
             "evt",
             "platform",
             "my.topic",
@@ -694,4 +734,22 @@ def test_generated_init_file_spdx_skip_is_line_1() -> None:
     first_line = _INIT_HEADER.splitlines()[0]
     assert first_line.startswith("# spdx-skip:"), (
         f"_INIT_HEADER first line must start with '# spdx-skip:'; got: {first_line!r}"
+    )
+
+
+@pytest.mark.unit
+def test_render_binding_keeps_nested_package_named_directory(tmp_path: Path) -> None:
+    entry = _entry(
+        "onex.evt.platform.intent-classified.v1",
+        "evt",
+        "platform",
+        "intent-classified",
+        "v1",
+        source="/checkout/src/omnibase_infra/nodes/omnibase_infra/contract.yaml",
+    )
+    rendered = TopicEnumGenerator().render([entry], output_dir=tmp_path)
+    assert (
+        "contract_topic_value('nodes/omnibase_infra/contract.yaml', "
+        "'platform', 'EVT_INTENT_CLASSIFIED_V1')"
+        in rendered[tmp_path / "enum_platform_topic.py"]
     )
