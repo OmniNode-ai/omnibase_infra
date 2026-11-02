@@ -43,7 +43,10 @@ from tests.integration.migrations.test_application_migration_ledger_omn15413 imp
 pytestmark = [pytest.mark.integration, pytest.mark.postgres, pytest.mark.serial]
 
 LOCK_ID = 100010
-SLOW_SECONDS = 12
+# The first migration blocks on this key until the test releases it, so the
+# window in which the run is "inside file 001" is opened and closed by the test
+# itself rather than by a sleep that a slow host could outlast.
+GATE_ID = 2192801
 
 
 def _scalar(
@@ -56,10 +59,11 @@ def _scalar(
     return pg16.command(database, *arguments, input_text=sql).stdout.strip()
 
 
-def _tree(tmp_path: Path) -> Path:
+def _tree(tmp_path: Path, *, gated: bool = False) -> Path:
     migrations_dir, _version, _checksum = _synthetic_migration_tree(tmp_path)
-    (migrations_dir / "001_slow.sql").write_text(
-        f"SELECT pg_sleep({SLOW_SECONDS});\n", encoding="utf-8"
+    (migrations_dir / "001_first.sql").write_text(
+        f"SELECT pg_advisory_lock({GATE_ID});\n" if gated else "SELECT 1;\n",
+        encoding="utf-8",
     )
     (migrations_dir / "002_after.sql").write_text(
         "CREATE TABLE public.omn21928_after (id INTEGER PRIMARY KEY);\n",
@@ -101,6 +105,68 @@ def _start_runner(
         )
 
 
+def _hold_gate(
+    pg16: Pg16Cluster, reaper: list[subprocess.Popen[Any]]
+) -> subprocess.Popen[Any]:
+    """A session that holds the gate key until it is killed; returns once it is granted."""
+    gate = subprocess.Popen(
+        start_new_session=True,
+        args=[
+            pg16.psql,
+            "-X",
+            "-q",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            str(pg16.port),
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-c",
+            f"SELECT pg_advisory_lock({GATE_ID}), pg_sleep(600)",
+        ],
+        env={**os.environ, "PGPASSWORD": ""},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    reaper.append(gate)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        held = _scalar(
+            pg16,
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted "
+            "AND classid = 0 AND objid = :'key'::oid;",
+            key=str(GATE_ID),
+        )
+        if held == "1":
+            return gate
+        time.sleep(0.2)
+    raise AssertionError("the gate session never held its advisory lock")
+
+
+def _release_gate(gate: subprocess.Popen[Any]) -> None:
+    os.killpg(gate.pid, signal.SIGKILL)
+    gate.wait(timeout=30)
+
+
+def _holder_tag(pg16: Pg16Cluster, database: str) -> str:
+    """The application name the runner's holder session carries, read from the server.
+
+    Never derived from the runner's pid: the tag is built inside the shell, and
+    the test must not assume what its `$$` came out as.
+    """
+    tag = _scalar(
+        pg16,
+        "SELECT application_name FROM pg_stat_activity "
+        "WHERE datname = :'db' AND application_name LIKE :'tag';",
+        db=database,
+        tag=f"forward-migration-lock-{LOCK_ID}-%",
+    )
+    assert tag, "positive control: the runner's holder session is on the server"
+    return tag
+
+
 def _wait_for(out: Path, needle: str, proc: subprocess.Popen[str]) -> None:
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
@@ -129,9 +195,10 @@ def test_a_holder_killed_mid_run_stops_the_run_at_the_next_file(
 ) -> None:
     databases = ("omn21928_kill_service", "omn21928_kill_app", "omn21928_kill_cloud")
     out = tmp_path / "runner.out"
-    proc = _start_runner(pg16, _tree(tmp_path), databases, out)
+    gate = _hold_gate(pg16, reaper)
+    proc = _start_runner(pg16, _tree(tmp_path, gated=True), databases, out)
     reaper.append(proc)
-    _wait_for(out, "apply 001_slow.sql", proc)
+    _wait_for(out, "apply 001_first.sql", proc)
 
     killed = _scalar(
         pg16,
@@ -141,10 +208,15 @@ def test_a_holder_killed_mid_run_stops_the_run_at_the_next_file(
         tag=f"forward-migration-lock-{LOCK_ID}-%",
     )
     assert killed == "1", "positive control: exactly one holder session was killed"
+    # Only now does file 001 finish: the holder was gone for the whole of it.
+    _release_gate(gate)
 
     assert proc.wait(timeout=90) != 0
     text = out.read_text(encoding="utf-8")
     assert f"advisory lock {LOCK_ID} was lost before applying 002_after.sql" in text
+    # The cause is the dead holder, not a failed probe: the failure reports the
+    # server's own view of the lock id, and nobody is on it.
+    assert "sessions on the lock: none" in text
     assert "apply 002_after.sql" not in text
     assert (
         _scalar(pg16, "SELECT to_regclass('public.omn21928_after');", databases[0])
@@ -174,13 +246,15 @@ def test_a_same_named_lock_holder_in_another_database_is_not_a_second_holder(
     foreign_database = "omn21928_dup_foreign"
     pg16.create_database(foreign_database)
     out = tmp_path / "runner.out"
-    proc = _start_runner(pg16, _tree(tmp_path), databases, out)
+    gate = _hold_gate(pg16, reaper)
+    proc = _start_runner(pg16, _tree(tmp_path, gated=True), databases, out)
     reaper.append(proc)
-    _wait_for(out, "apply 001_slow.sql", proc)
+    _wait_for(out, "apply 001_first.sql", proc)
+    tag = _holder_tag(pg16, databases[0])
 
     # What a second runner in another container looks like to the server: the
     # same lock id, in its own database, under the tag `$$` = 1 gives both. The
-    # foreign session borrows this runner's tag, which is `$$`-based.
+    # foreign session borrows the tag the server shows for this runner.
     foreign = subprocess.Popen(
         start_new_session=True,
         args=[
@@ -201,7 +275,7 @@ def test_a_same_named_lock_holder_in_another_database_is_not_a_second_holder(
         env={
             **os.environ,
             "PGPASSWORD": "",
-            "PGAPPNAME": f"forward-migration-lock-{LOCK_ID}-{proc.pid}",
+            "PGAPPNAME": tag,
         },
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -214,12 +288,13 @@ def test_a_same_named_lock_holder_in_another_database_is_not_a_second_holder(
             "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
             "WHERE l.locktype = 'advisory' AND l.granted "
             "AND a.application_name = :'tag';",
-            tag=f"forward-migration-lock-{LOCK_ID}-{proc.pid}",
+            tag=tag,
         )
         if visible == "2" or time.monotonic() > deadline:
             break
         time.sleep(0.2)
     assert visible == "2", "positive control: the server sees two granted holders"
+    _release_gate(gate)
 
     assert proc.wait(timeout=90) == 0, out.read_text(encoding="utf-8")
     assert "Sentinel set. Migration gate will report HEALTHY." in out.read_text(
