@@ -34,6 +34,18 @@
 tables:
   agent_routing_decisions:
     status: identical
+  agent_actions:
+    status: identical
+  agent_detection_failures:
+    status: identical
+  agent_execution_logs:
+    status: identical
+  agent_status_events:
+    status: identical
+  agent_transformation_events:
+    status: identical
+  router_performance_metrics:
+    status: identical
   capability_scores:
     status: identical
   evidence_correlation_trace_projection:

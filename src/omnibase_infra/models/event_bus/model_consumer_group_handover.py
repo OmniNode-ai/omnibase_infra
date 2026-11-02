@@ -118,11 +118,15 @@ class ModelConsumerGroupHandover(BaseModel):
         """The retired consumer group in ``environment``."""
         if self.from_group_id is not None:
             return self.from_group_id
-        assert (
-            self.from_service is not None
-            and self.from_node is not None
-            and self.from_version is not None
-        )  # _one_form guarantees the three segments
+        if (
+            self.from_service is None
+            or self.from_node is None
+            or self.from_version is None
+        ):
+            raise ValueError(
+                "a handover declares either from_group_id or all of "
+                "from_service, from_node and from_version"
+            )
         return compute_consumer_group_id(
             ModelNodeIdentity(
                 env=environment,
