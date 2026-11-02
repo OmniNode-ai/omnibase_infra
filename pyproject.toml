@@ -672,6 +672,7 @@ node_impact_analyzer_compute = "omnibase_infra.nodes.node_impact_analyzer_comput
 node_in_progress_probe_hygiene_effect = "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect"
 node_invariant_evaluate_compute = "omnibase_infra.nodes.node_invariant_evaluate_compute"
 node_kafka_replay_compute = "omnibase_infra.nodes.node_kafka_replay_compute"
+node_lab_lane_compose_busy_compute = "omnibase_infra.nodes.node_lab_lane_compose_busy_compute"
 node_lab_proof_plan_compute = "omnibase_infra.nodes.node_lab_proof_plan_compute"
 node_lab_proof_run_effect = "omnibase_infra.nodes.node_lab_proof_run_effect"
 node_ledger_projection_compute = "omnibase_infra.nodes.node_ledger_projection_compute"
