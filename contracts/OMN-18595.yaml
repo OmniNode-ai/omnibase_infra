@@ -189,3 +189,15 @@ dod_evidence:
         check_value: |-
           bash -o pipefail -c 'curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/uv.lock" | python3 -c "import sys,tomllib; from packaging.version import Version; lock=tomllib.loads(sys.stdin.read()); v=next(p[\"version\"] for p in lock[\"package\"] if p[\"name\"] == \"omnibase-core\"); print(v); assert Version(v) >= Version(\"0.47.57\"), v"'
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-18595-core-0-47-62-runner-lock
+    description: The core 0.47.62 dev-tag bump keeps the runner image lock identity and the core pin tests consistent with pyproject.toml and uv.lock.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/ci/test_core_dev_tag_pin_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

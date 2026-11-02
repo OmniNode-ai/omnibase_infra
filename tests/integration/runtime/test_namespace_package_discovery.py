@@ -49,7 +49,7 @@ def test_discover_contracts_skips_namespace_package_entry_point(tmp_path: Path) 
     ns_ep.load.return_value = ns_pkg
 
     with patch(
-        "omnibase_infra.runtime.auto_wiring.discovery.entry_points",
+        "omnibase_infra.handlers.handler_package_announcer.entry_points",
         return_value=[ns_ep],
     ):
         # Must not raise; should return an empty (or warning-only) manifest

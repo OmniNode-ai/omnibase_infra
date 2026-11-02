@@ -65,6 +65,8 @@ from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from omnibase_core.container import ModelONEXContainer
     from omnibase_core.models.reducer.model_intent import ModelIntent
     from omnibase_infra.protocols import ProtocolEventBusLike
@@ -168,6 +170,7 @@ class ContractRegistrationEventRouter:
         effect_handlers: dict[str, ProtocolIntentEffect],
         event_bus: ProtocolEventBusLike | None = None,
         tick_interval_seconds: int = 60,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         """Initialize ContractRegistrationEventRouter with container-based DI.
 
@@ -185,6 +188,8 @@ class ContractRegistrationEventRouter:
                 (optional, only needed if router publishes output events).
             tick_interval_seconds: Interval between staleness tick events.
                 Clamped to minimum of 5 seconds to prevent excessive CPU usage.
+            clock: Source of wall-clock seconds for timing metrics and tick
+                timestamps. Injected so this non-EFFECT package reads no clock itself.
 
         Example:
             >>> from omnibase_core.container import ModelONEXContainer
@@ -203,6 +208,7 @@ class ContractRegistrationEventRouter:
         self._reducer = reducer
         self._effect_handlers = effect_handlers
         self._event_bus = event_bus
+        self._clock = clock
         # Clamp tick interval to minimum of 5 seconds
         self._tick_interval_seconds = max(
             MIN_TICK_INTERVAL_SECONDS, tick_interval_seconds
@@ -210,6 +216,8 @@ class ContractRegistrationEventRouter:
         self._state: ModelContractRegistryState = ModelContractRegistryState()
         self._shutdown_event = asyncio.Event()
         self._tick_task: asyncio.Task[None] | None = None
+        # Position of the next catalog-fed event; the reducer keys idempotency on it.
+        self._announced_offset = 0
         self._tick_sequence: int = 0
 
         logger.debug(
@@ -360,7 +368,7 @@ class ContractRegistrationEventRouter:
                 event envelope in .value field.
         """
         callback_correlation_id = self._extract_correlation_id_from_message(msg)
-        callback_start_time = time.time()
+        callback_start_time = self._clock()
 
         logger.debug(
             "Contract event message callback invoked (correlation_id=%s)",
@@ -476,9 +484,9 @@ class ContractRegistrationEventRouter:
             }
 
             # Call reducer
-            reducer_start_time = time.time()
+            reducer_start_time = self._clock()
             output = self._reducer.reduce(self._state, event, event_metadata)
-            reducer_duration = time.time() - reducer_start_time
+            reducer_duration = self._clock() - reducer_start_time
 
             # Update state
             self._state = output.result
@@ -530,7 +538,7 @@ class ContractRegistrationEventRouter:
             )
 
         finally:
-            callback_duration = time.time() - callback_start_time
+            callback_duration = self._clock() - callback_start_time
             logger.debug(
                 "Contract message callback completed in %.3fs (correlation_id=%s)",
                 callback_duration,
@@ -538,6 +546,54 @@ class ContractRegistrationEventRouter:
                 extra={
                     "callback_duration_seconds": callback_duration,
                 },
+            )
+
+    async def register_announced(
+        self,
+        event: ModelContractRegisteredEvent,
+        correlation_id: UUID,
+        *,
+        topic: str,
+    ) -> None:
+        """Reduce a contract the node catalog announced, with no bus in between (OMN-21590).
+
+        Does what ``handle_message`` does for a ``contract-registered`` record once the
+        record is parsed: reduce, keep the state, execute the intents. The kernel calls
+        it for every contract the catalog yielded, so a boot publishes nothing.
+        """
+        started = self._clock()
+        try:
+            event_metadata: dict[str, JsonType] = {
+                "topic": topic,
+                "partition": 0,
+                "offset": self._announced_offset,
+                "data_provenance": "unknown",
+            }
+            self._announced_offset += 1
+            output = self._reducer.reduce(self._state, event, event_metadata)
+            self._state = output.result
+            if output.intents:
+                await self._execute_intents(output.intents, correlation_id)
+        except Exception as error:
+            # Log exception information without exposing the original exception's
+            # credentials or traceback locals at this optional startup boundary.
+            safe_error = RuntimeError(sanitize_error_message(error))
+            logger.exception(
+                "Failed to process announced contract: %s (correlation_id=%s)",
+                safe_error,
+                correlation_id,
+                exc_info=(RuntimeError, safe_error, None),
+                extra={
+                    "error_type": type(error).__name__,
+                    "contract_name": event.node_name,
+                    "event_id": str(event.event_id),
+                },
+            )
+        finally:
+            logger.debug(
+                "Announced contract callback completed (correlation_id=%s)",
+                correlation_id,
+                extra={"callback_duration_seconds": self._clock() - started},
             )
 
     async def _execute_intents(
@@ -586,7 +642,7 @@ class ContractRegistrationEventRouter:
                     continue
 
                 handler = self._effect_handlers[intent_type]
-                handler_start_time = time.time()
+                handler_start_time = self._clock()
 
                 # Extract correlation_id from payload if available
                 payload_correlation_id = getattr(
@@ -594,7 +650,7 @@ class ContractRegistrationEventRouter:
                 )
 
                 result = await handler.handle(payload, payload_correlation_id)
-                handler_duration = time.time() - handler_start_time
+                handler_duration = self._clock() - handler_start_time
 
                 # Check if handler returned a result with success field
                 success = getattr(result, "success", True) if result else True
@@ -652,7 +708,7 @@ class ContractRegistrationEventRouter:
                 # Increment sequence for each tick
                 self._tick_sequence += 1
                 tick_correlation_id = uuid4()
-                now = datetime.now(UTC)
+                now = datetime.fromtimestamp(self._clock(), UTC)
 
                 tick = ModelRuntimeTick(
                     tick_id=uuid4(),
@@ -671,9 +727,9 @@ class ContractRegistrationEventRouter:
                     "offset": self._tick_sequence,
                 }
 
-                tick_start_time = time.time()
+                tick_start_time = self._clock()
                 output = self._reducer.reduce(self._state, tick, metadata)
-                tick_duration = time.time() - tick_start_time
+                tick_duration = self._clock() - tick_start_time
 
                 # Update state
                 self._state = output.result
