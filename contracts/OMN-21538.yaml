@@ -20,6 +20,11 @@ requirements:
         statement: 'AC4: each burn-down ticket for a non-empty baseline exists and names its zero date -- falsifier: list_issues by parent returns the burn-down tickets; the baseline reaches zero on that date, read from the file'
       - id: AC5
         statement: 'AC5: hook ids and tags come from the shared hook repo pin (one home), not a second literal -- falsifier: a pytest case finds no dev-merge tag in the core-validators and canonical-file-shape jobs of ci.yml'
+  - id: req-omn21538-lab-proof-tests-no-home-path
+    statement: The lab proof plan tests hold no home-directory literal, so check-local-paths-compute passes on every change whose range includes them.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the Core Validators job is green on a head whose range includes the lab proof plan test files -- falsifier: a pytest case finds no home-directory path in tests/unit/nodes/node_lab_proof_plan_compute'
 evidence_requirements:
   - kind: "tests"
     description: "The wiring test parses .pre-commit-config.yaml and ci.yml for every wired hook id."
@@ -74,3 +79,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "tag_has_one_home"
     binds_ac:
       - AC5
+  - id: dod-omn21538-ac6-lab-proof-tests-no-home-path
+    description: >-
+      AC6. The lab proof plan fixtures and tests use a non-home lane root; the test scans the directory for a home-directory literal and fails on the pre-fix tree.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "home_directory"
+    binds_ac:
+      - AC6

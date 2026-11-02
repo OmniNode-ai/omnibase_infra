@@ -216,9 +216,9 @@ def test_prepare_retains_the_healthy_family_checked_by_injected_hashes(
     guard = _guard(host, tmp_path)
     result = guard.handle(ModelDevBootRequest(operation="prepare"))
     assert result.status == "pass"
-    assert guard.point is not None
-    assert guard.point.revision == REVISION
-    assert set(guard.point.images.values()) == {
+    assert guard.point.current is not None
+    assert guard.point.current.revision == REVISION
+    assert set(guard.point.current.images.values()) == {
         f"sha256:{s}" for s in guard_mod.DEV_BOOT_SERVICES
     }
     assert guard.snapshot_path in host.written
