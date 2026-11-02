@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import functools
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 
 from opentelemetry import trace
 from opentelemetry.trace import NoOpTracerProvider, ProxyTracerProvider, StatusCode
@@ -28,7 +28,7 @@ _SPAN_NAME = "message_dispatch_engine.dispatch"
 
 def traced_dispatch[**P](
     dispatch: Callable[P, Awaitable[ModelDispatchResult]],
-) -> Callable[P, Awaitable[ModelDispatchResult]]:
+) -> Callable[P, Coroutine[object, object, ModelDispatchResult]]:
     """Wrap an async ``dispatch(self, topic, envelope, ...)`` in one span."""
 
     @functools.wraps(dispatch)
