@@ -186,7 +186,7 @@ dod_evidence:
     binds_ac: [AC1, AC2]
   - id: dod-omn21288-t5-ac1-head-holds-dev-and-touched-tests-pass
     description: >-
-      T5 AC1, the writers fold's head contains current origin/dev (git merge-base --is-ancestor origin/dev HEAD exits 0 at the pushed head) and every test file the PR touches passes: the writers fold, the stack-only check, the deploy handler's folded-service tests and the deploy agent's fold tests. The ancestor read and the /omni:lab-run receipt at the pushed head (host, sha, exit code) are in the PR's Lab comment; the hosted check below re-runs the focused files without a broker or a daemon.
+      T5 AC1, the writers fold's head contains current origin/dev and the full deploy-agent suite and pre-commit over the whole PR diff pass on a lab host. At head 45e694f320b7d632e74a66c21ea04fcdcef68fd3, git merge-base --is-ancestor origin/dev HEAD exits 0 (origin/dev 5eda9ab591dd994d774df1cc86ddb7d9e506aa67). On h051, uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests -m "not lab_overlay" (the deploy-agent-tests CI form) gave 1930 passed, 2 deselected, exit 0 (unit lw-29f6e3c203a04544), and uv run --frozen pre-commit run --from-ref 5eda9ab591dd994d774df1cc86ddb7d9e506aa67 --to-ref 45e694f320b7d632e74a66c21ea04fcdcef68fd3 exited 0 (unit lw-4fe04ecd05644fff). Run with the repository's root environment instead, the suite gave 6 errors in test_queue_depth_omn18144.py (fixture aiohttp_client not found), identical at origin/dev and outside this diff. The hosted check below re-runs the focused files without a broker or a daemon.
     source: manual
     checks:
       - check_type: test_passes
@@ -198,7 +198,7 @@ dod_evidence:
     binds_ac: []
   - id: dod-omn21288-t5-ac2-no-event-lost-across-the-swap
     description: >-
-      T5 AC2, no event published during the swap is lost and each is projected once. The writer contracts declare the retired container's consumer under consumer_group_handover (omnimarket dev), and auto-wiring seeds the runtime's group from it (OMN-21753, merged to dev). The hosted check runs the in-process group-offset scenario; the Redpanda scenario, tests/integration/event_bus/test_consumer_group_handover_redpanda_omn21288.py, needs a broker and is run on a lab host, its receipt in the PR's Lab comment. The live row count on one projection is the post-merge dev proof through the deploy agent.
+      T5 AC2, no event published during the swap is lost and each is projected once. The writer contracts declare the retired container's consumer under consumer_group_handover (omnimarket dev), and auto-wiring seeds the runtime's group from it (OMN-21753, merged to dev). The hosted check runs the in-process group-offset scenario. The Redpanda scenario, tests/integration/event_bus/test_consumer_group_handover_redpanda_omn21288.py, was run on h201 against the pre-PR slot's broker (the lab dev lane's Redpanda; unit lw-f25bc4569e5e4d65) and errored at setup with KafkaConnectionError, because that broker takes SCRAM-SHA-256 clients only (docker-compose.dev-lane.yml KAFKA_SASL_MECHANISM) and the test opens plaintext clients; it is not in the hosted service-integration-suites list. The broker run and the live row count on one projection are owed to the post-merge dev proof through the deploy agent.
     source: manual
     checks:
       - check_type: test_passes
@@ -214,9 +214,27 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn21288-t5-ac3-rollback-by-revision
+    description: >-
+      T5 AC3, a rollback across the fold is by revision: the pre-fold image and the pre-fold overlay go back together and the five writer containers return. The unit half is held by test_auto_rollback.py and test_boot_guard_fold_pairing_omn21288.py (in the 1930-pass deploy-agent run at 45e694f320b7d632e74a66c21ea04fcdcef68fd3). The slot half (fold, publish, roll back, publish, row counts per projection) is not available on a pre-PR slot: the slot entrypoint composes infra, dev-lane and prepr only (scripts/runtime_build/prepr_verify_lane.sh COMPOSE_FILES), the prepr overlay starts each writer under profile prepr, and docker-compose.dev-tenant-fold.yml is primary-dev only, so a slot never folds; and the bring-up at 45e694f320b7d632e74a66c21ea04fcdcef68fd3 exited 10 at the workspace build's first-party source audit (h201 unit lw-e9671c9907614357, teardown CLEAN). It is owed to the post-merge dev proof through the deploy agent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn21288-t5-ac4-five-readings-before-and-after
+    description: >-
+      T5 AC4, the five readings before and after the fold. No slot reading was taken: the pre-PR slot bring-up at 45e694f320b7d632e74a66c21ea04fcdcef68fd3 exited 10 before any container started (h201 unit lw-e9671c9907614357), and a slot cannot fold (see the AC3 entry). As a read-only reference, dev was read twice 60 s apart on h201 (unit lw-54b86f0dc50746df, 2026-11-02T00:21:48Z and 00:22:49Z): 27 running containers in compose project omnibase-infra, the five writers among them; omninode-runtime memory.current 672374784 and memory.swap.current 10706944 bytes, cpu usage_usec 140447656 then 157531487; live_events +15, savings_estimates +2, claude_hook_events +129 rows inserted or updated, tenant_inference_credentials and tenant_registry_mirror +0; 8085 and 8086 ready and health 200, runtime healthy with 0 restarts. The after readings, with the five containers absent and their projections advancing, are owed to the post-merge dev proof through the deploy agent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
   - id: dod-omn21288-t5-ac4-ci-green-at-the-handoff-head
     description: >-
-      T5 AC4, the PR's CI at its head shows no red and no pending required context before handoff. The evidence is the PR watcher's read for that head (python3 pr_state_local.py --pr omnibase_infra#5518, or onex scm pr-checks), recorded in the handoff; a draft is excluded from the watcher, so a stale read is reported as stale. The hosted check re-runs the tests of the guard this change touches.
+      T5 AC5, the PR is out of draft and handed to the landing controller with needs=train at a head with no red context this PR caused. The evidence is the PR watcher's read for that head (python3 pr_state_local.py --pr omnibase_infra#5518, or onex scm pr-checks), recorded in the handoff; a draft is excluded from the watcher, so a stale read is reported as stale. The hosted check re-runs the tests of the guard this change touches.
     source: manual
     checks:
       - check_type: test_passes
@@ -225,5 +243,5 @@ dod_evidence:
     binds_ac: []
 context:
   remaining_after_this_change: "AC2 end state: eight dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test (effects, worker, projection-api, four consumers, the delegation writer); each leaves the list when its node runs inside the runtime."
-  tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
+  tenant_fold_proof: "No pre-PR slot can boot docker-compose.dev-tenant-fold.yml: the slot entrypoint composes infra, dev-lane and prepr only, and its workspace build fails the first-party source audit. The fold readings are owed to the post-merge dev proof through the deploy agent. No lane was redeployed by this lane."
   worker_integration: "The independently owned worker fold must preserve both overlays and union main.folded_profiles to [workers, tenant-projection]; then remove runtime-worker from SEPARATE_SERVICES as well. This branch never changes the worker branch."
