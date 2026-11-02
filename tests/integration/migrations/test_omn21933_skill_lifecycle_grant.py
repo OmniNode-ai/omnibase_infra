@@ -105,12 +105,14 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
     )
     assert readback.returncode == 0, readback.stderr
     assert readback.stdout.strip() == "1"
-    for tenant in ("omninode", "another-tenant", None):
+    for tenant in ("omninode", "another-tenant", "", None):
         # One psql process is one session, so SET ROLE and the tenant binding
         # carry into the count. The tenant values are fixed literals of this
         # test, and the count is read from a labelled line rather than the
         # last line of whatever the session printed.
-        tenant_args = ("-c", f"SET app.tenant_id = '{tenant}'") if tenant else ()
+        tenant_args = (
+            ("-c", f"SET app.tenant_id = '{tenant}'") if tenant is not None else ()
+        )
         visible = ephemeral_postgres.psql(
             "-At",
             "-c",
@@ -123,7 +125,7 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
         )
         assert visible.returncode == 0, visible.stderr
         assert (
-            f"bound={tenant or 'NULL'} visible={1 if tenant == 'omninode' else 0}"
+            f"bound={'NULL' if tenant is None else tenant} visible={1 if tenant == 'omninode' else 0}"
             in visible.stdout.splitlines()
         ), visible.stdout
     for tenant_setting in ((), ("-c", "SET app.tenant_id = 'another-tenant'")):
