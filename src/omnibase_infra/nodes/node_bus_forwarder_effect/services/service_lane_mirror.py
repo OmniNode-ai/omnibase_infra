@@ -156,9 +156,6 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forwarder_runtime_config import (
         ModelGatewayForwarderRuntimeConfig,
     )
-    from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror_bus_source import (
-        ProtocolLaneMirrorSource,
-    )
 
 _MESSAGE_ID_HEADER = "message_id"
 _CORRELATION_ID_HEADER = "correlation_id"
@@ -296,7 +293,7 @@ class NodeLaneMirror:
         config: ModelGatewayForwarderRuntimeConfig,
         transports: Mapping[str, KafkaTransport],
         source_bus: ProtocolEventBus | None,
-    ) -> ProtocolLaneMirrorSource:
+    ) -> ProtocolGatewayConsumer:
         """The unstarted source leg the overlay selected (OMN-21950).
 
         Lives on the mirror so the runtime entry point reaches the source and

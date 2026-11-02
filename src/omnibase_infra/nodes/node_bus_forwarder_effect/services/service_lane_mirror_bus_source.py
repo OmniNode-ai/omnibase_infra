@@ -33,7 +33,7 @@ import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from itertools import count
-from typing import Protocol, cast
+from typing import cast
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
@@ -69,14 +69,6 @@ def _encode_headers(headers: object) -> dict[str, bytes]:
         return {}
     fields = cast("Mapping[str, object]", dump(mode="json", exclude_none=True))
     return {name: str(value).encode("utf-8") for name, value in fields.items()}
-
-
-class ProtocolLaneMirrorSource(ProtocolGatewayConsumer, Protocol):
-    """A started-and-closed lane-mirror source: ``KafkaTransport`` or the bus leg."""
-
-    async def start(self) -> None: ...
-
-    async def close(self) -> None: ...
 
 
 class NodeLaneMirrorBusSource:
@@ -190,7 +182,7 @@ def build_lane_mirror_source(
     config: ModelGatewayForwarderRuntimeConfig,
     transports: Mapping[str, KafkaTransport],
     source_bus: ProtocolEventBus | None,
-) -> ProtocolLaneMirrorSource | None:
+) -> ProtocolGatewayConsumer | None:
     """The lane-mirror source leg the overlay selected.
 
     A container-selected source reads the runtime's own ``ProtocolEventBus``,
@@ -236,7 +228,6 @@ def build_lane_mirror_source(
 __all__ = [
     "IN_PROCESS_PARTITION",
     "NodeLaneMirrorBusSource",
-    "ProtocolLaneMirrorSource",
     "build_lane_mirror_source",
     "resolve_lane_mirror_source_bus",
 ]
