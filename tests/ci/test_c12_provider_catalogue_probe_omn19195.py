@@ -68,6 +68,46 @@ def test_the_recorded_catalogue_offers_anthropic_and_grades_it_like_openai() -> 
     assert record.verdict == "pass", record.failures
 
 
+def _with_openai_compatible(obs: dict[str, Any]) -> dict[str, Any]:
+    """The recording, reshaped to the catalogue dev-201 shipped in image
+    omnicloud-core:7f90d7f4-20261102T071628Z: omnimarket#4632 added the
+    customer-only ``openai_compatible`` row (``mirrors_house_rung: false``), so
+    it is offered, customer-only, accepted by the intake route, and backed by
+    no house rung (OMN-21981)."""
+    obs = copy.deepcopy(obs)
+    shipped = obs["shipped"]
+    shipped["offered"] = sorted({*shipped["offered"], "openai_compatible"})
+    shipped["customer_only"] = sorted({*shipped["customer_only"], "openai_compatible"})
+    obs["intake"]["openai_compatible"] = {"accepted": True}
+    return obs
+
+
+@pytest.mark.unit
+def test_the_deployed_openai_compatible_row_is_a_declared_customer_only_provider() -> (
+    None
+):
+    """Board run 41409937453 read C12 red on exactly this shape:
+    customer_only=['anthropic', 'openai', 'openai_compatible'] against a grader
+    that declared only anthropic and openai (OMN-21981)."""
+    record = probe.grade(_with_openai_compatible(_healthy()))
+    assert record.verdict == "pass", record.failures
+    assert record.exit_code == probe.EXIT_OK
+    assert "intake_accepts_openai_compatible" in {c.name for c in record.checks}
+    assert "openai_compatible" in probe.CUSTOMER_ONLY_PROVIDERS
+
+
+@pytest.mark.unit
+def test_openai_compatible_backed_by_a_house_rung_still_grades_fail() -> None:
+    """Declaring it customer-only does not let a house rung back it."""
+    obs = _with_openai_compatible(_healthy())
+    obs["shipped"]["house_keyed_slugs"] = sorted(
+        {*obs["shipped"]["house_keyed_slugs"], "openai_compatible"}
+    )
+    record = probe.grade(obs)
+    assert record.verdict == "fail"
+    assert "customer_only_has_no_house_rung" in _failed(record)
+
+
 @pytest.mark.unit
 @pytest.mark.live_contact("tests/ci/fixtures/omn17353_c12_dev201_observation.json")
 def test_the_recorded_dev201_container_reading_grades_pass(

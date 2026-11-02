@@ -1,0 +1,34 @@
+# OMN-21981 contract file for omnibase_infra: the C12 probe declares the customer-only openai_compatible row.
+schema_version: "1.0.0"
+ticket_id: "OMN-21981"
+title: "M4 criterion c12-provider-catalogue reads not-ok on the board: name the cause and correct it in the owning repo"
+summary: "The deployed catalogue (image omnicloud-core:7f90d7f4-20261102T071628Z) ships the customer-only openai_compatible row that omnimarket#4632 added; the C12 grader declared only anthropic and openai as customer-only, so parity/customer_only_exemptions_are_declared_here read RED. The grader now declares openai_compatible; every other clause, the house-rung clause and the self-exemption negative arm included, is unchanged."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21981-c12-declares-openai-compatible
+    statement: "The C12 grader declares openai_compatible as a customer-only provider, so the deployed catalogue grades pass while an undeclared exemption and a house-rung-backed customer-only provider still grade fail."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the cause is named from the probe's last non-ok run, with the run id, the observed output and the owning repo -- falsifier: the lane report quotes the probe output of run 41409937453"
+      - id: AC2
+        statement: "AC2: a correction in the owning repo makes the c12 probe read ok on the next board publish, with a test that is not satisfied by the old code -- falsifier: uv run pytest on the new test in the owning repo, then the next board publish reading c12 ok"
+evidence_requirements:
+  - kind: tests
+    description: "The C12 grading tests pass, including the deployed openai_compatible shape and the house-rung negative case."
+    command: "uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The C12 grading tests pass: the deployed shape with openai_compatible customer-only grades pass, and openai_compatible backed by a house rung grades fail."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -p no:cacheprovider
+  - id: dod-deploy
+    description: "Deploy probe: the C12 grader on the PR branch (read from GitHub by branch name) declares openai_compatible among CUSTOMER_ONLY_PROVIDERS. The grader runs from the checked-out repository on the scheduled workflow, so the branch content is what the next scheduled run grades with after merge; the hourly C12 run on dev reading success is the live readback."
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/scripts/ci/c12_provider_catalogue_probe.py?ref=omn-21981-c12-openai-compatible-customer-only" | grep -Eq ''^CUSTOMER_ONLY_PROVIDERS: Final = \(.*"openai_compatible"'''
