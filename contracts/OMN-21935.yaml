@@ -41,3 +41,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/topology/test_application_database_table_grants.py tests/unit/topology/test_application_database_topology.py tests/unit/topology/test_omnibase_infra_service_database.py -q --no-cov
         cwd: .
+  - id: dod-omn21935-ac1-integration
+    description: Through every shipped topology profile the declared table resolves to the omnibase_infra database in schema public and the grant derivation over the full state_io manifest grants it to role_omnibase_infra only. The tests fail at the merge base, which carries no declaration for the table.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/topology/test_infra_routing_decisions_binding_omn21935.py -q --no-cov
+        cwd: .
