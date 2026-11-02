@@ -25,3 +25,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov -k gate"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-002-deploy-gate-probe
+    description: "Deploy probe: the pinned nginx image parses the committed configuration (nginx -T exits 0) and the dump carries the operator-only report gate marker and its deny rule. A server whose configuration lacks the gate fails this check."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: "bash -o pipefail -c 'docker run --rm -v \"$PWD/docker/factory-floor-web/nginx.conf:/etc/nginx/nginx.conf:ro\" nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de nginx -T 2>/dev/null | grep -F \"operator-only report gate\" > /dev/null'"
+        cwd: ${OMNI_HOME}/omnibase_infra
