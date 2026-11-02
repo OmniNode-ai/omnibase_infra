@@ -56,12 +56,20 @@ event_bus:
     # path from a pattern candidate's result, so validation_event_ledger stayed
     # empty on the lab even for a result the pipeline published.
     - "onex.evt.platform.validation-result-published.v1"
+    # OMN-22002: omnibase_core publishes one run event per validation report and
+    # one triggered event per refusing validator. Both become validation ledger
+    # rows through HandlerValidatorEventLedgerProject and the same append path.
+    - "onex.evt.platform.validator-run.v1"
+    - "onex.evt.platform.validator-triggered.v1"
   # Projection consumer - read-only consumption for ledger persistence
   consumer_purpose: "projection"
   # Start from earliest offset to capture all historical validation events
   auto_offset_reset: "earliest"
   # Consumer group for validation ledger projection
   consumer_group: "onex-validation-ledger-projection-compute"
+# OMN-22002: COMPUTE archetype declaration, required by check-no-io-outside-effects.
+descriptor:
+  node_archetype: compute
 # Strongly typed I/O models
 input_model:
   name: "ModelEventMessage"
@@ -135,6 +143,28 @@ handler_routing:
       handler:
         name: "HandlerValidationLedgerProjection"
         module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
+      supported_operations:
+        - "validation_ledger.project"
+    - operation: validation_ledger.project
+      topic: "onex.evt.platform.validator-run.v1"
+      handler_type: "validation_ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerValidatorEventLedgerProject"
+        module: "omnibase_infra.handlers.handler_validator_event_ledger_project"
+      supported_operations:
+        - "validation_ledger.project"
+    - operation: validation_ledger.project
+      topic: "onex.evt.platform.validator-triggered.v1"
+      handler_type: "validation_ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerValidatorEventLedgerProject"
+        module: "omnibase_infra.handlers.handler_validator_event_ledger_project"
       supported_operations:
         - "validation_ledger.project"
 # Intent consumption (OMN-14524): the projection emits a
