@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import ast
 import textwrap
 from pathlib import Path
 from unittest.mock import patch
@@ -19,7 +20,7 @@ from scripts.check_topic_drift import (
 
 @pytest.mark.unit
 class TestExtractSuffixValues:
-    """Tests for AST-based SUFFIX_* extraction."""
+    """Tests for SUFFIX_* extraction."""
 
     def test_extracts_simple_string_constants(self, tmp_path: Path) -> None:
         """Extracts SUFFIX_* = "string" assignments."""
@@ -37,17 +38,86 @@ class TestExtractSuffixValues:
             "SUFFIX_NODE_HEARTBEAT": "onex.evt.platform.node-heartbeat.v1",
         }
 
-    def test_ignores_non_string_assignments(self, tmp_path: Path) -> None:
-        """Non-string SUFFIX_* values are ignored."""
+    def test_refuses_non_string_assignments(self, tmp_path: Path) -> None:
+        """A non-string SUFFIX_* value is refused, never silently dropped."""
         py_file = tmp_path / "suffixes.py"
         py_file.write_text(
             textwrap.dedent("""\
                 SUFFIX_COUNT: int = 42
-                SUFFIX_REAL: str = "onex.evt.platform.test.v1"
+                SUFFIX_REAL: str = "real-suffix"
+            """)
+        )
+        with pytest.raises(TypeError, match="SUFFIX_COUNT"):
+            _extract_suffix_values(py_file)
+
+    def test_refuses_enum_member_assigned_without_value(self, tmp_path: Path) -> None:
+        """A SUFFIX_* bound to a str-mixin enum member (no .value) is refused."""
+        py_file = tmp_path / "suffixes.py"
+        py_file.write_text(
+            textwrap.dedent("""\
+                from omnibase_infra.enums.generated import EnumPlatformTopic
+
+                SUFFIX_NODE_REGISTRATION = EnumPlatformTopic.EVT_NODE_REGISTRATION_V1
+            """)
+        )
+        with pytest.raises(TypeError, match="SUFFIX_NODE_REGISTRATION"):
+            _extract_suffix_values(py_file)
+
+    def test_unresolvable_enum_member_fails_loudly(self, tmp_path: Path) -> None:
+        """A SUFFIX_* naming a missing generated enum member is an error."""
+        py_file = tmp_path / "suffixes.py"
+        py_file.write_text(
+            textwrap.dedent("""\
+                from omnibase_infra.enums.generated import EnumPlatformTopic
+
+                SUFFIX_MISSING: str = EnumPlatformTopic.NO_SUCH_MEMBER_V1.value
+            """)
+        )
+        with pytest.raises(AttributeError, match="NO_SUCH_MEMBER_V1"):
+            _extract_suffix_values(py_file)
+
+    def test_resolves_generated_enum_member_values(self, tmp_path: Path) -> None:
+        """SUFFIX_* = EnumProducerTopic.MEMBER.value resolves to the enum's string."""
+        py_file = tmp_path / "suffixes.py"
+        py_file.write_text(
+            textwrap.dedent("""\
+                from omnibase_infra.enums.generated import EnumPlatformTopic
+
+                SUFFIX_NODE_REGISTRATION: str = EnumPlatformTopic.EVT_NODE_REGISTRATION_V1.value
             """)
         )
         result = _extract_suffix_values(py_file)
-        assert result == {"SUFFIX_REAL": "onex.evt.platform.test.v1"}
+        assert result == {
+            "SUFFIX_NODE_REGISTRATION": "onex.evt.platform.node-registration.v1",
+        }
+
+    def test_real_registry_extracts_every_suffix_name(self) -> None:
+        """Every SUFFIX_* the registry defines still resolves to a string."""
+        constants_file = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "omnibase_infra"
+            / "topics"
+            / "platform_topic_suffixes.py"
+        )
+        defined: set[str] = set()
+        for node in ast.walk(ast.parse(constants_file.read_text())):
+            if isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+            elif isinstance(node, ast.Assign):
+                targets = node.targets
+            else:
+                continue
+            defined.update(
+                target.id
+                for target in targets
+                if isinstance(target, ast.Name) and target.id.startswith("SUFFIX_")
+            )
+        extracted = _extract_suffix_values(constants_file)
+        assert defined - set(extracted) == set()
+        assert extracted["SUFFIX_NODE_REGISTRATION"] == (
+            "onex.evt.platform.node-registration.v1"
+        )
 
 
 @pytest.mark.unit
@@ -127,7 +197,7 @@ class TestDriftDetection:
             tmp_path,
             suffix_content=textwrap.dedent("""\
                 SUFFIX_A: str = "onex.evt.platform.topic-a.v1"
-                SUFFIX_ORPHAN: str = "onex.evt.platform.orphan.v1"
+                SUFFIX_ORPHAN: str = "onex.evt.platform.orphan-topic.v1"
             """),
             contracts={
                 "node_a": textwrap.dedent("""\

@@ -60,6 +60,7 @@ import os
 
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
+from omnibase_infra.enums import generated as topic_enums
 from omnibase_infra.topics.model_topic_provisioning_policy import (
     MANAGED_MINIMUM_REPLICATION_FACTOR,
 )
@@ -246,7 +247,7 @@ SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED: str = (
 """Topic for pattern lifecycle transition completion events."""
 
 SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED: str = (
-    "onex.evt.omniintelligence.llm-call-completed.v1"
+    topic_enums.EnumOmniintelligenceTopic.EVT_LLM_CALL_COMPLETED_V1.value
 )
 """Topic for LLM call completed metrics events.
 
@@ -259,7 +260,9 @@ SUFFIX_INTELLIGENCE_DISPATCH_OUTCOME_EVALUATED: str = (
 )
 """Topic for dispatch worker outcome evaluation events."""
 
-SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
+SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = (
+    topic_enums.EnumPatternTopic.EVT_DISCOVERED_V1.value
+)
 """Topic for generic pattern discovery events."""
 
 SUFFIX_INTELLIGENCE_DECISION_RECORDED_EVT: str = (
@@ -923,7 +926,7 @@ Producer: omnimarket node_github_pr_poller_effect / HandlerGitHubApiPoll
 Consumer: omnidash PR triage dashboard (future)
 """
 
-SUFFIX_LINEAR_SNAPSHOT: str = "onex.evt.linear.snapshot.v1"
+SUFFIX_LINEAR_SNAPSHOT: str = topic_enums.EnumLinearTopic.EVT_SNAPSHOT_V1.value
 """Topic suffix for Linear workspace snapshot events.
 
 Published by onex-linear-relay CLI for each snapshot relayed to Kafka.
@@ -932,7 +935,7 @@ Producer: onex-linear-relay (omnibase_infra CLI)
 Consumer: omnidash, omnibase_infra TUI
 """
 
-SUFFIX_GIT_HOOK: str = "onex.evt.git.hook.v1"
+SUFFIX_GIT_HOOK: str = topic_enums.EnumGitTopic.EVT_HOOK_V1.value
 """Topic suffix for git hook relay events.
 
 Published by onex-git-hook-relay CLI for each git hook event relayed to Kafka.
@@ -964,7 +967,7 @@ Consumer: omniintelligence pattern learning pipeline
 """
 
 SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED: str = (
-    "onex.evt.omnimemory.policy-state-updated.v1"
+    topic_enums.EnumOmnimemoryTopic.EVT_POLICY_STATE_UPDATED_V1.value
 )
 """Topic suffix for policy state update events (OMN-2927).
 
@@ -1399,7 +1402,7 @@ even if no consumer is registered yet.
 # the DB directly (OMN-5042); registering here closes that gap.
 
 SUFFIX_VALIDATION_CROSS_REPO_RUN_STARTED: str = (
-    "onex.evt.validation.cross-repo-run-started.v1"
+    topic_enums.EnumValidationTopic.EVT_CROSS_REPO_RUN_STARTED_V1.value
 )
 """Topic suffix for cross-repo validation run started events.
 
@@ -1412,7 +1415,7 @@ Consumer: omnidash EventBusDataSource
 """
 
 SUFFIX_VALIDATION_CROSS_REPO_VIOLATIONS_BATCH: str = (
-    "onex.evt.validation.cross-repo-violations-batch.v1"
+    topic_enums.EnumValidationTopic.EVT_CROSS_REPO_VIOLATIONS_BATCH_V1.value
 )
 """Topic suffix for cross-repo validation violations batch events.
 
@@ -1425,7 +1428,7 @@ Consumer: omnidash EventBusDataSource
 """
 
 SUFFIX_VALIDATION_CROSS_REPO_RUN_COMPLETED: str = (
-    "onex.evt.validation.cross-repo-run-completed.v1"
+    topic_enums.EnumValidationTopic.EVT_CROSS_REPO_RUN_COMPLETED_V1.value
 )
 """Topic suffix for cross-repo validation run completed events.
 
@@ -1655,7 +1658,7 @@ TCB_OUTCOME_REGISTRATION) and demo_loop_gate verification.
 """
 
 SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED: str = (
-    "onex.evt.omniclaude.notification-blocked.v1"
+    topic_enums.EnumOmniclaudeTopic.EVT_NOTIFICATION_BLOCKED_V1.value
 )
 """Notification event topic for agent BLOCKED states.
 
@@ -1664,7 +1667,7 @@ Consumer: omnibase_infra emit daemon notification consumer (push-notification re
 """
 
 SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED: str = (
-    "onex.evt.omniclaude.notification-completed.v1"
+    topic_enums.EnumOmniclaudeTopic.EVT_NOTIFICATION_COMPLETED_V1.value
 )
 """Notification event topic for agent COMPLETED states.
 
@@ -1881,8 +1884,8 @@ _OMNICLAUDE_SKILL_TOPIC_SUFFIXES: tuple[str, ...] = (
     "onex.cmd.omniclaude.action-logging.v1",
     "onex.cmd.omniclaude.agent-observability.v1",
     "onex.cmd.omniclaude.auto-merge.v1",
-    "onex.cmd.omniclaude.brainstorming.v1",
-    "onex.cmd.omniclaude.checkpoint.v1",
+    topic_enums.EnumOmniclaudeTopic.CMD_BRAINSTORMING_V1.value,
+    topic_enums.EnumOmniclaudeTopic.CMD_CHECKPOINT_V1.value,
     "onex.cmd.omniclaude.ci-failures.v1",
     "onex.cmd.omniclaude.ci-fix-pipeline.v1",
     "onex.cmd.omniclaude.ci-watch.v1",
@@ -1921,12 +1924,12 @@ _OMNICLAUDE_SKILL_TOPIC_SUFFIXES: tuple[str, ...] = (
     "onex.cmd.omniclaude.pr-watch.v1",
     "onex.cmd.omniclaude.project-status.v1",
     "onex.cmd.omniclaude.receiving-code-review.v1",
-    "onex.cmd.omniclaude.release.v1",
+    topic_enums.EnumOmniclaudeTopic.CMD_RELEASE_V1.value,
     "onex.cmd.omniclaude.requesting-code-review.v1",
     "onex.cmd.omniclaude.review-all-prs.v1",
     "onex.cmd.omniclaude.review-cycle.v1",
     "onex.cmd.omniclaude.root-cause-tracing.v1",
-    "onex.cmd.omniclaude.rrh.v1",
+    topic_enums.EnumOmniclaudeTopic.CMD_RRH_V1.value,
     "onex.cmd.omniclaude.setup-statusline.v1",
     "onex.cmd.omniclaude.sharing-skills.v1",
     "onex.cmd.omniclaude.slack-gate.v1",
@@ -2536,8 +2539,7 @@ def build_generated_tool_invoke_suffix(tool_name: str) -> str:
     """
     event = _to_kebab_event_name(tool_name)
     suffix = f"onex.cmd.{GENERATED_TOOL_PRODUCER}.{event}-invoke.v1"
-    result = validate_topic_suffix(suffix)
-    if not result.is_valid:
+    if not (result := validate_topic_suffix(suffix)).is_valid:
         raise OnexError(f"Invalid generated invoke suffix '{suffix}': {result.error}")
     return suffix
 
@@ -2556,8 +2558,7 @@ def build_generated_tool_result_suffix(tool_name: str) -> str:
     """
     event = _to_kebab_event_name(tool_name)
     suffix = f"onex.evt.{GENERATED_TOOL_PRODUCER}.{event}-result.v1"
-    result = validate_topic_suffix(suffix)
-    if not result.is_valid:
+    if not (result := validate_topic_suffix(suffix)).is_valid:
         raise OnexError(f"Invalid generated result suffix '{suffix}': {result.error}")
     return suffix
 
@@ -2575,8 +2576,7 @@ def _validate_all_suffixes() -> None:
             suffix failed and why.
     """
     for suffix in ALL_PROVISIONED_SUFFIXES:
-        result = validate_topic_suffix(suffix)
-        if not result.is_valid:
+        if not (result := validate_topic_suffix(suffix)).is_valid:
             raise OnexError(f"Invalid topic suffix '{suffix}': {result.error}")
 
 
