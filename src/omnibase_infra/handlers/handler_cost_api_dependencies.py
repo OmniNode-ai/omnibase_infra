@@ -18,7 +18,7 @@ from omnibase_infra.models.model_cost_snapshot_topics import ModelCostSnapshotTo
 
 
 class HandlerCostApiDependencies:
-    """Install cost routes with their validated contract configuration."""
+    """Bind cost API dependencies with their validated contract configuration."""
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -31,12 +31,9 @@ class HandlerCostApiDependencies:
     @staticmethod
     def handle(app: FastAPI, pool: object) -> None:
         """Bind dependencies before exposing the cost API routes."""
-        from omnibase_infra.services.cost_api.router import router
-
         topics = ModelCostSnapshotTopics.from_contract()
         app.state.cost_api_pool = pool
         app.state.cost_snapshot_topics = topics
-        app.include_router(router)
 
     @staticmethod
     def _request_correlation_id(request: Request) -> UUID:
@@ -74,5 +71,24 @@ class HandlerCostApiDependencies:
     @staticmethod
     def get_snapshot_topics(request: Request) -> ModelCostSnapshotTopics:
         """Return the contract-declared snapshot topics bound by the registry app factory."""
-        topics: ModelCostSnapshotTopics = request.app.state.cost_snapshot_topics
+        topics: ModelCostSnapshotTopics | None = getattr(
+            request.app.state, "cost_snapshot_topics", None
+        )
+        if topics is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=HandlerCostApiDependencies._request_correlation_id(
+                    request
+                ),
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="cost_api_snapshot_topics_lookup",
+                target_name="registry_api.cost_snapshot_topics",
+                suggested_resolution="Configure cost_snapshot_topics on the registry API app state.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "message": "Cost API snapshot topics not configured",
+                    "context": context.model_dump(mode="json"),
+                },
+            )
         return topics

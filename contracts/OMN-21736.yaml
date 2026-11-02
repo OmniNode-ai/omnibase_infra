@@ -103,3 +103,11 @@ dod_evidence:
           assert results["token-usage"]["total_tokens"] == 7, results
           print(json.dumps({"status": "PASS", "transport": "loopback HTTP", "routes": results}, sort_keys=True))
           PYTHON
+  - id: dod-004
+    description: Snapshot configuration rejects malformed topics, injected topics override populated contract topics, and unbound topic dependencies return a structured 503.
+    source: generated
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_registry_api_effect/test_cost_snapshot_topics_omn21736.py -k 'invalid_snapshot_topics or unbound_snapshot_topics or summary_route_reads_the_injected_topic' -q -p no:cacheprovider

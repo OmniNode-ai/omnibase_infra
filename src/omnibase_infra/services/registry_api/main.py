@@ -41,9 +41,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.handlers.handler_cost_api_dependencies import (
-    HandlerCostApiDependencies,
-)
+from omnibase_infra.services.cost_api.router import install_cost_routes
 from omnibase_infra.services.registry_api.registry_discovery import (
     ServiceRegistryDiscovery,
 )
@@ -201,7 +199,7 @@ def create_app(
         projection_reader=projection_reader,
         widget_mapping_path=widget_mapping_path,
     )
-    HandlerCostApiDependencies.handle(app, cost_api_pool)
+    install_cost_routes(app, cost_api_pool)
 
     # Include routes
     app.include_router(router)

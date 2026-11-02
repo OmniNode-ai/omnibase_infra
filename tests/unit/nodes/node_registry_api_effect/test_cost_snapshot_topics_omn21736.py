@@ -16,13 +16,17 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
+from fastapi import FastAPI
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.models.model_cost_snapshot_topics import ModelCostSnapshotTopics
 from omnibase_infra.nodes.node_registry_api_effect import load_registry_api_config
 from omnibase_infra.services.cost_api import handlers as cost_handlers
-from omnibase_infra.services.cost_api.router import get_cost_snapshot_topics
+from omnibase_infra.services.cost_api.router import (
+    get_cost_snapshot_topics,
+    router,
+)
 from omnibase_infra.services.cost_api.snapshot_cache import (
     clear_latest_snapshots,
     store_latest_snapshot,
@@ -50,9 +54,9 @@ def _fresh_state() -> None:
 
 def _injected_topics() -> ModelCostSnapshotTopics:
     return ModelCostSnapshotTopics(
-        summary="injected-summary",
-        by_repo="injected-by-repo",
-        token_usage="injected-token-usage",
+        summary="onex.snapshot.injected.cost-summary.v1",
+        by_repo="onex.snapshot.injected.cost-by-repo.v1",
+        token_usage="onex.snapshot.injected.token-usage.v1",
     )
 
 
@@ -91,6 +95,11 @@ async def test_summary_route_reads_the_injected_topic() -> None:
     )
     app.dependency_overrides[get_cost_snapshot_topics] = lambda: injected
     store_latest_snapshot(
+        app.state.cost_snapshot_topics.summary,
+        "24h",
+        {"total_cost_usd": "9.000000", "total_tokens": 99, "session_count": 9},
+    )
+    store_latest_snapshot(
         injected.summary,
         "24h",
         {"total_cost_usd": "1.000000", "total_tokens": 11, "session_count": 1},
@@ -100,9 +109,13 @@ async def test_summary_route_reads_the_injected_topic() -> None:
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.get("/api/costs/summary")
+        app.dependency_overrides.clear()
+        contract_response = await client.get("/api/costs/summary")
 
     assert response.status_code == 200
     assert response.json()["total_tokens"] == 11
+    assert contract_response.status_code == 200
+    assert contract_response.json()["total_tokens"] == 99
 
 
 @pytest.mark.unit
@@ -159,3 +172,50 @@ def test_from_contract_null_or_malformed_sections_raise_validation_error(
     contract.write_text(body, encoding="utf-8")
     with pytest.raises(ValidationError):
         ModelCostSnapshotTopics.from_contract(contract)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field", ["summary", "by_repo", "token_usage"])
+@pytest.mark.parametrize(
+    "invalid_topic",
+    [
+        "onex.evt.platform.cost-summary.v1",
+        "snapshot-topic",
+        "onex.snapshot.platform.cost-summary",
+        "onex.snapshot.platform.cost-summary.v1.trailing",
+    ],
+)
+def test_from_contract_rejects_invalid_snapshot_topics(
+    tmp_path: Path, field: str, invalid_topic: str
+) -> None:
+    declared = yaml.safe_load(_CONTRACT.read_text())
+    declared["config"]["cost_snapshot_topics"][field] = invalid_topic
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(yaml.safe_dump(declared), encoding="utf-8")
+    with pytest.raises(ValidationError, match=field):
+        ModelCostSnapshotTopics.from_contract(contract)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "correlation_id", ["invalid", "219391ad-2322-4564-acb1-114e13edeb17"]
+)
+async def test_unbound_snapshot_topics_return_structured_503(
+    correlation_id: str,
+) -> None:
+    app = FastAPI()
+    app.state.cost_api_pool = _UnusedPool()
+    app.include_router(router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.get(
+            "/api/costs/summary", headers={"X-Correlation-ID": correlation_id}
+        )
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["message"] == "Cost API snapshot topics not configured"
+    assert detail["context"]["operation"] == "cost_api_snapshot_topics_lookup"
+    if correlation_id != "invalid":
+        assert detail["context"]["correlation_id"] == correlation_id

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, FastAPI, Query
 
 from omnibase_infra.handlers.handler_cost_api_dependencies import (
     HandlerCostApiDependencies,
@@ -33,6 +33,13 @@ from omnibase_infra.services.cost_api.models import (
 router = APIRouter(tags=["costs"])
 get_cost_api_pool = HandlerCostApiDependencies.get_pool
 get_cost_snapshot_topics = HandlerCostApiDependencies.get_snapshot_topics
+SnapshotTopics = Annotated[ModelCostSnapshotTopics, Depends(get_cost_snapshot_topics)]
+
+
+def install_cost_routes(app: FastAPI, pool: object) -> None:
+    """Bind cost dependencies before installing their routes on the registry app."""
+    HandlerCostApiDependencies.handle(app, pool)
+    app.include_router(router)
 
 
 @router.get(
@@ -42,9 +49,7 @@ get_cost_snapshot_topics = HandlerCostApiDependencies.get_snapshot_topics
 )
 async def get_cost_summary(
     pool: Annotated[object, Depends(get_cost_api_pool)],
-    snapshot_topics: Annotated[
-        ModelCostSnapshotTopics, Depends(get_cost_snapshot_topics)
-    ],
+    snapshot_topics: SnapshotTopics,
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),
@@ -99,9 +104,7 @@ async def get_cost_by_model(
 )
 async def get_cost_by_repo(
     pool: Annotated[object, Depends(get_cost_api_pool)],
-    snapshot_topics: Annotated[
-        ModelCostSnapshotTopics, Depends(get_cost_snapshot_topics)
-    ],
+    snapshot_topics: SnapshotTopics,
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),
@@ -120,9 +123,7 @@ async def get_cost_by_repo(
 )
 async def get_token_usage(
     pool: Annotated[object, Depends(get_cost_api_pool)],
-    snapshot_topics: Annotated[
-        ModelCostSnapshotTopics, Depends(get_cost_snapshot_topics)
-    ],
+    snapshot_topics: SnapshotTopics,
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),

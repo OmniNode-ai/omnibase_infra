@@ -16,6 +16,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+_SNAPSHOT_TOPIC_PATTERN = r"^onex\.snapshot\.[a-z0-9_-]+\.[a-z0-9._-]+\.v[0-9]+$"
+
 
 class ModelCostSnapshotTopics(BaseModel):
     """Topics whose latest projection snapshot backs the cost API routes.
@@ -28,9 +30,9 @@ class ModelCostSnapshotTopics(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    summary: str = Field(..., min_length=1)
-    by_repo: str = Field(..., min_length=1)
-    token_usage: str = Field(..., min_length=1)
+    summary: str = Field(..., pattern=_SNAPSHOT_TOPIC_PATTERN)
+    by_repo: str = Field(..., pattern=_SNAPSHOT_TOPIC_PATTERN)
+    token_usage: str = Field(..., pattern=_SNAPSHOT_TOPIC_PATTERN)
 
     @classmethod
     def from_contract(
@@ -39,7 +41,7 @@ class ModelCostSnapshotTopics(BaseModel):
         """Build the topics from ``config.cost_snapshot_topics`` of the node contract.
 
         Raises:
-            pydantic.ValidationError: If the contract does not declare every topic.
+            pydantic.ValidationError: If any topic is missing or is not a snapshot topic.
         """
         path = contract_path or (
             Path(__file__).resolve().parents[1]
