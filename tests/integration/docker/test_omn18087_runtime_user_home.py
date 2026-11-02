@@ -12,6 +12,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_infra.docker.catalog.generator import generate_compose
+from omnibase_infra.docker.catalog.resolver import CatalogResolver
+
 ROOT = Path(__file__).resolve().parents[3]
 pytestmark = pytest.mark.integration
 
@@ -27,17 +30,20 @@ def test_runtime_account_paths_render_together(
         environment = runtime["environment"]
     else:
         name = "omninode-runtime" if source == "main-catalog" else "runtime-effects"
-        runtime = yaml.safe_load(
-            (ROOT / f"docker/catalog/services/{name}.yaml").read_text()
+        resolved = CatalogResolver(str(ROOT / "docker/catalog")).resolve(
+            ["runtime-core"]
         )
-        environment = runtime["hardcoded_env"]
+        resolved.project = "landing-l22492-lab"
+        services = generate_compose(resolved)["services"]
+        assert isinstance(services, dict)
+        runtime = services[name]
+        environment = runtime["environment"]
     # Render only the runtime's account paths; config never starts a container.
     service = {
         "image": "runtime:latest",
         "environment": {
             k: environment[k]
             for k in ("CODING_AGENT_CRED_HOME", "ONEX_CODING_AGENT_WORKSPACE_ROOT")
-            if k in environment
         },
         "volumes": [v for v in runtime["volumes"] if "/home/" in v],
     }
@@ -45,7 +51,7 @@ def test_runtime_account_paths_render_together(
     env.pop("RUNTIME_USER_NAME", None)
     if username is not None:
         env["RUNTIME_USER_NAME"] = username
-    env["COMPOSE_PROJECT_NAME"] = "omn18087-home-readback"
+    env["COMPOSE_PROJECT_NAME"] = "landing-l22492-lab"
     result = subprocess.run(
         ["docker", "compose", "-f", "-", "config", "--format", "json"],
         input=json.dumps(
@@ -64,10 +70,9 @@ def test_runtime_account_paths_render_together(
     home = f"/home/{username or 'omniinfra'}"
     for volume in rendered["volumes"]:
         assert volume["target"].startswith(home + "/")
-    if source != "main-catalog":
-        assert rendered["environment"]["CODING_AGENT_CRED_HOME"] == home
-        assert (
-            rendered["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"]
-            == home + "/agent-workspaces"
-        )
+    assert rendered["environment"]["CODING_AGENT_CRED_HOME"] == home
+    assert (
+        rendered["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"]
+        == home + "/agent-workspaces"
+    )
     assert rendered["volumes"]

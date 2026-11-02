@@ -45,7 +45,7 @@ requirements:
     acceptance:
       - id: AC7
         statement: >-
-          AC7: runtime_policy.contract.yaml declares main's boot-to-ready bound, the compose file renders it into the process, and a boot past it logs its blockers at ERROR without lowering the gate
+          AC7: runtime_policy.contract.yaml declares main's boot-to-ready bound, the compose file renders it into the process, and a boot past it logs its blockers at ERROR without lowering the gate; failed probes are logged and retried, and late readiness is recorded with within_bound=False
       - id: AC8
         statement: >-
           AC8: a boot past the bound names each required topic that holds no partition, and a required topic with no partition is never dropped from the required set to make the check pass
@@ -192,10 +192,19 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn18087-deploy-runtime-account-paths
     description: >-
-      Hosted-runner deploy render check: docker compose config renders the real runtime account paths for the default and an alternate user. It starts no container and needs no daemon or lane credentials. The fix parent ignores the alternate user.
+      Hosted-runner deploy render check: the catalog generator and docker compose config render the real runtime account paths for the default and an alternate user, including main's credential HOME and workspace root. It starts no container and needs no daemon or lane credentials. The fix parent lacks main's account environment.
     source: manual
     binds_ac: [AC12]
     checks:
       - check_type: test_passes
         check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_omn18087_runtime_user_home.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-deploy-boot-watch-readback
+    description: >-
+      Hosted-runner deploy check: start RuntimeHostProcess with the in-memory bus and HTTP handler, read its ServiceHealth endpoint over loopback, and hold a supplemental probe unready past the declared bound. The endpoint stays 503 until that probe becomes ready, then returns 200 while the watch records within_bound=False and exactly one bound error. The fix parent cannot observe late readiness after the bound. Unit checks also plant transient and persistent probe errors and verify cancellation and task failure observation.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn18087_boot_watch_readback.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"

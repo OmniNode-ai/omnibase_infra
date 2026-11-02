@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import sys
@@ -23,6 +24,7 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.handlers import boot_readiness_checks
 from omnibase_infra.handlers.boot_readiness_checks import (
     parse_priority_contracts,
     parse_ready_bound_seconds,
@@ -183,8 +185,8 @@ def test_no_bound_in_the_env_declares_no_bound() -> None:
     assert parse_ready_bound_seconds({}) is None
 
 
-UNJOINABLE = "onex.evt.platform.planted-unjoinable.v1"
-JOINED = "onex.evt.platform.joined.v1"
+UNJOINABLE = "test-unjoinable"
+JOINED = "test-joined"
 
 
 def _readiness(*, unjoinable_assignment: list[int]) -> dict[str, object]:
@@ -279,3 +281,121 @@ async def test_the_watch_starts_only_when_the_policy_declares_a_bound() -> None:
     )
     assert len(stops) == 1
     await stops[0]()
+
+
+@pytest.mark.asyncio
+async def test_readiness_probe_exception_is_logged_and_retried(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls = 0
+
+    async def probe() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("dependency still starting")
+        return _readiness(unjoinable_assignment=[0])
+
+    with caplog.at_level(logging.INFO):
+        within = await watch_ready_bound(
+            probe,
+            bound_seconds=60,
+            started_monotonic=time.monotonic(),
+            poll_seconds=0.001,
+        )
+
+    assert within is True
+    assert calls == 2
+    assert "Boot readiness probe failed; retrying" in caplog.text
+    assert "within_bound=True" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_persistent_probe_failure_still_reports_the_bound(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def probe() -> dict[str, object]:
+        raise RuntimeError("dependency unavailable")
+
+    with caplog.at_level(logging.ERROR):
+        within = await watch_ready_bound(
+            probe,
+            bound_seconds=1,
+            started_monotonic=time.monotonic() - 2,
+        )
+
+    assert within is False
+    assert "Boot bound exceeded" in caplog.text
+    assert "readiness_error=dependency unavailable" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_late_readiness_logs_once_for_the_bound_and_keeps_the_missed_verdict(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls = 0
+
+    async def probe() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return _readiness(unjoinable_assignment=[0] if calls == 3 else [])
+
+    with caplog.at_level(logging.INFO):
+        within = await asyncio.wait_for(
+            watch_ready_bound(
+                probe,
+                bound_seconds=1,
+                started_monotonic=time.monotonic() - 2,
+                poll_seconds=0.001,
+                observe_late_ready=True,
+            ),
+            timeout=1,
+        )
+
+    assert within is False
+    assert calls == 3
+    assert caplog.text.count("Boot bound exceeded") == 1
+    assert "within_bound=False" in caplog.text
+    assert UNJOINABLE in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_watch_task_failure_is_observed_before_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def failed_watch(*args: object, **kwargs: object) -> bool:
+        raise RuntimeError("watch failed")
+
+    monkeypatch.setattr(boot_readiness_checks, "watch_ready_bound", failed_watch)
+    runtime = _FakeRuntime(_readiness(unjoinable_assignment=[]))
+    stops: list[Callable[[], Awaitable[None]]] = []
+    with caplog.at_level(logging.ERROR):
+        start_ready_bound_watch(
+            runtime.readiness_check, {"ONEX_BOOT_READY_BOUND_SECONDS": "600"}, stops
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert "Boot readiness watch failed" in caplog.text
+        assert "watch failed" in caplog.text
+        await stops[0]()
+
+
+@pytest.mark.asyncio
+async def test_stopping_the_watch_cancels_a_pending_readiness_probe() -> None:
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def probe() -> dict[str, object]:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        return {}
+
+    stops: list[Callable[[], Awaitable[None]]] = []
+    start_ready_bound_watch(probe, {"ONEX_BOOT_READY_BOUND_SECONDS": "600"}, stops)
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    await stops[0]()
+    assert cancelled.is_set()

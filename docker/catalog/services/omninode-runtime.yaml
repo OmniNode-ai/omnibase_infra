@@ -39,6 +39,9 @@ hardcoded_env:
   USE_EVENT_ROUTING: 'true'
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   RUNTIME_PROFILE: main
+  # Keep child-process HOME and workspace roots aligned with the credential mount.
+  CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}
+  ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/${RUNTIME_USER_NAME:-omniinfra}/agent-workspaces
   ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_MAIN_CAPABILITIES}
   OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
   ENABLE_RUNTIME_LOG_BRIDGE: 'true'

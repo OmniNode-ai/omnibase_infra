@@ -119,19 +119,28 @@ async def watch_ready_bound(
     bound_seconds: float,
     started_monotonic: float,
     poll_seconds: float = READY_BOUND_POLL_SECONDS,
+    observe_late_ready: bool = False,
 ) -> bool:
     """Report whether ``/ready`` first answered 200 within the bound.
 
     Polls the runtime's readiness until it is ready or the bound (counted from
     *started_monotonic*) passes. Past the bound it logs, at ERROR, what still
     blocks readiness, naming the required topics that hold no partition.
+    With *observe_late_ready*, keep polling after that single error to record
+    eventual readiness, while still returning False for a missed bound.
+    A failed readiness probe is logged and retried without relaxing the bound.
 
     Returns:
         True when readiness arrived inside the bound.
     """
     deadline = started_monotonic + bound_seconds
+    bound_reported = False
     while True:
-        result = await readiness_check()
+        try:
+            result = await readiness_check()
+        except Exception as exc:
+            logger.exception("Boot readiness probe failed; retrying (OMN-18087)")
+            result = {"ready": False, "readiness_error": str(exc)}
         elapsed = time.monotonic() - started_monotonic
         if result.get("ready") is True:
             logger.info(
@@ -143,13 +152,14 @@ async def watch_ready_bound(
             )
             return elapsed <= bound_seconds
         remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        if remaining <= 0 and not bound_reported:
             bus = result.get("event_bus_readiness")
             supplemental = result.get("supplemental_readiness")
             logger.error(
                 "Boot bound exceeded: not ready %.1f s after process start, "
                 "bound=%.0f s, is_running=%s, required topics without "
-                "partitions=%s, supplemental not ready=%s (OMN-18087)",
+                "partitions=%s, supplemental not ready=%s, "
+                "readiness_error=%s (OMN-18087)",
                 elapsed,
                 bound_seconds,
                 result.get("is_running"),
@@ -167,9 +177,14 @@ async def watch_ready_bound(
                     )
                     if isinstance(detail, Mapping) and not detail.get("ready")
                 ),
+                result.get("readiness_error"),
             )
-            return False
-        await asyncio.sleep(min(poll_seconds, remaining))
+            bound_reported = True
+            if not observe_late_ready:
+                return False
+        await asyncio.sleep(
+            poll_seconds if bound_reported else min(poll_seconds, remaining)
+        )
 
 
 def start_ready_bound_watch(
@@ -189,13 +204,25 @@ def start_ready_bound_watch(
             readiness_check,
             bound_seconds=bound,
             started_monotonic=PROCESS_START_MONOTONIC,
+            observe_late_ready=True,
         ),
         name="boot-ready-bound-watch",
     )
 
+    def observe_completion(completed: asyncio.Task[bool]) -> None:
+        if not completed.cancelled() and (error := completed.exception()) is not None:
+            logger.error(
+                "Boot readiness watch failed (OMN-18087)",
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    task.add_done_callback(observe_completion)
+
     async def stop() -> None:
         task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
+        # Unexpected failures are observed by the completion callback; they must
+        # not prevent the remaining runtime shutdown callbacks from running.
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
 
     stops_out.append(stop)
