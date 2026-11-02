@@ -30,8 +30,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev python -m pytest scripts/deploy-agent/tests/unit/test_executor_derived_image_digest_omn22144.py -q -p no:cacheprovider
   - id: dod-deploy
-    description: "Test-only change: nothing is deployed. The test file exists on the branch and is collected."
+    description: "Test-only change: nothing is deployed. The test file exists on the branch and pytest collects its tests (collection only, no lab host and no lab-run involved)."
     source: generated
     checks:
       - check_type: command
-        check_value: 'test -f scripts/deploy-agent/tests/unit/test_executor_derived_image_digest_omn22144.py'
+        check_value: 'uv run --project scripts/deploy-agent --extra dev python -m pytest scripts/deploy-agent/tests/unit/test_executor_derived_image_digest_omn22144.py --collect-only -q -p no:cacheprovider'

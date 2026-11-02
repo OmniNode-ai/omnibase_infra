@@ -23,6 +23,7 @@ All docker effects are mocked; no real deploy happens.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -38,16 +39,51 @@ from deploy_agent.executor import (
 pytestmark = pytest.mark.unit
 
 # Two distinct image ids: the public runtime image, and the image derived from it
-# by adding one wheel layer. The checks never relate the two.
+# by adding one wheel layer. _FakeDockerDaemon records that lineage (derived's
+# parent is base) so the tests can show the check ignores it: only the
+# container's ``.Image`` id is ever compared.
 _BASE_IMAGE_ID = "sha256:" + "a" * 64
 _DERIVED_IMAGE_ID = "sha256:" + "b" * 64
+_IMAGE_PARENT = {_DERIVED_IMAGE_ID: _BASE_IMAGE_ID, _BASE_IMAGE_ID: ""}
+
+
+class _FakeDockerDaemon:
+    """A minimal ``docker inspect`` that knows the base -> derived lineage.
+
+    Answers ``--format {{.Image}}`` with the running container's image id and
+    ``{{.Parent}}`` with the lineage. Every command is recorded so a test can
+    assert the lineage was never asked for.
+    """
+
+    def __init__(self, running_image_id: str) -> None:
+        self.running_image_id = running_image_id
+        self.commands: list[list[str]] = []
+
+    def __call__(
+        self, cmd: list[str], timeout: int, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        self.commands.append(cmd)
+        fmt = cmd[cmd.index("--format") + 1] if "--format" in cmd else ""
+        if fmt == "{{.Image}}":
+            return _ok(self.running_image_id + "\n")
+        if fmt == "{{.Parent}}":
+            return _ok(_IMAGE_PARENT[self.running_image_id] + "\n")
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=1, stdout="", stderr=f"unexpected format {fmt!r}"
+        )
+
+    @property
+    def formats_queried(self) -> set[str]:
+        return {c[c.index("--format") + 1] for c in self.commands if "--format" in c}
 
 
 def _ok(stdout: str) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
 
 
-def _running_image_id(image_id: str, captured: list[list[str]] | None = None):
+def _running_image_id(
+    image_id: str, captured: list[list[str]] | None = None
+) -> Callable[..., subprocess.CompletedProcess[str]]:
     def fake_run(
         cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
@@ -118,6 +154,33 @@ class TestRunningImageDigestCheckOnADerivedImage:
             )
         inspect_cmd = next(cmd for cmd in captured if cmd[:2] == ["docker", "inspect"])
         assert inspect_cmd[inspect_cmd.index("--format") + 1] == "{{.Image}}"
+
+
+class TestRunningImageDigestCheckIgnoresImageLineage:
+    """The check is by-id equality; a derived image's ancestry earns it nothing."""
+
+    def test_base_id_is_refused_although_the_running_image_descends_from_it(
+        self,
+    ) -> None:
+        daemon = _FakeDockerDaemon(_DERIVED_IMAGE_ID)
+        assert _IMAGE_PARENT[_DERIVED_IMAGE_ID] == _BASE_IMAGE_ID  # lineage is real
+        with (
+            patch("deploy_agent.executor._run", side_effect=daemon),
+            pytest.raises(DigestMismatchError, match="does not match"),
+        ):
+            DeployExecutor().verify_running_image_digest(
+                lane=EnumRuntimeLane.PROD, expected_digest=_BASE_IMAGE_ID
+            )
+        assert daemon.formats_queried == {"{{.Image}}"}
+
+    def test_derived_id_is_accepted_without_consulting_the_base(self) -> None:
+        daemon = _FakeDockerDaemon(_DERIVED_IMAGE_ID)
+        with patch("deploy_agent.executor._run", side_effect=daemon):
+            DeployExecutor().verify_running_image_digest(
+                lane=EnumRuntimeLane.PROD, expected_digest=_DERIVED_IMAGE_ID
+            )
+        assert daemon.formats_queried == {"{{.Image}}"}
+        assert all(_BASE_IMAGE_ID not in " ".join(c) for c in daemon.commands)
 
 
 class TestProdBoundaryGuardOnADerivedImage:
