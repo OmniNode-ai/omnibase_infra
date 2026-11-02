@@ -1,0 +1,81 @@
+# OMN-21683 contract file for omnibase_infra: handler_hand_construction burn-down, slice rf1140-c1.
+schema_version: "1.0.0"
+ticket_id: "OMN-21683"
+title: "omnibase_infra contracts_and_di handler_hand_construction burn-down, slice rf1140-c1"
+summary: "The registration orchestrator wiring and the LLM completion registry build each handler only as the instance argument of the container registration call, and nine never-called node-registry factory methods that built their node by hand are deleted, taking handler_hand_construction over src/omnibase_infra from 133 to 116 with no baseline entry or suppression."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21683-no-hand-construction-in-slice
+    statement: "The slice paths no longer construct a handler or node class by hand outside a container registration call."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the contracts_and_di count for handler_hand_construction over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
+      - id: AC2
+        statement: "AC2: every hand-built dependency is taken through an injected parameter bound from the node contract and no hand construction remains in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths"
+      - id: AC3
+        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
+evidence_requirements:
+  - kind: tests
+    description: "The core contracts_and_di validator reports no handler_hand_construction finding on any slice path, with a positive control that the rule still fires."
+    command: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py -q -p no:cacheprovider --no-cov"
+  - kind: tests
+    description: "Unit tests of the touched wiring and registries pass."
+    command: "uv run --frozen pytest tests/integration/runtime/test_registration_wiring_identity_omn21683.py tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/test_node_auth_gate_compute.py tests/unit/nodes/node_contract_resolver_bridge/test_node_contract_resolver_bridge.py tests/unit/nodes/test_llm_completion_registry.py -q -p no:cacheprovider --no-cov"
+dod_evidence:
+  - id: dod-001
+    description: "The contracts_and_di validator, run per slice path, reports zero handler_hand_construction findings, and the rule still reports a hand-built handler in a probe file."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py -q -p no:cacheprovider --no-cov"
+  - id: dod-002
+    description: "The registration wiring registers every handler through the container, the heartbeat protocol binding shares the container's instance, and the registries keep their remaining behaviour."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/integration/runtime/test_registration_wiring_identity_omn21683.py tests/unit/runtime/test_container_wiring_registration.py tests/unit/nodes/test_node_auth_gate_compute.py tests/unit/nodes/node_contract_resolver_bridge/test_node_contract_resolver_bridge.py tests/unit/nodes/test_llm_completion_registry.py -q -p no:cacheprovider --no-cov"
+  - id: dod-003
+    description: "The slice regression and the touched modules' unit tests pass together at the PR head."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_omn21683_handler_hand_construction_slice.py tests/integration/runtime/test_registration_wiring_identity_omn21683.py -q -p no:cacheprovider --no-cov"
+  - id: dod-004-deploy-artifact-readback
+    description: >-
+      Hosted-runner deploy artifact probe reads the registration wiring source from the local checked-out commit and requires exactly one shared topic store and one introspection construction. It also runs the real-container registration readback for both optional-projector paths, shared catalog topics and repeated heartbeat binding identity. The artifact assertion fails against the merge base, which constructs the store and introspection handler twice.
+    source: manual
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          artifact="$(mktemp)";
+          trap 'rm -f "$artifact"' EXIT;
+          git show HEAD:src/omnibase_infra/nodes/node_registration_orchestrator/wiring.py > "$artifact";
+          python3 - "$artifact" <<'PYPROBE'
+          import ast
+          import sys
+          from pathlib import Path
+          tree = ast.parse(Path(sys.argv[1]).read_text())
+          wiring = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "wire_registration_handlers")
+          calls = [node for node in ast.walk(wiring) if isinstance(node, ast.Call)]
+          for name in ("ServiceIntrospectionTopicStore", "HandlerNodeIntrospected"):
+              count = sum((call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", None)) == name for call in calls)
+              assert count == 1, (name, count)
+          print("registration deploy artifact: one topic store and one introspection handler")
+          PYPROBE
+          env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_registration_wiring_identity_omn21683.py -q -p no:cacheprovider --no-cov
+  - id: dod-005-deploy-probe
+    description: "Post-deploy point read on the dev lane: the runtime answers /health after a deploy at this head, so the registration wiring change did not stop the runtime booting. Hosted CI has no lane container, so only the local Done gate runs it; it binds no criterion."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "curl -sf --max-time 10 http://localhost:8085/health"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

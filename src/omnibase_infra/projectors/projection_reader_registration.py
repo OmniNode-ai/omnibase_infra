@@ -89,6 +89,10 @@ from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 
+# Pool type the registration reader borrows connections from; node packages
+# import this name so they never import the database driver themselves.
+type RegistrationProjectionPool = asyncpg.Pool
+
 
 class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
     """Registration projection reader implementation using asyncpg.
@@ -137,7 +141,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
         ...     print("Node is active")
     """
 
-    def __init__(self, pool: asyncpg.Pool) -> None:
+    def __init__(self, pool: RegistrationProjectionPool) -> None:
         """Initialize reader with connection pool.
 
         Args:
@@ -271,10 +275,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            if row is None:
-                return None
-
-            return self._row_to_projection(row)
+            return self._row_to_projection(row) if row is not None else None
 
         except asyncpg.PostgresConnectionError as e:
             async with self._circuit_breaker_lock:
@@ -354,10 +355,7 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            if row is None:
-                return None
-
-            return EnumRegistrationState(row["current_state"])
+            return None if row is None else EnumRegistrationState(row["current_state"])
 
         except asyncpg.PostgresConnectionError as e:
             async with self._circuit_breaker_lock:
