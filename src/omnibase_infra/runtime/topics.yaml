@@ -46,3 +46,6 @@ topics:
   # OMN-21924: the generic node CLI publishes the architecture-validation
   # request through RuntimeLocal; the allowed-command tests exercise that bus path.
   - onex.cmd.platform.architecture-validate.v1
+  # OMN-21923: the generic node CLI publishes the census request; the recorded
+  # dev-daemon probe exercised this path through RuntimeLocal's real adapter.
+  - onex.cmd.omnibase-infra.lane-entry-point-census.v1
