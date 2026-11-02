@@ -59,3 +59,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_compose_up_no_build_after_explicit_build_omn18143.py -q -n 0 --no-cov -k core_pull_policy
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn18143-single-scope-up-no-build
+    description: Single-scope CORE and RUNTIME rebuilds pass compose_may_build=False for both whole-scope and explicitly named service lists.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_compose_up_no_build_after_explicit_build_omn18143.py -q -n 0 --no-cov -k single_scope
+        cwd: ${OMNI_HOME}/omnibase_infra

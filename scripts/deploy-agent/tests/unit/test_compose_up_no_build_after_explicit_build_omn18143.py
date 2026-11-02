@@ -126,3 +126,43 @@ class TestAFullRebuildBringsTheRuntimeUpWithoutBuilding:
         ]
         assert len(runtime_ups) == 1
         assert runtime_ups[0].kwargs.get("compose_may_build") is False
+
+
+class TestASingleScopeRebuildBringsServicesUpWithoutBuilding:
+    @pytest.mark.parametrize(
+        ("scope", "phase", "services"),
+        [
+            (Scope.CORE, Phase.CORE, []),
+            (Scope.CORE, Phase.CORE, ["postgres"]),
+            (Scope.RUNTIME, Phase.RUNTIME, []),
+            (Scope.RUNTIME, Phase.RUNTIME, ["omninode-runtime"]),
+        ],
+    )
+    def test_single_scope_up_after_explicit_build_forbids_a_second_build(
+        self, tmp_path: Path, scope: Scope, phase: Phase, services: list[str]
+    ) -> None:
+        executor = DeployExecutor()
+        with (
+            patch.object(executor, "_compose_build") as compose_build,
+            patch.object(executor, "_build_dev_lane_only_services"),
+            patch.object(executor, "_preflight_runtime_boot"),
+            patch.object(executor, "_deploy_gateway_lane"),
+            patch.object(executor, "_compose_up") as compose_up,
+            patch.object(
+                executor_mod, "_reconcile_lock_roots", return_value=[str(tmp_path)]
+            ),
+        ):
+            executor.rebuild_scope(
+                scope, services, _noop, git_sha=SHA, lane=EnumRuntimeLane.DEV
+            )
+
+        compose_build.assert_called_once()
+        assert compose_build.call_args.args[:2] == (scope, SHA)
+        compose_up.assert_called_once_with(
+            phase,
+            scope,
+            services,
+            _noop,
+            lane=EnumRuntimeLane.DEV,
+            compose_may_build=False,
+        )
