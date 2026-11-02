@@ -66,7 +66,8 @@ class ModelRuntimeTimeouts(BaseModel):
         snapshot_consumer_wait_ms: Consumer wait of the snapshot publisher.
         circuit_breaker_reset_seconds: Wait before a circuit breaker resets.
         health_probe_seconds: Wait of the node invocation runtime health probe.
-        local_dispatch_seconds: Wait for a whole local node dispatch.
+        local_dispatch_seconds: Wait for a whole local node dispatch, at most the
+            600 seconds the deployed dispatch path clamps a wait to.
         terminal_seconds: Wait for the terminal event after
             a local dispatch returns.
         llm_transport_max_seconds: Ceiling the LLM HTTP transport accepts.
@@ -93,7 +94,7 @@ class ModelRuntimeTimeouts(BaseModel):
     snapshot_consumer_wait_ms: int = Field(gt=0, strict=True)
     circuit_breaker_reset_seconds: float = Field(gt=0, strict=True, allow_inf_nan=False)
     health_probe_seconds: float = Field(gt=0, strict=True, allow_inf_nan=False)
-    local_dispatch_seconds: int = Field(gt=0, strict=True)
+    local_dispatch_seconds: int = Field(gt=0, le=600, strict=True)
     terminal_seconds: float = Field(gt=0, strict=True, allow_inf_nan=False)
     llm_transport_max_seconds: float = Field(gt=0, strict=True, allow_inf_nan=False)
     llm_post_seconds: float = Field(gt=0, strict=True, allow_inf_nan=False)

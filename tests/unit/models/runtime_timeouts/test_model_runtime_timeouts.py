@@ -369,3 +369,13 @@ def test_an_llm_post_wait_above_the_transport_ceiling_fails_to_load() -> None:
         ModelRuntimeTimeouts.model_validate(
             {**_block(), "llm_post_seconds": 121.0, "llm_transport_max_seconds": 120.0}
         )
+
+
+def test_a_local_dispatch_wait_above_the_deployed_command_ceiling_fails_to_load() -> (
+    None
+):
+    """The deployed path clamps a dispatch wait to 600 seconds, so a larger declared default would be truncated silently."""
+    block = _block()
+    assert ModelRuntimeTimeouts.model_validate({**block, "local_dispatch_seconds": 600})
+    with pytest.raises(ValidationError):
+        ModelRuntimeTimeouts.model_validate({**block, "local_dispatch_seconds": 601})
