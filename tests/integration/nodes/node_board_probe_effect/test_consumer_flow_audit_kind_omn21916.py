@@ -75,7 +75,8 @@ def test_audit_kind_is_an_audit_consumer_of_its_declared_topic() -> None:
     _kind, prefix, topic, counter = next(k for k in KINDS if k[0] == AUDIT_KIND)
     node = prefix.removeprefix("local.omnibase_infra.").removesuffix(".consume.")
     contract = yaml.safe_load((NODES / node / "contract.yaml").read_text())
-    event_bus = contract["event_bus"]
+    event_bus = contract.get("event_bus")
+    assert isinstance(event_bus, dict), f"{node} contract declares no event_bus"
     assert event_bus["consumer_purpose"] == "audit"
     assert topic in event_bus["subscribe_topics"]
     assert counter == "messages_in"
@@ -100,20 +101,45 @@ def test_parity_script_topics_are_the_contract_declared_topics() -> None:
         assert topic == declared[KIND_CONTRACT_KEY[kind]], kind
 
 
+def _reducer_sample(window_start: str) -> list[dict[str, object]]:
+    return [
+        {
+            "consumer_group": "local.omnimarket.projection_consumer_flow.consume.1.0.1",
+            "topic": "onex.evt.platform.node-heartbeat.v1",
+            "window_start": window_start,
+            "messages_in": 565,
+            "messages_out": 565,
+            "flow_state": "FLOWING",
+        }
+    ]
+
+
+REDUCER_ONLY = [
+    _reducer_sample("2026-11-02T08:50:01.865930+00:00"),
+    _reducer_sample("2026-11-02T08:51:01.865930+00:00"),
+]
+
+
+def _graded(samples: list[list[dict[str, object]]]) -> tuple[bool, bool]:
+    """(audit kind all ok, reducer kind all ok) for one set of samples."""
+    rec: list[ModelConsumerFlowCheck] = []
+    grade_kinds(rec, samples)
+    audit = [c for c in rec if c.name.startswith(AUDIT_KIND)]
+    reducer = [c for c in rec if c.name.startswith("publishing_reducer")]
+    assert audit, [c.name for c in rec]
+    assert reducer, [c.name for c in rec]
+    return all(c.ok for c in audit), all(c.ok for c in reducer)
+
+
 def test_parity_kinds_are_graded_as_separate_subscriptions() -> None:
     """The two kinds share the heartbeat topic but never one consumer-group row.
 
     Rows are matched on the consumer-group prefix and the topic, so a window
     that holds only the ledger projection's row passes the audit kind and
-    fails the publishing reducer, and the reverse.
+    fails the publishing reducer, and a window that holds only the reducer's
+    row passes the reducer kind and fails the audit kind.
     """
     prefixes = {k[0]: k[1] for k in KINDS}
     assert len(set(prefixes.values())) == len(prefixes)
-    rec: list[ModelConsumerFlowCheck] = []
-    grade_kinds(rec, SAMPLES)
-    reducer = [c for c in rec if c.name.startswith("publishing_reducer")]
-    audit = [c for c in rec if c.name.startswith(AUDIT_KIND)]
-    assert reducer, [c.name for c in rec]
-    assert audit
-    assert not all(c.ok for c in reducer), "the reducer has no row in SAMPLES"
-    assert all(c.ok for c in audit)
+    assert _graded(SAMPLES) == (True, False)
+    assert _graded(REDUCER_ONLY) == (False, True)
