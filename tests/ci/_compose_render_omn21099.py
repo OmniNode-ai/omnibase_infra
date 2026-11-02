@@ -127,7 +127,7 @@ def _compose_environment(
             else:
                 environment[variable] = "placeholder"
     policy = dotenv_values(DOCKER_DIR / "runtime-policy.env")
-    # Size-typed policy values: compose parses these, a placeholder does not decode.
+    # Compose validates memory sizes, so these take the rendered policy value.
     for key in (
         "DEV_REDPANDA_MEMORY",
         "DEV_REDPANDA_MEM_LIMIT",

@@ -1402,7 +1402,8 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     # runtime-infrastructure) changed with the declared main memory limit and the
     # portable runtime account paths.
     # OMN-21279: only market image tags (projection-api included) changed in the
-    # three updated digests.
+    # three updated digests. OMN-18087: the four runtime-bearing bundles moved
+    # when main's memory limit and the runtime user's home came from the policy.
     assert sorted(
         set(bundles) - {"local", "local-market", "local-lane-mirror"}
     ) == sorted(_OTHER_BUNDLE_DIGESTS)
