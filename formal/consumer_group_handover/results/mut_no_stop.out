@@ -1,0 +1,108 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 101 and seed -5701149924301819418 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/tmp.2EyhxStxSM/ConsumerGroupHandover.tla
+Parsing file /tmp/tlc-15521630182275479356/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-15521630182275479356/Integers.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-15521630182275479356/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-15521630182275479356/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-15521630182275479356/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ConsumerGroupHandover
+Linting of module ConsumerGroupHandover
+Starting... (2026-11-02 06:39:41)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-02 06:39:42.
+Error: Invariant FencedNoCommit is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 0
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 2: <Publish line 158, col 3 to line 161, col 66 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 1
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "old"
+/\ ops = 0
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 3: <Ask line 199, col 3 to line 205, col 57 of module ConsumerGroupHandover>
+/\ phase = "idle"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 1
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 4: <Fence line 211, col 3 to line 217, col 57 of module ConsumerGroupHandover>
+/\ phase = "fenced"
+/\ fencedCommit = FALSE
+/\ comm = [old |-> 0, new |-> -1]
+/\ cur = "old"
+/\ fenced = {"old", "new"}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<0, 0, 0, 0, 0, 0>>
+/\ pub = 1
+/\ up = {"old"}
+/\ stamp = <<-1, -1, -1, -1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<0, 0, 0, 0, 0, 0>>
+
+State 5: <Process("old") line 165, col 3 to line 176, col 83 of module ConsumerGroupHandover>
+/\ phase = "fenced"
+/\ fencedCommit = TRUE
+/\ comm = [old |-> 1, new |-> -1]
+/\ cur = "old"
+/\ fenced = {"old", "new"}
+/\ lastRan = "old"
+/\ orchCrashes = 0
+/\ rows = <<1, 0, 0, 0, 0, 0>>
+/\ pub = 1
+/\ up = {"old"}
+/\ stamp = <<1, -1, -1, -1, -1, -1>>
+/\ want = "new"
+/\ ops = 1
+/\ consCrashes = 0
+/\ eff = <<1, 0, 0, 0, 0, 0>>
+
+243 states generated, 155 distinct states found, 76 states left on queue.
+The depth of the complete state graph search is 8.
+Finished in 00s at (2026-11-02 06:39:42)
