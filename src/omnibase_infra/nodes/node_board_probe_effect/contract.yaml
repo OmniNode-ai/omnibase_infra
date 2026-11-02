@@ -33,10 +33,10 @@ node_version:
   minor: 1
   patch: 0
 node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on
+# it. The handler descriptor model defaults the rest.
 descriptor:
   node_archetype: effect
-  purity: side_effect
-  idempotent: false
 description: >
   Effect node that runs board checks against a lab or CI surface and returns one typed result per check: the check id, its surface class, the subject, PASS, FAIL or INDETERMINATE, and every reason. Consumer flow publishes one marked malformed trigger to prove the validation seam is live; its local negative controls restore the mutated source byte for byte.
 

@@ -83,3 +83,37 @@ def test_audit_kind_is_an_audit_consumer_of_its_declared_topic() -> None:
 
 def test_parity_grader_names_the_node_kinds() -> None:
     assert script.KINDS == KINDS
+
+
+CONTRACT = NODES / "node_board_probe_effect" / "contract.yaml"
+KIND_CONTRACT_KEY = {
+    "audit_projection_consumer": "audit_projection",
+    "publishing_reducer": "publishing_reducer",
+}
+
+
+def test_parity_script_topics_are_the_contract_declared_topics() -> None:
+    """Both tables are held to the contract's own text, not only to each other."""
+    declared = yaml.safe_load(CONTRACT.read_text())["consumer_flow_topics"]
+    assert {k[0] for k in script.KINDS} == set(KIND_CONTRACT_KEY)
+    for kind, _prefix, topic, _counter in script.KINDS:
+        assert topic == declared[KIND_CONTRACT_KEY[kind]], kind
+
+
+def test_parity_kinds_are_graded_as_separate_subscriptions() -> None:
+    """The two kinds share the heartbeat topic but never one consumer-group row.
+
+    Rows are matched on the consumer-group prefix and the topic, so a window
+    that holds only the ledger projection's row passes the audit kind and
+    fails the publishing reducer, and the reverse.
+    """
+    prefixes = {k[0]: k[1] for k in KINDS}
+    assert len(set(prefixes.values())) == len(prefixes)
+    rec: list[ModelConsumerFlowCheck] = []
+    grade_kinds(rec, SAMPLES)
+    reducer = [c for c in rec if c.name.startswith("publishing_reducer")]
+    audit = [c for c in rec if c.name.startswith(AUDIT_KIND)]
+    assert reducer, [c.name for c in rec]
+    assert audit
+    assert not all(c.ok for c in reducer), "the reducer has no row in SAMPLES"
+    assert all(c.ok for c in audit)
