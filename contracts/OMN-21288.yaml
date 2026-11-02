@@ -37,6 +37,18 @@ requirements:
       - id: AC5
         statement: |-
           AC5: every DRIFT or MISSING unit in the lab-host drift fixture except the prod-pinned deploy-agent.service declares a committed installer, the log monitor installs through install-host-maintenance.sh --log-monitor (run against a temporary home with a fake systemctl) and the git-mirror units through the omninode-host-maintenance-sync.sh manifest (row parity with the drift manifest), the text report prints repair=bash <installer> <args>, and no tracked unit's Documentation= URL names a missing repo path -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
+  - id: req-omn21288-ac6-topic-baseline
+    statement: "The dev lane's topic-spec count per boot is recorded before the boot-provisioning change, held as data, and a boot that grows it fails a check."
+    acceptance:
+      - id: AC6
+        statement: |-
+          AC6: the before reading (dev topics, partitions, groups, zero-consumer groups, memory and the per-boot topic spec count) is recorded with read times beside the plan's figures -- falsifier: re-read the numbers from the broker admin endpoint and show they match within the tolerance for a live bus
+      - id: AC7
+        statement: |-
+          AC7: a planted extra topic spec at boot fails the check -- falsifier: uv run pytest of the new test with one spec appended to the boot provisioning list fails, and passes without it
+      - id: AC8
+        statement: |-
+          AC8: the baseline record is data, not code -- falsifier: a test that changes the declared baseline value and sees the check's verdict change with no code edit
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -169,6 +181,34 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
+  - id: dod-omn21288-ac6-baseline-record
+    description: >-
+      The baseline data file carries the dev lane's recorded per-boot spec count, the time it was read and its source, typed by ModelTopicBootBaseline with extra=forbid. The file is new on this branch, so the check fails at the merge base. The live broker figures (topics, partitions, groups, memory) are in the pull request body with their read times; a hosted runner cannot read the dev broker.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          grep -c 'read_at: "2026-11-01T23:29:24Z"' config/boot_topic_specs.yaml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-omn21288-ac7-planted-spec-fails
+    description: >-
+      The test builds the provisioning list through TopicProvisioner, appends one extra spec in _build_topic_specs (the method the constructor calls at boot) and requires the planted list to be over the record by one while the unplanted list is within it. The test file is new on this branch, so the run fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "planted or within_the_recorded"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]
+  - id: dod-omn21288-ac8-baseline-is-data
+    description: >-
+      The same boot list passes against a temporary baseline file declaring its count and fails against one declaring a count one lower, with no code edit between the two; the record refuses unknown keys, an unknown lane and a repository list larger than the image list. The test file is new on this branch, so the run fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "declared_value or typed or larger or lane"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC8]
 context:
   remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
