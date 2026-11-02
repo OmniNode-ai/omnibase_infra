@@ -1,0 +1,87 @@
+{
+  "recorded": "2026-11-02T00:30Z",
+  "source": "census run on the dev lane, read-only, compose project omnibase-infra; table rows of the run",
+  "containers": [
+    {
+      "container": "omnibase-infra-runtime-worker-1",
+      "family": "onex-runtime",
+      "verdict": "allowed"
+    },
+    {
+      "container": "omnimarket-projection-api",
+      "family": "omnimarket-projection-api",
+      "verdict": "remove"
+    },
+    {
+      "container": "omnimarket-projection-claude-hook-events-writer",
+      "family": "onex-runtime",
+      "verdict": "allowed"
+    },
+    {
+      "container": "omnimarket-projection-delegation-writer",
+      "family": "python -m omnimarket...handler_*",
+      "verdict": "remove"
+    },
+    {
+      "container": "omnimarket-projection-live-events-writer",
+      "family": "python -m omnimarket...handler_*",
+      "verdict": "remove"
+    },
+    {
+      "container": "omnimarket-projection-registration-writer",
+      "family": "python -m omnimarket...handler_*",
+      "verdict": "remove"
+    },
+    {
+      "container": "omnimarket-projection-savings-writer",
+      "family": "python -m omnimarket...handler_*",
+      "verdict": "remove"
+    },
+    {
+      "container": "omnimarket-projection-tenant-credentials-writer",
+      "family": "python -m omnimarket...handler_*",
+      "verdict": "remove"
+    },
+    {
+      "container": "omnimarket-projection-tenant-registry-writer",
+      "family": "python -m omnimarket...handler_*",
+      "verdict": "remove"
+    },
+    {
+      "container": "omninode-agent-actions-consumer",
+      "family": "python -m ...consumer",
+      "verdict": "remove"
+    },
+    {
+      "container": "omninode-context-audit-consumer",
+      "family": "python -m ...consumer",
+      "verdict": "remove"
+    },
+    {
+      "container": "omninode-contract-resolver",
+      "family": "uvicorn",
+      "verdict": "remove"
+    },
+    {
+      "container": "omninode-infra-routing-decisions-consumer",
+      "family": "python -m ...consumer",
+      "verdict": "remove"
+    },
+    {
+      "container": "omninode-runtime",
+      "family": "onex-runtime",
+      "verdict": "allowed"
+    },
+    {
+      "container": "omninode-runtime-effects",
+      "family": "onex-runtime",
+      "verdict": "allowed"
+    },
+    {
+      "container": "omninode-skill-lifecycle-consumer",
+      "family": "python -m ...consumer",
+      "verdict": "remove"
+    }
+  ],
+  "matched_by": "image pattern only; the gateway forwarder (env-supplied image tag) was not in this matched set"
+}

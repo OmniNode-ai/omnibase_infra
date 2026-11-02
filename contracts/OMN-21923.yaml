@@ -1,0 +1,58 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21923
+title: "Each lane's census records every runtime-image container with its command, and a command outside the allowed list is reported by name as an entry point to remove (one-runtime plan task T24)"
+summary: >-
+  Adds a read-only census node that records the entrypoint and cmd of every runtime-image container per lane, grades each command against an allowed list kept in a data file (onex-runtime only for now), and regenerates the plan's entry-point table from the run. Nothing is deployed; installing the census on a lab host is the host owner's step.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21923-t24-entry-point-census
+    statement: "T24: the lane census records each runtime-image container with its command, and a command outside the declared allowed list reads as an entry point to remove."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: every lane's runtime-image containers list their command, and a command outside the allowed list reads as an entry point to remove -- falsifier: `uv run pytest` over a census fixture with one planted `python -m` container, which must be reported by name
+      - id: AC2
+        statement: |-
+          AC2: the dev numbers of the plan reproduce, 17 runtime-image containers with 4 on `onex-runtime` -- falsifier: the census run read-only against the dev lane on its host, with the command and the counts in the pull request body
+evidence_requirements:
+  - kind: tests
+    description: "The census handler over a recorded inspection with planted python -m containers, and the node through the local runtime."
+    command: |-
+      uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect tests/integration/runtime/test_lane_entry_point_census_omn21923.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21923-planted-entry-point
+    description: >-
+      The census handler run over a recorded docker inspect fixture that plants a python -m consumer and a python -m handler writer beside onex-runtime containers: each planted container is reported by name under remove, every runtime-image container lists its command, a runtime-image container run under an unmatched image tag is found by its launcher, and a widened allowed list in the data file changes the verdict without a code change. Fails at the merge base, which has no census handler.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_handler_lane_entry_point_census.py tests/integration/runtime/test_lane_entry_point_census_omn21923.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21923-dev-lane-numbers
+    description: >-
+      The recorded read-only census of the dev lane (2026-11-02T00:30Z) as its table rows: 16 runtime-image containers matched by image name, 4 on onex-runtime, 6 on python -m omnimarket handler_*, 4 on python -m consumer, 1 uvicorn, 1 omnimarket-projection-api. The plan's 17 counts the lane-mirror forwarder as well; the census now finds a runtime-image container by its launcher too. The live rerun of the branch code against the dev lane is reported in the PR body, not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_dev_lane_recorded_census.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21923-deploy-probe-handler
+    description: >-
+      Deploy-scope source readback for a read-only census node with no live deploy: read the handler at the evaluated commit through GitHub and require the handler class the change introduces. It does not deploy a service or claim a runtime runs it; no deployed runtime carries the node's local-dev profile. Fails at the parent, which has no such file.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_lane_entry_point_census.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerLaneEntryPointCensus:" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+context:
+  census_installation: "T24 adds node_lane_entry_point_census_effect (local-dev profile) and deploy/lane-census/runtime-entry-points.yaml. Installing the census on a lab host is the host owner's step; nothing is deployed by this change."
