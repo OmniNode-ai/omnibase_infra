@@ -29,8 +29,8 @@ from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
 from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.runtime.service_kernel import (
-    WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH,
     resolve_embedded_runtime_config,
+    workspace_runtime_contracts_dir,
 )
 
 pytestmark = pytest.mark.unit
@@ -57,10 +57,7 @@ def _workspace(root: Path, *, tier1_lane: str | None = None) -> Path:
     declaration.write_text(_LANES, encoding="utf-8")
     if tier1_lane is not None:
         config = (
-            root
-            / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
-            / "runtime"
-            / "runtime_config.yaml"
+            workspace_runtime_contracts_dir(root) / "runtime" / "runtime_config.yaml"
         )
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(

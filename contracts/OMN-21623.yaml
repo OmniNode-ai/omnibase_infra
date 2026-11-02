@@ -1,12 +1,19 @@
 schema_version: 1.0.0
 ticket_id: OMN-21623
-title: omnibase_infra model names leave the code; the node contracts declare them and the LLM adapters take them by injection (contracts_and_di burn-down, literal_model_name slice)
+title: omnibase_infra builds handlers at a binding site or not at all, declares model names in node contracts, and injects them into the LLM adapters (contracts_and_di burn-down, handler_hand_construction and literal_model_name slices)
 summary: >-
-  The literal_model_name slice of the contracts_and_di burn-down (omnibase_core#2175) for omnibase_infra. The savings estimation node held a counterfactual model map and a fallback model in its handler and input model; the waste detection analyzer held its premium-model markers; the five LLM enrichment and generation adapters, the OpenAI-compatible provider adapter and the decision search client held default model names. The two nodes now declare their model policy in the contract config block, parsed into frozen models with every field required; the adapters and the search client take the model from their caller, which resolves it from the model-routing policy. Separately, the contracts_and_di check reported 42 literal_url findings in src/omnibase_infra. This change declares the GitHub, Linear, Slack, Gmail, Claude Code schema and loopback-probe endpoints in models/third_party_endpoints/third_party_endpoints.yaml, loads them through ModelThirdPartyEndpoints (no field defaults, so an omitted value fails to load), and reads them in 11 modules. The check reports no literal_url finding over those modules, which held 16. Separately, the unit drift check and the CLAUDE.md reference check parse home-relative paths with Path parts; the literal_path rule reports nothing in those two files.
+  The literal_model_name slice of the contracts_and_di burn-down (omnibase_core#2175) for omnibase_infra, alongside the handler_hand_construction slice already on dev (24 unused node registry factories deleted; six handlers moved onto a binding site in each of their five nodes). The savings estimation node held a counterfactual model map and a fallback model in its handler and input model; the waste detection analyzer held its premium-model markers; the five LLM enrichment and generation adapters, the OpenAI-compatible provider adapter and the decision search client held default model names. The two nodes now declare their model policy in the contract config block, parsed into frozen models with every field required; the adapters and the search client take the model from their caller, which resolves it from the model-routing policy. Separately, the contracts_and_di check reported 42 literal_url findings in src/omnibase_infra. This change declares the GitHub, Linear, Slack, Gmail, Claude Code schema and loopback-probe endpoints in models/third_party_endpoints/third_party_endpoints.yaml, loads them through ModelThirdPartyEndpoints (no field defaults, so an omitted value fails to load), and reads them in 11 modules. The check reports no literal_url finding over those modules, which held 16. Separately, the unit drift check and the CLAUDE.md reference check parse home-relative paths with Path parts; the literal_path rule reports nothing in those two files.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn21623-slice-handler-construction
+    statement: No node registry factory that nothing calls remains in the 24 node packages, and the handlers that composed a HandlerDb obtain it from the binding site.
+    acceptance:
+      - id: AC41
+        statement: 'AC41: the 24 node packages hold no registry directory and their package exports name no registry class -- falsifier: a registry directory that is still present in one of the 24 node packages'
+      - id: AC42
+        statement: 'AC42: the contracts_and_di check reports no handler_hand_construction finding in the six handlers that composed a HandlerDb, reports a planted construction as the positive control, and the binding site builds a HandlerDb -- falsifier: a finding from one of the six handlers, or none from the planted module'
   - id: req-omn21623-model-name-infra
     statement: >-
       The savings estimation node, the waste detection analyzer, the LLM adapters and the decision search client hold no model name in code.
@@ -36,6 +43,12 @@ requirements:
         statement: 'AC33: both path resolvers expand bare and nested home-relative paths, preserve absolute paths and handle non-tilde inputs; reference paths prefer the repository before the workspace root and return None when absent, and installed registry paths obey resolve_registry -- falsifier: any returned path differs from the expected path in the behavioral tests'
 evidence_requirements:
   - kind: tests
+    description: The registry directories are gone, the six handlers hold no hand construction, the binding site builds a HandlerDb, and the planted construction is reported.
+    command: uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -q
+  - kind: tests
+    description: The handlers that compose a HandlerDb keep their behaviour.
+    command: uv run --frozen pytest tests/unit/nodes/node_ledger_write_effect tests/unit/nodes/node_validation_ledger_write_effect tests/unit/nodes/node_gateway_link_health_write_effect -q
+  - kind: tests
     description: The savings, waste detection, LLM adapter and decision search tests, including the contract completeness tests.
     command: uv run pytest tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute tests/unit/adapters/llm tests/unit/services/session_registry/test_decision_search.py -q
   - kind: tests
@@ -55,6 +68,36 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn21623-ac41-no-dead-registry
+    description: The 24 node packages exist, hold no registry directory and have no remaining source importers of the deleted factories. Fails at the merge base, where each held one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -k dead_registry_factory -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC41
+  - id: dod-omn21623-ac42-no-hand-construction
+    description: The check reports no handler_hand_construction finding in the six handlers and reports the planted construction. Fails at the merge base, where each of the six held one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -k 'planted or binding_site or builds_nothing_by_hand' -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC42
+  - id: dod-omn21623-deploy-binding-site
+    description: >-
+      Deploy probe for hosted CI: discover and wire the five real node contracts, then construct every routed DB-composing handler with a real ModelONEXContainer. Each must call the binding site once, retain that container and leave the database pool uninitialized. This exercises runtime wiring in process without a deployed container or database.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_handler_db_binding_omn21623.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_ledger_write_effect/container/container_handler_db.py?ref=omn-21623-cdi-handler-construction-slice" --jq .content | base64 -d | grep -q 'def bind_handler_db'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC42]
   - id: dod-omn21623-model-name-ac1-node-policy-tests
     description: The node model policies load from the contracts and a contract missing a field fails to load.
     source: manual
