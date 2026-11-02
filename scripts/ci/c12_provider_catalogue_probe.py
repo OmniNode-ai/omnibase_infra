@@ -83,11 +83,13 @@ DEFAULT_APP_ROOT: Final[str] = "/app"
 UNBACKED_PROVIDER: Final[str] = "mistral"
 
 # Providers the catalogue may offer with no house rung behind them: the platform
-# holds no key, the customer's own key pays (OMN-17373 openai, omnimarket#3777 anthropic). Declared HERE, not read
+# holds no key, the customer's own key pays (OMN-17373 openai, omnimarket#3777 anthropic,
+# omnimarket#4632 openai_compatible: a keyed endpoint the developer names by URL,
+# added to this list by OMN-21981). Declared HERE, not read
 # back from the catalogue: a row that declares ``mirrors_house_rung: false`` on
 # its own authority would otherwise exempt itself from the parity clause. An
 # exemption the catalogue declares for a provider not on this list stays RED.
-CUSTOMER_ONLY_PROVIDERS: Final[tuple[str, ...]] = ("anthropic", "openai")
+CUSTOMER_ONLY_PROVIDERS: Final = ("anthropic", "openai", "openai_compatible")
 SYNTHETIC_TOKEN_PROVIDER: Final[str] = "c12probe"
 ROUTE_PREFIX: Final[str] = "/v1/tenants/me/inference-credentials"
 
