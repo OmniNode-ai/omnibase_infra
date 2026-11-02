@@ -51,6 +51,7 @@ evidence_requirements:
   - kind: tests
     description: The savings, waste detection, LLM adapter and decision search tests, including the contract completeness tests.
     command: uv run pytest tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute tests/unit/adapters/llm tests/unit/services/session_registry/test_decision_search.py -q
+  - kind: tests
     description: The loaded timeouts equal the declared file, each omitted value fails to load, and every edited outbound-call site carries the declared value.
     command: uv run --frozen pytest tests/unit/models/outbound_timeouts/test_model_outbound_timeouts.py tests/integration/adapters/test_outbound_timeouts_omn21623.py -q
   - kind: ci

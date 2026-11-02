@@ -2375,42 +2375,12 @@ entries:
   - path: src/omnibase_infra/adapters/adapter_onex_tool_execution.py
     family: O
     content_sha1: e68b076a42b2c312fcbc74deddb96e64105b997d
-  - path: src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py
-    family: M
-    content_sha1: 0a9e1755428cf7e1a5f58ba223043e249f162670
-  - path: src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py
-    family: O
-    content_sha1: 4bdf7220650c68fdaf3ce4007c8a6631cf47d06c
-  - path: src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py
-    family: O
-    content_sha1: ad4c5d6850be855e646291269c3b7e11f5353962
-  - path: src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py
-    family: M
-    content_sha1: 29cb4a2fe216ef53a4d145c8df65e30e66187844
-  - path: src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py
-    family: O
-    content_sha1: 3691c2c66bb34a0d7f2e0493a7e8af19c54130c6
-  - path: src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py
-    family: O
-    content_sha1: 9ec908a614c2390d3d72cd9854500c159db4faf9
-  - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
-    family: M
-    content_sha1: 093c17c9e85e5a3b2b1611ad9eab339c17397daa
   - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
     family: M
     content_sha1: 2852a0b0c68fb80c16a733833450fa990797cf96
   - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
     family: M
     content_sha1: 2d35bca62ac6783047adb3932dfa94184fadd455
-  - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
-    family: M
-    content_sha1: 7cf83d637a2681ea50bcfbf1506178b3a89e7d7b
-  - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
-    family: O
-    content_sha1: 9ec908a614c2390d3d72cd9854500c159db4faf9
-  - path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py
-    family: O
-    content_sha1: e0afaa7064148122426f76c12069e46e7c9f0a05
   - path: src/omnibase_infra/adapters/llm/adapter_llm_provider_openai.py
     family: M
     content_sha1: e6fa88acde1dc60d958e3cc942b4ae20b3421932
@@ -2443,41 +2413,14 @@ entries:
     content_sha1: 9ec908a614c2390d3d72cd9854500c159db4faf9
   - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
     family: M
-    content_sha1: 0e4db5aff324cff4b8101d3a1a60cff9de4ba366
-  - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
-    family: M
-    content_sha1: 2618867c7da40edf36b7b79d219d59bc8e339a43
-  - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
-    family: M
     content_sha1: 2b763227b73072ba97ad7a6fe8234f90970666b6
   - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
     family: M
     content_sha1: f8c9213219a576387c250325780e1a57951ea13b
-  - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
-    family: O
-    content_sha1: 3691c2c66bb34a0d7f2e0493a7e8af19c54130c6
-  - path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py
-    family: O
-    content_sha1: 9ec908a614c2390d3d72cd9854500c159db4faf9
   - path: src/omnibase_infra/adapters/overseer/adapter_ticket_service_linear_scoped.py
     family: O
     content_sha1: c7fe9719e8dae6a7c3066ace798839cbb225c301
-  - path: src/omnibase_infra/adapters/project_tracker/linear_graphql_project_tracker_adapter.py
-    family: O
-    content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33
-  - path: src/omnibase_infra/adapters/project_tracker/linear_graphql_project_tracker_adapter.py
-    family: O
-    content_sha1: 96bdd2a5f5bd75b7827ed503921ce81f771ce949
-  - path: src/omnibase_infra/adapters/project_tracker/linear_graphql_project_tracker_adapter.py
-    family: O
-    content_sha1: c7fe9719e8dae6a7c3066ace798839cbb225c301
   - path: src/omnibase_infra/adapters/project_tracker/local_stub_project_tracker.py
-    family: O
-    content_sha1: c7fe9719e8dae6a7c3066ace798839cbb225c301
-  - path: src/omnibase_infra/adapters/ticket/adapter_ticket_service_linear.py
-    family: O
-    content_sha1: bfe7c682b913bddcb8a2ab40f153a183242c631f
-  - path: src/omnibase_infra/adapters/ticket/adapter_ticket_service_linear.py
     family: O
     content_sha1: c7fe9719e8dae6a7c3066ace798839cbb225c301
   - path: src/omnibase_infra/backends/backend_probe.py
@@ -2747,15 +2690,6 @@ entries:
   - path: src/omnibase_infra/deep_dive/processing.py
     family: P
     content_sha1: d5d5159f19a82b0e363ff1efaf5f887b98e8639c
-  - path: src/omnibase_infra/diagnostics/bus_audit.py
-    family: O
-    content_sha1: 7198f076d15628b4a72b0724e890048cfc68e238
-  - path: src/omnibase_infra/diagnostics/bus_audit.py
-    family: O
-    content_sha1: 9baeb9463cab0d21bb0a5d962bf8a772de537683
-  - path: src/omnibase_infra/diagnostics/bus_audit.py
-    family: O
-    content_sha1: a0f6a4500ee350e70f347aae7a1f7ca381293c4b
   - path: src/omnibase_infra/docker/catalog/cli.py
     family: F
     content_sha1: 7751d32aaf72c4ca5f7009a574af6b0f9d73dec0
