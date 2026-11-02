@@ -1144,7 +1144,7 @@ cases:
       sha256: ac2f987782cb5f2cbc24447119286e1b75425747c95fb798e632f97714378dce
     capture:
       method: host-file
-      source: host-file:omni-201-ts:/home/jonah/.config/systemd/user/onex-disk-gc.service.d/20-lane-census.conf
+      source: host-file:lab-host:/etc/systemd/user/onex-disk-gc.service.d/20-lane-census.conf
       captured_at: "2026-09-17T18:05:00Z"
       captured_by: lane lane-census-timer-stall-1637
     why: >-
