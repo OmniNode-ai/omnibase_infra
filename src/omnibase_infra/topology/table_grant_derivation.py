@@ -178,11 +178,34 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="state",
         ),
     ),
+    # OMN-21935. The omnibase_infra database's grants are derived from this
+    # manifest alone, and omnimarket's node_projection_infra_routing_decisions
+    # declares a db_io write on public.infra_routing_decisions there: the
+    # relation migration 080 already creates. The runtime refuses to wire a
+    # projection whose binding principal (role_omnibase_infra) lacks SELECT,
+    # INSERT and UPDATE on it. No new migration; the grant is provisioned from
+    # the topology. Once the pinned omnimarket contracts carry the node the
+    # same relation derives from the contract too, and the derivation is
+    # idempotent per relation, so this entry may then be deleted.
+    ContractTableDeclaration(
+        node="state_io:infra_routing_decisions",
+        contract_path=Path(
+            "docker/migrations/forward/080_create_infra_routing_decisions.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="infra_routing_decisions",
+            database_ref="omnibase_infra",
+            schema="public",
+            migration="docker/migrations/forward/080_create_infra_routing_decisions.sql",
+            access="read_write",
+            role="infra_routing_decisions",
+        ),
+    ),
 )
 
 
 def _vendored_read_write(
-    table: str, node_dir: str, create_file: str
+    table: str, node_dir: str, create_file: str, schema: str = "omninode_internal"
 ) -> ContractTableDeclaration:
     """An infra-first vendored relation: read_write, role named for the table."""
     migration = f"docker/migrations/forward/nodes/{node_dir}/{create_file}"
@@ -192,7 +215,7 @@ def _vendored_read_write(
         table=ModelDbTableDeclaration(
             name=table,
             database_ref="application",
-            schema="omninode_internal",
+            schema=schema,
             migration=migration,
             access="read_write",
             role=table,
@@ -469,23 +492,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # lands its node contract (head 677d2941ff7e). This bridge expires once the
     # pin includes that contract. Retired by: omnimarket#4380 merging and the pin
     # advancing past it; the OMN-18863 expiry module names this bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_capability_cells",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
-            "0000_create_delegation_capability_cells.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_capability_cells",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
-                "0000_create_delegation_capability_cells.sql"
-            ),
-            access="read_write",
-            role="delegation_capability_cells",
-        ),
+    _vendored_read_write(
+        "delegation_capability_cells",
+        "node_projection_delegation_capability_map",
+        "0000_create_delegation_capability_cells.sql",
+        schema="public",
     ),
     # OMN-19988: the same infra-first window; this repo vendors
     # node_projection_local_environment/0000-0002 ahead of the omnimarket node
@@ -496,23 +507,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
     # node_projection_local_environment contract merges and the pin advances
     # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:local_environment",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_local_environment/"
-            "0000_create_local_environment.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="local_environment",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_local_environment/"
-                "0000_create_local_environment.sql"
-            ),
-            access="read_write",
-            role="local_environment",
-        ),
+    _vendored_read_write(
+        "local_environment",
+        "node_projection_local_environment",
+        "0000_create_local_environment.sql",
+        schema="public",
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
