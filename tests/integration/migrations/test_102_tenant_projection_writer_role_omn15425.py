@@ -148,6 +148,17 @@ SAVINGS_AGGREGATE_VIEWS_FILE = (
     / "node_projection_savings"
     / "089_savings_aggregate_views_per_tenant.sql"
 )
+# OMN-21970: the per-day view's SELECT is carried by the migration that creates
+# it, for the same reason 0039's and 089's are.
+DAILY_VIEW_FILE = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_projection_delegation"
+    / "0066_delegation_daily_view.sql"
+)
 BOOTSTRAP_SCRIPT = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "000_create_multiple_databases.sh"
 )
@@ -470,7 +481,9 @@ def test_read_only_declarations_are_granted_select_and_never_write() -> None:
     assert read_only, "positive control: the topology declares read-only relations"
 
     aggregate_views_sql = (
-        AGGREGATE_VIEWS_FILE.read_text() + SAVINGS_AGGREGATE_VIEWS_FILE.read_text()
+        AGGREGATE_VIEWS_FILE.read_text()
+        + SAVINGS_AGGREGATE_VIEWS_FILE.read_text()
+        + DAILY_VIEW_FILE.read_text()
     )
     select_granted = set(
         re.findall(

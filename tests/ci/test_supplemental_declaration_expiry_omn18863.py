@@ -115,6 +115,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_receipts": "omnimarket OMN-21336 (node_projection_compaction_receipts)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "local_environment": "omnimarket OMN-19988 (node_projection_local_environment)",
+    "projection_delegation_daily": "omnimarket OMN-21970 (node_projection_delegation)",
 }
 
 _SKIP_REASON = (

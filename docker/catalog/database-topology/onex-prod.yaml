@@ -296,6 +296,7 @@ databases:
           - object_type: TABLE
             objects:
               - projection_cost_savings_overview
+              - projection_delegation_daily
               - projection_delegation_model_routing
               - projection_delegation_quality_gate
               - projection_delegation_savings
@@ -445,5 +446,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 6eb5d8e14042f1551f53211dca029fc64a2680cd747ba6c90f8bb8ae9ea17727
+  sha256: 2486ae5a164eb5411f46a423993c8031be0cfcd5da5ece8ed76f8c99482c5333
 topology_instance: onex-prod

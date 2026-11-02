@@ -227,84 +227,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="credentials",
         ),
     ),
-    # OMN-18159: the four delegation aggregate READ VIEWS, in this manifest for
-    # exactly the reason the docstring above gives -- the migration that
-    # creates them is vendored here, but the producing node's db_io
-    # declaration is not yet in the PINNED omnimarket contracts root this
-    # repo's CI derives from, and the pin advances only after the omnimarket
-    # source PR merges. The source PR in turn cannot merge until this grant
-    # exists, because the runtime validates the binding principal's declared
-    # read privilege before it will wire the handler. Declaring them here
-    # breaks that cycle without pointing the pin at an unmerged commit.
-    #
-    # These entries become redundant once the pin advances past the source
-    # PR and the contract declares the same four relations; removing them
-    # then is the follow-up, and leaving them is inert rather than wrong --
-    # the derivation is idempotent per relation.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_model_routing",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_model_routing",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_model_routing",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_quality_gate",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_quality_gate",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_quality_gate",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_summary",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_summary",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_summary",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_token_usage",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_token_usage",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_token_usage",
-        ),
-    ),
     # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
     # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
     # request its own comment named. The expiry module went red on the bot pull
@@ -512,6 +434,31 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="local_environment",
+        ),
+    ),
+    # OMN-21970: the same infra-first window. This repo vendors
+    # node_projection_delegation 0066's projection_delegation_daily view ahead of
+    # the omnimarket contract that declares it (access read, role aggregate_daily),
+    # which lands after this release: the node's wiring check refuses a contract
+    # whose relation no release grants. 0066 grants tenant_projection_writer
+    # SELECT. Retired when that contract merges and the pin advances past it; the
+    # expiry module names it.
+    ContractTableDeclaration(
+        node="legacy_migration:projection_delegation_daily",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/"
+            "0066_delegation_daily_view.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="projection_delegation_daily",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation/"
+                "0066_delegation_daily_view.sql"
+            ),
+            access="read",
+            role="aggregate_daily",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
