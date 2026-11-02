@@ -10,7 +10,6 @@ Architecture:
     - node.py: Declarative node shell extending NodeEffect
     - handlers/: PostgreSQL operation handlers (write_bundle, update_outcome)
     - models/: Payload models for gate-decision and pr-outcome events
-    - registry/: Infrastructure registry for dependency injection
     - contract.yaml: Intent routing and I/O definitions
 
 Node Type: EFFECT_GENERIC
@@ -31,15 +30,10 @@ from omnibase_infra.nodes.node_delta_bundle_effect.handlers import (
 from omnibase_infra.nodes.node_delta_bundle_effect.node import (
     NodeDeltaBundleEffect,
 )
-from omnibase_infra.nodes.node_delta_bundle_effect.registry import (
-    RegistryInfraDeltaBundleEffect,
-)
 
 __all__: list[str] = [
     # Node
     "NodeDeltaBundleEffect",
-    # Registry
-    "RegistryInfraDeltaBundleEffect",
     # Handlers
     "HandlerWriteBundle",
     "HandlerUpdateOutcome",

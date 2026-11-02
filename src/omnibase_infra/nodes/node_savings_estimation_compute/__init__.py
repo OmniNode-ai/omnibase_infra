@@ -17,7 +17,6 @@ Available Exports:
     - ModelSavingsEstimationInput: Input model for effectiveness data
     - ModelSavingsEstimate: Output model for computed savings
     - HandlerSavingsEstimation: Handler for savings computation
-    - RegistryInfraSavingsEstimation: DI registry
 
 Tracking:
     - OMN-6964: Token savings emitter
@@ -33,9 +32,6 @@ from omnibase_infra.nodes.node_savings_estimation_compute.models import (
 from omnibase_infra.nodes.node_savings_estimation_compute.node import (
     NodeSavingsEstimationCompute,
 )
-from omnibase_infra.nodes.node_savings_estimation_compute.registry import (
-    RegistryInfraSavingsEstimation,
-)
 
 __all__: list[str] = [
     # Node
@@ -45,6 +41,4 @@ __all__: list[str] = [
     # Models
     "ModelSavingsEstimationInput",
     "ModelSavingsEstimate",
-    # Registry
-    "RegistryInfraSavingsEstimation",
 ]
