@@ -173,7 +173,8 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
             lambda *args: None,
             lane=EnumRuntimeLane.DEV,
         )
-    assert [c[1] for c in calls] == ["ps", "stop", "rm", "compose"]
-    assert "omninode-runtime" in calls[-1]
-    assert "tenant-projection-writer" not in calls[-1]
+    assert [c[1] for c in calls[:4]] == ["ps", "stop", "rm", "compose"]
+    assert {c[1] for c in calls[3:]} == {"compose"}
+    assert "omninode-runtime" in calls[3]
+    assert all("tenant-projection-writer" not in c for c in calls[3:])
     assert "tenant-projection-writer" not in verify.call_args.args[0]
