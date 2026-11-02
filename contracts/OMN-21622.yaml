@@ -60,9 +60,9 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -o addopts='' -p no:cacheprovider -k "same_role_profile or issuer_image"
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -o addopts='' -p no:cacheprovider -k "same_role_profile or issuer_image or grant_roles"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: "grep -q machine-principal-derived-grants.json docker/Dockerfile.principal-issuer"
+        check_value: "grep -q 'only a machine binds grant_roles' scripts/lab_principal_issuer.py"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
