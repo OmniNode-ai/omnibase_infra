@@ -634,3 +634,217 @@ def test_the_image_installs_every_workspace_package_from_the_staged_tree() -> No
     start = tokens.index("-c") + 2
     required = tokens[start : tokens.index(";", start)]
     assert required == [*provenance.WORKSPACE_PACKAGES.values(), "omnibase-infra"]
+
+
+# ---------------------------------------------------------------------------
+# OMN-18087: the pre-PR verify slot. A slot boots a branch BEFORE it merges, so
+# the branch under test has no dev-merge tag. Only a compose project the
+# contract lists as a pool slot accepts a clean staged tree at a recorded
+# commit; the dev, stability and deploy-agent lanes keep the refusal.
+# ---------------------------------------------------------------------------
+
+SLOT_POLICY = _load(
+    "prepr_slot_policy_for_slot_mode", RUNTIME_BUILD / "prepr_slot_policy.py"
+)
+SLOT_PROJECT = SLOT_POLICY.SLOTS[1].compose_project
+# The projects the strict paths build under: every declared lane (the dev lane,
+# the stability lane and the rest), the pool's build-lock name, the Dockerfile's
+# default when no build arg is passed, and none at all.
+STRICT_PROJECTS = (
+    *sorted(SLOT_POLICY.DECLARED_LANE_PROJECTS),
+    SLOT_POLICY.POOL_BUILD_LOCK_PROJECT,
+    "unknown",
+    "",
+)
+
+
+def _slot_staging_record() -> dict[str, Any]:
+    """The record prepr_verify_lane.sh writes: siblings checked out on their
+    canonical-clone branch, no dev-merge tag, and the build context at the
+    target commit the slot resolved and verified clean."""
+    return {
+        "siblings": {
+            repo: {"vcs_ref": COMMITS[repo], "vcs_dirty": False, "vcs_branch": "dev"}
+            for repo in ("omnibase_core", "omnibase_spi", "omnimarket")
+        },
+        "build_context": {
+            "omnibase_infra": {
+                "vcs_ref": COMMITS["omnibase_infra"],
+                "vcs_dirty": False,
+                "vcs_branch": "HEAD",
+            }
+        },
+    }
+
+
+def _run_slot_audit(
+    site: Path, record: Path, compose_project: str, record_into: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    """run_audit from a fresh interpreter, as the Dockerfile calls it."""
+    code = (
+        "import sys; from pathlib import Path; "
+        "import importlib.util as u; "
+        f"s = u.spec_from_file_location('c', {str(CHECKER)!r}); "
+        "m = u.module_from_spec(s); sys.modules['c'] = m; s.loader.exec_module(m); "
+        f"sys.exit(m.run_audit(Path({str(record)!r}), "
+        "require=['omnibase-core', 'omnibase-spi', 'omnibase-infra'], "
+        f"search_paths=[{str(site)!r}], compose_project={compose_project!r}, "
+        f"record_into={('Path(' + repr(str(record_into)) + ')') if record_into else 'None'}))"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+
+
+def _slot_site(tmp_path: Path, record: dict[str, Any]) -> tuple[Path, Path]:
+    site = tmp_path / "site"
+    site.mkdir()
+    _install(site, _clean_environment())
+    path = tmp_path / "sibling-vcs-provenance.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    return site, path
+
+
+def test_a_slot_build_of_a_branch_passes_and_records_the_slot_mode(
+    tmp_path: Path,
+) -> None:
+    site, record = _slot_site(tmp_path, _slot_staging_record())
+    manifest = tmp_path / "build-provenance.json"
+    manifest.write_text(json.dumps({"build_source": "workspace"}), encoding="utf-8")
+
+    done = _run_slot_audit(site, record, SLOT_PROJECT, manifest)
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"slot mode: {SLOT_PROJECT}" in done.stdout
+    written = json.loads(manifest.read_text(encoding="utf-8"))
+    assert written["first_party_slot_mode"] == SLOT_PROJECT
+    assert {
+        entry["repo"]: entry["kind"] for entry in written["first_party_sources"]
+    } == dict.fromkeys(DISTRIBUTIONS, "slot-pinned-commit")
+
+
+@pytest.mark.parametrize("project", STRICT_PROJECTS)
+def test_a_dev_lane_build_of_a_branch_still_fails(tmp_path: Path, project: str) -> None:
+    site, record = _slot_site(tmp_path, _slot_staging_record())
+    manifest = tmp_path / "build-provenance.json"
+    manifest.write_text(json.dumps({"build_source": "workspace"}), encoding="utf-8")
+
+    done = _run_slot_audit(site, record, project, manifest)
+
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "slot mode" not in done.stdout
+    assert "FAIL omnibase-core: branch" in done.stdout
+    assert "FAIL omnibase-spi: branch" in done.stdout
+    assert "FAIL omnibase-infra: sha" in done.stdout
+    written = json.loads(manifest.read_text(encoding="utf-8"))
+    assert "first_party_slot_mode" not in written
+
+
+SLOT_STILL_REFUSES = [
+    pytest.param(
+        "omnibase_spi",
+        _vcs("omnibase_spi", "dev"),
+        None,
+        "branch",
+        id="git-branch-install",
+    ),
+    pytest.param("omnibase_spi", None, None, "exact-version", id="index-install"),
+    pytest.param(
+        "omnibase_core",
+        _vcs("omnibase_core", "v0.47.58"),
+        None,
+        "release",
+        id="release-tag",
+    ),
+    pytest.param(
+        "omnibase_core",
+        _local("omnibase_core"),
+        {"vcs_ref": COMMITS["omnibase_core"], "vcs_dirty": True, "vcs_branch": "dev"},
+        "branch",
+        id="dirty-staged-tree",
+    ),
+    pytest.param(
+        "omnibase_core",
+        _local("omnibase_core"),
+        {"vcs_ref": COMMITS["omnibase_core"][:12], "vcs_dirty": False},
+        "sha",
+        id="short-commit",
+    ),
+    pytest.param(
+        "omnibase_core",
+        _local("omnibase_core"),
+        {"vcs_ref": COMMITS["omnibase_core"], "vcs_branch": "dev"},
+        "branch",
+        id="dirty-flag-missing",
+    ),
+]
+
+
+@pytest.mark.parametrize(("repo", "direct_url", "record", "kind"), SLOT_STILL_REFUSES)
+def test_a_slot_build_still_refuses_every_other_source(
+    tmp_path: Path,
+    repo: str,
+    direct_url: dict[str, Any] | None,
+    record: dict[str, Any] | None,
+    kind: str,
+) -> None:
+    urls = _clean_environment()
+    urls[repo] = direct_url
+    staging = _slot_staging_record()
+    if record is not None:
+        staging["siblings"][repo] = record
+    site = tmp_path / "site"
+    site.mkdir()
+    _install(site, urls)
+    sources = fps.audit_environment(
+        CONTRACT, staging, search_paths=[str(site)], compose_project=SLOT_PROJECT
+    )
+    (planted,) = [s for s in sources if s.repo == repo]
+    assert planted.kind == kind
+    assert fps.violations(sources) == [planted]
+
+
+def test_a_slot_build_with_no_build_context_record_is_unbound(tmp_path: Path) -> None:
+    staging = _slot_staging_record()
+    del staging["build_context"]
+    site = tmp_path / "site"
+    site.mkdir()
+    _install(site, _clean_environment())
+    sources = fps.audit_environment(
+        CONTRACT, staging, search_paths=[str(site)], compose_project=SLOT_PROJECT
+    )
+    assert [(s.repo, s.kind) for s in fps.violations(sources)] == [
+        ("omnibase_infra", "unbound")
+    ]
+
+
+def test_the_slot_pattern_matches_exactly_the_pool_slots_of_the_slot_policy() -> None:
+    slots = {slot.compose_project for slot in SLOT_POLICY.SLOTS.values()}
+    assert slots
+    prefix = SLOT_PROJECT.rsplit("-", 1)[0]
+    candidates = {f"{prefix}-{n}" for n in range(10)} | slots | set(STRICT_PROJECTS)
+    assert {c for c in candidates if CONTRACT.is_slot_build(c)} == slots
+    assert not CONTRACT.is_slot_build(f"{SLOT_PROJECT}0")
+    assert not CONTRACT.is_slot_build(f"x{SLOT_PROJECT}")
+
+
+def test_the_audit_reads_the_compose_project_the_build_was_given() -> None:
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile.runtime").read_text(
+        encoding="utf-8"
+    )
+    builder = dockerfile.split("\nFROM ", 3)[2]
+    assert builder.startswith("python:${PYTHON_VERSION}-slim AS builder")
+    audit_at = builder.index("import run_audit;")
+    arg_at = builder.rfind("\nARG COMPOSE_PROJECT=unknown\n", 0, audit_at)
+    assert arg_at != -1, "the builder stage must declare COMPOSE_PROJECT"
+    assert "\nRUN " not in builder[arg_at + 1 : builder.rfind("RUN ", 0, audit_at)]
+    assert 'compose_project=os.environ["COMPOSE_PROJECT"]' in builder[audit_at:]
+
+
+def test_the_slot_writes_a_build_context_record_at_its_target_commit() -> None:
+    script = (RUNTIME_BUILD / "prepr_verify_lane.sh").read_text(encoding="utf-8")
+    assert (
+        '"build_context": {"omnibase_infra": {"vcs_ref": "%s", "vcs_dirty": false, '
+        '"vcs_branch": "HEAD"}}\\n}\\n\' "${TARGET_COMMIT}"'
+    ) in script
+    assert '--build-arg "COMPOSE_PROJECT=${COMPOSE_PROJECT}"' in script

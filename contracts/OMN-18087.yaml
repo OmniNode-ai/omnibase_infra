@@ -40,6 +40,12 @@ requirements:
       - id: AC11
         statement: >-
           AC11: a process whose ONEX_RUNTIME_NODE_SELECTION names a contract derives its kernel consumer groups (contract registry, plugins, savings, runtime-error triage and the host process) from a service name that carries the selection, so it shares no group with the main runtime under the same KAFKA_INSTANCE_ID, and an unselected process keeps its existing group names
+  - id: req-omn18087-prepr-slot-builds-a-branch
+    statement: A pre-PR verify slot can build the branch it exists to prove, and no other build path is relaxed.
+    acceptance:
+      - id: AC12
+        statement: >-
+          AC12: the first-party source audit accepts a clean staged tree at a recorded commit only when the build's compose project is a pre-PR pool slot, prepr_verify_lane.sh records the build context at its target commit, and a build of the same branch under the dev, stability or default compose project still fails the audit
 evidence_requirements:
   - kind: tests
     description: "Boot subscription tests pass"
@@ -102,6 +108,15 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/test_kernel.py -q --no-cov -k selection_scoped_service"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac12-prepr-slot-audit
+    description: >-
+      A slot build of a branch passes the first-party audit as slot-pinned-commit, the same build under the dev, stability, unknown or empty compose project fails with branch and sha findings, a slot still refuses git, index, release, dirty, short-commit and unbound sources, the slot projects equal the slot policy's pool slots, and the Dockerfile hands the audit its COMPOSE_PROJECT. Fails at the merge base, where run_audit takes no compose project.
+    source: manual
+    binds_ac: [AC12]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/scripts/test_first_party_sources_omn17427.py -q --no-cov -k 'slot or dev_lane_build'"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn18087-deploy-probe
     description: >-
