@@ -10,6 +10,12 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_infra.topology import load_topology_profile
+from omnibase_infra.topology.table_grant_derivation import (
+    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    derive_table_grants,
+)
+
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -61,14 +67,28 @@ def test_vendor_manifest_binding_matches_the_bytes(filename: str) -> None:
 @pytest.mark.parametrize("filename", [_CREATE, _GRANT])
 def test_migration_classes_are_declared(filename: str) -> None:
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
-    assert classes[f"forward/nodes/{_NODE}/{filename}"] == "expand-only"
+    assert classes[f"forward/nodes/{_NODE}/{filename}"] == "forward-only"
 
 
-def test_grant_migration_names_the_role_and_the_table() -> None:
-    sql = (_VENDOR / _GRANT).read_text(encoding="utf-8")
-    assert "GRANT SELECT, INSERT, UPDATE" in sql
-    assert f"public.{_TABLE}" in sql
-    assert "TO tenant_projection_writer" in sql
+def test_supplemental_declaration_derives_the_writer_privileges() -> None:
+    declarations = tuple(
+        declaration
+        for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        if declaration.table.name == _TABLE
+    )
+    assert len(declarations) == 1
+    for instance in sorted(path.stem for path in _INSTANCES.glob("*.yaml")):
+        derived = derive_table_grants(load_topology_profile(instance), declarations)
+        assert not derived.unmappable
+        assert set(derived.grants) == {"tenant_projection_writer"}
+        (grant,) = derived.grants["tenant_projection_writer"]
+        assert grant.schema == "public"
+        assert grant.objects == (_TABLE,)
+        assert {privilege.value for privilege in grant.privileges} == {
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+        }
 
 
 @pytest.mark.parametrize("instance", sorted(p.stem for p in _INSTANCES.glob("*.yaml")))
