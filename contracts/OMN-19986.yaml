@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19986
+title: Infra vendoring of the local_identity node migrations
+summary: >-
+  Infra half only: vendors omnimarket node migrations 0000-0002 of node_projection_local_identity byte for byte, with their ledger rows and classes, fences the FORCE step, and carries an interim grant declaration until omnimarket's node contract declares the relation. The fold, the writer and the page are the omnimarket and omnidash halves. This check proves deployment identity, not acceptance of the criterion.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19986-ac1-infra-vendor
+    statement: >-
+      Migrations 0000-0002 of node_projection_local_identity are deployed byte-identical to the omnimarket source they were copied from, each with one checksum-bound ledger row and the class the migration class checker reads from its statements, only the FORCE step is fenced, and an interim grant declaration names the vendored create.
+    acceptance:
+      - id: AC1
+        statement: "AC1: Replaying the same mint event twice leaves one identity row -- falsifier: the fold test run with uv run pytest finds two"
+evidence_requirements:
+  - kind: tests
+    description: Infra deployment half only; the vendored bytes, ledger checksums, classes, fence and interim declaration match the pinned omnimarket source.
+    command: uv run pytest tests/unit/migrations/test_omn19986_omn19991_local_identity_alerts_vendor.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19986-ac1-infra-vendor-0000-0002
+    description: Infra half only. Pins the source bytes of node_projection_local_identity 0000-0002, their exact ledger checksums and classes, that only 0002 (FORCE ROW LEVEL SECURITY) is fenced, and the interim grant declaration. It fails at the merge base, where none of them exist. It does not prove the fold, the writer or the page.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn19986_omn19991_local_identity_alerts_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
