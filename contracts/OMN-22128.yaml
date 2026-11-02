@@ -1,0 +1,65 @@
+schema_version: 1.0.0
+ticket_id: OMN-22128
+title: The dev-baseline publisher can finish its suite, and can land the baseline it finished
+summary: timeout-minutes on the publish-baseline job clears the measured serial suite floor, and the baseline push fetches, rebases onto the current origin/dev and re-attempts, so neither of the two causes that gave the workflow zero successes in 138 scheduled runs can return silently.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-publisher-can-finish
+    statement: The publish-baseline job's timeout clears the suite it runs serially.
+    acceptance:
+      - id: AC1
+        statement: The publish-baseline job in .github/workflows/dev-baseline-publisher.yml declares timeout-minutes at or above the 86-minute serial suite floor measured on clean dev.
+  - id: req-publisher-can-land
+    statement: A dev merge landing during the suite costs a retry, not the baseline.
+    acceptance:
+      - id: AC2
+        statement: The baseline commit step fetches and rebases onto the current origin/dev and re-attempts the push instead of losing the baseline to a non-fast-forward rejection.
+  - id: req-both-causes-held-red-first
+    statement: Both assertions fail against the pre-fix workflow text.
+    acceptance:
+      - id: AC3
+        statement: The timeout and push-rebase assertions are built from the two recorded run logs, 34008081727 for the push rejection and 41380955296 for the timeout kill, and fail against the pre-fix workflow.
+  - id: req-committed-baseline-stays-readable
+    statement: Whatever the publisher commits stays parseable by its own loader.
+    acceptance:
+      - id: AC4
+        statement: The baseline file committed to the repository loads through the publisher's own load_baseline with its required top-level fields intact, so a published baseline can never strand the PR gate.
+evidence_requirements:
+  - kind: tests
+    description: The publisher workflow's timeout, its push-rebase retry, and the committed baseline's readability.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py -q --no-cov
+dod_evidence:
+  - id: dod-publisher-timeout
+    description: The publish-baseline job's timeout-minutes clears the 86-minute serial suite floor, so the job is no longer killed mid-pytest and reported as cancelled.
+    source: generated
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py -q --no-cov -k publisher_timeout_clears_the_measured_suite_floor
+  - id: dod-publisher-push-rebase
+    description: The baseline push fetches, rebases onto the current origin/dev and loops its re-attempts, so a concurrent dev merge no longer discards the computed baseline.
+    source: generated
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py -q --no-cov -k publisher_push_rebases_and_retries_onto_current_dev
+  - id: dod-both-causes-red-first
+    description: The whole publisher-workflow class passes on the fix; its two workflow assertions were run red-first against the pre-fix text, failing with "assert 30 >= 86" and with the step named as pushing without rebasing.
+    source: generated
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py -q --no-cov -k TestPublisherWorkflow
+  - id: dod-committed-baseline-readable
+    description: The committed baseline loads through the publisher's own loader and carries generated_at, generated_by, repo and ttl_days, with clusters a mapping.
+    source: generated
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py -q --no-cov -k committed_baseline_loads_through_the_publishers_own_loader
