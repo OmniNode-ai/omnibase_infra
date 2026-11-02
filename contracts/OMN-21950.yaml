@@ -52,11 +52,11 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-omn21950-deploy-source-from-container
-    description: The deploy-scoped forwarder runtime config carries the container-selected lane-mirror source property at the pinned commit; the grep fails if the property is absent.
+    description: The deploy-scoped forwarder runtime config carries the container-selected lane-mirror source property on the PR branch; the grep fails if the property is absent.
     source: manual
     checks:
       - check_type: command
-        check_value: grep -qF 'def lane_mirror_source_from_container' src/omnibase_infra/nodes/node_bus_forwarder_effect/models/model_gateway_forwarder_runtime_config.py
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_bus_forwarder_effect/models/model_gateway_forwarder_runtime_config.py?ref=omn-21950-ledger-l16-1102 --jq .content | base64 -d | grep -qF 'def lane_mirror_source_from_container'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
