@@ -18,6 +18,12 @@ under ``set -euo pipefail`` a reader that stops early (``awk ... {exit}``,
 ``head -12``) sends SIGPIPE to the writer still producing output, and pipefail
 turns the writer's 141 into the step's exit status.
 
+OMN-20079 puts both contract hot-load paths behind ``contract_hotload.enabled``
+in the runtime config, default off. With the switch off the runtime opens no
+dynamic contract listener, so the step asserts the group only when the runtime
+config it reads from the running kernel's container opts in. It still fails an
+enabled runtime that has no live group, and it fails a config it cannot read.
+
 These tests run the step's own ``run:`` text, unmodified, with the step's own
 ``env:`` and with ``docker`` and ``sleep`` replaced on PATH by stubs, so the
 proof is the shipped script and not a paraphrase of it. The stub broker prints
@@ -30,6 +36,7 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +94,12 @@ while [ "$1" = "-e" ]; do
   shift 2
 done
 shift # the container
+# OMN-20079: the opt-in read is the step's own python, run against a config dir
+# the test lays out; every other call is an rpk call and needs the credentials.
+if [ "$1" = "/app/.venv/bin/python" ]; then
+  shift
+  ONEX_CONTRACTS_DIR="$STUB_CONTRACTS_DIR" exec "$STUB_PYTHON" "$@"
+fi
 if [ "${RPK_USER:-}" != "onex-local" ] || [ "${RPK_PASS:-}" != "$STUB_PASSWORD" ] \\
     || [ "${RPK_SASL_MECHANISM:-}" != "SCRAM-SHA-256" ]; then
   echo "unable to request metadata: SASL is required but not provided" >&2
@@ -159,6 +172,12 @@ while [ "$1" = "-e" ]; do
   shift 2
 done
 shift # the container
+# OMN-20079: the opt-in read is the step's own python, run against a config dir
+# the test lays out; every other call is an rpk call and needs the credentials.
+if [ "$1" = "/app/.venv/bin/python" ]; then
+  shift
+  ONEX_CONTRACTS_DIR="$STUB_CONTRACTS_DIR" exec "$STUB_PYTHON" "$@"
+fi
 if [ "${RPK_USER:-}" != "onex-local" ] || [ "${RPK_PASS:-}" != "$STUB_PASSWORD" ] \\
     || [ "${RPK_SASL_MECHANISM:-}" != "SCRAM-SHA-256" ]; then
   echo "unable to request metadata: SASL is required but not provided" >&2
@@ -191,6 +210,20 @@ def _probe_step() -> dict[str, Any]:
     return matches[0]
 
 
+_ENABLED = "contract_hotload:\n  enabled: true\n  mode: on_demand\n"
+
+
+def _write_runtime_config(tmp_path: Path, text: str | None) -> Path:
+    """Lay out ``<dir>/runtime/runtime_config.yaml`` as the kernel's container has it."""
+    contracts = tmp_path / "contracts"
+    (contracts / "runtime").mkdir(parents=True)
+    if text is not None:
+        (contracts / "runtime" / "runtime_config.yaml").write_text(
+            "event_bus:\n  type: kafka\n" + text, encoding="utf-8"
+        )
+    return contracts
+
+
 def _write_executable(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -202,6 +235,7 @@ def _run_probe(
     *,
     env_text: str = "REDPANDA_SUPERUSER_PASSWORD=stub-secret\n",
     flaky_describe: bool = False,
+    runtime_config: str | None = _ENABLED,
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -224,6 +258,8 @@ def _run_probe(
         "STUB_GROUPS": "\n".join(f"{name} {members}" for name, members in groups),
         "STUB_TOPIC": _TOPIC,
         "STUB_FILLER_ROWS": str(_FILLER_ROWS),
+        "STUB_CONTRACTS_DIR": str(_write_runtime_config(tmp_path, runtime_config)),
+        "STUB_PYTHON": sys.executable,
     }
     if flaky_describe:
         env["STUB_FLAKY_DESCRIBE"] = str(tmp_path / "describe-failed-once")
@@ -267,6 +303,8 @@ def _run_replay(
         "STUB_PASSWORD": "stub-secret",
         "LOCAL_PROJECT": _PROJECT,
         "REPLAY_DIR": str(replay),
+        "STUB_CONTRACTS_DIR": str(_write_runtime_config(tmp_path, _ENABLED)),
+        "STUB_PYTHON": sys.executable,
     }
     env.update(step.get("env", {}))
     return subprocess.run(
@@ -378,6 +416,69 @@ def test_probe_fails_when_the_superuser_password_is_wrong(tmp_path: Path) -> Non
         env_text="REDPANDA_SUPERUSER_PASSWORD=wrong\n",
     )
     assert result.returncode != 0
+
+
+def test_probe_asserts_no_group_when_the_runtime_config_does_not_opt_in(
+    tmp_path: Path,
+) -> None:
+    """OMN-20079: a runtime that opens no listener has no group, and that is not red."""
+    result = _run_probe(tmp_path, [], runtime_config="")
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    assert "opens no dynamic contract listener" in result.stdout
+    assert "live consumer group" not in result.stdout
+
+
+def test_probe_skips_the_group_for_an_explicit_off_switch(tmp_path: Path) -> None:
+    off = "contract_hotload:\n  enabled: false\n  mode: on_demand\n"
+    result = _run_probe(tmp_path, [], runtime_config=off)
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    assert "opens no dynamic contract listener" in result.stdout
+
+
+def test_same_fixture_is_red_once_the_runtime_config_opts_in(tmp_path: Path) -> None:
+    """Negative control: no group on the broker, switch on, step red (not the skip)."""
+    off = tmp_path / "off"
+    off.mkdir()
+    on = tmp_path / "on"
+    on.mkdir()
+    assert _run_probe(off, [], runtime_config="").returncode == 0
+    result = _run_probe(on, [], runtime_config=_ENABLED)
+    _assert_no_live_group(result)
+    assert "opens no dynamic contract listener" not in result.stdout
+
+
+def test_probe_names_the_opt_in_before_asserting_a_live_group(tmp_path: Path) -> None:
+    """OMN-20079: with the switch on the step says so, then still requires the group."""
+    result = _run_probe(tmp_path, [(_GROUP, 1)], runtime_config=_ENABLED)
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    assert "contract_hotload.enabled is true" in result.stdout
+    assert f"live consumer group {_GROUP} (1 member) on {_TOPIC}" in result.stdout
+
+
+def test_probe_fails_when_the_opted_in_group_has_no_member(tmp_path: Path) -> None:
+    _assert_no_live_group(_run_probe(tmp_path, [(_GROUP, 0)], runtime_config=_ENABLED))
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "contract_hotload: [true]\n",
+        "contract_hotload:\n  enabled: 'yes'\n",
+        "contract_hotload:\n  enabled:\n",
+        "contract_hotload: true\n",
+    ],
+)
+def test_probe_fails_on_a_malformed_opt_in(tmp_path: Path, malformed: str) -> None:
+    """A switch the step cannot read as a boolean must never read as 'off'."""
+    result = _run_probe(tmp_path, [], runtime_config=malformed)
+    assert result.returncode != 0, result.stdout[-2000:]
+    assert "could not read contract_hotload" in result.stdout + result.stderr
+
+
+def test_probe_fails_when_the_runtime_config_is_unreadable(tmp_path: Path) -> None:
+    result = _run_probe(tmp_path, [(_GROUP, 1)], runtime_config=None)
+    assert result.returncode != 0, result.stdout[-2000:]
+    assert "could not read contract_hotload" in result.stdout + result.stderr
 
 
 @pytest.mark.live_contact("tests/ci/fixtures/omn20820_listener_groups_recorded.json")
