@@ -20,7 +20,16 @@ class ModelScopeCheckCommand(BaseModel):
     plan_file_path: str = Field(
         ..., description="Absolute path to the plan file to read."
     )
-    output_path: str = Field(..., description="Path to write the scope manifest JSON.")
+    output_path: str = Field(
+        ...,
+        min_length=1,
+        pattern=r"\S",
+        description=(
+            "Path to write the scope manifest JSON. Required: the command"
+            " producer supplies it and every hop carries it forward; code holds"
+            " no default location (OMN-21799)."
+        ),
+    )
     auto_confirm: bool = Field(
         default=False,
         description="Skip interactive confirmation (always true in ONEX workflow).",

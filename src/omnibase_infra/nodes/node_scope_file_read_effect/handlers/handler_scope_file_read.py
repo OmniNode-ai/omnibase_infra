@@ -34,7 +34,7 @@ class HandlerScopeFileRead:
         self,
         file_path: str,
         correlation_id: UUID,
-        output_path: str = "~/.claude/scope-manifest.json",
+        output_path: str,
     ) -> ModelScopeFileReadResult:
         """Read a file from disk and return its content.
 
