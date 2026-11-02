@@ -41,7 +41,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.services.cost_api import router as cost_api_router
+from omnibase_infra.services.cost_api.router import install_cost_routes
 from omnibase_infra.services.registry_api.registry_discovery import (
     ServiceRegistryDiscovery,
 )
@@ -194,17 +194,15 @@ def create_app(
     )
 
     # Create and attach service
-    service = ServiceRegistryDiscovery(
+    app.state.registry_service = ServiceRegistryDiscovery(
         container=container,
         projection_reader=projection_reader,
         widget_mapping_path=widget_mapping_path,
     )
-    app.state.registry_service = service
-    app.state.cost_api_pool = cost_api_pool
+    install_cost_routes(app, cost_api_pool)
 
     # Include routes
     app.include_router(router)
-    app.include_router(cost_api_router)
 
     # Root endpoint
     @app.get("/", include_in_schema=False)

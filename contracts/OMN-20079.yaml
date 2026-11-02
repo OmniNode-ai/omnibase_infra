@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20079
+title: The catalog-local runtime-boot listener step asserts the group only when the runtime config opts in
+summary: >-
+  This contract covers the runtime-boot (mode=catalog-local) step "Runtime dynamic contract listener has a live consumer group". With contract_hotload.enabled off (the default OMN-20079 sets) the runtime opens no dynamic contract listener, so the step read a group that no longer exists and the merge queue ejected the pull request that turned the listener off. The step now reads the opt-in from the runtime config in the running kernel's container, asserts the live group when it is on, and fails an unreadable or malformed opt-in. It does not claim the runtime gate itself, the deploy-repository policy test or the production readback.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-listener-step-follows-the-opt-in
+    statement: The catalog-local listener step asserts a live consumer group when the runtime config opts in, and does not when it does not.
+    acceptance:
+      - id: AC1
+        statement: With the opt-in on and no group on the broker, or a group with no member, the step exits 1 with "no live dynamic-contract-listener consumer group"; with the opt-in on and a live group it passes.
+      - id: AC2
+        statement: With the opt-in absent or false and no group on the broker the step passes and names why; the same broker fixture with the opt-in on fails.
+      - id: AC3
+        statement: An opt-in that is not a boolean, a block that is not a mapping, or a runtime config the container cannot read fails the step and is never read as off.
+evidence_requirements:
+  - kind: tests
+    description: The step's own run text executes against a stub broker and a config directory laid out as the kernel container has it.
+    command: uv run --frozen pytest tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q -n 0 --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-listener-step-enabled-ac1
+    description: With the opt-in on the step fails on no group and on a memberless group and passes on a live group, in the recorded real-broker replay as well.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q -n 0 --no-cov -p no:randomly -k "names_the_opt_in or live_group or no_group_owns or no_member or recorded_real_broker"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-listener-step-off-ac2
+    description: With the opt-in absent or false and no group the step passes, and the same fixture with the opt-in on fails (the negative control).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q -n 0 --no-cov -p no:randomly -k "does_not_opt_in or explicit_off_switch or red_once_the_runtime_config_opts_in"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-listener-step-unreadable-ac3
+    description: Each malformed opt-in and a missing runtime config fail the step.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q -n 0 --no-cov -p no:randomly -k "malformed_opt_in or runtime_config_is_unreadable"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

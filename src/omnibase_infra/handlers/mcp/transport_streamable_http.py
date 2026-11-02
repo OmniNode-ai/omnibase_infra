@@ -47,6 +47,7 @@ Usage:
 from __future__ import annotations
 
 import hmac
+import importlib.metadata
 import json
 import logging
 import time
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     import uvicorn
+    from mcp.server.mcpserver import MCPServer
     from starlette.applications import Starlette
     from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -74,6 +76,32 @@ logger = logging.getLogger(__name__)
 
 # Endpoints explicitly exempted from auth (case-insensitive prefix match)
 _AUTH_EXEMPT_PATHS: frozenset[str] = frozenset({"/health"})
+
+
+def _load_mcp_server_class() -> type[MCPServer]:
+    """Import ``MCPServer`` from the installed MCP SDK.
+
+    Reports "not installed" only when the ``mcp`` distribution itself is
+    absent. When ``mcp`` is installed but the module cannot be imported, the
+    error names the installed version and the failing module so an SDK major
+    mismatch is not mistaken for a missing package.
+
+    Raises:
+        ImportError: ``mcp`` is absent, or is installed without the module.
+    """
+    try:
+        from mcp.server.mcpserver import MCPServer
+    except ImportError as e:
+        try:
+            installed = importlib.metadata.version("mcp")
+        except importlib.metadata.PackageNotFoundError:
+            raise ImportError("MCP SDK not installed. Install via: uv add mcp") from e
+        failing = e.name or "mcp.server.mcpserver"
+        raise ImportError(
+            f"MCP SDK {installed} is installed but module '{failing}' could not "
+            f"be imported ({e}). Requires mcp>=2.3.0,<3.0.0."
+        ) from e
+    return MCPServer
 
 
 class MCPAuthMiddleware:
@@ -312,20 +340,12 @@ class TransportMCPStreamableHttp:
             When ``auth_enabled=False``, a WARNING is logged at startup
             and no authentication is enforced. Do not use in production.
         """
-        try:
-            from mcp.server.fastmcp import FastMCP
-        except ImportError as e:
-            raise ImportError("MCP SDK not installed. Install via: uv add mcp") from e
+        mcp_server_class = _load_mcp_server_class()
 
         from starlette.applications import Starlette
         from starlette.routing import Mount
 
-        # Create FastMCP server with streamable HTTP configuration
-        mcp = FastMCP(
-            "ONEX MCP Server",
-            stateless_http=self._config.stateless,
-            json_response=self._config.json_response,
-        )
+        mcp = mcp_server_class("ONEX MCP Server")
 
         # Register tools from the provided definitions
         for tool_def in tools:
@@ -334,7 +354,13 @@ class TransportMCPStreamableHttp:
         # Create Starlette app with MCP server mounted
         self._app = Starlette(
             routes=[
-                Mount(self._config.path, app=mcp.streamable_http_app()),
+                Mount(
+                    self._config.path,
+                    app=mcp.streamable_http_app(
+                        stateless_http=self._config.stateless,
+                        json_response=self._config.json_response,
+                    ),
+                ),
             ],
         )
 
@@ -377,7 +403,7 @@ class TransportMCPStreamableHttp:
 
     def _register_tool(
         self,
-        mcp: object,  # FastMCP type, but using object to avoid import issues
+        mcp: object,  # MCPServer type, but using object to avoid import issues
         tool_def: ProtocolMCPToolDefinition,
         tool_executor: Callable[[str, dict[str, object]], object],
     ) -> None:
@@ -388,31 +414,31 @@ class TransportMCPStreamableHttp:
 
         Note:
             Each tool handler gets a unique function name (onex_tool_{name}) to avoid
-            potential conflicts with FastMCP's internal function registry. While FastMCP
+            potential conflicts with MCPServer's internal function registry. While MCPServer
             uses the explicit `name` parameter for tool identification, having unique
             function names ensures robustness across different MCP SDK versions.
 
         Args:
-            mcp: FastMCP server instance.
+            mcp: MCPServer instance.
             tool_def: Tool definition.
             tool_executor: Callback to execute the tool.
         """
-        from mcp.server.fastmcp import FastMCP
+        mcp_server_class = _load_mcp_server_class()
 
-        if not isinstance(mcp, FastMCP):
+        if not isinstance(mcp, mcp_server_class):
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.MCP,
                 operation="register_tool",
             )
             raise ProtocolConfigurationError(
-                f"Expected FastMCP instance, got {type(mcp).__name__}",
+                f"Expected MCPServer instance, got {type(mcp).__name__}",
                 context=context,
             )
 
         tool_name = tool_def.name
 
         # Create a handler factory that produces uniquely-named functions per tool.
-        # This avoids potential issues where FastMCP might use __name__ internally.
+        # This avoids potential issues where MCPServer might use __name__ internally.
         def _make_tool_handler(name: str) -> Callable[..., object]:
             def handler(**kwargs: object) -> object:
                 """Wrapper that routes to the ONEX tool executor."""
