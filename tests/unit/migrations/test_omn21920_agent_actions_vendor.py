@@ -24,7 +24,7 @@ _CATALOGS = _ROOT / "docker" / "catalog" / "database-topology"
 _CREATE = "0000_create_agent_observability_tables.sql"
 _GRANT = "0001_grant_tenant_projection_writer_agent_observability_tables.sql"
 _SHA256 = {
-    _CREATE: "be9ccf9ed75c746cdb507513b4ea2ebdc27b89da6d230d2fa1aa4432f165111a",
+    _CREATE: "3508d0744a4af64067fd1f6901990d6c09c3ae0482711648634e1aba79d31e89",
     _GRANT: "7056fa7b3aa27974e4866348e9c0f5c936f8635962b859ad3bbe4cec0ae36346",
 }
 # The six tables node_projection_agent_actions writes. The seventh table of the
@@ -87,7 +87,7 @@ def test_vendor_bytes_and_manifest_binding_are_exact(filename: str) -> None:
 
 def test_migration_classes_are_declared() -> None:
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
-    assert classes[f"forward/nodes/{_NODE}/{_CREATE}"] == "expand-only"
+    assert classes[f"forward/nodes/{_NODE}/{_CREATE}"] == "forward-only"
     assert classes[f"forward/nodes/{_NODE}/{_GRANT}"] == "expand-only"
 
 

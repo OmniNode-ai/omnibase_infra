@@ -194,3 +194,66 @@ ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS metadata JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_agent_status_correlation ON public.agent_status_events (correlation_id);
 CREATE INDEX IF NOT EXISTS idx_agent_status_created ON public.agent_status_events (created_at DESC);
+
+-- A table an earlier shape left without its key gets the key CREATE TABLE
+-- declares, so a drifted database ends at the schema a fresh one builds.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.agent_actions'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE public.agent_actions ADD CONSTRAINT agent_actions_pkey PRIMARY KEY (id);
+    END IF;
+END
+$$;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.agent_transformation_events'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE public.agent_transformation_events ADD CONSTRAINT agent_transformation_events_pkey PRIMARY KEY (id);
+    END IF;
+END
+$$;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.router_performance_metrics'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE public.router_performance_metrics ADD CONSTRAINT router_performance_metrics_pkey PRIMARY KEY (id);
+    END IF;
+END
+$$;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.agent_detection_failures'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE public.agent_detection_failures ADD CONSTRAINT agent_detection_failures_pkey PRIMARY KEY (correlation_id);
+    END IF;
+END
+$$;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.agent_execution_logs'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE public.agent_execution_logs ADD CONSTRAINT agent_execution_logs_pkey PRIMARY KEY (execution_id);
+    END IF;
+END
+$$;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.agent_status_events'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE public.agent_status_events ADD CONSTRAINT agent_status_events_pkey PRIMARY KEY (id);
+    END IF;
+END
+$$;
