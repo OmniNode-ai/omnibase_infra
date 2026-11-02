@@ -58,15 +58,20 @@ class TestScopeModels:
             (ModelScopeExtracted, {"plan_file_path": "plan.md"}),
         ],
     )
-    @pytest.mark.parametrize("output_path", [None, ""])
+    @pytest.mark.parametrize("output_path", [None, "", "   ", "\t\n"])
     def test_output_path_is_required(
         self, model: type[BaseModel], fields: dict[str, str], output_path: str | None
     ) -> None:
         """No scope model carries a default manifest location (OMN-21799).
 
         The command producer supplies ``output_path`` and each hop carries it
-        forward; a missing or empty value is refused instead of resolving to a
-        location hard-coded in code.
+        forward; a missing, empty or whitespace-only value is refused instead of
+        resolving to a location hard-coded in code. The missing-value case was
+        already refused by every model before this change (each declared
+        ``Field(...)``); the empty and whitespace-only cases are the new
+        constraint (``min_length=1`` plus a non-whitespace ``pattern``) and fail against the
+        merge-base models. The hard-coded default lived in
+        ``HandlerScopeFileRead.handle``, covered in its own test file.
         """
         kwargs: dict[str, object] = {"correlation_id": uuid4(), **fields}
         if output_path is not None:

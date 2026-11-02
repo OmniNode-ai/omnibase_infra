@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21799
 title: "omnibase_infra contracts_and_di literal_path and literal_model_name burn-down, slice rf1540-c8"
 summary: >-
-  The scope-check workflow models (ModelScopeCheckCommand, ModelScopeFileReadRequest, ModelScopeFileReadResult, ModelScopeExtractInput, ModelScopeExtracted) and HandlerScopeFileRead.handle carried a home-relative manifest location as a code default, six literal_path findings of the contracts_and_di validator. The field is now required and non-empty on every hop: the command producer (node_scope_workflow_orchestrator/bin/scope_check.sh, from SCOPE_MANIFEST_PATH) supplies it and each handler carries it forward. No baseline entry or suppression is added. The repo-wide validator run over src at this head reports no literal_path finding; the evidence below runs that count and fails if one appears.
+  The scope-check workflow models (ModelScopeCheckCommand, ModelScopeFileReadRequest, ModelScopeFileReadResult, ModelScopeExtractInput, ModelScopeExtracted) and HandlerScopeFileRead.handle carried a home-relative manifest location as a code default. The validator, run over the three slice node directories at the merge base, reported exactly one literal_path finding there (the handler default, handler_scope_file_read.py:37); the five models already declared output_path as a required field with no default. The field is now required, non-empty and not whitespace-only on every hop, and the handler default is removed: the command producer (node_scope_workflow_orchestrator/bin/scope_check.sh, from SCOPE_MANIFEST_PATH) supplies it and each handler carries it forward. No baseline entry or suppression is added. The repo-wide validator run over src at this head reports no literal_path finding; the evidence below runs that count and fails if one appears.
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
@@ -20,7 +20,7 @@ requirements:
         statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: the focused scope tests and validator on the lab at the PR head, receipt path in the PR body"
 evidence_requirements:
   - kind: tests
-    description: The scope canary unit tests, including the required-output_path test that fails against the merge-base models.
+    description: The scope canary unit tests, including the required-output_path test, whose empty and whitespace-only cases fail against the merge-base models (the missing-value case was already refused there).
     command: uv run --frozen pytest tests/unit/nodes/test_scope_canary/test_scope_models.py tests/unit/nodes/test_scope_canary/test_scope_workflow_integration.py tests/unit/nodes/test_scope_canary/test_handler_scope_file_read.py tests/unit/nodes/test_scope_canary/test_handler_scope_extract.py tests/unit/nodes/node_scope_extract_compute/test_scope_extract_dispatch_entrypoint_omn14832.py tests/unit/nodes/node_scope_extract_compute/test_node_scope_extract_compute_golden_equivalence.py -q
   - kind: manual
     description: The contracts_and_di validator over the three slice node directories reports no finding.
@@ -46,7 +46,7 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn21799-ac2-output-path-required
-    description: Every scope model refuses a missing or empty output_path and keeps a supplied one; the workflow test carries the command's path to the manifest writer. The required-field tests assert a validation error for a missing output_path, which the pre-change default value did not raise.
+    description: Every scope model refuses a missing, empty or whitespace-only output_path and keeps a supplied one; the workflow test carries the command's path to the manifest writer; the file-read handler test asserts a blank output_path raises. At the merge base the empty and whitespace-only cases are accepted by the models and the handler defaulted a missing value; the missing-value case on the models was already refused there.
     source: manual
     checks:
       - check_type: test_passes

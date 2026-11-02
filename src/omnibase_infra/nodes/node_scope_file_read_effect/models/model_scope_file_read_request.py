@@ -19,6 +19,7 @@ class ModelScopeFileReadRequest(BaseModel):
     output_path: str = Field(
         ...,
         min_length=1,
+        pattern=r"\S",
         description=(
             "Path to write the scope manifest JSON. Required: the command"
             " producer supplies it and every hop carries it forward; code holds"
