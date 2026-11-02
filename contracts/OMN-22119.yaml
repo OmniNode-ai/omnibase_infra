@@ -1,0 +1,27 @@
+# OMN-22119 contract file for omnibase_infra: the factory floor web server answers the operator-only report path to the operator's own devices only.
+schema_version: "1.0.0"
+ticket_id: "OMN-22119"
+title: "The Decision quality report is served only to the operator's own devices and the shared factory floor page no longer carries its tab"
+summary: "docker/factory-floor-web/nginx.conf gates /reports/decision-quality and everything under it behind an include of generated allow lines in /etc/nginx/access followed by deny all, so every address the include does not name (and every address when no include exists) gets HTTP 403. docker/docker-compose.factory-floor-web.yml mounts the access directory read-only from the required FACTORY_FLOOR_ACCESS_DIR. omnimarket's node_factory_floor_publish_effect derives the owner's device addresses from the tailnet status at every publish and writes the include."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22119-operator-gate
+    statement: "The report path answers only the source addresses the generated include names; nobody is admitted while the include is absent."
+    acceptance:
+      - id: AC5
+        statement: "AC5: the access check passed: from h051 or another non-operator device the report path answers HTTP 403 and the page has no quality tab, and from the operator's Mac the report path answers HTTP 200 -- falsifier: curl -s -o /dev/null -w '%{http_code}' on the report path from h051 (expect 403) and from the operator's Mac (expect 200), with both outputs in the PR body"
+evidence_requirements:
+  - kind: tests
+    description: "A running nginx of the pinned image refuses the report path to an address the include does not name, refuses everyone while no include exists, and admits exactly the address the include names."
+    command: "uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov -k gate"
+dod_evidence:
+  - id: dod-001
+    description: "The running server answers 403 on the report path to an address the include does not name and to everyone while no include exists, and 200 to the named address."
+    source: generated
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov -k gate"
+        cwd: ${OMNI_HOME}/omnibase_infra
