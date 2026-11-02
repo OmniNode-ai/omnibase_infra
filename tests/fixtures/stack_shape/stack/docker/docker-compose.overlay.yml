@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+services:
+  omninode-runtime:
+    environment:
+      LANE: fixture
+  overlay-image:
+    image: example/runtime:tag

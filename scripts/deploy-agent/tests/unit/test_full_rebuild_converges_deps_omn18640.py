@@ -38,9 +38,9 @@ What these tests pin, in the terms of the defect:
    asserted over EVERY captured command, not just the one this module expects
    to be the deps leg, so a new call site cannot reintroduce the churn behind a
    test that only ever looks at one index.
-4. The runtime leg is UNCHANGED: still ``--force-recreate``, still
-   ``--no-deps``. Convergence is right for a dependency and wrong for a service
-   whose image this deploy just rebuilt.
+4. The runtime leg keeps ``--no-deps`` and, since OMN-22006, carries no
+   ``--force-recreate``: a service whose image this deploy just rebuilt is
+   recreated by the rolling pass (``runtime_rolling``), one at a time.
 5. A direct ``scope=core`` command still force-recreates. That one IS a request
    to act on the deps, and the fix is deliberately scoped to the side effect.
 6. The deps argv now agrees with ``converge_deps``' own recovery argv, which
@@ -205,12 +205,10 @@ class TestTheDepsLegOfAFullRebuild:
         )
 
 
-class TestTheRuntimeLegIsUnchanged:
-    """Convergence is right for a dependency and wrong for a rebuilt image."""
+class TestTheRuntimeLegConverges:
+    """The runtime leg converges; the rolling pass replaces what changed."""
 
-    def test_the_runtime_leg_still_force_recreates_and_still_passes_no_deps(
-        self,
-    ) -> None:
+    def test_the_runtime_leg_converges_and_still_passes_no_deps(self) -> None:
         runtime_legs = [
             cmd
             for cmd in _capture_full_rebuild(EnumRuntimeLane.DEV)
@@ -218,10 +216,10 @@ class TestTheRuntimeLegIsUnchanged:
         ]
         assert runtime_legs, "expected at least one runtime-profile compose up"
         family = runtime_legs[-1]
-        assert "--force-recreate" in family, (
-            "the runtime family's images were just rebuilt under the same tag, "
-            "so convergence would re-adopt the stale containers -- this leg "
-            f"must keep forcing: {family}"
+        assert "--force-recreate" not in family, (
+            "OMN-22006: a service whose config hash or image id moved is "
+            "recreated one at a time before this leg; the leg itself must not "
+            f"force every runtime at once: {family}"
         )
         assert "--no-deps" in family, (
             f"OMN-9455: the runtime leg must never walk depends_on: {family}"

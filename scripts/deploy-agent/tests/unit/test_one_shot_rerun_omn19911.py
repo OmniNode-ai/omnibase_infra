@@ -189,7 +189,8 @@ def test_one_shot_rerun_finishes_before_the_runtime_services_start() -> None:
         executor._compose_up(Phase.RUNTIME, Scope.RUNTIME, [], _noop)
 
     started = [c[-1] if c[-1] == ONESHOT else "runtime" for c in lane.up_commands()]
-    assert started == [ONESHOT, "runtime"]
+    assert started[0] == ONESHOT
+    assert set(started[1:]) == {"runtime"}
 
 
 def test_one_shot_job_record_lists_each_rerun_with_its_exit_code() -> None:
