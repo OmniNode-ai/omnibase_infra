@@ -229,7 +229,7 @@ dod_evidence:
     binds_ac:
       - AC34
   - id: dod-omn21623-ac35-path-behavior
-    description: 'Hosted post-deploy smoke: imports the two path resolvers and asserts returned paths for bare tilde, nested home paths, absolute paths, relative paths, missing references, repository precedence and registry resolution. Runs without containers or external services.'
+    description: 'Local behavioral tests, runnable on hosted CI: import the two path resolvers and assert returned paths for bare tilde, nested home paths, absolute paths, relative paths, missing references, repository precedence and registry resolution. These unit tests run against the source checkout without a deployed artifact, containers or external services.'
     source: manual
     execution_scope: hosted_and_local
     checks:
