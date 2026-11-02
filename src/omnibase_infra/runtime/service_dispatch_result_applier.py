@@ -358,12 +358,8 @@ class DispatchResultApplier:
         Returns:
             The resolved topic string.
         """
-        embedded_topic = self._resolve_embedded_output_topic(event)
-        resolved = (
-            embedded_topic
-            if embedded_topic is not None
-            else self._resolve_mapped_output_topic(event)
-        )
+        embedded = self._resolve_embedded_output_topic(event)
+        resolved = embedded or self._resolve_mapped_output_topic(event)
         return apply_failure_terminal_guard(
             event,
             resolved,
@@ -1000,7 +996,9 @@ def build_contract_result_applier(
         output_topic_map=derived_map,
         output_event_handler=output_event_handler,
         allowed_output_topics=(
-            topics if allowed_output_topics is None else allowed_output_topics
+            (*topics, *ModelPrincipalTopic.declared_in(contract_path))
+            if allowed_output_topics is None
+            else allowed_output_topics
         ),
         failure_terminal_topics=declared_failure_terminal_topics(
             contract_path,

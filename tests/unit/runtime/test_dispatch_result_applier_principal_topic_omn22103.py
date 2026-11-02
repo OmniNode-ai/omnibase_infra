@@ -10,6 +10,7 @@ template with a well-formed principal in the slot.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.service_dispatch_result_applier import (
     DispatchResultApplier,
+    build_contract_result_applier,
 )
 
 pytestmark = pytest.mark.unit
@@ -87,3 +89,56 @@ async def test_a_topic_outside_the_declared_template_falls_back_to_the_contract_
     refused: str,
 ) -> None:
     assert await published_topic(refused) == TERMINAL
+
+
+CONTRACT_PARTS = """\
+published_events:
+  - event_type: Prepared
+    topic_parts:
+      kind: evt
+      producer: omnimarket
+      name_prefix: context-compaction-prepared-for-
+      version: 1
+      principal_pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+"""
+
+
+async def contract_published_topic(contract: Path, emitted_topic: str) -> str:
+    bus = AsyncMock(spec=ProtocolEventBusLike)
+    contract.write_text(CONTRACT_PARTS)
+    built = build_contract_result_applier(
+        event_bus=bus,
+        contract_path=contract,
+        publish_topics=[TERMINAL],
+        terminal_event=TERMINAL,
+    )
+    await built.apply(
+        ModelDispatchResult(
+            dispatch_id=uuid4(),
+            status="success",
+            topic="onex.cmd.omniintelligence.context-compaction-requested.v1",
+            started_at="2026-01-01T00:00:00Z",
+            output_events=[
+                ModelEventEnvelope(
+                    payload=Reply(), correlation_id=uuid4(), event_type=emitted_topic
+                )
+            ],
+        )
+    )
+    return str(bus.publish_envelope.call_args.kwargs["topic"])
+
+
+@pytest.mark.asyncio
+async def test_a_topic_declared_in_parts_admits_its_principal_topics(
+    tmp_path: Path,
+) -> None:
+    """A contract declares the slot topic in parts, since the lint refuses a slot in a full name."""
+    assert await contract_published_topic(tmp_path / "contract.yaml", ALICE) == ALICE
+
+
+@pytest.mark.asyncio
+async def test_a_topic_declared_in_parts_does_not_admit_another_family(
+    tmp_path: Path,
+) -> None:
+    other = ALICE.replace("prepared", "other")
+    assert await contract_published_topic(tmp_path / "contract.yaml", other) == TERMINAL

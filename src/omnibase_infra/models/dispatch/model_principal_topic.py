@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from pathlib import Path
 
+import yaml
 from pydantic import BaseModel, ConfigDict
 
 SLOT = "{principal}"
@@ -45,3 +47,31 @@ class ModelPrincipalTopic(BaseModel):
         if SLOT not in candidate and candidate in topics:
             return True
         return any(ModelPrincipalTopic(template=t).matches(candidate) for t in topics)
+
+    @staticmethod
+    def declared_in(contract_path: Path) -> tuple[str, ...]:
+        """The templates a contract declares in parts under ``published_events``.
+
+        A ``{principal}`` slot inside a full topic string fails the topic-name lint, so a
+        contract states such a topic as ``topic_parts`` (kind, producer, name_prefix,
+        version, principal_pattern), which render to
+        ``onex.<kind>.<producer>.<name_prefix>{principal}.v<version>``. A row whose
+        principal pattern is not the one this runtime applies is refused, not skipped:
+        a skipped row would send every answer to the contract's terminal topic.
+        """
+        contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        rows = (contract or {}).get("published_events") or []
+        templates: list[str] = []
+        for row in rows:
+            parts = row.get("topic_parts") if isinstance(row, dict) else None
+            if not isinstance(parts, dict):
+                continue
+            pattern = str(parts.get("principal_pattern", "")).removeprefix("^")
+            if pattern.removesuffix("$") != PRINCIPAL_PATTERN:
+                msg = f"{contract_path}: {row.get('event_type')} declares a principal pattern other than {PRINCIPAL_PATTERN}"
+                raise ValueError(msg)
+            templates.append(
+                f"onex.{parts['kind']}.{parts['producer']}.{parts['name_prefix']}"
+                f"{SLOT}.v{parts['version']}"
+            )
+        return tuple(templates)
