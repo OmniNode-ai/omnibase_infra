@@ -18,6 +18,7 @@ from omnibase_infra.handlers.handler_lane_entry_point_census import (
 )
 from omnibase_infra.models.lane_entry_point_census import (
     ModelLaneEntryPointCensusRequest,
+    ModelLaneEntryPointCensusResult,
 )
 
 pytestmark = pytest.mark.unit
@@ -30,7 +31,7 @@ PLANTED = "proj-a-ctx-consumer"
 WRITER = "proj-a-delegation-writer"
 
 
-def _run(policy: Path = POLICY, **extra: str):
+def _run(policy: Path = POLICY, **extra: str) -> ModelLaneEntryPointCensusResult:
     request = ModelLaneEntryPointCensusRequest(
         policy_path=str(policy), inspect_json_path=str(FIXTURE), **extra
     )

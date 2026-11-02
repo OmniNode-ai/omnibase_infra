@@ -24,7 +24,10 @@ HANDLER_WRITERS = {
 
 
 def _containers() -> list[dict[str, str]]:
-    return json.loads(RECORDED.read_text(encoding="utf-8"))["containers"]
+    containers: list[dict[str, str]] = json.loads(RECORDED.read_text(encoding="utf-8"))[
+        "containers"
+    ]
+    return containers
 
 
 def test_dev_lane_runs_sixteen_runtime_image_containers_four_on_onex_runtime() -> None:
