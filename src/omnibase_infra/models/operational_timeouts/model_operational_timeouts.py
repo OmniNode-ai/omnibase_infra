@@ -37,11 +37,14 @@ class ModelOperationalTimeouts(BaseModel):
         consumer_restart_initial_backoff_seconds: First backoff of a restart.
         consumer_restart_max_backoff_seconds: Ceiling of the restart backoff.
         consumer_restart_backoff_factor: Growth factor of the restart backoff.
+        consumer_restart_stable_threshold_seconds: Run length that resets backoff.
         kafka_admin_seconds: Wait of one Kafka admin call or future.
         kafka_watermark_seconds: Wait of one watermark offset query.
         dev_lane_ledger_seconds: Wait of a dev-lane ledger append.
         dev_lane_docker_seconds: Wait of one dev-lane docker call.
         dev_lane_restart_seconds: Wait of a dev-lane container restart.
+        dev_lane_restart_wait_seconds: Wait for a restarted container to settle.
+        dev_lane_restart_poll_seconds: Poll period while a restart settles.
         done_write_verify_seconds: Wait of one done-write verifier run.
         kill_wait_seconds: Wait for a killed verifier to exit.
         tool_execution_seconds: Wait of one tool execution orchestrator call.
@@ -61,11 +64,14 @@ class ModelOperationalTimeouts(BaseModel):
     consumer_restart_initial_backoff_seconds: float = Field(gt=0)
     consumer_restart_max_backoff_seconds: float = Field(gt=0)
     consumer_restart_backoff_factor: float = Field(ge=1)
+    consumer_restart_stable_threshold_seconds: float = Field(gt=0)
     kafka_admin_seconds: float = Field(gt=0)
     kafka_watermark_seconds: float = Field(gt=0)
     dev_lane_ledger_seconds: float = Field(gt=0)
     dev_lane_docker_seconds: float = Field(gt=0)
     dev_lane_restart_seconds: float = Field(gt=0)
+    dev_lane_restart_wait_seconds: float = Field(gt=0)
+    dev_lane_restart_poll_seconds: float = Field(gt=0)
     done_write_verify_seconds: float = Field(gt=0)
     kill_wait_seconds: float = Field(gt=0)
     tool_execution_seconds: float = Field(gt=0)

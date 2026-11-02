@@ -148,8 +148,8 @@ CONTENT_DIRNAME = "content"
 
 DOCKER_TIMEOUT_SECONDS = TIMEOUTS.dev_lane_docker_seconds
 RESTART_TIMEOUT_SECONDS = TIMEOUTS.dev_lane_restart_seconds
-RESTART_WAIT_SECONDS = 240.0
-RESTART_POLL_SECONDS = 3.0
+RESTART_WAIT_SECONDS = TIMEOUTS.dev_lane_restart_wait_seconds
+RESTART_POLL_SECONDS = TIMEOUTS.dev_lane_restart_poll_seconds
 
 EXIT_OK = 0
 EXIT_REFUSED = 3

@@ -29,17 +29,22 @@ timeouts:
   consumer_restart_initial_backoff_seconds: 1.0
   consumer_restart_max_backoff_seconds: 60.0
   consumer_restart_backoff_factor: 2.0
+  # A run longer than this resets the restart backoff to its initial value.
+  consumer_restart_stable_threshold_seconds: 60.0
   # Demo reset CLI: wait of one Kafka admin request, one admin future, one
   # metadata listing, and one watermark query.
-  kafka_admin_seconds: 10
-  kafka_watermark_seconds: 5
+  kafka_admin_seconds: 10.0
+  kafka_watermark_seconds: 5.0
   # Dev-lane handlers: ledger append, one docker call, a container restart.
-  dev_lane_ledger_seconds: 330
+  dev_lane_ledger_seconds: 330.0
   dev_lane_docker_seconds: 60.0
   dev_lane_restart_seconds: 240.0
+  # Dev-lane container restart: whole wait for it to settle, and poll period.
+  dev_lane_restart_wait_seconds: 240.0
+  dev_lane_restart_poll_seconds: 3.0
   # Done-write receipt guard: whole verifier run, and the wait for a killed
   # verifier process to exit.
   done_write_verify_seconds: 300.0
-  kill_wait_seconds: 5
+  kill_wait_seconds: 5.0
   # Tool execution adapter: wait of one orchestrator call.
   tool_execution_seconds: 30.0

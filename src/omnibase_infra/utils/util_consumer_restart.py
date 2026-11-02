@@ -109,7 +109,7 @@ async def run_with_restart(
     initial_backoff_s: float = TIMEOUTS.consumer_restart_initial_backoff_seconds,
     max_backoff_s: float = TIMEOUTS.consumer_restart_max_backoff_seconds,
     backoff_factor: float = TIMEOUTS.consumer_restart_backoff_factor,
-    stable_threshold_s: float = 60.0,
+    stable_threshold_s: float = TIMEOUTS.consumer_restart_stable_threshold_seconds,
 ) -> None:
     """Run a coroutine in a restart loop with exponential backoff.
 
