@@ -49,6 +49,7 @@ TEST_NOW = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
 # Distinct from TEST_NOW so a handler reading the event time instead of the
 # injected clock is detected.
 EVENT_TIMESTAMP = datetime(2025, 6, 15, 11, 0, 0, tzinfo=UTC)
+assert TEST_NOW != EVENT_TIMESTAMP, "clock and event timestamp must stay distinct"
 
 
 # =============================================================================
@@ -156,7 +157,6 @@ class TestRegistrationHandlerInterface:
         assert output.correlation_id == correlation_id
         # Verify the injected clock reading and input id reach the output
         assert output.timestamp == TEST_NOW
-        assert output.timestamp != EVENT_TIMESTAMP
         assert output.input_envelope_id == input_id
 
 
