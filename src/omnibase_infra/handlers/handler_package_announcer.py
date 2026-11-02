@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import importlib.util
+import importlib.resources
 import inspect
 import logging
 from collections.abc import Callable, Iterable
@@ -194,13 +194,12 @@ def load_boot_runtime_config(
 ) -> ModelBootRuntimeConfig:
     """Read and validate the boot bounds from the announce contract or an overlay."""
     if contract_path is None:
-        spec = importlib.util.find_spec(
-            "omnibase_infra.nodes.node_package_announce_effect"
-        )
-        if spec is None or not spec.submodule_search_locations:
-            raise FileNotFoundError("node_package_announce_effect package not found")
-        contract_path = (
-            Path(next(iter(spec.submodule_search_locations))) / "contract.yaml"
+        contract_path = Path(
+            str(
+                importlib.resources.files("omnibase_infra").joinpath(
+                    "nodes", "node_package_announce_effect", "contract.yaml"
+                )
+            )
         )
     path = contract_path
     raw = read_contract_yaml(path)
