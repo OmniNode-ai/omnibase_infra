@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22130
+title: HandlerMCP takes only its container, and its server timeouts come from the handler contract, not from literals
+summary: The handler-di-gate check reported 6 findings in src/omnibase_infra/handlers/handler_mcp.py, all admitted by .onex_ratchets/handler_di_baseline.txt. This change makes the constructor (self, container) with the container required, removes the unused registry and executor parameters (the server lifecycle sets both during initialize), and moves the shutdown, cancel and startup timeouts into metadata.transport of the MCP handler contract, which reaches the handler through extract_handler_config and initialize(config). The baseline line for the file is deleted and the check reports zero findings for it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22130-handler-mcp-di
+    statement: HandlerMCP is built from the injected container alone and reads its server timeouts from the handler contract through initialize(config); handler_mcp.py has no entry in the handler DI baseline.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: handler-di-gate reports zero findings for handler_mcp.py with its baseline line deleted, and the whole-tree run exits 0 -- falsifier: uv run pre-commit run handler-di-gate --all-files'
+      - id: AC2
+        statement: 'AC2: the constructor takes exactly a required container, the timeouts come from the contract, and the server start and stop path passes with the in-memory and the Redpanda-overlay binding -- falsifier: uv run --frozen pytest tests/unit/handlers/test_handler_mcp_di_omn22130.py -q'
+      - id: AC3
+        statement: 'AC3: the existing MCP handler and contract-config tests keep passing -- falsifier: uv run --frozen pytest tests/unit/handlers/test_handler_mcp.py tests/unit/runtime/test_handler_bootstrap_source.py tests/integration/handlers/test_mcp_handler_integration.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The DI test fails at the merge base and passes at the head; the existing MCP tests pass at the head.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_mcp_di_omn22130.py tests/unit/handlers/test_handler_mcp.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22130-ac1-gate-clean
+    description: The handler-di-gate hook passes over the whole tree with the handler_mcp.py baseline line deleted.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pre-commit run handler-di-gate --all-files"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22130-ac2-di-two-profile
+    description: The constructor signature, the contract-declared timeouts and the two-profile server start and stop. Fails at the merge base, where the constructor takes three optional parameters and the timeouts are module literals.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/handlers/test_handler_mcp_di_omn22130.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn22130-ac3-existing-tests
+    description: The existing MCP handler, bootstrap source and MCP integration tests pass at the head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/handlers/test_handler_mcp.py tests/unit/runtime/test_handler_bootstrap_source.py tests/integration/handlers/test_mcp_handler_integration.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

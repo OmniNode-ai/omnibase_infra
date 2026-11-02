@@ -50,6 +50,9 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from omnibase_infra.enums.enum_contract_transport_key import (
+    EnumContractTransportKey,
+)
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -561,20 +564,9 @@ def extract_handler_config(
         # Transport configuration
         transport = metadata.get("transport", {})
         if isinstance(transport, dict):
-            if "default_host" in transport:
-                config["host"] = transport["default_host"]
-
-            if "default_port" in transport:
-                config["port"] = transport["default_port"]
-
-            if "default_path" in transport:
-                config["path"] = transport["default_path"]
-
-            if "stateless" in transport:
-                config["stateless"] = transport["stateless"]
-
-            if "json_response" in transport:
-                config["json_response"] = transport["json_response"]
+            for key in EnumContractTransportKey:
+                if key.value in transport:
+                    config[key.config_key] = transport[key.value]
 
         # Security configuration (rich contracts - in metadata.security)
         metadata_security = metadata.get("security", {})
