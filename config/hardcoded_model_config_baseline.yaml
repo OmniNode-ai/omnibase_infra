@@ -2330,9 +2330,6 @@ entries:
   - path: scripts/validation/validate_precommit_fail_loud.py
     family: F
     content_sha1: dda2717507560049d66c1093afa4949c63d962e0
-  - path: scripts/validation/validate_precommit_interpreter.py
-    family: F
-    content_sha1: dda2717507560049d66c1093afa4949c63d962e0
   - path: scripts/validation/validate_precommit_pin_parity.py
     family: F
     content_sha1: dda2717507560049d66c1093afa4949c63d962e0

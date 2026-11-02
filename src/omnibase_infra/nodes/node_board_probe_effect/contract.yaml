@@ -33,6 +33,10 @@ node_version:
   minor: 1
   patch: 0
 node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on
+# it. The handler descriptor model defaults the rest.
+descriptor:
+  node_archetype: effect
 description: >
   Effect node that runs board checks against a lab or CI surface and returns one typed result per check: the check id, its surface class, the subject, PASS, FAIL or INDETERMINATE, and every reason. Consumer flow publishes one marked malformed trigger to prove the validation seam is live; its local negative controls restore the mutated source byte for byte.
 
@@ -56,7 +60,14 @@ board_checks:
 # These are observed through the projection API and broker probe; this node
 # does not subscribe to or publish on these topics.
 consumer_flow_topics:
-  audit_projection: "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+  # The audit-purpose consumer C28 grades is node_ledger_projection_compute on
+  # the node heartbeat; the gateway heartbeat has no producer on a lab lane with
+  # its gateway phase off (#5485, OMN-21916). The two kinds now read one topic, so
+  # a heartbeat outage reddens both; the kinds stay separate subscriptions, each
+  # needing its own consumer-group row with an advancing window and its own
+  # counter (messages_in, messages_out). The second topic the audit kind used to
+  # cover is given up, because on this lane it carried no flow at all.
+  audit_projection: "onex.evt.platform.node-heartbeat.v1"
   publishing_reducer: "onex.evt.platform.node-heartbeat.v1"
   applied: "onex.evt.omnimarket.projection-consumer-flow-applied.v1"
   exposure: "onex.snapshot.projection.consumer-flow.v1"

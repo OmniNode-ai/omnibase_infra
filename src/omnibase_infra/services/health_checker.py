@@ -474,17 +474,14 @@ class ServiceHealth:
     def attach_manifest(self, manifest: ModelAutoWiringManifest) -> None:
         """Attach the auto-wiring manifest for the introspection endpoint (OMN-11198).
 
-        Also builds the ASGI apps its contracts declare under ``http_mount``
-        (OMN-21288) and starts their lifespans in the background. A declaration
-        or factory that cannot be served raises here, failing boot; a lifespan
-        that does not start turns every request into a 503.
+        Also mounts the contracts' ``http_mount`` apps (OMN-21288); the kernel
+        attaches before wiring, and a later call mounts nothing again.
         """
         self._manifest = manifest
-        if self._app is not None and self._http_mounts.prepare(
-            manifest.contracts, self._app.router
-        ):
-            self._mount_task = asyncio.get_running_loop().create_task(
-                self._http_mounts.start()
+        if self._app is not None:
+            self._mount_task = (
+                self._http_mounts.attach(manifest.contracts, self._app.router)
+                or self._mount_task
             )
         logger.info(
             "ServiceHealth attached manifest (%d contracts)",

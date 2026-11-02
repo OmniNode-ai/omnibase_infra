@@ -43,7 +43,12 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-GATE = REPO_ROOT / "scripts" / "validation" / "check_exposed_identifiers.py"
+GATE_CMD = (
+    sys.executable,
+    "-m",
+    "omnibase_core.nodes.node_exposed_identifiers_check_compute."
+    "runtime_exposed_identifiers_check",
+)
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "omn17320"
 ARTIFACT = FIXTURE_DIR / "migration-supersessions.tsv.captured"
 REPLAY_DENYLIST = FIXTURE_DIR / "replay-denylist.json"
@@ -62,8 +67,7 @@ pytestmark = pytest.mark.unit
 def _run(denylist: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
-            sys.executable,
-            str(GATE),
+            *GATE_CMD,
             "--denylist",
             str(denylist),
             "--root",
@@ -115,7 +119,15 @@ def test_the_shipped_denylist_does_not_fire_on_this_artifact() -> None:
 def test_the_artifact_carries_no_real_denylisted_identifier() -> None:
     """The fixture itself must satisfy the rule the guard enforces."""
     result = subprocess.run(
-        [sys.executable, str(GATE), "--mode", "blocking", "--scope", "all"],
+        [
+            *GATE_CMD,
+            "--denylist",
+            str(SHIPPED_DENYLIST),
+            "--mode",
+            "blocking",
+            "--scope",
+            "all",
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

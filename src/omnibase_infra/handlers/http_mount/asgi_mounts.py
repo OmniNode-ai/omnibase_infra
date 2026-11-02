@@ -101,6 +101,7 @@ class AsgiMounts:
     def __init__(self) -> None:
         self._mounts: list[tuple[ModelHttpMount, _AsgiApp, LifespanDriver]] = []
         self._started = False
+        self._attached = False
         self.failure = ""
         """Why the mounts failed to start; empty while none has failed."""
 
@@ -188,6 +189,23 @@ class AsgiMounts:
         ]
         return bool(declared)
 
+    def attach(
+        self, contracts: Iterable[ModelDiscoveredContract], router: web.UrlDispatcher
+    ) -> asyncio.Task[None] | None:
+        """`prepare` once, then start the lifespans in a background task.
+
+        Returns:
+            The start task; None when no mount is declared or when the mounts
+            were already attached.
+        """
+        if self._attached:
+            return None
+        declared = self.prepare(contracts, router)
+        self._attached = True
+        return (
+            asyncio.get_running_loop().create_task(self.start()) if declared else None
+        )
+
     async def start(self) -> None:
         """Run every prepared mount's lifespan startup, or none.
 
@@ -213,6 +231,7 @@ class AsgiMounts:
     async def stop(self) -> None:
         """Shut down every started mount, last first."""
         self._started = False
+        self._attached = False
         while self._mounts:
             _, _, lifespan = self._mounts.pop()
             await lifespan.shutdown()
