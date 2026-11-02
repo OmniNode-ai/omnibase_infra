@@ -41,6 +41,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "resolves_to_the_core_repository or not_defined_locally or executes_exactly_the_wired_hook_ids or runs_the_hooks_of_the_core_block"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
   - id: dod-omn21538-ac2-planted-defects-refused
@@ -50,6 +51,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "positive_control or unconditional_and_hosted or fails_on_the_first_failing_command"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
   - id: dod-omn21538-ac3-baselines-name-no-finding-file
@@ -59,6 +61,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "baselines_name_no_finding_file or baselines_are_per_file or reads_its_baseline"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
   - id: dod-omn21538-ac4-baselines-to-burn-down
@@ -68,6 +71,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "names_its_zero_date or baselines_are_per_file or reads_its_baseline"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
   - id: dod-omn21538-ac5-tag-has-one-home
@@ -77,6 +81,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "tag_has_one_home"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
   - id: dod-omn21538-ac6-lab-proof-tests-no-home-path
@@ -86,5 +91,6 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_core_validators_wired_omn21538.py -q -n 0 --no-cov -k "home_directory"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
