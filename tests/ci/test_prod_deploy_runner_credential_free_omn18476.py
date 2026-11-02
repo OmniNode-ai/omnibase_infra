@@ -44,6 +44,7 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.ci._runner_compose_text import read_runner_compose
 from tests.ci.test_customer_plane_runner_credential_free_omn18392 import (
     DOCKER_SOCKET,
     LAB_CREDENTIALS_TARGET,
@@ -63,7 +64,7 @@ CLASS_LABEL = "omnibase-prod-deploy"
 
 
 def _compose() -> dict[str, Any]:
-    loaded = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+    loaded = yaml.safe_load(read_runner_compose(COMPOSE_FILE))
     assert isinstance(loaded, dict)
     return loaded
 
