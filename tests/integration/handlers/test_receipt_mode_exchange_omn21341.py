@@ -111,7 +111,12 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
         try:
             # The invocation matches deliberately: replaying this record would
             # finish the handler with deny before the new command's response.
-            await responder.publish(
+            # Only Kafka keeps a log a late reader could start from (both buses
+            # here are configured to read from the earliest offset), so the
+            # Kafka variant is what falsifies the latest-offset behavior; the
+            # in-memory bus never replays to a new subscriber. The receipt
+            # proves the record was produced before the handler subscribed.
+            stale_receipt = await responder.publish(
                 reply_topic,
                 key=None,
                 value=json.dumps(
@@ -121,6 +126,8 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
                     }
                 ).encode(),
             )
+            assert stale_receipt.topic.endswith(reply_topic)
+            assert stale_receipt.offset >= 0
             unsubscribe = await responder.subscribe(
                 command_topic,
                 group_id=f"receipt-responder.{suffix}",
@@ -148,10 +155,19 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
                 assert commands[0].event_type == "receipt-mode.requested"
                 assert commands[0].payload == {"invocation_id": invocation_id}
                 assert len(active_client_groups) == 1
-                assert all(
-                    topic != reply_topic or group.startswith("ungrouped.")
+                reply_groups = {
+                    group
                     for topic, group in active_client_groups[0]
-                )
+                    if topic == reply_topic
+                }
+                if transport == "inmemory":
+                    # The in-memory bus lists its private ungrouped subscription,
+                    # so the reply subscription must exist while the command runs.
+                    assert len(reply_groups) == 1
+                    assert all(group.startswith("ungrouped.") for group in reply_groups)
+                else:
+                    # Kafka's ungrouped reader holds no group, so none is listed.
+                    assert reply_groups == set()
                 health = await client_bus.health_check()
                 assert health["started"] is False
                 assert not client_bus.get_consumer_groups()
