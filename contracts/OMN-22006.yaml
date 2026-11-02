@@ -1,0 +1,69 @@
+schema_version: 1.0.0
+ticket_id: OMN-22006
+title: the dev runtime phase recreates only the services whose config hash or image moved, one at a time
+summary: >-
+  Lane dev-redeploy-ready-1102. Dev deploy job acd585d0 (2026-11-02, accepted 10:27:13Z, success 10:50:13Z) recreated all 19 application containers of compose project omnibase-infra at about 10:45Z and /ready on 8085 and 8086 read 000 or 503 for 3.5 minutes. The job record carries verify_recreate [] and oneshot_reruns [], so the recreate was the runtime phase's own up. Cause: DeployExecutor._compose_up took force_recreate=True and the runtime phase of rebuild_scope never passed anything else, so every runtime up carried --force-recreate. The runtime phase now runs one up per service, in the service list's order, without --force-recreate and each verified running before the next is touched, so compose recreates a service only when its config hash or image id moved and no two runtimes are stopped together. The auto-rollback restore (build=False) keeps its single forced up. The canonical-file-shape ratchet refuses a new module under scripts/deploy-agent and any growth of executor.py, so the change is paid for by folding thirteen repeated compose argv prefixes into one helper. AC4 (the live /ready poll through one deploy-agent job) is not claimed here: it needs a lab deploy and is recorded in the pull request.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22006-no-force-recreate
+    statement: The runtime phase of a deploy issues no --force-recreate for a service whose container carries the config hash compose renders now and the image id its image reference points at now.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the all-19 recreate of job acd585d0 is reproduced from its project state (the job record's verify_recreate and oneshot_reruns are empty, so the phase's own up is the cause) and the runtime phase issues no --force-recreate over it -- falsifier: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_phase_recreate -q -p no:cacheprovider (fails on the parent commit)"
+      - id: AC2
+        statement: "AC2: a runtime-phase run over a compose project in which a container's image and config digest are unchanged issues no recreate for that container -- falsifier: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_phase_unchanged_not_recreated -q -p no:cacheprovider (fails on the parent commit)"
+  - id: req-omn22006-rolling-recreate
+    statement: A service that must be recreated is recreated alone, with compose waiting for its healthcheck, before the next is touched, and a failed one ends the roll.
+    acceptance:
+      - id: AC3
+        statement: "AC3: where a runtime must be recreated, the phase recreates runtimes one at a time and waits for each replacement before the next, and a test asserts that no two runtimes are stopped at once -- falsifier: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_phase_rolling -q -p no:cacheprovider (fails on the parent commit)"
+evidence_requirements:
+  - kind: tests
+    description: The runtime-phase recreate tests of the deploy agent.
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22006-ac1-runtime-phase-recreate
+    description: >-
+      The real _compose_up runs over the 19-service project state of job acd585d0 (fixture runtime_phase_job_acd585d0_omn22006.json: the job record read from the deploy agent and the 19 services named in the ticket, with equal running and rendered hashes) and issues no --force-recreate and recreates nothing. On the parent commit the same run issues the flag over the whole service list. The fixture's hashes are synthetic; the dev host's own container labels were not read.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_phase_recreate -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22006-ac2-unchanged-not-recreated
+    description: >-
+      A container whose config hash and image id both match is left alone; one whose rendered hash moved is recreated alone; a service with no container or a stopped one is left to the converging up; the same tag rebuilt (equal hash, new image id) is recreated.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_phase_unchanged_not_recreated -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22006-ac3-runtime-phase-rolling
+    description: >-
+      With 19 services needing a recreate, the phase runs one up per service and confirms it running before the next, and a fake lane that fails an assertion when a second service is recreated while one is down never trips. A failed replacement leaves the services after it untouched.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_phase_rolling -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22006-deploy-source
+    description: >-
+      Deploy probe. GitHub serves the checked-out commit with the executor's per-service runtime up. The read fails on a tree without it, including origin/dev. This proves source identity only, not a running deployment or AC4.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c "rolling = build and bool(requested_services)"'
