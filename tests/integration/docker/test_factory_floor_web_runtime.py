@@ -118,15 +118,11 @@ def test_factory_floor_web_runtime() -> None:
         document = json.loads(require([*command, "config", "--format", "json"], env))
         service = document["services"][SERVICE]
         assert re.fullmatch(r"nginx:1\.29-alpine@sha256:[0-9a-f]{64}", service["image"])
-        assert service["ports"] == [
-            {
-                "mode": "ingress",
-                "host_ip": "127.0.0.1",
-                "target": 8080,
-                "published": "0",
-                "protocol": "tcp",
-            }
-        ], service["ports"]
+        # Compose versions differ in the type of `published` and in whether they emit `mode`.
+        assert [
+            (port["host_ip"], port["target"], str(port["published"]))
+            for port in service["ports"]
+        ] == [("127.0.0.1", 8080, "0")], service["ports"]
         override = Path(temporary_override) / "probe-compose.json"
         override.write_text(
             json.dumps(
@@ -166,33 +162,38 @@ def test_factory_floor_web_runtime() -> None:
             assert binding["HostIp"] == "127.0.0.1", bindings
             LOGGER.info("PASS: isolated container %s ports=%s", container, bindings)
             opener = build_opener(ProxyHandler({}))
+            # (path, GET status, POST status, policy, expected body). The dot-file rule answers 404 to every
+            # method; elsewhere limit_except refuses POST with 403.
             cases = [
-                ("/", 200, DEFAULT_POLICY, content["index.html"]),
+                ("/", 200, 403, DEFAULT_POLICY, content["index.html"]),
                 (
                     "/factory-floor.json",
                     200,
+                    403,
                     DEFAULT_POLICY,
                     content["factory-floor.json"],
                 ),
-                ("/reports/", 200, DEFAULT_POLICY, content["reports/index.html"]),
+                ("/reports/", 200, 403, DEFAULT_POLICY, content["reports/index.html"]),
                 (
                     "/reports/decision-map/",
                     200,
+                    403,
                     SCOPED_POLICY,
                     content["reports/decision-map/index.html"],
                 ),
                 (
                     "/reports/decision-map/index.html",
                     200,
+                    403,
                     SCOPED_POLICY,
                     content["reports/decision-map/index.html"],
                 ),
-                ("/.publish.tmp", 404, DEFAULT_POLICY, None),
-                ("/reports/decision-map/.publish.tmp", 404, DEFAULT_POLICY, None),
-                ("/missing", 404, DEFAULT_POLICY, None),
-                ("/reports/decision-map/missing", 404, SCOPED_POLICY, None),
+                ("/.publish.tmp", 404, 404, DEFAULT_POLICY, None),
+                ("/reports/decision-map/.publish.tmp", 404, 404, DEFAULT_POLICY, None),
+                ("/missing", 404, 403, DEFAULT_POLICY, None),
+                ("/reports/decision-map/missing", 404, 403, SCOPED_POLICY, None),
             ]
-            for path, status, policy, expected_body in cases:
+            for path, status, post_status, policy, expected_body in cases:
                 for method in ("GET", "HEAD", "POST"):
                     request = Request(
                         f"http://127.0.0.1:{binding['HostPort']}{path}", method=method
@@ -202,11 +203,7 @@ def test_factory_floor_web_runtime() -> None:
                     except HTTPError as error:
                         response = error
                     with response:
-                        # The dot-file rule returns 404 for every method; elsewhere
-                        # limit_except refuses POST with 403.
-                        expected_status = status
-                        if method == "POST" and "/." not in path:
-                            expected_status = 403
+                        expected_status = post_status if method == "POST" else status
                         assert response.status == expected_status, (
                             method,
                             path,
