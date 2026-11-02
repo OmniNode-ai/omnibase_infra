@@ -4,7 +4,9 @@
 -- this file changes nothing. Every relation is schema-qualified, as the
 -- application database SQL gate requires. It exists so the node's golden chain can build the
 -- schema it writes to on a database that has none. The guarded ADD COLUMN
--- statements reconcile a table an earlier shape left with fewer columns.
+-- statements add only nullable or defaulted columns to a table an earlier shape
+-- left with fewer. A column that is NOT NULL without a default, and a table's key,
+-- are never added to an existing table, because that fails on a populated one.
 
 CREATE TABLE IF NOT EXISTS public.agent_actions (
     id UUID PRIMARY KEY,
@@ -22,7 +24,6 @@ CREATE TABLE IF NOT EXISTS public.agent_actions (
     project_name VARCHAR(255),
     working_directory TEXT
 );
-ALTER TABLE public.agent_actions ADD COLUMN IF NOT EXISTS id UUID;
 ALTER TABLE public.agent_actions ADD COLUMN IF NOT EXISTS correlation_id UUID;
 ALTER TABLE public.agent_actions ADD COLUMN IF NOT EXISTS agent_name VARCHAR(255);
 ALTER TABLE public.agent_actions ADD COLUMN IF NOT EXISTS action_type VARCHAR(50);
@@ -52,7 +53,6 @@ CREATE TABLE IF NOT EXISTS public.agent_transformation_events (
     project_name VARCHAR(255),
     claude_session_id VARCHAR(255)
 );
-ALTER TABLE public.agent_transformation_events ADD COLUMN IF NOT EXISTS id UUID;
 ALTER TABLE public.agent_transformation_events ADD COLUMN IF NOT EXISTS correlation_id UUID;
 ALTER TABLE public.agent_transformation_events ADD COLUMN IF NOT EXISTS source_agent VARCHAR(255);
 ALTER TABLE public.agent_transformation_events ADD COLUMN IF NOT EXISTS target_agent VARCHAR(255);
@@ -78,9 +78,6 @@ CREATE TABLE IF NOT EXISTS public.router_performance_metrics (
     labels JSONB,
     metadata JSONB
 );
-ALTER TABLE public.router_performance_metrics ADD COLUMN IF NOT EXISTS id UUID;
-ALTER TABLE public.router_performance_metrics ADD COLUMN IF NOT EXISTS metric_name VARCHAR(255) NOT NULL;
-ALTER TABLE public.router_performance_metrics ADD COLUMN IF NOT EXISTS metric_value DECIMAL(15,6) NOT NULL;
 ALTER TABLE public.router_performance_metrics ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE public.router_performance_metrics ADD COLUMN IF NOT EXISTS correlation_id UUID;
 ALTER TABLE public.router_performance_metrics ADD COLUMN IF NOT EXISTS unit VARCHAR(50);
@@ -104,8 +101,6 @@ CREATE TABLE IF NOT EXISTS public.agent_detection_failures (
     project_name VARCHAR(255),
     claude_session_id VARCHAR(255)
 );
-ALTER TABLE public.agent_detection_failures ADD COLUMN IF NOT EXISTS correlation_id UUID;
-ALTER TABLE public.agent_detection_failures ADD COLUMN IF NOT EXISTS failure_reason TEXT NOT NULL;
 ALTER TABLE public.agent_detection_failures ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE public.agent_detection_failures ADD COLUMN IF NOT EXISTS request_summary TEXT;
 ALTER TABLE public.agent_detection_failures ADD COLUMN IF NOT EXISTS attempted_patterns JSONB;
@@ -139,7 +134,6 @@ CREATE TABLE IF NOT EXISTS public.agent_execution_logs (
     claude_session_id VARCHAR(255),
     terminal_id VARCHAR(255)
 );
-ALTER TABLE public.agent_execution_logs ADD COLUMN IF NOT EXISTS execution_id UUID;
 ALTER TABLE public.agent_execution_logs ADD COLUMN IF NOT EXISTS correlation_id UUID;
 ALTER TABLE public.agent_execution_logs ADD COLUMN IF NOT EXISTS agent_name VARCHAR(255);
 ALTER TABLE public.agent_execution_logs ADD COLUMN IF NOT EXISTS status VARCHAR(50);
@@ -177,13 +171,7 @@ CREATE TABLE IF NOT EXISTS public.agent_status_events (
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     metadata JSONB
 );
-ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS id UUID;
-ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS correlation_id UUID NOT NULL;
-ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS agent_name VARCHAR(255) NOT NULL;
-ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS session_id VARCHAR(255) NOT NULL;
-ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS state VARCHAR(50) NOT NULL;
 ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS status_schema_version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS message TEXT NOT NULL;
 ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS progress DECIMAL(3, 2);
 ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS current_phase VARCHAR(255);
 ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS current_task TEXT;
@@ -194,66 +182,3 @@ ALTER TABLE public.agent_status_events ADD COLUMN IF NOT EXISTS metadata JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_agent_status_correlation ON public.agent_status_events (correlation_id);
 CREATE INDEX IF NOT EXISTS idx_agent_status_created ON public.agent_status_events (created_at DESC);
-
--- A table an earlier shape left without its key gets the key CREATE TABLE
--- declares, so a drifted database ends at the schema a fresh one builds.
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_constraint
-        WHERE conrelid = 'public.agent_actions'::regclass AND contype = 'p'
-    ) THEN
-        ALTER TABLE public.agent_actions ADD CONSTRAINT agent_actions_pkey PRIMARY KEY (id);
-    END IF;
-END
-$$;
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_constraint
-        WHERE conrelid = 'public.agent_transformation_events'::regclass AND contype = 'p'
-    ) THEN
-        ALTER TABLE public.agent_transformation_events ADD CONSTRAINT agent_transformation_events_pkey PRIMARY KEY (id);
-    END IF;
-END
-$$;
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_constraint
-        WHERE conrelid = 'public.router_performance_metrics'::regclass AND contype = 'p'
-    ) THEN
-        ALTER TABLE public.router_performance_metrics ADD CONSTRAINT router_performance_metrics_pkey PRIMARY KEY (id);
-    END IF;
-END
-$$;
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_constraint
-        WHERE conrelid = 'public.agent_detection_failures'::regclass AND contype = 'p'
-    ) THEN
-        ALTER TABLE public.agent_detection_failures ADD CONSTRAINT agent_detection_failures_pkey PRIMARY KEY (correlation_id);
-    END IF;
-END
-$$;
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_constraint
-        WHERE conrelid = 'public.agent_execution_logs'::regclass AND contype = 'p'
-    ) THEN
-        ALTER TABLE public.agent_execution_logs ADD CONSTRAINT agent_execution_logs_pkey PRIMARY KEY (execution_id);
-    END IF;
-END
-$$;
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_constraint
-        WHERE conrelid = 'public.agent_status_events'::regclass AND contype = 'p'
-    ) THEN
-        ALTER TABLE public.agent_status_events ADD CONSTRAINT agent_status_events_pkey PRIMARY KEY (id);
-    END IF;
-END
-$$;

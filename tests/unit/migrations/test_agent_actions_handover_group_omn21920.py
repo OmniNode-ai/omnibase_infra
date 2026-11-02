@@ -15,7 +15,7 @@ from omnibase_infra.models.event_bus.model_consumer_group_handover import (
     ModelConsumerGroupHandover,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 def test_the_bare_group_round_trips_through_a_dumped_model() -> None:
