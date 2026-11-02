@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-20079
 title: Both contract hot-load paths are off unless the runtime config opts in
-summary: 'This contract covers the omnibase_infra half of the interim hot-load gate (plan task H0). The listener on the node-registration topic and the baseline subscription on the contract-registered topic start only when the runtime config carries contract_hotload.enabled with a mode and a non-empty allowed_environments list, the switch on in an environment that list does not name (or with ONEX_ENVIRONMENT unset) is a boot error before architecture validation and the event bus start, and a malformed block is a boot error. The guard is a declared allowlist read from the runtime config or overlay, so it fails closed and the code holds no environment names. It does not claim the deploy-repository policy test, the production promotion or the production listener log readback; those are the ticket''s own AC3 and AC4. It also carries the runtime-boot listener step half: This contract covers the runtime-boot (mode=catalog-local) step "Runtime dynamic contract listener has a live consumer group". With contract_hotload.enabled off (the default OMN-20079 sets) the runtime opens no dynamic contract listener, so the step read a group that no longer exists and the merge queue ejected the pull request that turned the listener off. The step now reads the opt-in from the runtime config in the running kernel''s container, asserts the live group when it is on, and fails an unreadable or malformed opt-in. It does not claim the runtime gate itself, the deploy-repository policy test or the production readback.'
+summary: 'This contract covers two halves of the interim hot-load gate (plan task H0). The runtime half: the listener on the node-registration topic and the baseline subscription on the contract-registered topic start only when the runtime config carries contract_hotload.enabled with a mode and a non-empty allowed_environments list; the switch on in an environment that list does not name (or with ONEX_ENVIRONMENT unset) is a boot error before architecture validation and the event bus start, and a malformed block is a boot error. The guard is a declared allowlist read from the runtime config or overlay, so it fails closed and the code holds no environment names. The runtime-boot half: the catalog-local step "Runtime dynamic contract listener has a live consumer group" read a group that no longer exists once the default turned the listener off, and the merge queue ejected the pull request that turned it off; the step now reads the opt-in from the runtime config in the running kernel''s container, asserts the live group when it is on, and fails an unreadable or malformed opt-in. It does not claim the deploy-repository policy test, the production promotion or the production listener log readback; those are the ticket''s own AC3 and AC4.'
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -70,15 +70,15 @@ dod_evidence:
       - AC3
       - AC4
   - id: dod-hotload-gate-merged-source
-    description: Hermetic deployed-source readback of the runtime host at the evaluated commit; the gate call is absent at the merge base.
+    description: Hermetic deployed-source readback of the runtime host at the evaluated commit; it requires the standalone start-time gate resolution and at least the two subscription call sites that test the gate's enabled flag, all absent at the merge base.
     source: manual
     binds_ac:
       - AC1
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/runtime_host_process.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "_resolve_contract_hotload_gate().enabled" > /dev/null'
+        check_value: bash -o pipefail -c 'src=$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/runtime_host_process.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d); test "$(printf %s "$src" | grep -cF "_resolve_contract_hotload_gate().enabled")" -ge 2 && printf %s "$src" | grep -qE "^ +self\._resolve_contract_hotload_gate\(\)$"'
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-listener-step-enabled-ac1
+  - id: dod-listener-step-enabled-ac5
     description: With the opt-in on the step fails on no group and on a memberless group and passes on a live group, in the recorded real-broker replay as well.
     source: manual
     checks:
@@ -87,7 +87,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
-  - id: dod-listener-step-off-ac2
+  - id: dod-listener-step-off-ac6
     description: With the opt-in absent or false and no group the step passes, and the same fixture with the opt-in on fails (the negative control).
     source: manual
     checks:
@@ -96,7 +96,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
-  - id: dod-listener-step-unreadable-ac3
+  - id: dod-listener-step-unreadable-ac7
     description: Each malformed opt-in and a missing runtime config fail the step.
     source: manual
     checks:
