@@ -189,6 +189,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py -k "served_on_the_runtime_port or without_a_mount" -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mount_live_port_omn21288.py -k answers_on_the_runtime_port -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC6]
   - id: dod-omn21288-ac7-failing-mount-fails-boot
     description: >-
@@ -197,6 +200,9 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py -k "fails_boot or out_of_service or may_not_shadow or malformed" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mount_live_port_omn21288.py -k planted_factory_error -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC7]
 context:
