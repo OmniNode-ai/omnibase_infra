@@ -39,18 +39,6 @@ class RegistryInfraAuthGateCompute:
         """
         return NodeAuthGateCompute
 
-    @staticmethod
-    def create_node(container: ModelONEXContainer) -> NodeAuthGateCompute:
-        """Create a NodeAuthGateCompute instance with the given container.
-
-        Args:
-            container: ONEX dependency injection container.
-
-        Returns:
-            Configured NodeAuthGateCompute instance.
-        """
-        return NodeAuthGateCompute(container)
-
 
 __all__: list[str] = [
     "NodeAuthGateCompute",

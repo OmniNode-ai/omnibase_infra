@@ -487,7 +487,7 @@ jobs:
           set -euo pipefail
           # contract_loader_effect.yaml deny_patterns include "/home", which
           # blocks the default contracts/ path when the runner CWD is under
-          # /home/runner/... (GitHub-hosted and self-hosted CI). Copy the
+          # a runner home directory (GitHub-hosted and self-hosted CI). Copy the
           # contracts tree to /tmp so path.resolve() lands outside the deny list.
           rm -rf /tmp/onex-contracts
           cp -r "${{ github.workspace }}/contracts" /tmp/onex-contracts
@@ -969,7 +969,8 @@ jobs:
   # way its documentation tells a new engineer to -- `make local-env`, then
   # `make up-local` -- and fail unless the migration gate is healthy, both
   # runtime kernels report /health status "healthy" with is_running true, and
-  # the runtime's dynamic contract listener has a live consumer group (OMN-20820).
+  # the runtime's dynamic contract listener has a live consumer group (OMN-20820)
+  # whenever the runtime config opts in to contract hot loading (OMN-20079).
   #
   # No self-skip: a runner without Docker Compose FAILS this job, as it fails
   # the `compose` mode's boot job since OMN-20147 (OMN-18811 AC4). Probes run through `docker exec`, never a host port, so they
@@ -1247,6 +1248,43 @@ jobs:
         run: |
           set -euo pipefail
           broker="${LOCAL_PROJECT}-redpanda"
+          # OMN-20079: the dynamic contract listener, and the group it opens, exist
+          # only when the runtime config opts in with contract_hotload.enabled
+          # (default off). The opt-in is read from the runtime config the
+          # running kernel loaded, in its own container. An opt-in that is
+          # absent or false means the runtime opens no listener, so there is no
+          # group to find and the step says so; a value that is not a boolean, a
+          # block that is not a mapping, or a config the container cannot read
+          # fails the step, as does an enabled runtime with no live group.
+          runtime="${LOCAL_PROJECT}-omninode-runtime"
+          if ! hotload="$(docker exec "$runtime" /app/.venv/bin/python -c '
+          import os, sys
+          import yaml
+          path = os.path.join(os.environ.get("ONEX_CONTRACTS_DIR", "/app/contracts"), "runtime", "runtime_config.yaml")
+          with open(path, encoding="utf-8") as handle:
+              config = yaml.safe_load(handle) or {}
+          block = config.get("contract_hotload") if isinstance(config, dict) else None
+          if block is None:
+              print("false")
+          elif isinstance(block, dict) and isinstance(block.get("enabled", False), bool):
+              print(str(block.get("enabled", False)).lower())
+          else:
+              sys.exit("contract_hotload in " + path + " is malformed")
+          ' </dev/null)"; then
+            echo "::error::could not read contract_hotload from the runtime config in ${runtime}"
+            exit 1
+          fi
+          case "$hotload" in
+            true) echo "contract_hotload.enabled is true in ${runtime}: the dynamic contract listener must hold a live group" ;;
+            false)
+              echo "contract_hotload.enabled is not true in ${runtime}: the runtime opens no dynamic contract listener, so there is no listener group to assert (OMN-20079)"
+              exit 0
+              ;;
+            *)
+              echo "::error::unreadable contract_hotload opt-in from ${runtime}: ${hotload}"
+              exit 1
+              ;;
+          esac
           # OMN-20820: omnibase_infra#5261 removed this job's delegate-skill
           # consumer-group probe, because the local bundle no longer runs an
           # omnimarket orchestrator. This probe reads a group omnibase_infra's

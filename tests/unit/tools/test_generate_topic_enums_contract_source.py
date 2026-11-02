@@ -80,17 +80,23 @@ def test_generator_no_longer_uses_topic_constants_ast() -> None:
 
 @pytest.mark.unit
 def test_omnimarket_enum_byte_identical_without_topic_constants_ast() -> None:
-    """Regenerating from contracts + runtime manifest (NO topic_constants.py AST)
+    """Regenerating from contracts + topic manifests (NO topic_constants.py AST)
     reproduces the committed EnumOmnimarketTopic byte-for-byte, including the two
     EVT_DELEGATE_SKILL_*_V1 members consumed by service_kernel bootstrap."""
     if not _CONTRACTS_ROOT.exists():
         pytest.skip("contracts root not found")
 
+    # Regenerate with the manifest roots the script itself defaults to
+    # (runtime, cli and services since OMN-21689), so this reproduces exactly
+    # what ``generate_topic_enums.py --generate`` writes.
+    module = _load_script_module()
+    manifest_roots = list(module._DEFAULT_TOPIC_MANIFEST_ROOTS)
+    assert _RUNTIME_MANIFEST.parent in manifest_roots
     extractor = ContractTopicExtractor()
     entries = extractor.extract_all(
         _CONTRACTS_ROOT,
         supplementary_sources=None,
-        skill_manifests_roots=[_RUNTIME_MANIFEST.parent],
+        skill_manifests_roots=manifest_roots,
     )
     rendered = TopicEnumGenerator().render(entries, output_dir=_GENERATED_DIR)
 

@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumRouterTopic(str, Enum):
     """Kafka topic enum for producer: router.
@@ -18,6 +20,6 @@ class EnumRouterTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    CMD_ROUTE_REQUEST_V1 = "onex.cmd.router.route-request.v1"  # onex.cmd.router.route-request.v1
-    EVT_ROUTING_COMPLETE_V1 = "onex.evt.router.routing-complete.v1"  # onex.evt.router.routing-complete.v1
-    EVT_ROUTING_FAILED_V1 = "onex.evt.router.routing-failed.v1"  # onex.evt.router.routing-failed.v1
+    CMD_ROUTE_REQUEST_V1 = contract_topic_value('nodes/node_routing_orchestrator/contract.yaml', 'router', 'CMD_ROUTE_REQUEST_V1')  # onex.cmd.router.route-request.v1
+    EVT_ROUTING_COMPLETE_V1 = contract_topic_value('nodes/node_routing_orchestrator/contract.yaml', 'router', 'EVT_ROUTING_COMPLETE_V1')  # onex.evt.router.routing-complete.v1
+    EVT_ROUTING_FAILED_V1 = contract_topic_value('nodes/node_routing_orchestrator/contract.yaml', 'router', 'EVT_ROUTING_FAILED_V1')  # onex.evt.router.routing-failed.v1
