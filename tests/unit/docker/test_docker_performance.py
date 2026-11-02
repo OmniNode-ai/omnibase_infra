@@ -49,8 +49,27 @@ def _duration_seconds(value: object) -> int:
     return amount * multipliers[unit]
 
 
+_POLICY_ENV_PATH = Path(__file__).resolve().parents[3] / "docker" / "runtime-policy.env"
+_POLICY_REF = re.compile(r"\$\{([A-Z0-9_]+):\?[^}]*\}")
+
+
+def _resolve_policy_ref(value: object) -> object:
+    """Resolve a fail-fast ``${VAR:?...}`` reference against the rendered policy."""
+    if not isinstance(value, str):
+        return value
+    match = _POLICY_REF.fullmatch(value.strip())
+    if match is None:
+        return value
+    for line in _POLICY_ENV_PATH.read_text(encoding="utf-8").splitlines():
+        key, _, rendered = line.partition("=")
+        if key == match.group(1):
+            return rendered
+    raise AssertionError(f"{match.group(1)} is not rendered in runtime-policy.env")
+
+
 def _memory_mib(value: object) -> int:
     """Parse a compose/catalog memory value into MiB."""
+    value = _resolve_policy_ref(value)
     if isinstance(value, int):
         return value // (1024 * 1024)
     if not isinstance(value, str):

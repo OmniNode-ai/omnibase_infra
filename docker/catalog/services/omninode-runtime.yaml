@@ -39,6 +39,9 @@ hardcoded_env:
   USE_EVENT_ROUTING: 'true'
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   RUNTIME_PROFILE: main
+  # Keep child-process HOME and workspace roots aligned with the credential mount.
+  CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}
+  ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/${RUNTIME_USER_NAME:-omniinfra}/agent-workspaces
   ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_MAIN_CAPABILITIES}
   OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
   ENABLE_RUNTIME_LOG_BRIDGE: 'true'
@@ -79,7 +82,7 @@ volumes:
   - runtime_logs:/app/logs
   - runtime_data:/app/data
   # The runtime-owned sqlite secret store, shared with runtime-effects (see there).
-  - delegation_credentials:/home/omniinfra/.omninode/delegation
+  - delegation_credentials:/home/${RUNTIME_USER_NAME:-omniinfra}/.omninode/delegation
   - ../contracts:/app/contracts:ro
 tmpfs:
   - /run/onex-runtime:uid=1000,gid=1000,mode=0770
@@ -97,7 +100,8 @@ ulimits:
     hard: 65535
 resources:
   cpus: '1.0'
-  memory: 1536M
+  # OMN-18087: declared in runtime_policy.contract.yaml, rendered into runtime-policy.env.
+  memory: ${DEV_RUNTIME_MAIN_MEMORY:?runtime policy contract must set DEV_RUNTIME_MAIN_MEMORY}
   cpus_reservation: '0.25'
   memory_reservation: 256M
 stop_grace_period: 90s
