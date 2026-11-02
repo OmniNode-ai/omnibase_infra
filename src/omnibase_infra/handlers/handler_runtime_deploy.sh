@@ -249,12 +249,8 @@ readonly RUNTIME_SERVICES=(
 # START the carrier on a lane that never opted into it, defeating the compose
 # profile that keeps it inert there. Membership here scopes the restart to the
 # two lanes whose overlays put it in the `runtime` compose profile.
-# OMN-19513 adds projection-claude-hook-events-writer for the same reason as
-# the carrier: declared in the base compose file, started only by the dev lane
-# overlay that moves it into the `runtime` profile.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     tenant-projection-writer
-    projection-claude-hook-events-writer
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
@@ -265,6 +261,14 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     onex-api
     cost-estimator-web
 )
+
+# OMN-21288: services whose compose declaration is gone because their node now
+# runs inside omninode-runtime. They are named in no restart or build set; the
+# only thing left to do for them is retire a container of the previous revision
+# before main is recreated, so the node's consumer group has one owner at a time.
+# The group id carries main's KAFKA_INSTANCE_ID, so main resumes from the retired
+# writer's committed offsets. Retiring is a stop-and-remove with no -v.
+readonly RETIRED_NODE_CARRIER_SERVICES=(projection-claude-hook-events-writer)
 
 # OMN-18012: dev-lane Kafka clients that are declared in the BASE compose file
 # and that no deploy path restarted.
@@ -3820,8 +3824,10 @@ restart_services() {
     local folded_service container_ids
     resolve_lane_folded_services "${compose_project}" || return 1
     # Only a recreate of main takes over the folded roles.
-    [[ " ${lane_services[*]} " == *" omninode-runtime "* ]] || LANE_FOLDED_SERVICES=()
-    for folded_service in "${LANE_FOLDED_SERVICES[@]}"; do
+    local main_takes_over=true
+    [[ " ${lane_services[*]} " == *" omninode-runtime "* ]] || main_takes_over=false
+    for folded_service in "${LANE_FOLDED_SERVICES[@]}" "${RETIRED_NODE_CARRIER_SERVICES[@]}"; do
+        [[ "${main_takes_over}" == true ]] || continue
         container_ids="$(docker ps -aq \
             --filter "label=com.docker.compose.project=${compose_project}" \
             --filter "label=com.docker.compose.service=${folded_service}")" || return 1
