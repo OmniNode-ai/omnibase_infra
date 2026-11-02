@@ -87,14 +87,12 @@ class RegistryInfraLlmEmbeddingEffect:
             HandlerEmbeddingOpenaiCompatible,
         )
 
-        handler = HandlerEmbeddingOpenaiCompatible(target_name=target_name)
-
         if container.service_registry is None:
             return
 
         await container.service_registry.register_instance(
             interface=HandlerEmbeddingOpenaiCompatible,
-            instance=handler,
+            instance=HandlerEmbeddingOpenaiCompatible(target_name=target_name),
             scope=EnumInjectionScope.GLOBAL,
         )
         logger.info(
