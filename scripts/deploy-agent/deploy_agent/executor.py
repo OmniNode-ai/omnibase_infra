@@ -5806,8 +5806,15 @@ class DeployExecutor:
             "-p",
             config.compose_project,
         ]
-        if profile:
-            cmd += ["--profile", profile]
+        # OMN-18143: `up` enables the profile of a service named on its
+        # command line; `config --hash` does not. Naming `cost-estimator-web`
+        # (profile `cost-estimator`) under `--profile runtime` aborted job
+        # da6bc43b with `no such service`. The wildcard is compose's own
+        # "every profile the model declares" and leaves a service's hash
+        # unchanged, so no profile list is written here to drift from the
+        # compose files. The `["*"]` form keeps exactly the requested profile.
+        if wanted := ("*" if list(services) != ["*"] else profile):
+            cmd += ["--profile", wanted]
         cmd += ["config", "--hash", ",".join(services)]
         result = _run(
             cmd, timeout=CONFIG_HASH_TIMEOUT_SECONDS, env=_compose_env(extra_env)

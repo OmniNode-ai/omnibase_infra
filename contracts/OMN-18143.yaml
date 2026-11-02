@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-18143
+title: the dev runtime phase's convergence read names every profile its services need, so a profile-gated dev-lane service no longer aborts the deploy
+summary: >-
+  Lane dev-redeploy-window-1102. The deploy agent's rendered-hash read (`compose config --hash <services>`) ran under `--profile runtime` and named cost-estimator-web, whose compose profile is `cost-estimator`; compose enables the profile of a service named on an `up` command line but not on `config --hash`, so the read failed with `no such service: cost-estimator-web` and aborted dev deploy da6bc43b. An explicit service list is now rendered with every declared profile enabled; the `["*"]` form keeps exactly the requested profile. This pull request fixes that one failure only; it does not claim the ticket's own six criteria, which concern the redeploy effect's publish monitor.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18143-config-hash-enables-named-profiles
+    statement: A rendered-hash read of an explicit service list enables the compose profile of every service it names, derived from the compose model and not from a second hand-written list.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: `_rendered_config_hashes` for an explicit list that names cost-estimator-web resolves it, under profile runtime and under no profile, and the `["*"]` form keeps exactly the requested profile -- falsifier: the pytest case reads the dev-lane overlay for services outside the runtime profile and fails on the parent commit'
+evidence_requirements:
+  - kind: "tests"
+    description: "The rendered-hash argv enables the profile of a named profile-gated service."
+    command: "uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_config_hash_enables_named_profiles_omn18143.py -q -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn18143-ac7-config-hash-enables-named-profiles
+    description: >-
+      AC7. The test builds the argv `_rendered_config_hashes` hands compose for an explicit list that includes every dev-lane service the agent names outside the runtime profile (read from the compose model), and asserts its profile is enabled; the `["*"]` form is asserted to keep exactly the requested profile. A positive control asserts the hazard exists in the overlay.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_config_hash_enables_named_profiles_omn18143.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
