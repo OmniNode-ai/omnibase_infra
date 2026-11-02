@@ -48,6 +48,8 @@ class ModelOperationalTimeouts(BaseModel):
         done_write_verify_seconds: Wait of one done-write verifier run.
         kill_wait_seconds: Wait for a killed verifier to exit.
         tool_execution_seconds: Wait of one tool execution orchestrator call.
+        boundary_dlq_max_attempts: Dispatch attempts of one delivery before the DLQ.
+        not_ready_retry_max_attempts: Attach attempts of a NOT_READY contract.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -75,6 +77,8 @@ class ModelOperationalTimeouts(BaseModel):
     done_write_verify_seconds: float = Field(gt=0)
     kill_wait_seconds: float = Field(gt=0)
     tool_execution_seconds: float = Field(gt=0)
+    boundary_dlq_max_attempts: int = Field(ge=1)
+    not_ready_retry_max_attempts: int = Field(ge=1)
 
     @model_validator(mode="after")
     def _backoffs_are_ordered(self) -> ModelOperationalTimeouts:
