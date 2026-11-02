@@ -118,7 +118,7 @@ x-runner-base: &runner-base
     # as the healthcheck definition below -- a recreate of all 88 runner
     # containers is required for this to take effect; a bind-mounted file
     # update alone does not change a live container's env.
-    KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
+    KUBECONFIG: ${RUNNER_USER_HOME:-/home/runner}/.lab-credentials/lab-ci-reader.kubeconfig
     # OMN-18415 — HMAC signing key for local LLM inference calls, fleet-wide.
     #
     # WHY IT IS HERE. omniintelligence's `cli_review` (the Hostile Review
@@ -203,6 +203,25 @@ x-runner-base: &runner-base
     UV_CONCURRENT_BUILDS: "1"
     UV_CONCURRENT_INSTALLS: "1"
     UV_HTTP_TIMEOUT: "600"
+    # OMN-21807 -- keep the tool caches OUT of the container's writable layer.
+    # Measured 2026-10-31 (lane dev-restore-1515): a runner recreate removes the
+    # old container, and when its layer holds the uv cache and the shared
+    # ci-envs, containerd's garbage collector holds its metadata write lock for
+    # about 28 minutes while it deletes them; every `docker rm` on the host
+    # blocks behind that lock, and the dev deploy agent's redeploys failed.
+    # Each general-pool service therefore mounts two per-runner NAMED volumes
+    # (runner-N-cache at ${RUNNER_USER_HOME}/.cache, runner-N-work at the job
+    # workspace) so a recreate removes a thin layer. A named volume is seeded
+    # from the image on first use, so the baked ci-env under
+    # ~/.cache/omni/ci-envs is there on the first job. The uv cache lives INSIDE
+    # the workspace volume, not in ~/.cache: uv installs a wheel by hardlinking
+    # out of its cache, a hardlink cannot cross a mount, and a cache on its own
+    # mount would copy every file instead (OMN-19998 measured 262 s against 32 s
+    # for the same sync). The runner's `rm -rf _work/*` job cleanup does not
+    # match the dot-directory, so the cache survives job cleanup. npm keeps its
+    # cache under ~/.cache so the one volume holds it too.
+    UV_CACHE_DIR: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/.uv-cache
+    npm_config_cache: ${RUNNER_USER_HOME:-/home/runner}/.cache/npm
     # OMN-14027 C1 — PyPI pull-through cache wiring (INERT until rollout).
     # DO NOT uncomment here. This block is shovel-ready but deliberately inert:
     # activating it fleet-wide is a soak-gated rollout action, and pointing the
@@ -239,7 +258,7 @@ x-runner-base: &runner-base
     # section. Until recreated, docker/runners/runner-job-started.sh's
     # disk_admission_self_pause() fails open (no-op) on the missing mount; the
     # primary per-job admission gate is unaffected and needs no recreate.
-    - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+    - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
     # OMN-18188 — read-only LAB CREDENTIALS DIRECTORY, fleet-wide.
     #
     # A DIRECTORY, not the single kubeconfig file it started as, and that is
@@ -275,7 +294,7 @@ x-runner-base: &runner-base
     # merge, only mappings do (see the OMN-16363 precedent, which is
     # duplicated the same way). This line documents the shared shape; the
     # per-service `volumes:` blocks below carry the actual effective copy.
-    - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+    - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
     - *lab-host-table
   group_add:
     - "984" # Match host Docker socket GID for DinD access
@@ -307,10 +326,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-1-creds:/home/runner/.runner-creds
+      - runner-1-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-1-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-2:
     !!merge <<: *runner-base
     container_name: omninode-runner-2
@@ -321,10 +342,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-2-creds:/home/runner/.runner-creds
+      - runner-2-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-2-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-3:
     !!merge <<: *runner-base
     container_name: omninode-runner-3
@@ -335,10 +358,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-3-creds:/home/runner/.runner-creds
+      - runner-3-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-3-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-4:
     !!merge <<: *runner-base
     container_name: omninode-runner-4
@@ -349,10 +374,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-4-creds:/home/runner/.runner-creds
+      - runner-4-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-4-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-5:
     !!merge <<: *runner-base
     container_name: omninode-runner-5
@@ -363,10 +390,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-5-creds:/home/runner/.runner-creds
+      - runner-5-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-5-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-5-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-6:
     !!merge <<: *runner-base
     container_name: omninode-runner-6
@@ -377,10 +406,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-6-creds:/home/runner/.runner-creds
+      - runner-6-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-6-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-6-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-7:
     !!merge <<: *runner-base
     container_name: omninode-runner-7
@@ -391,10 +422,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-7-creds:/home/runner/.runner-creds
+      - runner-7-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-7-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-7-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-8:
     !!merge <<: *runner-base
     container_name: omninode-runner-8
@@ -405,10 +438,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-8-creds:/home/runner/.runner-creds
+      - runner-8-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-8-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-8-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-9:
     !!merge <<: *runner-base
     container_name: omninode-runner-9
@@ -419,10 +454,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-9-creds:/home/runner/.runner-creds
+      - runner-9-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-9-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-9-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   omninode-runner-10:
     !!merge <<: *runner-base
     container_name: omninode-runner-10
@@ -433,10 +470,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - *lab-host-table
-      - runner-10-creds:/home/runner/.runner-creds
+      - runner-10-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
+      - runner-10-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - runner-10-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
   # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real
@@ -578,10 +617,10 @@ services:
         # does not touch the runner uid/Dockerfile shared with the other
         # 72-runner fleet. Re-copied on every container start/recreate, so a
         # host-side env rotation is picked up on next restart.
-        mkdir -p /home/runner/.runner-creds
-        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
-          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+          /run/omnibase-operator.env ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       # OMN-17477 arch label; see the fleet anchor above for why it is
@@ -608,9 +647,9 @@ services:
       # 0600 owned by the host operator uid and is unreadable by the `runner`
       # job user (uid 1001) once the entrypoint drops privilege. See the
       # entrypoint block above for the copy step (never point this at
-      # /home/runner/.omnibase either -- its state/ subtree must stay
+      # ${RUNNER_USER_HOME}/.omnibase either -- its state/ subtree must stay
       # runner-writable for refresh receipts).
-      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+      OMNIBASE_OPERATOR_ENV_FILE: ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
       # OMN-14958: health-gate/rollback-gate probes. Inside this container
       # localhost is the container itself, so the refresh scripts' default
       # http://localhost:18085|8085 probes die ECONNREFUSED and report a
@@ -643,20 +682,20 @@ services:
       # REQUIRED (fail-fast `:?`, same policy as DEPLOY_RUNNER_OMNI_HOME):
       # a silent default would let docker create a DIRECTORY at a bogus host
       # path and the scripts would crash later with a misleading error. Do
-      # NOT mount this at /home/runner/.omnibase/.env -- docker would create
+      # NOT mount this at ${RUNNER_USER_HOME}/.omnibase/.env -- docker would create
       # root-owned intermediate dirs there and break the runner-writable
       # ~/.omnibase/state receipt tree.
       # OMN-14983: this mount stays as the host owner's original 0600 perms
       # (deliberately -- never chmod/chgrp the host file). Only the
       # root-phase entrypoint init (which still runs as root/CAP_DAC_OVERRIDE)
       # reads it directly, to copy it into the runner-owned
-      # /home/runner/.runner-creds/operator.env consumed by
+      # ${RUNNER_USER_HOME}/.runner-creds/operator.env consumed by
       # OMNIBASE_OPERATOR_ENV_FILE above. The `runner` job user never reads
       # this path.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - deploy-runner-creds:/home/runner/.runner-creds
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - deploy-runner-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
     # OMN-14958: host-gateway alias so LANE_PROBE_HOST=host.docker.internal
     # reaches the lane ports published on the host (18085/8085 etc.).
     extra_hosts:
@@ -760,10 +799,10 @@ services:
         set -eu
         runner_uid="$$(id -u runner)"
         runner_gid="$$(id -g runner)"
-        mkdir -p /home/runner/.runner-creds
-        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
-          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+          /run/omnibase-operator.env ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       # `host-201` is load-bearing, not decoration: `omnibase-verify` names a
@@ -785,15 +824,15 @@ services:
       # Same reasoning as omninode-deploy-runner: inside this container
       # `localhost` is the container itself, not the lab host.
       LANE_PROBE_HOST: host.docker.internal
-      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+      OMNIBASE_OPERATOR_ENV_FILE: ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - verify-runner-1-creds:/home/runner/.runner-creds
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - verify-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
     group_add:
@@ -905,10 +944,10 @@ services:
         set -eu
         runner_uid="$$(id -u runner)"
         runner_gid="$$(id -g runner)"
-        mkdir -p /home/runner/.runner-creds
-        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
-          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+          /run/omnibase-operator.env ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
@@ -918,15 +957,15 @@ services:
       RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       LANE_PROBE_HOST: host.docker.internal
-      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+      OMNIBASE_OPERATOR_ENV_FILE: ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above omninode-verify-runner-1.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - verify-runner-2-creds:/home/runner/.runner-creds
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - verify-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
     group_add:
@@ -957,10 +996,10 @@ services:
         set -eu
         runner_uid="$$(id -u runner)"
         runner_gid="$$(id -g runner)"
-        mkdir -p /home/runner/.runner-creds
-        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
+        mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
-          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+          /run/omnibase-operator.env ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
@@ -970,15 +1009,15 @@ services:
       RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       LANE_PROBE_HOST: host.docker.internal
-      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+      OMNIBASE_OPERATOR_ENV_FILE: ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above omninode-verify-runner-1.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - verify-runner-3-creds:/home/runner/.runner-creds
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - verify-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
     group_add:
@@ -1089,8 +1128,8 @@ services:
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - customer-plane-runner-1-creds:/home/runner/.runner-creds
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - customer-plane-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
     healthcheck:
       test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
@@ -1125,8 +1164,8 @@ services:
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - customer-plane-runner-2-creds:/home/runner/.runner-creds
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - customer-plane-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
     healthcheck:
       test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
@@ -1227,8 +1266,8 @@ services:
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - prod-deploy-runner-1-creds:/home/runner/.runner-creds
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - prod-deploy-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
     healthcheck:
       test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
@@ -1268,21 +1307,61 @@ volumes:
     name: omninode-prod-deploy-runner-1-creds
   runner-1-creds:
     name: omninode-runner-1-creds
+  runner-1-cache:
+    name: omninode-runner-1-cache
+  runner-1-work:
+    name: omninode-runner-1-work
   runner-2-creds:
     name: omninode-runner-2-creds
+  runner-2-cache:
+    name: omninode-runner-2-cache
+  runner-2-work:
+    name: omninode-runner-2-work
   runner-3-creds:
     name: omninode-runner-3-creds
+  runner-3-cache:
+    name: omninode-runner-3-cache
+  runner-3-work:
+    name: omninode-runner-3-work
   runner-4-creds:
     name: omninode-runner-4-creds
+  runner-4-cache:
+    name: omninode-runner-4-cache
+  runner-4-work:
+    name: omninode-runner-4-work
   runner-5-creds:
     name: omninode-runner-5-creds
+  runner-5-cache:
+    name: omninode-runner-5-cache
+  runner-5-work:
+    name: omninode-runner-5-work
   runner-6-creds:
     name: omninode-runner-6-creds
+  runner-6-cache:
+    name: omninode-runner-6-cache
+  runner-6-work:
+    name: omninode-runner-6-work
   runner-7-creds:
     name: omninode-runner-7-creds
+  runner-7-cache:
+    name: omninode-runner-7-cache
+  runner-7-work:
+    name: omninode-runner-7-work
   runner-8-creds:
     name: omninode-runner-8-creds
+  runner-8-cache:
+    name: omninode-runner-8-cache
+  runner-8-work:
+    name: omninode-runner-8-work
   runner-9-creds:
     name: omninode-runner-9-creds
+  runner-9-cache:
+    name: omninode-runner-9-cache
+  runner-9-work:
+    name: omninode-runner-9-work
   runner-10-creds:
     name: omninode-runner-10-creds
+  runner-10-cache:
+    name: omninode-runner-10-cache
+  runner-10-work:
+    name: omninode-runner-10-work
