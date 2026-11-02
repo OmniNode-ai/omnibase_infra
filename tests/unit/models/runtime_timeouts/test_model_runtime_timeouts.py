@@ -260,6 +260,21 @@ def test_the_declared_file_loads_from_inside_a_zip(tmp_path: Path) -> None:
     assert loaded == RUNTIME_TIMEOUTS
 
 
+def test_the_resource_beside_a_module_inside_a_zip_is_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_declared_resource`` walks up from a module path inside an archive to the archive."""
+    archive = tmp_path / "wheel.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        handle.write(_DECLARED, "pkg/runtime_timeouts.yaml")
+    monkeypatch.setattr(
+        model_module, "__file__", str(archive / "pkg" / "model_runtime_timeouts.py")
+    )
+    resource = model_module._declared_resource()
+    assert isinstance(resource, zipfile.Path)
+    assert ModelRuntimeTimeouts.from_file(resource) == RUNTIME_TIMEOUTS
+
+
 def test_a_malformed_file_is_refused_as_a_configuration_error(tmp_path: Path) -> None:
     path = tmp_path / "runtime_timeouts.yaml"
     path.write_text("timeouts: [unclosed\n", encoding="utf-8")
