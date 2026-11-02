@@ -314,7 +314,12 @@ SIBLING_PINS="$(first_party_sources "${REPO_ROOT}/${FPS_MODULE_REL}" \
     'c = m.load_contract(); [print(r, *m.newest_dev_merge_tag_of(Path(p), c)) for r, p in (a.split("=", 1) for a in sys.argv[2:])]' \
     "${SIBLING_ARGS[@]}")" \
     || fail "${EXIT_PROVENANCE_MISMATCH}" "a sibling has no dev-merge tag to stage; a clone without dev-* tags cannot feed a slot build."
-while read -r repo tag commit; do
+# Each line is checked field by field: a stray line on the checker's stdout, a
+# repository the manifest does not list, or a commit that is not a literal sha
+# refuses the run, naming the line, instead of staging a pin nothing verified.
+while read -r repo tag commit extra; do
+    [[ -n "${tag}" && -z "${extra}" && "${commit}" =~ ^[0-9a-f]{40}$ && " ${SIBLING_REPOS[*]} " == *" ${repo} "* ]] \
+        || fail "${EXIT_PROVENANCE_MISMATCH}" "the sibling pin line '${repo} ${tag} ${commit} ${extra}' is not '<listed repo> <tag> <40-hex commit>'; the pins read were: ${SIBLING_PINS}"
     SIBLING_TAG["${repo}"]="${tag}"
     SIBLING_COMMIT["${repo}"]="${commit}"
     log "sibling ${repo} <- ${SIBLING_SRC[${repo}]} @ ${commit} tag ${tag} (${SIBLING_ORIGIN[${repo}]})"
@@ -326,21 +331,16 @@ done
 
 if [[ "${PLAN_ONLY}" == "1" ]]; then
     log "--plan-only: every refusal passed. Nothing was built, started or connected to."
-    "${PY}" - "${SIBLING_PINS}" <<PYPLAN
+    # Every value reaches the script through argv, so a branch name carrying a
+    # quote or a backslash cannot alter the Python source.
+    "${PY}" - "${SIBLING_PINS}" "${SLOT}" "${COMPOSE_PROJECT}" "${TARGET_REPO}" "${TARGET_COMMIT}" \
+        "${TARGET_BRANCH}" "${STAGING_ROOT}" "${TOPIC_NAMESPACE}" "${DB_SLOT}" "${WITH_GATEWAY}" <<'PYPLAN'
 import json, sys
-print(json.dumps({
-    "plan_only": True,
-    "slot": ${SLOT},
-    "compose_project": "${COMPOSE_PROJECT}",
-    "target_repo": "${TARGET_REPO}",
-    "target_commit": "${TARGET_COMMIT}",
-    "target_branch": "${TARGET_BRANCH}",
-    "siblings": {r: {"tag": t, "commit": c} for r, t, c in map(str.split, sys.argv[1].splitlines())},
-    "staging_root": "${STAGING_ROOT}",
-    "topic_namespace": "${TOPIC_NAMESPACE}",
-    "db_slot": "${DB_SLOT}",
-    "with_gateway": bool(${WITH_GATEWAY}),
-}, indent=2))
+pins, *v = sys.argv[1:]
+keys = ("slot", "compose_project", "target_repo", "target_commit", "target_branch", "staging_root", "topic_namespace", "db_slot", "with_gateway")
+plan = dict(zip(keys, v))
+print(json.dumps({"plan_only": True, **plan, "slot": int(v[0]), "with_gateway": bool(int(v[-1])),
+    "siblings": {r: {"tag": t, "commit": c} for r, t, c in map(str.split, pins.splitlines())}}, indent=2))
 PYPLAN
     exit 0
 fi

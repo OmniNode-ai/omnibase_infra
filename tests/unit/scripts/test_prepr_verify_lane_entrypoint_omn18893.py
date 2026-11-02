@@ -1446,3 +1446,61 @@ def test_entrypoint_stages_siblings_at_dev_tag_and_names_the_declared_slot_conte
         "the entrypoint spells the slot context name instead of reading it from "
         "first_party_sources.yaml"
     )
+
+
+def test_entrypoint_stages_siblings_at_dev_tag_with_a_branch_name_that_is_not_shell_safe(
+    tmp_path: Path,
+) -> None:
+    """The plan carries a quote branch name as data, not as source."""
+    registry = tmp_path / "registry_root"
+    for repo in _siblings_of_the_manifest():
+        _repo_with_tags(registry / repo, repo)
+    worktree = tmp_path / "ticket" / "omnibase_infra"
+    worktree.mkdir(parents=True)
+    branch = "omn-21928-q\"u'ote"
+    _git_in(worktree, "init", "-q", "-b", branch)
+    _git_in(worktree, "commit", "-q", "--allow-empty", "-m", "target")
+    home = tmp_path / "home"
+    home.mkdir()
+    done = subprocess.run(
+        [
+            "bash",
+            str(ENTRYPOINT),
+            "--slot",
+            "1",
+            "--worktree",
+            str(worktree),
+            "--staging-root",
+            str(tmp_path / "stage"),
+            "--reason",
+            "OMN-21928 plan proof",
+            "--plan-only",
+        ],
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(home),
+            "OMNI_HOME": str(registry),
+            "ONEX_LANE_LOCK_DIR": str(tmp_path / "locks"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    lines = done.stdout.splitlines()
+    plan = json.loads("\n".join(lines[lines.index("{") :]))
+    assert plan["target_branch"] == branch
+    assert plan["slot"] == 1
+    assert plan["with_gateway"] is True
+
+
+def test_entrypoint_stages_siblings_at_dev_tag_checks_every_pin_line_it_reads() -> None:
+    """A pin line is three fields, a listed repository and a literal commit."""
+    body = _entrypoint_code()
+    loop_at = body.index("while read -r repo tag commit extra")
+    loop = body[loop_at : body.index("done <<< ", loop_at)]
+    assert "[0-9a-f]{40}" in loop
+    assert '-z "${extra}"' in loop
+    assert "SIBLING_REPOS[*]" in loop
+    assert loop.count("fail ") == 1
