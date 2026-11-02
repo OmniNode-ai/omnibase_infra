@@ -30,11 +30,14 @@ start) keeps exactly the requested profile.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import yaml
 from deploy_agent.compose_budget import _read_compose_services
 from deploy_agent.events import DEV_LANE_ONLY_RUNTIME_SERVICES, EnumRuntimeLane
 from deploy_agent.executor import DeployExecutor
@@ -106,3 +109,56 @@ def test_the_everything_in_one_profile_form_keeps_exactly_that_profile() -> None
     argv = _render(["*"], profile="runtime")
     assert _enabled_profiles(argv) == {"runtime"}
     assert argv[argv.index("--hash") + 1] == "*"
+
+
+@pytest.mark.parametrize("profile", ["runtime", None])
+def test_real_compose_resolves_named_services_and_preserves_runtime_hash(
+    tmp_path: Path,
+    profile: str | None,
+) -> None:
+    """Exercise compose's profile selection without a daemon or deployed files."""
+    gated = _profile_gated_named_services()
+    assert "cost-estimator-web" in gated
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        yaml.safe_dump(
+            {
+                "services": {
+                    "omninode-runtime": {
+                        "image": "busybox:latest",
+                        "profiles": ["runtime"],
+                    },
+                    **{
+                        name: {"image": "busybox:latest", "profiles": profiles}
+                        for name, profiles in gated.items()
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = {**os.environ, "COMPOSE_PROFILES": ""}
+    with (
+        patch(
+            "deploy_agent.executor._compose_file_args",
+            return_value=["-f", str(compose)],
+        ),
+        patch(
+            "deploy_agent.executor.lane_config_for",
+            return_value=SimpleNamespace(
+                compose_project="landing-l22913-lab",
+            ),
+        ),
+        patch("deploy_agent.executor._compose_env", return_value=env),
+    ):
+        executor = DeployExecutor()
+        runtime_only = executor._rendered_config_hashes(
+            EnumRuntimeLane.DEV, ["*"], profile="runtime"
+        )
+        named = executor._rendered_config_hashes(
+            EnumRuntimeLane.DEV, ["omninode-runtime", *gated], profile=profile
+        )
+    assert set(runtime_only) == {"omninode-runtime"}
+    assert set(named) == {"omninode-runtime", *gated}
+    assert named["omninode-runtime"] == runtime_only["omninode-runtime"]
+    assert all(len(value) == 64 and int(value, 16) >= 0 for value in named.values())

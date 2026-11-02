@@ -8,22 +8,22 @@ interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-omn18143-config-hash-enables-named-profiles
-    statement: A rendered-hash read of an explicit service list enables the compose profile of every service it names, derived from the compose model and not from a second hand-written list.
+    statement: A rendered-hash read of an explicit service list asks compose to enable all declared profiles with its wildcard, so every named service can be resolved without maintaining a second profile list.
     acceptance:
       - id: AC7
-        statement: 'AC7: `_rendered_config_hashes` for an explicit list that names cost-estimator-web resolves it, under profile runtime and under no profile, and the `["*"]` form keeps exactly the requested profile -- falsifier: the pytest case reads the dev-lane overlay for services outside the runtime profile and fails on the parent commit'
+        statement: 'AC7: `_rendered_config_hashes` for an explicit list that names cost-estimator-web returns real compose hashes, under profile runtime and under no profile; the `["*"]` form keeps exactly the requested profile and excludes cost-estimator-web. The test reads the profiles from this repository and invokes compose config without starting containers.'
 evidence_requirements:
   - kind: "tests"
-    description: "The rendered-hash argv enables the profile of a named profile-gated service."
+    description: "Compose returns hashes for named services across profiles and preserves the selected-profile service set."
     command: "uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_config_hash_enables_named_profiles_omn18143.py -q -p no:cacheprovider"
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
-  - id: dod-omn18143-ac7-config-hash-enables-named-profiles
+  - id: dod-omn18143-ac7-config-hash-profiles
     description: >-
-      AC7. The test builds the argv `_rendered_config_hashes` hands compose for an explicit list that includes every dev-lane service the agent names outside the runtime profile (read from the compose model), and asserts its profile is enabled; the `["*"]` form is asserted to keep exactly the requested profile. A positive control asserts the hazard exists in the overlay.
+      AC7 only. The tests check the generated argv and run the executor against real compose config using a minimal model with service profiles read from this repository's dev-lane overlay. They require hashes for every explicitly named service, an unchanged runtime-service hash, and exclusion of cost-estimator-web from the runtime-only wildcard service set. Compose config runs without a daemon, image pulls, or container changes, so the check can run on a hosted runner with Docker Compose. This evidence does not cover AC1 through AC6 or a live redeploy.
     source: manual
     checks:
       - check_type: test_passes
