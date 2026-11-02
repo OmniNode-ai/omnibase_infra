@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import importlib.util
+import math
 import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -470,11 +471,24 @@ _PUBLISHER_WORKFLOW = (
 )
 _BASELINE_FILE = _REPO_ROOT / "config" / "validation" / "test-failure-baseline.yaml"
 
-#: Test time measured for the publisher's own marker selection on clean dev,
-#: summed across the 15 parallel splits of run 41446149536 (head f30b9f461).
-#: The publisher runs that selection serially in one process, so this is its
-#: floor, not its target.
-_MEASURED_SERIAL_SUITE_MINUTES = 86
+#: Test time for the publisher's own marker selection, summed across the 15
+#: parallel splits of run 41446149536 on clean dev (head f30b9f461). This is an
+#: ESTIMATE of the scale of the serial run, not a measurement of it: the sum
+#: carries each split's own setup fifteen times over, while the serial job pays
+#: setup once and then adds database startup, the commit and the push on top.
+#: It is the only figure available without a serial run, so the assertion below
+#: demands a multiple of it rather than treating it as the true cost.
+_MEASURED_SPLIT_SUM_MINUTES = 86
+
+#: How much more than the split-sum estimate the job's ceiling must allow.
+#: A ceiling AT the estimate is what produced the `cancelled` era, so a test
+#: that admitted it would pass on a workflow that still dies mid-pytest.
+_REQUIRED_HEADROOM_FACTOR = 1.5
+
+#: The smallest timeout-minutes this repository accepts for the publisher.
+_MINIMUM_PUBLISHER_TIMEOUT_MINUTES = math.ceil(
+    _MEASURED_SPLIT_SUM_MINUTES * _REQUIRED_HEADROOM_FACTOR
+)
 
 
 def _publisher_job() -> dict[str, object]:
@@ -493,18 +507,27 @@ class TestPublisherWorkflow:
 
         Run 41380955296 ran 03:03:29Z-03:33:47Z and its post-job cleanup
         terminated orphan uv, python3, pytest and psql processes, so the job
-        died inside the test run and never reached the push at all. The job
-        timeout has to clear the serial suite with headroom.
+        died inside the test run and never reached the push at all.
+
+        The ceiling must exceed the split-sum estimate by a margin, not merely
+        reach it: the estimate is not the serial cost, and the job still has
+        dependency install, database startup, the commit and the push to pay
+        after the last test. A test that admitted the estimate exactly would
+        pass a workflow that goes on dying mid-pytest.
         """
         timeout = _publisher_job()["timeout-minutes"]
         assert isinstance(timeout, int), (
             f"publish-baseline must declare an integer timeout-minutes; got {timeout!r}"
         )
-        assert timeout >= _MEASURED_SERIAL_SUITE_MINUTES, (
-            f"publish-baseline allows {timeout} minutes but the suite it runs "
-            f"serially measured {_MEASURED_SERIAL_SUITE_MINUTES} minutes of "
-            "test time on clean dev. A timeout at or under the suite kills the "
-            "job mid-pytest and reports `cancelled`, which no alarm reads."
+        assert timeout >= _MINIMUM_PUBLISHER_TIMEOUT_MINUTES, (
+            f"publish-baseline allows {timeout} minutes. The suite it runs "
+            f"serially estimates at {_MEASURED_SPLIT_SUM_MINUTES} minutes from "
+            "the summed splits of run 41446149536 on clean dev, and this job "
+            "also pays install, database startup, the commit and the push, so "
+            f"the ceiling must be at least {_REQUIRED_HEADROOM_FACTOR}x that "
+            f"estimate, {_MINIMUM_PUBLISHER_TIMEOUT_MINUTES} minutes. A tighter "
+            "ceiling kills the job mid-pytest and reports `cancelled`, which is "
+            "not a failure conclusion and so alarms nothing."
         )
 
     def test_publisher_push_rebases_and_retries_onto_current_dev(self) -> None:

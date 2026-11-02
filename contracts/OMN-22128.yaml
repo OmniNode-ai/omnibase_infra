@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-22128
 title: The dev-baseline publisher can finish its suite, and can land the baseline it finished
-summary: timeout-minutes on the publish-baseline job clears the measured serial suite floor, and the baseline push fetches, rebases onto the current origin/dev and re-attempts, so neither of the two causes that gave the workflow zero successes in 138 scheduled runs can return silently.
+summary: timeout-minutes on the publish-baseline job clears the measured serial suite floor, and the baseline push fetches, rebases onto the current origin/dev and re-attempts, so neither of the two causes that gave the workflow zero successes in 138 scheduled runs can return silently. The ticket's AC4 (a post-fix publisher run reaching a non-cancelled conclusion, with its baseline still loadable) is deliberately not a contract AC, because that run can only happen after this merges while the workflow runs from dev, and the repo-side readability test also passes at the merge base, so binding it would be an always-pass. The test ships as a standing guard and AC4 is evidenced on the ticket after the first post-merge run.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -21,11 +21,6 @@ requirements:
     acceptance:
       - id: AC3
         statement: The timeout and push-rebase assertions are built from the two recorded run logs, 34008081727 for the push rejection and 41380955296 for the timeout kill, and fail against the pre-fix workflow.
-  - id: req-committed-baseline-stays-readable
-    statement: Whatever the publisher commits stays parseable by its own loader.
-    acceptance:
-      - id: AC4
-        statement: The baseline file committed to the repository loads through the publisher's own load_baseline with its required top-level fields intact, so a published baseline can never strand the PR gate.
 evidence_requirements:
   - kind: tests
     description: The publisher workflow's timeout, its push-rebase retry, and the committed baseline's readability.
@@ -55,11 +50,3 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py -q --no-cov -k TestPublisherWorkflow
-  - id: dod-committed-baseline-readable
-    description: The committed baseline loads through the publisher's own loader and carries generated_at, generated_by, repo and ttl_days, with clusters a mapping.
-    source: generated
-    binds_ac:
-      - AC4
-    checks:
-      - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py -q --no-cov -k committed_baseline_loads_through_the_publishers_own_loader
