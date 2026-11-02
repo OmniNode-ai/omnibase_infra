@@ -59,6 +59,7 @@ from omnibase_infra.models.projection import (
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
 from omnibase_infra.projectors.snapshot_publisher_registration import (
     SnapshotPublisherRegistration,
 )
@@ -1306,6 +1307,35 @@ class TestSnapshotCacheOperations:
 
         assert result is None
         assert publisher.is_cache_loaded is True
+
+    async def test_cache_consumer_takes_its_kafka_timeouts_from_the_declared_file(
+        self,
+        mock_producer: AsyncMock,
+        mock_consumer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """The cache-reading consumer is built with the declared session settings."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer,
+            snapshot_config,
+            bootstrap_servers="localhost:9092",
+        )
+
+        with patch(
+            "aiokafka.AIOKafkaConsumer", return_value=mock_consumer
+        ) as consumer_class:
+            await publisher.get_latest_snapshot("nonexistent-id", "registration")
+
+        kwargs = consumer_class.call_args.kwargs
+        assert kwargs["session_timeout_ms"] == RUNTIME_TIMEOUTS.kafka_session_ms
+        assert (
+            kwargs["heartbeat_interval_ms"]
+            == RUNTIME_TIMEOUTS.kafka_heartbeat_interval_ms
+        )
+        assert (
+            kwargs["max_poll_interval_ms"]
+            == RUNTIME_TIMEOUTS.kafka_max_poll_interval_ms
+        )
 
     async def test_cache_hit_returns_correct_snapshot(
         self,

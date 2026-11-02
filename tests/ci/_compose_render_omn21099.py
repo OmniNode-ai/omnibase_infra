@@ -127,7 +127,12 @@ def _compose_environment(
             else:
                 environment[variable] = "placeholder"
     policy = dotenv_values(DOCKER_DIR / "runtime-policy.env")
-    for key in ("DEV_REDPANDA_MEMORY", "DEV_REDPANDA_MEM_LIMIT"):
+    # Compose validates memory sizes, so these take the rendered policy value.
+    for key in (
+        "DEV_REDPANDA_MEMORY",
+        "DEV_REDPANDA_MEM_LIMIT",
+        "DEV_RUNTIME_MAIN_MEMORY",
+    ):
         if key in environment and policy.get(key):
             environment[key] = str(policy[key])
     environment.update(overrides)
