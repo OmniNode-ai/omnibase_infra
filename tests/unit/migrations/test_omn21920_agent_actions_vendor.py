@@ -24,7 +24,7 @@ _CATALOGS = _ROOT / "docker" / "catalog" / "database-topology"
 _CREATE = "0000_create_agent_observability_tables.sql"
 _GRANT = "0001_grant_tenant_projection_writer_agent_observability_tables.sql"
 _SHA256 = {
-    _CREATE: "b56298043d2b85c2e9dc8671cf30d5420ad47acd4bcd3039429acf1f2f14d79e",
+    _CREATE: "be9ccf9ed75c746cdb507513b4ea2ebdc27b89da6d230d2fa1aa4432f165111a",
     _GRANT: "7056fa7b3aa27974e4866348e9c0f5c936f8635962b859ad3bbe4cec0ae36346",
 }
 # The six tables node_projection_agent_actions writes. The seventh table of the
