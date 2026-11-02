@@ -150,6 +150,11 @@ requirements:
     acceptance:
       - id: AC32
         statement: 'AC32: call-repo-evidence-gate.yml pins verifier-version 0.4.310 or newer, the first omnimarket release with omnimarket#3694, and pyproject.toml pins omnibase-core by its dev-merge tag alone in tool.uv.sources -- falsifier: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0 fails test_caller_verifier_admits_override_dependency_pins against the merge-base caller, which pins 0.4.305'
+  - id: req-omn19998-node-refusal-reason
+    statement: When a handler refuses with a typed result (success false) and the runtime records no error of its own, the SkillRoutingError envelope that onex node prints carries the handler's error_message or reason, so the ci-live-contact pre-commit hook names its fix on the console instead of printing only run did not complete (result=failed).
+    acceptance:
+      - id: AC33
+        statement: 'AC33: onex node node_ci_live_contact_effect on a repository with a staged scripts/ci change exits 1 with a SkillRoutingError envelope whose message names a live-contact test and .github/live-contact-exception.md, and a staged non-tooling change exits 0 with no envelope -- falsifier: uv run pytest tests/unit/cli/test_cli_node_refusal_reason_omn19998.py -q -n 0 fails test_refused_ci_tooling_change_names_its_fix_in_the_envelope against the merge-base cli_node.py'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -223,6 +228,9 @@ evidence_requirements:
   - kind: tests
     description: The override-pin tests read the repo-evidence caller's verifier-version and pyproject.toml's omnibase-core tag source.
     command: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0
+  - kind: tests
+    description: The refusal-reason tests run the packaged node_ci_live_contact_effect through the onex node command on a temporary git repository with a staged change and read the printed envelope.
+    command: uv run pytest tests/unit/cli/test_cli_node_refusal_reason_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -614,3 +622,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC32
+  - id: dod-omn19998-ac33-node-refusal-reason
+    description: AC33 runs the packaged ci-live-contact node through onex node on a temporary repository with a staged scripts/ci change and a staged non-tooling change and reads the SkillRoutingError envelope on stdout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_node_refusal_reason_omn19998.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC33

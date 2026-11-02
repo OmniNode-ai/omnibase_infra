@@ -46,21 +46,21 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 def _emit_skill_routing_error(
     node_id: str,
     result: EnumWorkflowResult,
-    last_error: str | None,
+    runtime: ExecutionGraphHostingRuntime,
 ) -> None:
     """Emit the documented ``SkillRoutingError`` JSON envelope to stdout.
 
     Skill shells (e.g. ``golden_chain_sweep``) dispatch via ``onex node`` and
-    document that a non-zero exit surfaces a ``SkillRoutingError`` JSON envelope
-    rather than a raw traceback (OMN-8724). The default (non-receipt) path
-    previously left only the runtime's stderr traceback, so callers had no
-    machine-readable envelope to surface. This emits the same envelope shape as
-    ``omnibase_core.cli.cli_run_node._emit_error`` so both dispatch surfaces are
-    consistent.
+    document that a non-zero exit surfaces this envelope rather than a raw
+    traceback (OMN-8724); its shape matches ``omnibase_core.cli.cli_run_node.
+    _emit_error``. A handler that refuses with a typed result leaves
+    ``last_error`` unset, so its ``error_message`` is the message and a hook
+    such as ci-live-contact names its fix on stdout (OMN-19998).
     """
     envelope: dict[str, str] = {
         "error_type": "SkillRoutingError",
-        "message": last_error
+        "message": runtime.last_error
+        or getattr(runtime.handler_result, "error_message", None)
         or f"Node '{node_id}' run did not complete (result={result.value}).",
         "node_id": node_id,
         "result": result.value,
@@ -268,5 +268,5 @@ def run_node_by_name(
     )
     result = runtime.run()
     if result is not EnumWorkflowResult.COMPLETED:
-        _emit_skill_routing_error(node_name, result, runtime.last_error)
+        _emit_skill_routing_error(node_name, result, runtime)
     sys.exit(runtime.exit_code)
