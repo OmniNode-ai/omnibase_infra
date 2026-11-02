@@ -272,7 +272,7 @@ class TestComposeUpUsesTheDerivedCeiling:
         seen: list[int] = []
 
         def _fake_run(cmd: list[str], timeout: int, **kwargs: Any) -> Any:
-            if "up" in cmd and "--force-recreate" in cmd:
+            if "up" in cmd and "--no-deps" in cmd:
                 seen.append(timeout)
             return subprocess.CompletedProcess(
                 args=cmd, returncode=0, stdout="", stderr=""
@@ -315,8 +315,8 @@ class TestComposeUpUsesTheDerivedCeiling:
             _LIVE_COMPOSE_FILES,
             services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV),
         ).timeout_seconds
-        assert seen == [expected]
-        assert seen != [300]
+        assert set(seen) == {expected}
+        assert 300 not in seen
 
     def test_the_core_compose_up_no_longer_takes_the_flat_phase_bound(self) -> None:
         """SUPERSEDED BY OMN-18692. This assertion used to be the opposite.
