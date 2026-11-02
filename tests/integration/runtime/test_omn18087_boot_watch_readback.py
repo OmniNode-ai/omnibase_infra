@@ -52,6 +52,7 @@ async def test_boot_watch_preserves_503_and_records_late_runtime_readiness(
     process.register_readiness_probe("lab_boot_dependency", gate)
     server = ServiceHealth(runtime=process, host="127.0.0.1", port=0)
     watch: asyncio.Task[bool] | None = None
+    started = time.monotonic()
     try:
         await asyncio.wait_for(process.start(), timeout=10)
         await server.start()
@@ -62,7 +63,8 @@ async def test_boot_watch_preserves_503_and_records_late_runtime_readiness(
 
         async def probe() -> dict[str, object]:
             result = await process.readiness_check()
-            polled.set()
+            if time.monotonic() - started >= 1:
+                polled.set()
             return result
 
         with caplog.at_level(logging.INFO):
@@ -70,12 +72,12 @@ async def test_boot_watch_preserves_503_and_records_late_runtime_readiness(
                 watch_ready_bound(
                     probe,
                     bound_seconds=1,
-                    started_monotonic=time.monotonic() - 2,
-                    poll_seconds=0.001,
+                    started_monotonic=started,
+                    poll_seconds=0.05,
                     observe_late_ready=True,
                 )
             )
-            await asyncio.wait_for(polled.wait(), timeout=1)
+            await asyncio.wait_for(polled.wait(), timeout=2)
             async with httpx.AsyncClient() as client:
                 blocked = await client.get(url)
                 assert blocked.status_code == 503
