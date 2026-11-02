@@ -51,16 +51,29 @@ def _gates_green() -> list[dict[str, Any]]:
     return [_job(g, "success") for g in (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS)]
 
 
+def _for_event(event: str, jobs: list[dict[str, Any]]) -> tuple[int, str]:
+    """Judge ``jobs`` as ``main()`` does when the poller passes no check-runs.
+
+    ``main()`` leaves ``sweep_external`` at its default (True), so this helper
+    does too; with no ``check_runs`` the sweep has nothing to judge and the
+    verdict is the job-level one these tests pin.
+    """
+    return evaluate(jobs, strict_gates=strict_gates_for_event(event))
+
+
 def _merge_group(jobs: list[dict[str, Any]]) -> tuple[int, str]:
-    return evaluate(
-        jobs, strict_gates=strict_gates_for_event("merge_group"), sweep_external=False
-    )
+    return _for_event("merge_group", jobs)
 
 
 def _pull_request(jobs: list[dict[str, Any]]) -> tuple[int, str]:
-    return evaluate(
-        jobs, strict_gates=strict_gates_for_event("pull_request"), sweep_external=False
-    )
+    return _for_event("pull_request", jobs)
+
+
+def _failure_section(report: str) -> str:
+    """The text after the ``strict-gate failures:`` label, failing clearly if absent."""
+    _, label, tail = report.partition("strict-gate failures:")
+    assert label, f"report has no 'strict-gate failures:' section:\n{report}"
+    return tail
 
 
 def test_runtime_boot_gate_name_is_the_compose_inner_job() -> None:
@@ -89,7 +102,7 @@ def test_runtime_boot_merge_group_non_success_fails(conclusion: str) -> None:
     jobs = _gates_green() + [_job(RUNTIME_BOOT_SMOKE_COMPOSE_GATE, conclusion)]
     code, report = _merge_group(jobs)
     assert code == EXIT_FAILURE, report
-    assert RUNTIME_BOOT_SMOKE_COMPOSE_GATE in report.split("strict-gate failures:")[1]
+    assert RUNTIME_BOOT_SMOKE_COMPOSE_GATE in _failure_section(report), report
 
 
 def test_runtime_boot_merge_group_absent_never_passes() -> None:
@@ -196,24 +209,27 @@ def test_stack_shape_missing_job_never_passes(event: str) -> None:
     """Absent is PENDING, which the poller turns into FAILURE at its deadline."""
     jobs = _without(_gates_green(), STACK_SHAPE_GATE)
     assert len(jobs) == len(_gates_green()) - 1  # positive control: the job was there
-    code, report = evaluate(
-        jobs, strict_gates=strict_gates_for_event(event), sweep_external=False
-    )
+    code, report = _for_event(event, jobs)
     assert code == EXIT_PENDING, report
     assert STACK_SHAPE_GATE in report
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
 @pytest.mark.parametrize("conclusion", ["skipped", "failure", "cancelled", "timed_out"])
-def test_stack_shape_non_success_fails(conclusion: str) -> None:
+def test_stack_shape_non_success_fails(event: str, conclusion: str) -> None:
     jobs = _without(_gates_green(), STACK_SHAPE_GATE) + [
         _job(STACK_SHAPE_GATE, conclusion)
     ]
-    code, report = _pull_request(jobs)
+    code, report = _for_event(event, jobs)
     assert code == EXIT_FAILURE, report
-    assert STACK_SHAPE_GATE in report.split("strict-gate failures:")[1]
+    assert STACK_SHAPE_GATE in _failure_section(report), report
 
 
-def test_stack_shape_success_passes() -> None:
-    code, report = _pull_request(_gates_green())
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
+def test_stack_shape_success_passes(event: str) -> None:
+    jobs = _gates_green()
+    if event == "merge_group":  # the merge_group strict tier also needs the boot
+        jobs.append(_job(RUNTIME_BOOT_SMOKE_COMPOSE_GATE, "success"))
+    code, report = _for_event(event, jobs)
     assert code == EXIT_SUCCESS, report
     assert f"- {STACK_SHAPE_GATE}: completed/success" in report
