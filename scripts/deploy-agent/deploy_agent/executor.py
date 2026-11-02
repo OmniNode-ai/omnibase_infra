@@ -109,7 +109,7 @@ from deploy_agent.ref_fence import (
     ModelRefLineageFacts,
     assert_ref_not_stale_branch,
 )
-from deploy_agent.routing import AGENT_CLONE_ROOT, RoutingTableError
+from deploy_agent.routing import AGENT_CLONE_ROOT, lane_flags_for_instance
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
@@ -172,6 +172,7 @@ def load_dev_boot_guard() -> ModuleType:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
     for relative in (
+        "models/handlers/model_value_holder.py",
         "models/model_dev_boot_health_status.py",
         "models/model_dev_boot_state.py",
         "models/model_dev_boot_healthcheck.py",
@@ -187,8 +188,7 @@ def load_dev_boot_guard() -> ModuleType:
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Cannot load dev boot effect: {relative}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
+        module = sys.modules[module_name] = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     return sys.modules[name]
 
@@ -742,13 +742,11 @@ class ProdStabilityDigestMissingError(RuntimeError):
 
 
 class EnumInstancePhase(StrEnum):
-    """The deploy phases that exist on the .201 dev lane's host only (OMN-19522).
+    """The deploy phases an instance's ``disabled_phases`` can turn off (OMN-19522).
 
-    Each one reaches something .202 does not have: the ``omninode-gateway``
-    compose project and its systemd forwarder, the k3s onex-lab overlay (and its
-    failing-path repair build), the omninode_infra cloud image that the onex-api
-    pin delivers, and the Infisical container that the seed writes to (which the
-    dev-202 overlay disables, as the roles plan rules for that host).
+    The ``omninode-gateway`` compose project and its systemd forwarder, the k3s
+    lab overlay (and its failing-path repair build), the cloud image the
+    onex-api pin delivers, and the Infisical container the seed writes to.
     """
 
     GATEWAY_DEPLOY = "gateway-deploy"
@@ -775,10 +773,11 @@ class ModelLaneConfig(BaseModel):
       the running build (the lineage fence reads it). On the .201 dev lane the
       first health target's service name is also its container name; on a lane
       that renames containers it is not.
-    * ``disabled_phases`` -- the .201-only phases this lane never runs.
-    * ``disabled_services`` -- services the lane's overlay disables by profile.
-      Naming one in a compose argv would auto-activate its profile and start
-      it, so they are never compose arguments on this lane.
+    * ``disabled_phases`` -- the phases this lane never runs (``lane:`` block
+      and ``flags:``).
+    * ``disabled_services`` -- services the lane's overlay disables by profile
+      (never compose arguments: naming one would start it) and, with the gateway
+      phase off, the gateway project's.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -872,32 +871,29 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
 DEFAULT_DEV_INSTANCE = "dev-201"
 
 
+def lane_with_phases_off(
+    config: ModelLaneConfig, names: tuple[str, ...]
+) -> ModelLaneConfig:
+    """``config`` with the phases ``names`` spell off (OMN-21629)."""
+    phases = config.disabled_phases | {EnumInstancePhase(p) for p in names}
+    services = config.disabled_services
+    if EnumInstancePhase.GATEWAY_DEPLOY in phases:
+        services |= frozenset(DEV_LANE_GATEWAY_SERVICES)
+    return config.model_copy(
+        update={"disabled_phases": phases, "disabled_services": services}
+    )
+
+
 def dev_instance_lane_config(
     spec: ModelInstanceLane, *, repo_dir: str = REPO_DIR
 ) -> ModelLaneConfig:
     """An instance's dev-lane composition, from its routing-table ``lane:`` block.
 
-    OMN-19543: this replaces the per-instance literal OMN-19522 wrote for
-    dev-202. The instance's overlay is layered on the .201 dev lane's pair and
-    replaces everything that identifies a lane on a host (project, container
-    names, network, volumes, ports); the table names the rest. The health
-    targets keep the SERVICE names, as on the .201 dev lane: the verify
-    recreate (VERIFY_RECREATE_LANES) looks them up by compose label, and the
-    ports are the host ports the overlay publishes them on. Disabling the
-    gateway phase also disables the gateway project's services, which have no
-    lane on a host without that phase.
+    OMN-19543: its overlay layers on the default dev lane's pair. The health targets
+    keep the SERVICE names (the verify recreate looks them up by compose label)
+    on the host ports the overlay publishes.
     """
-    try:
-        phases = frozenset(EnumInstancePhase(p) for p in spec.disabled_phases)
-    except ValueError as exc:
-        raise RoutingTableError(
-            f"unknown disabled phase in {spec.disabled_phases!r} (known: "
-            f"{', '.join(p.value for p in EnumInstancePhase)})"
-        ) from exc
-    services = set(spec.disabled_services)
-    if EnumInstancePhase.GATEWAY_DEPLOY in phases:
-        services.update(DEV_LANE_GATEWAY_SERVICES)
-    return ModelLaneConfig(
+    config = ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
         compose_files=(
             COMPOSE_FILE,
@@ -912,9 +908,9 @@ def dev_instance_lane_config(
             ("runtime-effects", spec.health_ports.effects),
         ),
         runtime_container=spec.runtime_container,
-        disabled_phases=phases,
-        disabled_services=frozenset(services),
+        disabled_services=frozenset(spec.disabled_services),
     )
+    return lane_with_phases_off(config, spec.disabled_phases)
 
 
 def build_dev_instance_lane_configs(
@@ -923,7 +919,14 @@ def build_dev_instance_lane_configs(
     """Every dev instance's composition: the default's historical one, plus one
     per ``lane:`` block."""
     return {
-        DEFAULT_DEV_INSTANCE: _LANE_CONFIGS[EnumRuntimeLane.DEV],
+        # The default declares no ``lane:`` block, so its phases are the table's
+        # ``flags:`` (OMN-21629).
+        DEFAULT_DEV_INSTANCE: lane_with_phases_off(
+            _LANE_CONFIGS[EnumRuntimeLane.DEV],
+            lane_flags_for_instance(
+                AGENT_CLONE_ROOT, DEFAULT_DEV_INSTANCE
+            ).disabled_phases,
+        ),
         **{
             name: dev_instance_lane_config(spec, repo_dir=repo_dir)
             for name, spec in specs.items()
@@ -1246,6 +1249,24 @@ def _build_source_build_args(
         "--build-arg",
         f"OMNI_HOME={omni_home}",
     ]
+
+
+def _first_party_audit_args(lane: EnumRuntimeLane, declared_pr: str) -> list[str]:
+    """The audit's build-context build arguments; empty without a declaration (OMN-21928)."""
+    # The checker is loaded by path from the clone being built: the agent's own
+    # ``omnibase_infra`` is a released wheel that need not carry it.
+    if not declared_pr:
+        return []
+    path = (
+        Path(REPO_DIR) / "src/omnibase_infra/validation/checker_first_party_sources.py"
+    )
+    spec = importlib.util.spec_from_file_location("first_party_checker", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load the first-party source checker from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return cast("list[str]", module.audit_build_args(lane.value, declared_pr))
 
 
 def _decode_stream(stream: str | bytes | None) -> str:
@@ -3390,6 +3411,9 @@ class DeployExecutor:
         # without this the terminal event named one repository's commit and left
         # the other three to be inferred from the image.
         self.sibling_source_refs: dict[str, str] = {}
+        # OMN-21928: <repo>#<number>@<head sha> of the open pull request this
+        # rebuild declares; rebuild_scope sets it from the signed command.
+        self.declared_pr = ""
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
         # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
         # stages, so every RUN after it takes the value as build environment
@@ -4607,6 +4631,7 @@ class DeployExecutor:
         build_source: BuildSource | str = BuildSource.RELEASE,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
+        declared_pr: str = "",
     ) -> list[str]:
         # OMN-16442: no self-update here. This method runs inside an accepted
         # job, after preflight/git/compose_gen/seed; a re-exec from this point
@@ -4619,6 +4644,7 @@ class DeployExecutor:
         phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
         # OMN-18057: residue is per-rebuild, not per-process.
         self.reset_deploy_observations()
+        self.declared_pr = declared_pr
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).
@@ -5039,7 +5065,7 @@ class DeployExecutor:
                     env=self._gateway_child_env(build_source, git_ref=git_ref),
                 )
             except subprocess.TimeoutExpired as exc:
-                raise RuntimeError(
+                raise load_dev_boot_guard().DevCompanionLaneFailedError(
                     f"GATEWAY_DEPLOY_TIMED_OUT: {' '.join(cmd)} exceeded its "
                     f"{timeout}s ceiling and was killed. Ceiling derivation: "
                     f"{budget.describe()}."
@@ -5050,7 +5076,7 @@ class DeployExecutor:
             # deploy-gateway.sh stages the workspace into REPO_DIR again (OMN-20637).
             _restore_build_byproducts(REPO_DIR)
         if result.returncode != 0:
-            raise RuntimeError(
+            raise load_dev_boot_guard().DevCompanionLaneFailedError(
                 f"GATEWAY_DEPLOY_FAILED: {' '.join(cmd)} exited "
                 f"{result.returncode}. stderr: {result.stderr[-2000:]}"
             )
@@ -5425,29 +5451,29 @@ class DeployExecutor:
 
         The guard STAYS. This passes the pin the operator supplied; it does not
         weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
-        deliberately NOT substituted with a fallback ref — nothing is exported
-        and the script refuses in its own words, which is the correct outcome
-        for a caller that has no pin to offer.
-
-        OMN-17135: ``deploy_ref`` pins ONE repository. The CI path
-        (``runtime-rebuild-trigger.yml`` → ``trigger_rebuild_on_merge.py``)
-        constrains the published ``git_ref`` to a lowercase hex commit SHA of
-        **omnibase_infra**, and that commit exists in no sibling — so RT-1
-        aborted on the first one it tried (``ERROR: omnibase_core: cannot
-        resolve ref '<infra sha>'``, exit 4) and every CI-triggered agent
-        rebuild failed by construction, 13 seconds after acceptance (job
-        ``a5b200d5``, 2026-09-09T21:02Z). ``sibling_fallback_ref`` is the ref
-        each sibling resolves for itself instead: the declared tracking head.
-        Manual requests carrying ``git_ref=origin/dev`` are unaffected, because
-        the fallback engages only where the primary names no commit.
-
-        Returns repo → the commit SHA RT-1 actually resolved for that sibling,
-        read back from the expected-refs manifest this call pins the location of.
-        The path is named explicitly, under the same ``~/.omnibase/state``
-        convention the script's own default uses but with a distinct
-        agent-and-pid basename, so two concurrent callers cannot read each
-        other's manifest and neither can collide with the script's default.
         """
+        # deliberately NOT substituted with a fallback ref — nothing is exported
+        # and the script refuses in its own words, which is the correct outcome
+        # for a caller that has no pin to offer.
+        #
+        # OMN-17135: ``deploy_ref`` pins ONE repository. The CI path
+        # (``runtime-rebuild-trigger.yml`` → ``trigger_rebuild_on_merge.py``)
+        # constrains the published ``git_ref`` to a lowercase hex commit SHA of
+        # **omnibase_infra**, and that commit exists in no sibling — so RT-1
+        # aborted on the first one it tried (``ERROR: omnibase_core: cannot
+        # resolve ref '<infra sha>'``, exit 4) and every CI-triggered agent
+        # rebuild failed by construction, 13 seconds after acceptance (job
+        # ``a5b200d5``, 2026-09-09T21:02Z). ``sibling_fallback_ref`` is the ref
+        # each sibling resolves for itself instead: the declared tracking head.
+        # Manual requests carrying ``git_ref=origin/dev`` are unaffected, because
+        # the fallback engages only where the primary names no commit.
+        #
+        # Returns repo → the commit SHA RT-1 actually resolved for that sibling,
+        # read back from the expected-refs manifest this call pins the location of.
+        # The path is named explicitly, under the same ``~/.omnibase/state``
+        # convention the script's own default uses but with a distinct
+        # agent-and-pid basename, so two concurrent callers cannot read each
+        # other's manifest and neither can collide with the script's default.
         script = Path(repo_dir) / "scripts" / "runtime_build" / "stage_workspace.sh"
         if not script.exists():
             raise RuntimeError(
@@ -5577,6 +5603,11 @@ class DeployExecutor:
             build_source,
             expected_build_source=expected_build_source,
         )
+        # OMN-21928: a declared open pull request names the first-party audit's
+        # build context. The policy data (first_party_sources.yaml, read from the
+        # clone being built) names the lanes that may declare; any other lane is
+        # refused here, before staging or any docker side effect.
+        validated_args += _first_party_audit_args(runtime_lane, self.declared_pr)
 
         selected_source = _coerce_build_source(build_source, layer="deploy-agent")
         omni_home = os.environ.get("OMNI_HOME", "").strip()

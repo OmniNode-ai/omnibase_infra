@@ -27,6 +27,7 @@ from uuid import NAMESPACE_URL, uuid5
 from pydantic import JsonValue, TypeAdapter
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.handlers.model_value_holder import ModelValueHolder
 from omnibase_infra.models.model_dev_boot_container import ModelDevBootContainer
 from omnibase_infra.models.model_dev_boot_point import ModelDevBootPoint
 from omnibase_infra.models.model_dev_boot_report_config import ModelDevBootReportConfig
@@ -47,6 +48,16 @@ class DevBootFailedError(RuntimeError):
 
 class DevBootRecoveryError(RuntimeError):
     """The candidate deploy failed, including when recovery succeeded."""
+
+
+class DevCompanionLaneFailedError(RuntimeError):
+    """A lane deployed beside the runtime failed (the gateway forwarder).
+
+    The companion lane carries no delegation or runtime traffic, so its failure
+    fails the job and is reported, but it is not by itself a reason to replace a
+    runtime that is up and healthy (OMN-21645). The guard still restores the
+    retained family when the runtime is unhealthy or absent.
+    """
 
 
 def _checked(
@@ -169,6 +180,13 @@ def _unchanged_and_healthy(
     )
 
 
+def _all_healthy(read_containers: Callable[[], list[ModelDevBootContainer]]) -> bool:
+    try:
+        return all(_healthy(c) for c in read_containers())
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return False
+
+
 class HandlerDevBootGuard:
     """Supervise only the selected DEV compose project under its caller's lock."""
 
@@ -193,7 +211,7 @@ class HandlerDevBootGuard:
         )
         self.root = state_dir / "dev-boot-guard" / self.config.compose_project
         self.snapshot_path = self.root / "last-healthy.json"
-        self.point: ModelDevBootPoint | None = None
+        self.point: ModelValueHolder[ModelDevBootPoint] = ModelValueHolder()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -402,7 +420,7 @@ class HandlerDevBootGuard:
     def prepare(self) -> None:
         """Retain the live healthy family BEFORE git updates compose settings."""
         try:
-            self.point = self._capture()
+            self.point.hold(self._capture())
             return
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             if not self.snapshot_path.is_file():
@@ -412,15 +430,15 @@ class HandlerDevBootGuard:
         point = ModelDevBootPoint.model_validate_json(self.snapshot_path.read_text())
         if point.project != self.config.compose_project:
             raise DevBootFailedError("last healthy snapshot belongs to another project")
-        self.point = point
+        self.point.hold(point)
 
     def _restore(self) -> None:
-        if self.point is None:
+        if self.point.current is None:
             raise DevBootFailedError("no last healthy dev revision")
-        for retained, image_id in self.point.images.items():
+        for retained, image_id in self.point.current.images.items():
             self.execution._tag_image(image_id, retained)
         path = self.root / "recovery-compose.json"
-        self.execution._atomic_write_private_json(path, self.point.compose)
+        self.execution._atomic_write_private_json(path, self.point.current.compose)
         _checked(
             [
                 "docker",
@@ -428,7 +446,7 @@ class HandlerDevBootGuard:
                 "-f",
                 str(path),
                 "-p",
-                self.point.project,
+                self.point.current.project,
                 "--profile",
                 "runtime",
                 "up",
@@ -460,11 +478,11 @@ class HandlerDevBootGuard:
         mark_failed: Callable[[str], object],
     ) -> Iterator[None]:
         """Keep the failed verdict even after successfully recovering the lane."""
-        if self.point is None:
+        if self.point.current is None:
             raise DevBootFailedError("no last healthy dev revision")
         try:
             yield
-            self.point = self._capture()
+            self.point.hold(self._capture())
         except Exception as exc:
             boot_causes: list[str] = []
             try:
@@ -494,7 +512,7 @@ class HandlerDevBootGuard:
                 "status": "failed",
                 "project": self.config.compose_project,
                 "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "restored_revision": self.point.revision,
+                "restored_revision": self.point.current.revision,
                 "recovery_verified": False,
                 "ledger_pending": True,
                 "exception_pending": True,
@@ -507,8 +525,33 @@ class HandlerDevBootGuard:
             except (OSError, RuntimeError):
                 logger.exception("Cannot persist failed dev deploy before recovery")
             try:
-                unchanged = _unchanged_and_healthy(self.point, self._containers)
-                if not unchanged:
+                unchanged = _unchanged_and_healthy(self.point.current, self._containers)
+                kept_revision: str | None = None
+                if (
+                    isinstance(exc, DevCompanionLaneFailedError)
+                    and not unchanged
+                    and _all_healthy(self._containers)
+                ):
+                    # OMN-21645: the companion lane failed after the new
+                    # runtime was replaced and verified. Rolling that healthy
+                    # family back recreates the runtime a second time and ends
+                    # every in-flight run with runtime_shutdown. A capture that
+                    # refuses leaves kept_revision unset, so the retained
+                    # family is restored as before.
+                    try:
+                        captured = self._capture()
+                        self.point.hold(captured)
+                        kept_revision = captured.revision
+                    except (
+                        OSError,
+                        ValueError,
+                        RuntimeError,
+                        subprocess.SubprocessError,
+                    ):
+                        kept_revision = None
+                if kept_revision is not None:
+                    incident["runtime_kept_revision"] = kept_revision
+                elif not unchanged:
                     self._restore()
                 incident["recovery_skipped_healthy"] = unchanged
                 incident["recovery_verified"] = True
@@ -528,7 +571,7 @@ class HandlerDevBootGuard:
             except (OSError, RuntimeError):
                 logger.exception("Dev deploy failure report remains pending")
             raise DevBootRecoveryError(
-                f"commit={commit}: {reason}; forward redeploy revision={self.point.revision} "
+                f"commit={commit}: {reason}; forward redeploy revision={self.point.current.revision} "
                 f"verified={incident['recovery_verified']}"
             ) from exc
 

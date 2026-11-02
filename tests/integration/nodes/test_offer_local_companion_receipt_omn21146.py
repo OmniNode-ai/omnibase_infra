@@ -90,6 +90,7 @@ async def test_local_offer_provenance_survives_the_receipt(
     request = ModelEvidenceAutocloseSweepRequest.model_validate_json(
         ModelEvidenceAutocloseSweepRequest(
             correlation_id=uuid4(),
+            demotion_window_hours=0,
             evidence_repo=_OCC_REPO,
             apply=True,
             offer_tickets=(_TICKET,),
@@ -138,6 +139,7 @@ async def test_local_changed_file_conflict_is_refused_in_the_receipt(
     )
     request = ModelEvidenceAutocloseSweepRequest(
         correlation_id=uuid4(),
+        demotion_window_hours=0,
         evidence_repo=_OCC_REPO,
         apply=True,
         offer_tickets=(_TICKET,),

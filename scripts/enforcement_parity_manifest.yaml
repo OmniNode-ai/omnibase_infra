@@ -176,11 +176,32 @@ repos:
         queue: disabled # DECIDED policy: queue disabled org-wide
         strict: false # recorded as-is
         rule: "queue disabled org-wide (decided); strict recorded as-is"
-      # NOTE (verified 2026-07-10): omnibase_spi dev still has a LIVE merge queue
-      # (mergeQueue id present) against the decided queue=disabled policy, so the
-      # ratchet reports QUEUE_DRIFT here. This is real drift surfaced by the
-      # merge-policy dimension, not a manifest error — disabling it is a separate,
-      # operator/admin branch-protection action (this ratchet does not mutate).
+        # NOTE (verified 2026-07-10): omnibase_spi dev still has a LIVE merge queue
+        # (mergeQueue id present) against the decided queue=disabled policy, so the
+        # ratchet reports QUEUE_DRIFT here. This is real drift surfaced by the
+        # merge-policy dimension, not a manifest error — disabling it is a separate,
+        # operator/admin branch-protection action (this ratchet does not mutate).
+  # --- Public repo gated on main (OMN-21863) ---
+  # OmniUI's default branch is main. Both gates are reusable-workflow callers, so
+  # the check-run names are "<caller job> / <called job>".
+  omniui:
+    main:
+      # Observed baseline, not an org-wide policy: PR watcher settings read of
+      # omniui:main (read_at 2026-11-01T17:35:53Z): protection strict=False and
+      # no merge-queue rule on the branch, so queue disabled and strict false.
+      # The parity audit compares live settings with this baseline on every run
+      # and reports QUEUE_DRIFT or STRICT_DRIFT when either setting changes.
+      merge_policy:
+        queue: disabled
+        strict: false
+        rule: "omniui main settings observed 2026-11-01; parity audit reports drift from this baseline"
+      load_bearing_gates:
+        - context: "kb-doc-gate / kb-doc-gate"
+          coverage: direct
+          rule: "public-repo document placement (OMN-21863)"
+        - context: "public-repo-hygiene / public-repo-hygiene"
+          coverage: direct
+          rule: "public-repo hygiene, mode enforce (OMN-21863)"
 
 # omniweb is DELIBERATELY omitted. Its `dev` branch has no protection object
 # (spec M5), but omniweb deploys from `main` (not dev), so dev protection may be

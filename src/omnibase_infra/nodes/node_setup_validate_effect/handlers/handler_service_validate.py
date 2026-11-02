@@ -36,6 +36,8 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.models.network_binding import load_network_binding_settings
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.nodes.node_setup_validate_effect.models.model_service_health_result import (
     ModelSetupNodeHealthResult,
 )
@@ -216,7 +218,9 @@ class HandlerServiceValidate:
             health_check_path = local_cfg.health_check_path
 
             if health_check_path is not None:
-                url = f"http://localhost:{host_port}{health_check_path}"  # url-authority-ok: LOCAL topology probes a host-mapped Compose port on this deployment host.
+                url = load_third_party_endpoints().loopback_url(
+                    host_port, health_check_path
+                )
                 logger.debug("HTTP health check for %s: %s", svc_name, url)
                 healthy, response_time_ms = await _check_http_health(url, timeout_s)
                 message = f"HTTP {url} {'OK' if healthy else 'UNREACHABLE'}"
@@ -225,7 +229,7 @@ class HandlerServiceValidate:
                     "TCP health check for %s: localhost:%d", svc_name, host_port
                 )
                 healthy, response_time_ms = await _check_tcp_health(
-                    "localhost", host_port, timeout_s
+                    load_network_binding_settings().local_host, host_port, timeout_s
                 )
                 message = f"TCP localhost:{host_port} {'OPEN' if healthy else 'CLOSED'}"
 

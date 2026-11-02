@@ -243,7 +243,9 @@ class HandlerRewardBinder:
         if self._publisher is None:
             raise RuntimeHostError(
                 "HandlerRewardBinder requires a publisher to be configured. "
-                "Use RegistryInfraRewardBinderEffect.create_with_publisher().",
+                "Construct it with publisher=<async publish callable> through the "
+                "handler binding for 'emit_reward_events' in "
+                "node_reward_binder_effect/contract.yaml handler_routing.",
                 context=context,
             )
 

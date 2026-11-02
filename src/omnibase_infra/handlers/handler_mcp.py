@@ -55,7 +55,12 @@ from omnibase_infra.handlers.models.mcp import (
     ModelMcpToolResult,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
+from omnibase_infra.models.handlers.model_name_keyed_table import ModelNameKeyedTable
 from omnibase_infra.services.mcp import MCPServerLifecycle, ModelMCPServerConfig
+from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
+    ProtocolMCPToolDefinition,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Sequence
@@ -66,9 +71,6 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.services.mcp.service_mcp_tool_registry import (
         ServiceMCPToolRegistry,
-    )
-    from omnibase_spi.protocols.types.protocol_mcp_tool_types import (
-        ProtocolMCPToolDefinition,
     )
 
 logger = logging.getLogger(__name__)
@@ -191,7 +193,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         self._container = container
         self._config: ModelMcpHandlerConfig | None = None
         self._initialized: bool = False
-        self._tool_registry: dict[str, ProtocolMCPToolDefinition] = {}
+        self._tool_registry: ModelNameKeyedTable[ProtocolMCPToolDefinition] = ModelNameKeyedTable()  # fmt: skip
 
         # MCP integration components (OMN-1281)
         self._mcp_registry: ServiceMCPToolRegistry | None = registry
@@ -383,18 +385,18 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
             # Try TCP connect
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(poll_interval)
-                # TCP PROTOCOL REQUIREMENT (NOT a config fallback):
-                # When a server binds to 0.0.0.0 (INADDR_ANY), it listens on all
-                # interfaces but you cannot connect() to 0.0.0.0 - it's not a
-                # routable address. TCP requires connecting to a specific interface.
-                # Using 127.0.0.1 (loopback) is the correct way to reach a local
-                # server that bound to 0.0.0.0. This is standard TCP/IP behavior,
-                # not an environment configuration fallback.
-                effective_host = "127.0.0.1" if host == "0.0.0.0" else host  # noqa: S104
-                result = sock.connect_ex((effective_host, port))
-                sock.close()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(poll_interval)
+                    # TCP PROTOCOL REQUIREMENT (NOT a config fallback):
+                    # When a server binds to the bind-all address (INADDR_ANY), it
+                    # listens on all interfaces but you cannot connect() to it - it's
+                    # not a routable address. TCP requires connecting to a specific
+                    # interface. Using the loopback address is the correct way to reach
+                    # a local server that bound to the bind-all address. This is
+                    # standard TCP/IP behavior, not an environment configuration
+                    # fallback.
+                    effective_host = load_endpoint_defaults().connect_address(host)
+                    result = sock.connect_ex((effective_host, port))
                 if result == 0:
                     return  # Server is ready
             except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
@@ -459,7 +461,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             self._config = ModelMcpHandlerConfig(**config)
 
             # Initialize tool registry (empty until tools are registered)
-            self._tool_registry = {}
+            self._tool_registry.discard_all()
 
             # Initialize circuit breaker for tool execution resilience
             # Configuration from contract.yaml: threshold=5, reset_timeout=60.0
@@ -786,7 +788,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         self._mcp_executor = None
 
         # Clear all state
-        self._tool_registry.clear()
+        self._tool_registry.discard_all()
         self._config = None
         self._initialized = False
         self._server = None
@@ -943,7 +945,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             arguments = {}
 
         # Check if tool exists
-        if tool_name not in self._tool_registry:
+        if tool_name not in self._tool_registry.entries:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.MCP,
                 operation="mcp.call_tool",
@@ -958,7 +960,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         # Validate arguments before dispatch so malformed inputs are rejected
         # at the MCP boundary with a clean error rather than producing confusing
         # downstream errors inside ONEX orchestrators.
-        tool_def = self._tool_registry[tool_name]
+        tool_def = self._tool_registry.entries[tool_name]
         # MCPToolDefinition stores input_schema; ProtocolMCPToolDefinition does
         # not declare it, so we access it via getattr for forward-compatibility.
         tool_input_schema: dict[str, object] | None = getattr(
@@ -1137,7 +1139,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
     def _get_tool_definitions(self) -> Sequence[ProtocolMCPToolDefinition]:
         """Get all registered tool definitions."""
-        return list(self._tool_registry.values())
+        return list(self._tool_registry.entries.values())
 
     def _build_input_schema(self, tool: ProtocolMCPToolDefinition) -> dict[str, object]:
         """Build JSON Schema for tool input from MCP tool definition."""
@@ -1374,14 +1376,14 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     context=ctx,
                 )
         """
-        if self._config and len(self._tool_registry) >= self._config.max_tools:
+        if self._config and len(self._tool_registry.entries) >= self._config.max_tools:
             logger.warning(
                 "Maximum tool limit reached, tool not registered",
                 extra={"tool_name": tool.name, "max_tools": self._config.max_tools},
             )
             return False
 
-        self._tool_registry[tool.name] = tool
+        self._tool_registry.register(tool.name, tool)
         logger.info(
             "Tool registered",
             extra={
@@ -1401,8 +1403,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         Returns:
             True if tool was unregistered, False if not found.
         """
-        if tool_name in self._tool_registry:
-            del self._tool_registry[tool_name]
+        if self._tool_registry.unregister(tool_name):
             logger.info("Tool unregistered", extra={"tool_name": tool_name})
             return True
         return False
@@ -1427,7 +1428,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
             }
 
         # Include lifecycle tool count if available (OMN-1282)
-        tool_count = len(self._tool_registry)
+        tool_count = len(self._tool_registry.entries)
         if self._lifecycle and self._lifecycle.registry:
             tool_count = self._lifecycle.registry.tool_count
 
@@ -1518,7 +1519,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         # Task is still running - healthy
         # Include lifecycle tool count if available (OMN-1282)
-        tool_count = len(self._tool_registry)
+        tool_count = len(self._tool_registry.entries)
         if self._lifecycle and self._lifecycle.registry:
             tool_count = self._lifecycle.registry.tool_count
 
