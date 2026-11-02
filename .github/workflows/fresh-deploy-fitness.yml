@@ -53,11 +53,8 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
-    # OMN-14471: this gate now invokes the canonical node_release_identity_compute
-    # COMPUTE node (via scripts/check_release_identity.py), which imports
-    # omnibase_infra, so the job must run in the uv workspace rather than a bare
-    # setup-python. The gate BEHAVIOR is unchanged — only the environment that
-    # imports the node differs. Mirrors the sibling-lock-pins job below.
+    # OMN-21939: this gate runs omnibase_core's node_release_identity_check_compute
+    # (the check-release-identity hook's runtime) from the locked uv workspace.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -73,7 +70,8 @@ jobs:
           set -euo pipefail
           BASE="${{ github.event.pull_request.base.ref || 'dev' }}"
           git fetch --quiet origin "${BASE}" || true
-          uv run --frozen python scripts/check_release_identity.py --base "origin/${BASE}"
+          uv run --frozen python -m omnibase_core.nodes.node_release_identity_check_compute.runtime_release_identity_check \
+            --root . --base "origin/${BASE}"
 
   terminal-cost-completeness:
     name: terminal-cost-completeness
