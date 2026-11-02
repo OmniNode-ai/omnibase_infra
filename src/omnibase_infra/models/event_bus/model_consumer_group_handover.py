@@ -26,6 +26,17 @@ Shape, as a TOP-LEVEL key in the node's ``contract.yaml``::
       from_version: v1
       from_auto_offset_reset: earliest
 
+A retired consumer whose group is a bare name, not built from service, node and
+version, declares the name itself in place of the three segments::
+
+    consumer_group_handover:
+      from_group_id: agent-observability-postgres
+      from_auto_offset_reset: earliest
+
+``from_group_id`` is the group as it is, with no environment prefix and no
+derivation, so it serves every lane that retired consumer ran in. A declaration
+carries either the three segments or ``from_group_id``, never both.
+
 The source group is derived with the same ``compute_consumer_group_id`` and the
 runtime's own environment, so one declaration serves every lane whose retired
 container used ``{env}.<service>.<node>.consume.<version>`` (the dev, stability,
@@ -43,9 +54,9 @@ unrecognised top-level key cannot break parsing.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.models import ModelNodeIdentity
@@ -59,14 +70,23 @@ class ModelConsumerGroupHandover(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    from_service: str = Field(
-        ..., min_length=1, description="Service segment of the retired group."
+    from_service: str | None = Field(
+        default=None, min_length=1, description="Service segment of the retired group."
     )
-    from_node: str = Field(
-        ..., min_length=1, description="Node segment of the retired group."
+    from_node: str | None = Field(
+        default=None, min_length=1, description="Node segment of the retired group."
     )
-    from_version: str = Field(
-        ..., min_length=1, description="Version segment of the retired group."
+    from_version: str | None = Field(
+        default=None, min_length=1, description="Version segment of the retired group."
+    )
+    from_group_id: str | None = Field(
+        default=None,
+        min_length=1,
+        pattern=r"^[A-Za-z0-9._-]+$",
+        description=(
+            "The retired consumer group by name, for a group that is not built "
+            "from service, node and version. Used as it is in every environment."
+        ),
     )
     from_auto_offset_reset: Literal["earliest", "latest"] = Field(
         ...,
@@ -77,8 +97,32 @@ class ModelConsumerGroupHandover(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def _one_form(self) -> Self:
+        """Either ``from_group_id`` or all of service, node and version."""
+        segments = (self.from_service, self.from_node, self.from_version)
+        if self.from_group_id is not None:
+            if any(segment is not None for segment in segments):
+                raise ValueError(
+                    "from_group_id names the retired group by itself; it cannot "
+                    "be combined with from_service, from_node or from_version"
+                )
+        elif any(segment is None for segment in segments):
+            raise ValueError(
+                "a handover declares either from_group_id or all of "
+                "from_service, from_node and from_version"
+            )
+        return self
+
     def source_group(self, environment: str) -> str:
         """The retired consumer group in ``environment``."""
+        if self.from_group_id is not None:
+            return self.from_group_id
+        assert (
+            self.from_service is not None
+            and self.from_node is not None
+            and self.from_version is not None
+        )  # _one_form guarantees the three segments
         return compute_consumer_group_id(
             ModelNodeIdentity(
                 env=environment,
