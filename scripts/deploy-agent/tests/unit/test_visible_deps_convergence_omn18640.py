@@ -420,8 +420,8 @@ class TestTheArgvIsRecorded:
             and "--no-deps" in i.argv
         ]
         assert runtime_argvs, "the runtime leg issued no recorded argv"
-        assert "--force-recreate" in runtime_argvs[-1], (
-            "the runtime leg still forces, and the record must show that too"
+        assert "--force-recreate" not in runtime_argvs[-1], (
+            "the runtime leg converges (OMN-22006), and the record must show that too"
         )
 
     def test_the_recorded_argv_is_the_list_handed_to_the_kernel(self) -> None:
