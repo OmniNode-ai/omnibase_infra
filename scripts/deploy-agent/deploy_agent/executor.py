@@ -2690,11 +2690,7 @@ def _compose_service_states(
 ) -> dict[str, tuple[str, int | None]]:
     result = subprocess.run(
         [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            lane_config_for(lane).compose_project,
+            *_compose_argv(lane),
             "ps",
             "-a",
             "--format",
@@ -2758,6 +2754,17 @@ def _container_image_id(container_name: str) -> str | None:
         )
         return None
     return observed
+
+
+def _compose_argv(lane: EnumRuntimeLane) -> list[str]:
+    """``docker compose`` under the lane's files and project, ahead of any verb."""
+    return [
+        "docker",
+        "compose",
+        *_compose_file_args(lane),
+        "-p",
+        lane_config_for(lane).compose_project,
+    ]
 
 
 def _service_satisfied(state: str, exit_code: int | None) -> bool:
@@ -2884,11 +2891,7 @@ def _oneshot_log_tail(lane: EnumRuntimeLane, service: str, *, lines: int = 5) ->
     """Return the one-shot's last log lines with URL credentials redacted."""
     result = _run(
         [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            lane_config_for(lane).compose_project,
+            *_compose_argv(lane),
             "logs",
             "--no-color",
             "--tail",
@@ -4205,11 +4208,7 @@ class DeployExecutor:
 
         config = lane_config_for(lane)
         recreate = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "runtime",
             "up",
@@ -4516,11 +4515,7 @@ class DeployExecutor:
             )
 
             validate_cmd = [
-                "docker",
-                "compose",
-                *_compose_file_args(lane),
-                "-p",
-                config.compose_project,
+                *_compose_argv(lane),
                 "--profile",
                 profile,
                 "config",
@@ -5828,14 +5823,17 @@ class DeployExecutor:
         """
         config = lane_config_for(lane)
         cmd = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
         ]
-        if profile:
-            cmd += ["--profile", profile]
+        # OMN-18143: `up` enables the profile of a service named on its
+        # command line; `config --hash` does not. Naming `cost-estimator-web`
+        # (profile `cost-estimator`) under `--profile runtime` aborted job
+        # da6bc43b with `no such service`. The wildcard is compose's own
+        # "every profile the model declares" and leaves a service's hash
+        # unchanged, so no profile list is written here to drift from the
+        # compose files. The `["*"]` form keeps exactly the requested profile.
+        if wanted := ("*" if list(services) != ["*"] else profile):
+            cmd += ["--profile", wanted]
         cmd += ["config", "--hash", ",".join(services)]
         result = _run(
             cmd, timeout=CONFIG_HASH_TIMEOUT_SECONDS, env=_compose_env(extra_env)
@@ -5858,11 +5856,7 @@ class DeployExecutor:
         """The rendered `core` profile, as compose's own canonical JSON."""
         config = lane_config_for(lane)
         cmd = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "core",
             "config",
@@ -6040,11 +6034,7 @@ class DeployExecutor:
         """
         config = lane_config_for(lane)
         return [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "runtime",
             "up",
@@ -6289,6 +6279,7 @@ class DeployExecutor:
         # cancel a live recreate. Every other phase's execution is unchanged.
         deps_phase = scope == Scope.CORE
         timeout = 0
+        rolling = False
         if scope == Scope.RUNTIME:
             # OMN-18057: derived from the compose model, never a bare constant.
             budget = runtime_compose_up_budget(lane, expected)
@@ -6323,16 +6314,15 @@ class DeployExecutor:
                         f"{self.cloud_migration_failure}; every requested service needs "
                         "omninode_cloud, refusing an empty service scope"
                     )
+            # OMN-22006: compose converges each service alone; nothing is forced.
+            rolling = build and bool(requested_services)
+            force_recreate = force_recreate and not rolling
         elif not deps_phase:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
         if scope is Scope.RUNTIME and "omninode-runtime" in requested_services:
             self._retire_folded_dev_tenant_projections(lane, config)
         cmd = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             profile,
             "up",
@@ -6407,7 +6397,23 @@ class DeployExecutor:
             )
         else:
             try:
-                result = _run(cmd, timeout=timeout, env=_compose_env(extra_env))
+                # OMN-22006: one service per `up`, each running before the next
+                # is touched; compose recreates only a service whose config hash
+                # or image id moved, so no two runtimes are ever stopped together.
+                steps = [
+                    [*cmd[: -len(requested_services)], x] for x in requested_services
+                ]
+                for step in steps if rolling else [cmd]:
+                    result = _run(step, timeout=timeout, env=_compose_env(extra_env))
+                    if result.returncode != 0 or (
+                        rolling
+                        and not verify_containers_up(
+                            step[-1:],
+                            timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS,
+                            lane=lane,
+                        )[0]
+                    ):
+                        break
             except subprocess.TimeoutExpired:
                 compose_up_error = (
                     f"docker compose up exceeded its {timeout}s ceiling for phase "
@@ -6449,11 +6455,7 @@ class DeployExecutor:
             )
             for name in stuck:
                 recovery_cmd = [
-                    "docker",
-                    "compose",
-                    *_compose_file_args(lane),
-                    "-p",
-                    config.compose_project,
+                    *_compose_argv(lane),
                     "up",
                     "-d",
                     "--no-deps",
@@ -6647,11 +6649,7 @@ class DeployExecutor:
                 planned.reason.value,
             )
             cmd = [
-                "docker",
-                "compose",
-                *_compose_file_args(lane),
-                "-p",
-                config.compose_project,
+                *_compose_argv(lane),
                 "--profile",
                 "runtime",
                 "up",
@@ -6737,11 +6735,7 @@ class DeployExecutor:
         fingerprint = read_checkout_migration_fingerprint()
         config = lane_config_for(lane)
         base_cmd = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "runtime",
             "up",
@@ -6840,11 +6834,7 @@ class DeployExecutor:
                     if consumers:
                         stopped = _run(
                             [
-                                "docker",
-                                "compose",
-                                *_compose_file_args(lane),
-                                "-p",
-                                config.compose_project,
+                                *_compose_argv(lane),
                                 "--profile",
                                 "runtime",
                                 "stop",
@@ -7450,11 +7440,7 @@ class DeployExecutor:
         budget = runtime_health_probe_budget(lane, service)
         config = lane_config_for(lane)
         argv = [
-            "docker",
-            "compose",
-            *_compose_file_args(lane),
-            "-p",
-            config.compose_project,
+            *_compose_argv(lane),
             "--profile",
             "runtime",
             "up",
