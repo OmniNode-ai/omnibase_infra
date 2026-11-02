@@ -6421,5 +6421,4 @@ jobs:
         run: |
           if [ -z "$CHANGED_FILES" ]; then exit 0; fi
           # The check-ai-slop hook carries --strict in omnibase_core's manifest.
-          # shellcheck disable=SC2086
-          uvx pre-commit@4.5.1 run check-ai-slop --files $CHANGED_FILES
+          echo "$CHANGED_FILES" | tr ' ' '\n' | xargs uvx pre-commit@4.5.1 run check-ai-slop --files
