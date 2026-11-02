@@ -60,3 +60,5 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_factory_floor_web_runtime.py -q --no-cov --log-cli-level=INFO'
+      - check_type: command
+        check_value: 'env FACTORY_FLOOR_BIND_ADDR=203.0.113.7 FACTORY_FLOOR_PORT=8080 FACTORY_FLOOR_SERVE_DIR=/tmp docker compose -f docker/docker-compose.factory-floor-web.yml config --format json | grep -q "\"host_ip\": \"203.0.113.7\""'
