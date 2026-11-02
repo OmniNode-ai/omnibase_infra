@@ -11,12 +11,13 @@ from __future__ import annotations
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.models.network_binding import ModelBindAllHealthServerBinding
 from omnibase_infra.services.waitlist_signup_notifier.topics import (
     TOPIC_WAITLIST_SIGNUP,
 )
 
 
-class ConfigWaitlistSignupNotifier(BaseSettings):
+class ConfigWaitlistSignupNotifier(ModelBindAllHealthServerBinding, BaseSettings):
     """Configuration sourced from environment variables.
 
     Prefix: WAITLIST_NOTIFIER_
@@ -51,10 +52,6 @@ class ConfigWaitlistSignupNotifier(BaseSettings):
     health_check_port: int = Field(
         default=8095,
         description="Health check HTTP port",
-    )
-    health_check_host: str = Field(
-        default="0.0.0.0",  # noqa: S104
-        description="Health check bind address",
     )
     slack_bot_token: str = Field(
         default="",
