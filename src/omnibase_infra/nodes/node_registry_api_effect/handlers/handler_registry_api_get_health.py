@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_registry_api_effect.models import (
+    ModelRegistryApiRequest,
     ModelRegistryApiResponse,
 )
 
@@ -44,19 +44,21 @@ class HandlerRegistryApiGetHealth:
         """Return the behavioral classification: EFFECT (external I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, request: object, correlation_id: UUID) -> object:
+    async def handle(
+        self, request: ModelRegistryApiRequest
+    ) -> ModelRegistryApiResponse:
         """Handle get_health operation.
 
         Pings DB, Kafka, and Qdrant. Each component ping is wrapped in
         try/except so a single failure does not crash the health check.
 
         Args:
-            request: Ignored for health checks.
-            correlation_id: Distributed tracing identifier.
+            request: Typed registry API request with a correlation ID.
 
         Returns:
             ModelRegistryApiResponse with component health status in ``data``.
         """
+        correlation_id = request.correlation_id
         components: dict[str, str] = {}
 
         # DB health check
