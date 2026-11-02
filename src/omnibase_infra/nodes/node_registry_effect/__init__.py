@@ -10,7 +10,6 @@ Architecture (OMN-1103 Refactoring):
     - node.py: Declarative node shell extending NodeEffect
     - models/: Node-specific Pydantic models
     - handlers/: Operation-specific handlers (PostgreSQL)
-    - registry/: Infrastructure registry for dependency injection
     - contract.yaml: Operation routing and I/O definitions
 
     The node is 100% contract-driven with zero custom business logic in node.py.
@@ -47,7 +46,6 @@ Related:
     - node.py: Declarative node implementation
     - models/: Node-specific models
     - handlers/: Operation handlers
-    - registry/: Infrastructure registry
 """
 
 from __future__ import annotations
@@ -59,11 +57,6 @@ from omnibase_infra.nodes.node_registry_effect.handlers import (
     HandlerPostgresUpsert,
 )
 
-# Export registry
-from omnibase_infra.nodes.node_registry_effect.registry import (
-    RegistryInfraRegistryEffect,
-)
-
 # Export the functional NodeRegistryEffect (direct programmatic use).
 # For the ONEX declarative runtime, use node_registry_effect.node.NodeRegistryEffect.
 from omnibase_infra.nodes.node_registry_effect.registry_effect import NodeRegistryEffect
@@ -71,8 +64,6 @@ from omnibase_infra.nodes.node_registry_effect.registry_effect import NodeRegist
 __all__: list[str] = [
     # Node (functional implementation)
     "NodeRegistryEffect",
-    # Registry
-    "RegistryInfraRegistryEffect",
     # Handlers
     "HandlerPartialRetry",
     "HandlerPostgresDeactivate",

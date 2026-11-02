@@ -1,0 +1,429 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 46 and seed -4019359856557555765 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/tmp0jj5_wd6/HostBringup.tla
+Parsing file /tmp/tlc-18171522061367094678/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-18171522061367094678/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-18171522061367094678/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-18171522061367094678/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module HostBringup
+Linting of module HostBringup
+Starting... (2026-11-01 19:00:24)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-01 19:00:24.
+Error: Invariant NoLandAfterSuccessorVerify is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 0
+/\ pc = (r1 :> "new" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 0, holder |-> none, exp |-> 0, owed |-> {}]
+/\ rev = 0
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 2: <Acquire(r1) line 240, col 3 to line 252, col 84 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 0
+/\ pc = (r1 :> "abandon" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 3: <Tick line 201, col 3 to line 206, col 84 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 1
+/\ pc = (r1 :> "abandon" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 4: <Tick line 201, col 3 to line 206, col 84 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "abandon" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 5: <EndAbandon(r1) line 293, col 3 to line 301, col 84 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "probe" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 6: <Probe(r1) line 305, col 3 to line 314, col 84 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "plan" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 7: <Plan(r1) line 326, col 3 to line 334, col 84 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "hostlock" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 8: <TakeLock(r1) line 355, col 3 to line 361, col 84 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "hostapply" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = r1
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> FALSE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 9: <HostApply(r1) line 366, col 3 to line 380, col 86 of module HostBringup>
+/\ passRead = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "probe" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> TRUE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 10: <Probe(r1) line 305, col 3 to line 314, col 84 of module HostBringup>
+/\ passRead = (r1 :> {"a"} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "plan" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> TRUE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "a" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 11: <Plan(r1) line 326, col 3 to line 334, col 84 of module HostBringup>
+/\ passRead = (r1 :> {"a"} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "extstart" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> TRUE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "b" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 12: <ExtStart(r1) line 384, col 3 to line 396, col 84 of module HostBringup>
+/\ passRead = (r1 :> {"a"} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "extwait" @@ r2 :> "new" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {[t |-> "b", fence |-> 1, deadline |-> 3, run |-> r1]}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 1, holder |-> r1, exp |-> 2, owed |-> {}]
+/\ rev = 1
+/\ world = [a |-> TRUE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "b" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 13: <Acquire(r2) line 240, col 3 to line 252, col 84 of module HostBringup>
+/\ passRead = (r1 :> {"a"} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 2 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "extwait" @@ r2 :> "abandon" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {[t |-> "b", fence |-> 1, deadline |-> 3, run |-> r1]}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 2, holder |-> r2, exp |-> 4, owed |-> {r1}]
+/\ rev = 2
+/\ world = [a |-> TRUE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "b" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = FALSE
+/\ term = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 14: <EmitAbandoned(r2,r1) line 281, col 3 to line 290, col 68 of module HostBringup>
+/\ passRead = (r1 :> {"a"} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 2 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "extwait" @@ r2 :> "abandon" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {[t |-> "b", fence |-> 1, deadline |-> 3, run |-> r1]}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 2, holder |-> r2, exp |-> 4, owed |-> {}]
+/\ rev = 2
+/\ world = [a |-> TRUE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "b" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = TRUE
+/\ term = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 15: <EndAbandon(r2) line 293, col 3 to line 301, col 84 of module HostBringup>
+/\ passRead = (r1 :> {"a"} @@ r2 :> {} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 2 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "extwait" @@ r2 :> "probe" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {[t |-> "b", fence |-> 1, deadline |-> 3, run |-> r1]}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 2, holder |-> r2, exp |-> 4, owed |-> {}]
+/\ rev = 2
+/\ world = [a |-> TRUE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "b" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = TRUE
+/\ term = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 16: <Probe(r2) line 305, col 3 to line 314, col 84 of module HostBringup>
+/\ passRead = (r1 :> {"a"} @@ r2 :> {"a"} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 2 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "extwait" @@ r2 :> "plan" @@ r3 :> "new")
+/\ lateLanded = FALSE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {[t |-> "b", fence |-> 1, deadline |-> 3, run |-> r1]}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 2, holder |-> r2, exp |-> 4, owed |-> {}]
+/\ rev = 2
+/\ world = [a |-> TRUE, b |-> FALSE, c |-> FALSE]
+/\ tgt = (r1 :> "b" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = TRUE
+/\ term = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1, r2}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+State 17: <Next line 487, col 6 to line 487, col 48 of module HostBringup>
+/\ passRead = (r1 :> {"a"} @@ r2 :> {"a"} @@ r3 :> {})
+/\ hostStale = FALSE
+/\ killsLeft = 2
+/\ fence = (r1 :> 1 @@ r2 :> 2 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "extwait" @@ r2 :> "plan" @@ r3 :> "new")
+/\ lateLanded = TRUE
+/\ lock = none
+/\ staleRefused = FALSE
+/\ ext = {}
+/\ credit = (r1 :> {} @@ r2 :> {} @@ r3 :> {})
+/\ lease = [fence |-> 2, holder |-> r2, exp |-> 4, owed |-> {}]
+/\ rev = 2
+/\ world = [a |-> TRUE, b |-> TRUE, c |-> FALSE]
+/\ tgt = (r1 :> "b" @@ r2 :> "a" @@ r3 :> "a")
+/\ abandonEmitted = TRUE
+/\ term = (r1 :> 1 @@ r2 :> 0 @@ r3 :> 0)
+/\ hostUnlocked = FALSE
+/\ waitRead = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ verified = {r1, r2}
+/\ regressLeft = 1
+/\ cmpOk = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+
+69709 states generated, 21586 distinct states found, 6230 states left on queue.
+The depth of the complete state graph search is 19.
+Finished in 03s at (2026-11-01 19:00:27)
