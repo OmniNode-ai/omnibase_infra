@@ -566,7 +566,7 @@ def extract_handler_config(
         if isinstance(transport, dict):
             for key in EnumContractTransportKey:
                 if key.value in transport:
-                    config[key.config_key] = transport[key.value]
+                    config[key.config_key] = key.checked(transport, handler_type)
 
         # Security configuration (rich contracts - in metadata.security)
         metadata_security = metadata.get("security", {})
