@@ -163,7 +163,8 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
     # OMN-19983: plus the laptop lane mirror's 4 rows.
     # OMN-21099: plus the compaction replies' 8 rows and the request topic's 2.
     # OMN-21339: plus the work-ledger query path's 6 rows.
-    assert len(rows) == 159
+    # OMN-22103: plus READ and DESCRIBE on the three per-principal reply topics.
+    assert len(rows) == 165
     assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
     assert {row.operation for row in rows if row.name == "*"} == {"describe"}
     scoped_expected = {
