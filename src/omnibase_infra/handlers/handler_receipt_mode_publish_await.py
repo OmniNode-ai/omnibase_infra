@@ -14,14 +14,12 @@ an import dependency on omnimarket.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from functools import partial
-from typing import cast
 from uuid import uuid4
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -190,29 +188,12 @@ class HandlerReceiptModePublishAwait:
             try:
                 async with timeout:
                     await bus.start()
-                    group_id = f"receipt-mode-client.{uuid4().hex[:12]}"
-                    supports_latest = (
-                        "auto_offset_reset"
-                        in inspect.signature(bus.subscribe).parameters
-                    )
                     for awaited_topic in awaited_events:
-                        callback = partial(receive, awaited_topic)
-                        if supports_latest:
-                            # Signature inspection establishes this transport extension.
-                            subscribe = cast(
-                                "Callable[..., Awaitable[Callable[[], Awaitable[None]]]]",
-                                bus.subscribe,
-                            )
-                            unsubscribe = await subscribe(
-                                awaited_topic,
-                                on_message=callback,
-                                group_id=group_id,
-                                auto_offset_reset="latest",
-                            )
-                        else:
-                            unsubscribe = await bus.subscribe(
-                                awaited_topic, on_message=callback, group_id=group_id
-                            )
+                        # No consumer group: a one-shot caller reads from the log
+                        # end and leaves nothing on the broker after it returns.
+                        unsubscribe = await bus.subscribe_ungrouped(
+                            awaited_topic, partial(receive, awaited_topic)
+                        )
                         cleanup.push_async_callback(unsubscribe)
                     await bus.publish(
                         topic,
