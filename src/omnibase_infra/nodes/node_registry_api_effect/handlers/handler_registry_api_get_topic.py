@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_registry_api_effect.models import (
@@ -57,17 +56,18 @@ class HandlerRegistryApiGetTopic:
         """Return the behavioral classification: EFFECT (external I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, request: object, correlation_id: UUID) -> object:
+    async def handle(
+        self, request: ModelRegistryApiRequest
+    ) -> ModelRegistryApiResponse:
         """Handle get_topic operation.
 
-        Deserialises the request, calls ServiceRegistryDiscovery.get_topic_detail(),
+        Calls ServiceRegistryDiscovery.get_topic_detail(),
         and returns a ModelRegistryApiResponse with the topic data or
         success=False if not found.
 
         Args:
-            request: ModelRegistryApiRequest (or mapping-compatible object).
+            request: Typed registry API request with a correlation ID.
                 Must include topic_suffix.
-            correlation_id: Distributed tracing identifier.
 
         Returns:
             ModelRegistryApiResponse with topic data or success=False if not found.
@@ -75,21 +75,21 @@ class HandlerRegistryApiGetTopic:
         Raises:
             ValueError: If topic_suffix is not provided in the request.
         """
-        req = ModelRegistryApiRequest.model_validate(request)
-        if req.topic_suffix is None:
+        correlation_id = request.correlation_id
+        if request.topic_suffix is None:
             raise ValueError("topic_suffix is required for get_topic operation")
         topic, warnings = await self._service.get_topic_detail(
-            topic_suffix=req.topic_suffix,
+            topic_suffix=request.topic_suffix,
             correlation_id=correlation_id,
         )
         logger.debug(
             "get_topic for %r found=%s",
-            req.topic_suffix,
+            request.topic_suffix,
             topic is not None,
             extra={"correlation_id": str(correlation_id)},
         )
         return ModelRegistryApiResponse(
-            operation=req.operation,
+            operation=request.operation,
             correlation_id=correlation_id,
             success=topic is not None,
             data={
