@@ -54,7 +54,7 @@ requirements:
     acceptance:
       - id: AC8
         statement: |-
-          AC8: node_contract_resolver_bridge's contract.yaml declares http_mount (factory omnibase_infra.services.contract_resolver.main:create_mounted_app, path_prefix /api/nodes); loaded through contract discovery and served by the runtime's aiohttp server, GET /api/nodes/health and POST /api/nodes/contract.resolve answer over a real port -- falsifier: tests/unit/handlers/http_mount/test_contract_resolver_mount_omn21288.py fails at the merge base and passes on the branch
+          AC8: node_contract_resolver_bridge's contract.yaml declares http_mount (factory omnibase_infra.services.contract_resolver.main:create_mounted_app, path_prefix /api/nodes); loaded through contract discovery and served by the runtime's aiohttp server, GET /api/nodes/health and POST /api/nodes/contract.resolve answer over a real port -- falsifier: tests/integration/handlers/http_mount/test_contract_resolver_mount_omn21288.py fails at the merge base and passes on the branch
   - id: req-omn21288-ac9-mount-before-wiring
     statement: "One-runtime plan T16: the mount serves before consumer wiring completes, and a failing factory fails boot instead of serving partly."
     acceptance:
@@ -236,7 +236,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_contract_resolver_mount_omn21288.py -q --no-cov
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_contract_resolver_mount_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC8]
   - id: dod-omn21288-ac9-mount-before-wiring
