@@ -1,8 +1,8 @@
 # OMN-21595 contract file for omnibase_infra: the omnibase_core pin moves to a core dev tag that contains omnibase_core#2219.
 schema_version: "1.0.0"
 ticket_id: "OMN-21595"
-title: "omnibase_infra pins omnibase_core at the newest core dev tag that contains omnibase_core#2219"
-summary: "The omnibase_core git pin in pyproject.toml moves from dev-20261031202655-5bb91ae7e720 to dev-20261101152344-a22c8c0a1df0, the newest core dev tag, which contains merge commit a22c8c0a1 (omnibase_core#2219). uv.lock is regenerated with uv lock and records omnibase-core 0.47.62 at that tag's commit. The range omnibase-core>=0.47.58,<0.48.0 is unchanged. This is the infra half of OMN-21595; the omnimarket half and the remaining acceptance criteria of the ticket belong to a later lane."
+title: "omnibase_infra pins omnibase_core at dev-20261101203942-2080333acfaf, a core dev tag that contains omnibase_core#2219"
+summary: "The omnibase_core git pin in pyproject.toml moves from dev-20261031202655-5bb91ae7e720 to dev-20261101203942-2080333acfaf, which contains merge commit a22c8c0a1 (omnibase_core#2219) and is the tag the omnimarket half of OMN-21595 pins. uv.lock is regenerated with uv lock and records omnibase-core 0.47.62 at that tag's commit; the runner image identity lock follows the new inputs. The range omnibase-core>=0.47.58,<0.48.0 is unchanged. This is the infra half of OMN-21595; the omnimarket half and the remaining acceptance criteria of the ticket belong to a later lane."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -11,37 +11,40 @@ requirements:
     statement: "omnibase_infra pins omnibase_core by tag to a core dev tag that contains omnibase_core#2219, with a lock that matches."
     acceptance:
       - id: DoD1
-        statement: "PIN1: pyproject.toml on the PR head pins omnibase_core by tag = dev-... to a core tag that contains a22c8c0a1, and no rev or sha form appears for omnibase_core -- falsifier: git merge-base --is-ancestor a22c8c0a1 <tag> in the core clone exits non-zero, or grep -n 'omnibase-core = ' pyproject.toml shows a rev"
+        statement: "DoD1: pyproject.toml pins omnibase-core by tag dev-20261101203942-2080333acfaf with no rev or sha form, and the dev-tag lineage recording for that tag matches -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_dep_provenance_core_lineage_live_contact_omn17427.py -q fails at the merge base, where the pin is the previous tag"
       - id: DoD2
-        statement: "PIN2: uv.lock on the PR head records omnibase-core at the same tag's commit and uv lock --check passes -- falsifier: uv lock --check exits non-zero in the lane worktree on the lab"
+        statement: "DoD2: uv.lock records omnibase-core 0.47.62 at the commit 2080333acfaf6c076313be3ceadea9bc0394aaee that tag names and uv lock --check passes -- falsifier: uv lock --check exits non-zero, or the pin test finds another commit in uv.lock"
       - id: DoD3
-        statement: "PIN3: the unit tests, mypy and ruff pass on the PR head on the lab, and every fix-forward edit is explained by a core change -- falsifier: uv run pytest tests/ -m unit -n auto, uv run mypy src/omnibase_infra/ or uv run ruff check src/ tests/ exits non-zero on the lab"
+        statement: "DoD3: the recorded runner image identity matches the pin and lock inputs -- falsifier: uv run --frozen pytest tests/ci/test_runner_image_identity.py -q fails with a stale identity_digest or shared_env_digest"
 evidence_requirements:
+  - kind: tests
+    description: "The core dev-tag pin, its commit, its lock identity and its lineage recording agree."
+    command: "uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_dep_provenance_core_lineage_live_contact_omn17427.py -q"
   - kind: command
     description: "The lock matches the pin."
     command: "uv lock --check"
 dod_evidence:
   - id: dod-omn21595-pin1-tag-form
-    description: "pyproject.toml pins omnibase_core by the dev tag dev-20261101152344-a22c8c0a1df0 and holds no rev form for it."
+    description: "The pin test asserts the exact tag, commit and absence of override or rev form for omnibase-core; the lineage recording test binds the same tag to its remote commit. Both fail at the merge base, which pins the previous tag."
     source: manual
     binds_ac: [DoD1]
     checks:
-      - check_type: command
-        check_value: "grep -q 'omnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261101152344-a22c8c0a1df0\" }' pyproject.toml"
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_dep_provenance_core_lineage_live_contact_omn17427.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21595-pin2-lock
-    description: "uv.lock records omnibase-core at the tagged commit and uv lock --check passes."
+    description: "uv lock --check passes against the pin; it fails if uv.lock still records the previous tag."
     source: manual
     binds_ac: [DoD2]
     checks:
       - check_type: command
         check_value: "uv lock --check"
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn21595-pin3-unit
-    description: "The unit tests pass at the PR head; the lab receipt (host, sha, exit code) is in the PR body, mypy and ruff results beside it."
+  - id: dod-omn21595-pin3-runner-identity
+    description: "The runner image identity tests recompute the digests from the pin and lock inputs and compare them with docker/runners/runner-image.lock.json; they fail at the parent of the regeneration."
     source: manual
     binds_ac: [DoD3]
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/ -m unit -n auto -q -p no:cacheprovider"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_identity.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
