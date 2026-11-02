@@ -145,6 +145,7 @@ from omnibase_infra.event_bus.event_bus_kafka import (
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.handlers import boot_readiness_checks
 from omnibase_infra.handlers.handler_workspace_config_root_resolve import (
     DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH,
     ENV_WORKSPACE_CONFIG_ROOT,
@@ -712,45 +713,35 @@ def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
         ModelTopicReadinessConfig,
     )
 
-    def _float_env(name: str, default: float) -> float:
-        raw = os.environ.get(name)
-        if raw is None or raw.strip() == "":
-            return default
+    def _env_number[T: (int, float)](name: str, default: T, cast: type[T]) -> T:
         try:
-            value = float(raw)
+            value = cast(os.environ.get(name) or default)
         except ValueError:
             return default
-        if value <= 0.0 or math.isnan(value) or math.isinf(value):
-            return default
-        return value
-
-    def _int_env(name: str, default: int) -> int:
-        raw = os.environ.get(name)
-        if raw is None or raw.strip() == "":
-            return default
-        try:
-            value = int(raw)
-        except ValueError:
-            return default
-        return value if value >= 1 else default
+        return value if value > 0 and math.isfinite(value) else default
 
     return ModelTopicReadinessConfig(
-        readiness_timeout_seconds=_float_env(
+        readiness_timeout_seconds=_env_number(
             "ONEX_TOPIC_READINESS_TIMEOUT_SECONDS",
             DEFAULT_READINESS_TIMEOUT_SECONDS,
+            float,
         ),
-        readiness_poll_interval_ms=_int_env(
+        readiness_poll_interval_ms=_env_number(
             "ONEX_TOPIC_READINESS_POLL_INTERVAL_MS",
             DEFAULT_READINESS_POLL_INTERVAL_MS,
+            int,
         ),
-        max_attempts=_int_env(
+        max_attempts=_env_number(
             "ONEX_TOPIC_READINESS_MAX_ATTEMPTS",
             DEFAULT_READINESS_MAX_ATTEMPTS,
+            int,
         ),
-        max_concurrent_contract_attach=_int_env(
+        max_concurrent_contract_attach=_env_number(
             "ONEX_MAX_CONCURRENT_CONTRACT_ATTACH",
             DEFAULT_MAX_CONCURRENT_CONTRACT_ATTACH,
+            int,
         ),
+        priority_contracts=boot_readiness_checks.parse_priority_contracts(os.environ),
     )
 
 
@@ -4589,6 +4580,9 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+            boot_readiness_checks.start_ready_bound_watch(
+                runtime.readiness_check, os.environ, plugin_unsubscribe_callbacks
+            )
             _attach_results: list[ModelContractAttachResult] = []
             # OMN-17372: the interleave reports the contracts it will NEVER
             # attempt, so the gate requires only what can actually report.
@@ -4634,6 +4628,9 @@ async def bootstrap() -> int:
                 demand_watch_stops_out=_demand_watch_stops,
             )
             plugin_unsubscribe_callbacks.extend(_demand_watch_stops)
+            boot_readiness_checks.report_roster_partition(
+                auto_wiring_report.results, _attach_results, _attach_exclusions
+            )
             _contract_attach_gate.exclude(tuple(_attach_exclusions))
             _contract_attach_gate.record(tuple(_attach_results))
             _gate_status = _contract_attach_gate.status()

@@ -1366,15 +1366,15 @@ _OTHER_BUNDLE_DIGESTS = {
     "auth": "1bf4de388a77a7d94e7a44cf785c7caba8a051c8aaf5501cc0b082cb5a25d28d",
     "canary": "5ab631eca245b2bdee989982d8e2e7b562e2632c149aadd7297a77dfdbdac76b",
     "core": "6aadec4f0303690e429c3dbe6b4b72fec42b6ee4624d1b84f6941e6f8e09eb55",
-    "fault-injection": "21cad3a1a39c695cce94cd9d78001006b0482f507128bccd79b4e6b299391840",
+    "fault-injection": "8db0f73d370c5ad02ac45aface9ed797b564d3cdc2dffe31f4acc21890f5f7e9",
     "memgraph": "d55629512c84083550a018a068c3e394f352e06414192eff5a4f9f0967bd8bc3",
     "observability": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
     "omnidash": "c8ec69a7177b270479e795459ad901c7608bfe5dafee676d83706f0c4ad267ba",
     "omnimarket-projections": "2dddac4c21e6209ca3c09f04e43dc7a7f56b087e862fc565ed0315db3f5762e0",
     "omnimemory": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
-    "runtime": "fb515a2157008792af5576feef0daf7eed956fc1c29e73189c0bb31dc265fdab",
-    "runtime-core": "d1445a8a07580f2c1658906595e519f0d5f71d2a787410c8509116d538885853",
-    "runtime-infrastructure": "67c641280893ca6024fd9876b68da09f5db53604ea5ec39bb80a50f4ec52f57c",
+    "runtime": "df2dcc3c0faa9496325f55006f758b980875d37391c292ea30d7446feb8f9e25",
+    "runtime-core": "5ea725c69de13cbd3af0810ec7aabae39ca95c88d47e28e064ccea17bf5a976e",
+    "runtime-infrastructure": "faf5e4ccaa9f09d9ccc9412a253d614573a865a31f274d6a68056ddd8538a78c",
     "runtime-integrations": "becf59c5917d835f5148c9449bcec688b593792c89b1d31d6a62666b31d6b623",
     "runtime-observability-projections": "843681c597dcf5ba7e0d1fd223c1bae557f8dc8a69c132f0c9376eb8365da052",
     "secrets": "6aadec4f0303690e429c3dbe6b4b72fec42b6ee4624d1b84f6941e6f8e09eb55",
@@ -1399,7 +1399,8 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     bundles = yaml.safe_load((Path(_CATALOG_DIR) / "bundles.yaml").read_text())
     # local-lane-mirror and local-market extend the laptop stack.
     # OMN-21279: only market image tags (projection-api included) changed in the
-    # three updated digests.
+    # three updated digests. OMN-18087: the four runtime-bearing bundles moved
+    # when main's memory limit and the runtime user's home came from the policy.
     assert sorted(
         set(bundles) - {"local", "local-market", "local-lane-mirror"}
     ) == sorted(_OTHER_BUNDLE_DIGESTS)
