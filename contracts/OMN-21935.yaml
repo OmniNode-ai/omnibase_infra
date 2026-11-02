@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21935
+title: omnibase_infra grants role_omnibase_infra the infra_routing_decisions table so the routing-decisions projection node can wire
+summary: >-
+  omnimarket's node_projection_infra_routing_decisions declares a db_io write on public.infra_routing_decisions in the omnibase_infra database, the relation migration 080 already creates. This adds one table-grant declaration to STATE_IO_TABLE_DECLARATIONS (the manifest the omnibase_infra database derives its grants from) and regenerates the three topology instances and the nine rendered catalogs from it, so role_omnibase_infra holds SELECT, INSERT and UPDATE on the table. No SQL migration: the table exists and the grant is provisioned from the topology.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21935-grant
+    statement: >-
+      The role the routing-decisions projection node writes as, role_omnibase_infra, holds SELECT, INSERT and UPDATE on public.infra_routing_decisions in the omnibase_infra database in every shipped topology instance.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra topology grants role_omnibase_infra write on public.infra_routing_decisions in every shipped topology instance and the runtime projection binding check accepts the declaration -- falsifier: uv run pytest tests/unit/contracts/test_every_node_auto_wires_in_process_omn17427.py -q in omnimarket against the omnibase_infra branch
+evidence_requirements:
+  - kind: tests
+    description: The instances grant the table to role_omnibase_infra and only to it, the runtime binding check accepts the declaration, and removing the declaration removes the grant.
+    command: uv run pytest tests/unit/topology/test_infra_routing_decisions_grant_omn21935.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21935-ac1-grant
+    description: role_omnibase_infra holds SELECT, INSERT and UPDATE on public.infra_routing_decisions in every shipped topology instance, the runtime binding check accepts the declaration, and nothing else in the omnibase_infra database is granted it. The tests fail at the merge base, which carries no declaration for the table.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_infra_routing_decisions_grant_omn21935.py -q --no-cov
+        cwd: .
+  - id: dod-omn21935-ac1-derivation
+    description: The rendered catalogs grant the table to role_omnibase_infra only, and the shipped instances still match the grant derivation and the application database topology. The rendered-catalog test file does not exist at the merge base, so the command fails there.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_infra_routing_decisions_rendered_catalogs_omn21935.py tests/unit/topology/test_application_database_table_grants.py tests/unit/topology/test_application_database_topology.py tests/unit/topology/test_omnibase_infra_service_database.py -q --no-cov
+        cwd: .
+  - id: dod-omn21935-ac1-integration
+    description: Through every shipped topology profile the declared table resolves to the omnibase_infra database in schema public and the grant derivation over the full state_io manifest grants it to role_omnibase_infra only. The tests fail at the merge base, which carries no declaration for the table.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/topology/test_infra_routing_decisions_binding_omn21935.py -q --no-cov
+        cwd: .

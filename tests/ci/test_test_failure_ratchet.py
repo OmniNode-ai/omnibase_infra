@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import datetime
 import importlib.util
+import math
 import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -32,7 +34,7 @@ def _load(name: str) -> object:
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None, f"cannot load {path}"
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    spec.loader.exec_module(mod)
     return mod
 
 
@@ -449,3 +451,180 @@ class TestBaselinePublisher:
         with baseline_path.open() as fh:
             data = yaml.safe_load(fh)
         assert "tests.unit" not in data["clusters"]
+
+
+# ---------------------------------------------------------------------------
+# The publisher workflow itself (OMN-22128)
+#
+# The ratchet gate's own refusal text tells a blocked PR to "run
+# dev-baseline-publisher on dev to add them to the baseline". That remedy was
+# inoperable for 4.5 months: all 138 scheduled runs from 2026-06-18 to
+# 2026-11-02 ended non-success, in two eras with two causes, and
+# config/validation/test-failure-baseline.yaml on dev still carried only its
+# own creation commit. Both causes are asserted here so neither can come back
+# silently, since a `cancelled` conclusion is not a failure and alarms nothing.
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PUBLISHER_WORKFLOW = (
+    _REPO_ROOT / ".github" / "workflows" / "dev-baseline-publisher.yml"
+)
+_BASELINE_FILE = _REPO_ROOT / "config" / "validation" / "test-failure-baseline.yaml"
+
+#: Test time for the publisher's own marker selection, summed across the 15
+#: parallel splits of run 41446149536 on clean dev (head f30b9f461). This is an
+#: ESTIMATE of the scale of the serial run, not a measurement of it: the sum
+#: carries each split's own setup fifteen times over, while the serial job pays
+#: setup once and then adds database startup, the commit and the push on top.
+#: It is the only figure available without a serial run, so the assertion below
+#: demands a multiple of it rather than treating it as the true cost.
+_MEASURED_SPLIT_SUM_MINUTES = 86
+
+#: How much more than the split-sum estimate the job's ceiling must allow.
+#: A ceiling AT the estimate is what produced the `cancelled` era, so a test
+#: that admitted it would pass on a workflow that still dies mid-pytest.
+_REQUIRED_HEADROOM_FACTOR = 1.5
+
+#: The smallest timeout-minutes this repository accepts for the publisher.
+_MINIMUM_PUBLISHER_TIMEOUT_MINUTES = math.ceil(
+    _MEASURED_SPLIT_SUM_MINUTES * _REQUIRED_HEADROOM_FACTOR
+)
+
+
+def _publisher_job() -> dict[str, object]:
+    with _PUBLISHER_WORKFLOW.open() as fh:
+        workflow = yaml.safe_load(fh)
+    job = workflow["jobs"]["publish-baseline"]
+    assert isinstance(job, dict)
+    return job
+
+
+class TestPublisherWorkflow:
+    """The publisher must be able to finish, and to land what it finished."""
+
+    def test_publisher_timeout_clears_the_measured_suite_floor(self) -> None:
+        """Era two (2026-09-07..2026-11-02, 70 runs): cancelled mid-pytest.
+
+        Run 41380955296 ran 03:03:29Z-03:33:47Z and its post-job cleanup
+        terminated orphan uv, python3, pytest and psql processes, so the job
+        died inside the test run and never reached the push at all.
+
+        The ceiling must exceed the split-sum estimate by a margin, not merely
+        reach it: the estimate is not the serial cost, and the job still has
+        dependency install, database startup, the commit and the push to pay
+        after the last test. A test that admitted the estimate exactly would
+        pass a workflow that goes on dying mid-pytest.
+        """
+        timeout = _publisher_job()["timeout-minutes"]
+        assert isinstance(timeout, int), (
+            f"publish-baseline must declare an integer timeout-minutes; got {timeout!r}"
+        )
+        assert timeout >= _MINIMUM_PUBLISHER_TIMEOUT_MINUTES, (
+            f"publish-baseline allows {timeout} minutes. The suite it runs "
+            f"serially estimates at {_MEASURED_SPLIT_SUM_MINUTES} minutes from "
+            "the summed splits of run 41446149536 on clean dev, and this job "
+            "also pays install, database startup, the commit and the push, so "
+            f"the ceiling must be at least {_REQUIRED_HEADROOM_FACTOR}x that "
+            f"estimate, {_MINIMUM_PUBLISHER_TIMEOUT_MINUTES} minutes. A tighter "
+            "ceiling kills the job mid-pytest and reports `cancelled`, which is "
+            "not a failure conclusion and so alarms nothing."
+        )
+
+    def test_publisher_push_rebases_and_retries_onto_current_dev(self) -> None:
+        """Era one (2026-06-18..2026-09-06, 68 runs): push rejected.
+
+        Run 34008081727 finished the suite at 29m09s, wrote and committed the
+        baseline as 8cca07378 (1 file changed, 19 insertions, 25 deletions),
+        then died on "! [rejected] dev -> dev (fetch first)". A job that spends
+        an hour on tests always races a dev merge, so a single bare push loses
+        the baseline it just computed.
+
+        The assertions below are on the step's EXECUTABLE text with comments
+        stripped, and each one names a way the loop could be wrong rather than
+        a phrase it happens to contain: no `git rebase` (which can stop on a
+        conflict and strand the repository mid-rebase while the loop burns its
+        attempts), a checked fetch, a re-apply onto dev's current head, a push
+        to dev inside the loop, and a provenance trailer naming the head the
+        suite ran against, so a published baseline can never silently claim to
+        have been computed from the commit it happens to sit on.
+        """
+        steps = _publisher_job()["steps"]
+        assert isinstance(steps, list)
+        push_steps = [
+            step
+            for step in steps
+            if isinstance(step, dict) and "git push" in str(step.get("run", ""))
+        ]
+        assert push_steps, "no step in publish-baseline pushes the baseline"
+
+        for step in push_steps:
+            name = step.get("name")
+            code = "\n".join(
+                line
+                for line in str(step["run"]).splitlines()
+                if not line.strip().startswith("#")
+            )
+            assert "git rebase" not in code, (
+                f"step {name!r} rebases to land the baseline. An unchecked "
+                "rebase can stop on a conflict and leave the repository "
+                "mid-rebase while the loop burns its remaining attempts, and "
+                "a rebased commit hides that its content was computed against "
+                "an older tree. Re-apply the computed file onto dev's current "
+                "head instead."
+            )
+            assert "git fetch origin dev" in code, (
+                f"step {name!r} does not fetch dev before re-attempting, so it "
+                "re-applies onto a stale origin/dev"
+            )
+            assert "if ! git fetch origin dev" in code, (
+                f"step {name!r} does not check whether the fetch succeeded, so "
+                "a transport failure silently re-applies onto a stale ref"
+            )
+            assert "git reset --hard origin/dev" in code, (
+                f"step {name!r} does not reset onto dev's current head, so the "
+                "re-apply is not conflict-free"
+            )
+            assert "for attempt in" in code, (
+                f"step {name!r} has no retry loop around the push, so a second "
+                "concurrent merge still loses the baseline"
+            )
+            assert "git push origin HEAD:dev" in code, (
+                f"step {name!r} loops without pushing the baseline to dev"
+            )
+            assert "Onex-Computed-From" in code, (
+                f"step {name!r} publishes the baseline without recording the "
+                "dev head the suite was computed from, so its staleness is "
+                "unreadable after the fact"
+            )
+
+    def test_committed_baseline_loads_through_the_publishers_own_loader(
+        self,
+    ) -> None:
+        """A standing guard, deliberately NOT bound to an acceptance criterion.
+
+        It passes at the merge base too, because the committed baseline is
+        already loadable there, so it proves nothing this change introduces and
+        contracts/OMN-22128.yaml binds no AC to it. It is kept because the
+        publisher writes this file and the PR gate reads it: a baseline the
+        publisher's own loader could not read would strand every open PR with
+        no way to baseline a dev-side failure, and nothing else asserts that.
+
+        `publisher` is the module-level importlib load of
+        scripts/publish_test_failure_baseline.py near the top of this file, the
+        same object the rest of the module's publisher tests use.
+        """
+        assert _BASELINE_FILE.exists(), f"{_BASELINE_FILE} is missing"
+        # Reached through an Any-typed alias rather than publisher.<attr>, so
+        # this needs no type-ignore comment: the canonical-file-shape ratchet
+        # refuses any growth in a file's suppression-comment count.
+        loader: Any = publisher
+        baseline = loader.load_baseline(_BASELINE_FILE)
+        assert isinstance(baseline, dict)
+        for field in ("generated_at", "generated_by", "repo", "ttl_days"):
+            assert field in baseline, (
+                f"committed baseline has no {field!r}; the publisher writes "
+                "all four and the gate's summary step reads them"
+            )
+        assert isinstance(baseline.get("clusters", {}), dict), (
+            "clusters must be a mapping of cluster key to entry"
+        )
