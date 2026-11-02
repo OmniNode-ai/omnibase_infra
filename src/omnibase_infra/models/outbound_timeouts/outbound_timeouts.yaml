@@ -10,9 +10,10 @@ timeouts:
   # Subprocess wait for the git diff the code-analysis enrichment reads.
   git_diff_seconds: 15
   # LLM adapters: per-request wait, and the ceiling the HTTP transport accepts.
-  # A per-request wait above llm_long_form_max_seconds fails to load.
+  # Each per-request wait must fit the ceiling of its own transport.
   llm_request_seconds: 90
   llm_documentation_request_seconds: 150
+  llm_coder_request_seconds: 30
   llm_coder_max_seconds: 120
   llm_long_form_max_seconds: 180
   # Linear adapters and the shared close() grace.

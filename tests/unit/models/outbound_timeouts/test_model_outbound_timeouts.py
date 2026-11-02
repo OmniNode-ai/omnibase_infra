@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 import inspect
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from omnibase_infra.adapters.llm import (
     adapter_code_analysis_enrichment,
@@ -43,11 +46,14 @@ _TIMEOUTS = load_outbound_timeouts()
 _PROBE_MODEL = "probe-model"
 
 
-def _declared_block() -> dict[str, object]:
-    return yaml.safe_load(_TIMEOUTS_FILE.read_text(encoding="utf-8"))["timeouts"]
+def _declared_block() -> dict[str, float]:
+    return cast(
+        "dict[str, float]",
+        yaml.safe_load(_TIMEOUTS_FILE.read_text(encoding="utf-8"))["timeouts"],
+    )
 
 
-def _write(tmp_path: Path, block: dict[str, object]) -> Path:
+def _write(tmp_path: Path, block: dict[str, float]) -> Path:
     path = tmp_path / "timeouts.yaml"
     path.write_text(yaml.safe_dump({"timeouts": block}), encoding="utf-8")
     return path
@@ -66,8 +72,11 @@ class TestOutboundTimeoutsContract:
     ) -> None:
         block = _declared_block()
         del block[key]
-        with pytest.raises(ValueError, match=key):
+        with pytest.raises(ValidationError) as caught:
             ModelOutboundTimeouts.from_file(_write(tmp_path, block))
+        assert [(error["loc"], error["type"]) for error in caught.value.errors()] == [
+            ((key,), "missing")
+        ]
 
     def test_file_without_a_timeouts_mapping_is_refused(self, tmp_path: Path) -> None:
         path = tmp_path / "timeouts.yaml"
@@ -91,6 +100,57 @@ class TestOutboundTimeoutsContract:
         block[key] = float(block["llm_long_form_max_seconds"]) + 1
         with pytest.raises(ValueError, match=key):
             ModelOutboundTimeouts.from_file(_write(tmp_path, block))
+
+    def test_coder_request_above_its_own_ceiling_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        block = _declared_block()
+        block["llm_coder_max_seconds"] = float(block["llm_coder_request_seconds"]) - 1
+        with pytest.raises(
+            ValidationError,
+            match="llm_coder_request_seconds exceeds llm_coder_max_seconds",
+        ):
+            ModelOutboundTimeouts.from_file(_write(tmp_path, block))
+
+    def test_adapter_imports_do_not_read_the_timeout_file(self, tmp_path: Path) -> None:
+        program = """
+import importlib
+from pathlib import Path
+original_open = Path.open
+
+def refuse_timeout_file(path, *args, **kwargs):
+    if path.name == "outbound_timeouts.yaml":
+        raise FileNotFoundError("timeout file unavailable for import probe")
+    return original_open(path, *args, **kwargs)
+
+Path.open = refuse_timeout_file
+for module in (
+    "adapters.llm.adapter_code_analysis_enrichment",
+    "adapters.llm.adapter_code_review_analysis",
+    "adapters.llm.adapter_documentation_generation",
+    "adapters.llm.adapter_test_boilerplate_generation",
+    "adapters.project_tracker.linear_graphql_project_tracker_adapter",
+    "adapters.ticket.adapter_ticket_service_linear",
+    "diagnostics.bus_audit",
+):
+    importlib.import_module("omnibase_infra." + module)
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts
+assert load_outbound_timeouts.cache_info().currsize == 0
+try:
+    load_outbound_timeouts()
+except FileNotFoundError as error:
+    assert "timeout file unavailable" in str(error)
+else:
+    raise AssertionError("first use must refuse a missing settings file")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _default(callable_: Callable[..., object], parameter: str) -> object:
@@ -136,14 +196,17 @@ _SITES: list[tuple[str, object, str]] = [
 
 
 @pytest.mark.unit
-class TestSitesUseDeclaredTimeouts:
+class TestSiteDefaults:
     @pytest.mark.parametrize(
         ("site", "value", "field"), _SITES, ids=[site[0] for site in _SITES]
     )
-    def test_site_carries_the_declared_value(
+    def test_site_defers_the_declared_default_until_use(
         self, site: str, value: object, field: str
     ) -> None:
-        assert value == getattr(_TIMEOUTS, field), site
+        if site == "bus audit poll":
+            assert value == getattr(_TIMEOUTS, field), site
+        else:
+            assert value is None, site
 
 
 class _Proc:

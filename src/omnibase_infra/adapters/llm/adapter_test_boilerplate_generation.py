@@ -57,7 +57,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts as _t
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -275,7 +275,7 @@ class AdapterTestBoilerplateGeneration:
 
         self._transport = TransportHolderLlmHttp(
             target_name=f"{model}-test-boilerplate",
-            max_timeout_seconds=_T.llm_long_form_max_seconds,
+            max_timeout_seconds=_t().llm_long_form_max_seconds,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
 
@@ -387,7 +387,7 @@ class AdapterTestBoilerplateGeneration:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             api_key=self._api_key,
-            timeout_seconds=_T.llm_request_seconds,
+            timeout_seconds=_t().llm_request_seconds,
         )
 
         # --- Call LLM ---

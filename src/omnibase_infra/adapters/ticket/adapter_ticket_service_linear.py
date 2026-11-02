@@ -49,7 +49,7 @@ from omnibase_infra.handlers.done_write_receipt_guard import (
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
-from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts as _t
 
 # Metadata dict type for unimplemented create_ticket stub.
 # ONEX_EXCLUDE: dict_str_any - unimplemented stub; no domain type exists yet
@@ -192,19 +192,19 @@ class AdapterTicketLinear:
     def __init__(
         self,
         linear_api_key: str,
-        timeout: float = _T.linear_ticket_request_seconds,
+        timeout: float | None = None,
         done_write_guard: DoneWriteReceiptGuard | None = None,
     ) -> None:
         if not linear_api_key:
             raise ValueError("AdapterTicketLinear requires a non-empty linear_api_key")
         self._api_key = linear_api_key
+        if timeout is None:
+            timeout = _t().linear_ticket_request_seconds
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
-        self._done_write_guard = (
-            done_write_guard
-            if done_write_guard is not None
-            else DoneWriteReceiptGuard()
-        )
+        if done_write_guard is None:
+            done_write_guard = DoneWriteReceiptGuard()
+        self._done_write_guard = done_write_guard
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -308,9 +308,7 @@ class AdapterTicketLinear:
             InfraConnectionError: On network errors.
         """
         # Heuristic: Linear UUIDs are 36-char strings with dashes
-        is_uuid = len(ticket_id) == 36 and "-" in ticket_id
-
-        if is_uuid:
+        if len(ticket_id) == 36 and "-" in ticket_id:
             data = await self._execute_graphql(
                 _ISSUE_QUERY,
                 {"id": ticket_id},
@@ -355,8 +353,7 @@ class AdapterTicketLinear:
         """
         variables: dict[str, object] = {"first": min(limit, 250)}
         if filters:
-            gql_filter = _build_issue_filter(filters)
-            if gql_filter:
+            if gql_filter := _build_issue_filter(filters):
                 variables["filter"] = gql_filter
 
         data = await self._execute_graphql(
@@ -466,12 +463,14 @@ class AdapterTicketLinear:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def close(self, timeout_seconds: float = _T.close_seconds) -> None:
+    async def close(self, timeout_seconds: float | None = None) -> None:
         """Release the httpx client.
 
         Args:
             timeout_seconds: Maximum time to wait for cleanup.
         """
+        if timeout_seconds is None:
+            timeout_seconds = _t().close_seconds
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
             self._client = None

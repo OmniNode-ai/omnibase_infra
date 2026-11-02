@@ -59,7 +59,7 @@ from omnibase_infra.diagnostics.models import (
     EnvelopeStats,
     TopicHealth,
 )
-from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts as _t
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ class AuditConfig:
         default_factory=lambda: MappingProxyType({})
     )
     sample_per_partition: int = _DEFAULT_SAMPLE_PER_PARTITION
-    poll_timeout: float = _T.audit_poll_seconds
+    poll_timeout: float = field(default_factory=lambda: _t().audit_poll_seconds)
     envelope_exempt_topics: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
@@ -148,7 +148,7 @@ def run_audit(config: AuditConfig) -> AuditReport:
     """
     # Phase 1: Topic discovery
     admin = AdminClient({"bootstrap.servers": config.broker})
-    cluster_metadata = admin.list_topics(timeout=_T.audit_topic_discovery_seconds)
+    cluster_metadata = admin.list_topics(timeout=_t().audit_topic_discovery_seconds)
     broker_topics: set[str] = set(cluster_metadata.topics.keys())
 
     # Collect all topics to audit (expected + any discovered)
@@ -222,7 +222,7 @@ def _collect_watermarks(
             for pid in partitions:
                 try:
                     low, high = consumer.get_watermark_offsets(
-                        TopicPartition(topic, pid), timeout=_T.audit_offsets_seconds
+                        TopicPartition(topic, pid), timeout=_t().audit_offsets_seconds
                     )
                     topic_offsets.append((pid, low, high))
                 except Exception:  # noqa: BLE001 — boundary: returns degraded response

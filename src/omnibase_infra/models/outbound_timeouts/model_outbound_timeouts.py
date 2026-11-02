@@ -31,6 +31,7 @@ class ModelOutboundTimeouts(BaseModel):
             test-boilerplate LLM adapters.
         llm_documentation_request_seconds: Per-request wait of the
             documentation-generation LLM adapter.
+        llm_coder_request_seconds: Per-request wait of the code-analysis adapter.
         llm_coder_max_seconds: Ceiling the HTTP transport accepts for the
             coder-class LLM adapters.
         llm_long_form_max_seconds: Ceiling the HTTP transport accepts for the
@@ -50,6 +51,7 @@ class ModelOutboundTimeouts(BaseModel):
     git_diff_seconds: float = Field(gt=0)
     llm_request_seconds: float = Field(gt=0)
     llm_documentation_request_seconds: float = Field(gt=0)
+    llm_coder_request_seconds: float = Field(gt=0)
     llm_coder_max_seconds: float = Field(gt=0)
     llm_long_form_max_seconds: float = Field(gt=0)
     linear_graphql_request_seconds: float = Field(gt=0)
@@ -63,6 +65,8 @@ class ModelOutboundTimeouts(BaseModel):
     @model_validator(mode="after")
     def _request_waits_fit_the_transport_ceiling(self) -> ModelOutboundTimeouts:
         """Refuse a per-request LLM wait above the ceiling its transport accepts."""
+        if self.llm_coder_request_seconds > self.llm_coder_max_seconds:
+            raise ValueError("llm_coder_request_seconds exceeds llm_coder_max_seconds")
         if self.llm_request_seconds > self.llm_long_form_max_seconds:
             raise ValueError("llm_request_seconds exceeds llm_long_form_max_seconds")
         if self.llm_documentation_request_seconds > self.llm_long_form_max_seconds:

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Models for the contract-declared outbound-call timeouts (OMN-21623).
 
-``OUTBOUND_TIMEOUTS`` is the settings block loaded from ``outbound_timeouts.yaml``;
-call sites read their waits from it and hold no timeout literal.
+Call sites load the settings block from ``outbound_timeouts.yaml`` on first
+use. Importing this package performs no settings file I/O.
 """
 
 from omnibase_infra.models.outbound_timeouts.model_outbound_timeouts import (
@@ -11,6 +11,4 @@ from omnibase_infra.models.outbound_timeouts.model_outbound_timeouts import (
     load_outbound_timeouts,
 )
 
-OUTBOUND_TIMEOUTS = load_outbound_timeouts()
-
-__all__ = ["OUTBOUND_TIMEOUTS", "ModelOutboundTimeouts", "load_outbound_timeouts"]
+__all__ = ["ModelOutboundTimeouts", "load_outbound_timeouts"]

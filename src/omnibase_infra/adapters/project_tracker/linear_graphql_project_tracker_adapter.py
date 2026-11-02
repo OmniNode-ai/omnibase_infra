@@ -47,7 +47,7 @@ from omnibase_infra.handlers.done_write_receipt_guard import (
     is_done_state,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
-from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts as _t
 from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.protocols.protocol_linear_graphql_transport import (
     ProtocolLinearGraphQLTransport,
@@ -217,9 +217,7 @@ class LinearGraphQLHealthStatus:
 
 
 def _coerce_str(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
+    return None if value is None else str(value)
 
 
 def _issue_from_graphql(d: dict[str, object]) -> ModelStubIssue:
@@ -350,7 +348,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         self,
         api_key: str | None = None,
         endpoint: str = load_third_party_endpoints().linear_graphql_url,
-        timeout_seconds: float = _T.linear_graphql_request_seconds,
+        timeout_seconds: float | None = None,
         client: httpx.AsyncClient | None = None,
         done_write_guard: DoneWriteReceiptGuard | None = None,
     ) -> None:
@@ -391,6 +389,8 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
                 auth_method="api_key",
             )
 
+        if timeout_seconds is None:
+            timeout_seconds = _t().linear_graphql_request_seconds
         self._api_key: str = resolved_key
         self._endpoint: str = endpoint
         self._timeout_seconds: float = timeout_seconds
@@ -411,15 +411,13 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             )
         )
         self._connected: bool = False
-        self._done_write_guard: DoneWriteReceiptGuard = (
-            done_write_guard
-            if done_write_guard is not None
-            else DoneWriteReceiptGuard()
-        )
+        if done_write_guard is None:
+            done_write_guard = DoneWriteReceiptGuard()
+        self._done_write_guard: DoneWriteReceiptGuard = done_write_guard
 
         self._init_circuit_breaker(
             threshold=5,
-            reset_timeout=_T.linear_graphql_circuit_reset_seconds,
+            reset_timeout=_t().linear_graphql_circuit_reset_seconds,
             service_name=SERVICE_NAME,
             transport_type=EnumInfraTransportType.HTTP,
             half_open_successes=1,
@@ -432,7 +430,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
     async def graphql_transport(
         cls,
         api_key: str,
-        timeout_seconds: float = _T.linear_graphql_request_seconds,
+        timeout_seconds: float | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> AsyncIterator[ProtocolLinearGraphQLTransport]:
         """Scope a transport to an existing caller's attempt without probing.
@@ -442,6 +440,8 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         Status/error interpretation stays with the caller, so a sweep retains
         its bounded retry policy and does not retry a write implicitly.
         """
+        if timeout_seconds is None:
+            timeout_seconds = _t().linear_graphql_request_seconds
         if client is not None:
             adapter = cls(
                 api_key=api_key, timeout_seconds=timeout_seconds, client=client
@@ -489,8 +489,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             InfraConnectionError: If Linear is unreachable.
         """
         data = await self._execute(_QUERY_VIEWER, operation="connect")
-        viewer = data.get("viewer") if isinstance(data, dict) else None
-        self._connected = bool(viewer)
+        self._connected = bool(data.get("viewer")) if isinstance(data, dict) else False
         return self._connected
 
     async def health_check(self) -> LinearGraphQLHealthStatus:
@@ -501,7 +500,9 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
     async def get_capabilities(self) -> list[str]:
         return ["read", "write"]
 
-    async def close(self, timeout_seconds: float = _T.close_seconds) -> None:
+    async def close(self, timeout_seconds: float | None = None) -> None:
+        if timeout_seconds is None:
+            timeout_seconds = _t().close_seconds
         self._connected = False
         # Cancel circuit breaker active recovery task to avoid leaking it.
         await self.cancel_active_recovery()
@@ -562,8 +563,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             operation="list_issues",
             variables={"first": limit, "filter": graphql_filter},
         )
-        nodes = self._extract_nodes(data, "issues")
-        return [_issue_from_graphql(n) for n in nodes]
+        return [_issue_from_graphql(n) for n in self._extract_nodes(data, "issues")]
 
     async def create_issue(
         self,
@@ -746,8 +746,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             operation="list_projects",
             variables={"first": limit},
         )
-        nodes = self._extract_nodes(data, "projects")
-        return [_project_from_graphql(n) for n in nodes]
+        return [_project_from_graphql(n) for n in self._extract_nodes(data, "projects")]
 
     # -- internal --
 

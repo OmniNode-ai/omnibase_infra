@@ -48,7 +48,7 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumLlmOperationType,
 )
-from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts as _t
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -162,7 +162,7 @@ class AdapterCodeAnalysisEnrichment:
 
         self._transport = TransportHolderLlmHttp(
             target_name="coder-14b-enrichment",
-            max_timeout_seconds=_T.llm_coder_max_seconds,
+            max_timeout_seconds=_t().llm_coder_max_seconds,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
 
@@ -256,12 +256,11 @@ class AdapterCodeAnalysisEnrichment:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             api_key=self._api_key,
+            timeout_seconds=_t().llm_coder_request_seconds,
         )
 
-        response = await self._handler.handle(request)
+        summary = (await self._handler.handle(request)).generated_text or ""
         latency_ms = (time.perf_counter() - start) * 1000
-
-        summary = response.generated_text or ""
         if not summary:
             summary = "## Analysis Unavailable\n\nThe model did not return a response."
             logger.warning(
@@ -320,7 +319,7 @@ class AdapterCodeAnalysisEnrichment:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=_T.git_diff_seconds
+                proc.communicate(), timeout=_t().git_diff_seconds
             )
             if proc.returncode != 0:
                 logger.debug(
@@ -334,7 +333,7 @@ class AdapterCodeAnalysisEnrichment:
             if proc is not None:
                 proc.kill()
                 await proc.wait()
-            logger.debug("git diff HEAD timed out after %.0fs", _T.git_diff_seconds)
+            logger.debug("git diff HEAD timed out after %.0fs", _t().git_diff_seconds)
             return ""
         except asyncio.CancelledError:
             if proc is not None:

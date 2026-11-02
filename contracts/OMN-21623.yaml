@@ -34,6 +34,8 @@ requirements:
         statement: 'AC9: each edited outbound-call site carries the value declared in outbound_timeouts.yaml and the model refuses a block that omits a value -- falsifier: a site whose default differs from the declared value, or a block missing a value that still loads'
       - id: AC10
         statement: 'AC10: the contracts_and_di literal_timeout rule reports no finding over the seven edited files and models/outbound_timeouts -- falsifier: any literal_timeout line from that run'
+      - id: AC11
+        statement: 'AC11: adapter imports do not read timeout YAML, missing keys report the missing field, the coder request fits its own transport ceiling, and a built wheel loads the timeout file outside the checkout -- falsifier: any focused timeout or wheel regression fails'
   - id: req-omn21623-slice-service-endpoints
     statement: The modules that call GitHub, Linear, Slack, Gmail or a loopback probe read the URL from the declared endpoints file, and an endpoints block that omits a value fails to load.
     acceptance:
@@ -160,7 +162,7 @@ dod_evidence:
     binds_ac:
       - AC10
   - id: dod-omn21623-deploy-hosted-outbound-timeouts
-    description: Hosted deploy check loads the shipped timeout declaration and sends loopback HTTP requests through the Linear and LLM adapters, asserting the declared waits reach HTTPX without clamping and explicit Linear overrides are retained.
+    description: Hosted deploy check loads the shipped timeout declaration and sends loopback HTTP requests through the Linear and all four LLM adapters, asserting the declared waits reach HTTPX without clamping and explicit Linear overrides are retained.
     source: manual
     checks:
       - check_type: test_passes
@@ -256,3 +258,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC31
+  - id: dod-omn21623-ac11-lazy-timeouts-and-wheel
+    description: A fresh interpreter imports all seven modules with timeout file access refused, missing keys identify the exact missing field, coder requests fit their own ceiling, and an extracted wheel loads its packaged YAML outside the source checkout.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/models/outbound_timeouts/test_model_outbound_timeouts.py tests/integration/adapters/test_outbound_timeouts_omn21623.py tests/integration/models/test_outbound_timeouts_packaged_omn21623.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra

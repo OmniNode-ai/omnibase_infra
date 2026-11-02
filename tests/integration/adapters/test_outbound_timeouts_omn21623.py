@@ -8,6 +8,9 @@ import httpx
 import pytest
 from pytest_httpserver import HTTPServer
 
+from omnibase_infra.adapters.llm.adapter_code_analysis_enrichment import (
+    AdapterCodeAnalysisEnrichment,
+)
 from omnibase_infra.adapters.llm.adapter_code_review_analysis import (
     AdapterCodeReviewAnalysis,
 )
@@ -71,7 +74,7 @@ async def test_tracker_timeout_reaches_a_real_graphql_request(
     httpserver.check_assertions()
 
 
-@pytest.mark.parametrize("kind", ["review", "documentation", "boilerplate"])
+@pytest.mark.parametrize("kind", ["coder", "review", "documentation", "boilerplate"])
 async def test_llm_timeout_reaches_the_http_transport(
     httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
@@ -94,11 +97,14 @@ async def test_llm_timeout_reaches_the_http_transport(
     )
     endpoint = httpserver.url_for("/completion")
     adapter: (
-        AdapterDocumentationGeneration
+        AdapterCodeAnalysisEnrichment
+        | AdapterDocumentationGeneration
         | AdapterCodeReviewAnalysis
         | AdapterTestBoilerplateGeneration
     )
-    if kind == "documentation":
+    if kind == "coder":
+        adapter = AdapterCodeAnalysisEnrichment(base_url=endpoint, model=_PROBE_MODEL)
+    elif kind == "documentation":
         adapter = AdapterDocumentationGeneration(base_url=endpoint, model=_PROBE_MODEL)
     elif kind == "boilerplate":
         adapter = AdapterTestBoilerplateGeneration(
@@ -114,7 +120,12 @@ async def test_llm_timeout_reaches_the_http_transport(
     client = await adapter._transport._get_http_client()
     client.event_hooks["request"].append(record_timeout)
     try:
-        if isinstance(adapter, AdapterTestBoilerplateGeneration):
+        if isinstance(adapter, AdapterCodeAnalysisEnrichment):
+            enrichment = await adapter.enrich(
+                prompt="Review this change", context="+def probe(): pass"
+            )
+            assert enrichment.summary_markdown == "Probe response"
+        elif isinstance(adapter, AdapterTestBoilerplateGeneration):
             result = await adapter.generate(
                 task_type="test_module", source="def probe(): pass"
             )
@@ -126,13 +137,16 @@ async def test_llm_timeout_reaches_the_http_transport(
             result = await adapter.review(
                 review_type="naming", code_diff="+def probe(): pass"
             )
-        assert result.rendered_text == "Probe response"
+        if not isinstance(adapter, AdapterCodeAnalysisEnrichment):
+            assert result.rendered_text == "Probe response"
     finally:
         await adapter.close()
 
     timeouts = load_outbound_timeouts()
     expected = (
-        timeouts.llm_documentation_request_seconds
+        timeouts.llm_coder_request_seconds
+        if kind == "coder"
+        else timeouts.llm_documentation_request_seconds
         if kind == "documentation"
         else timeouts.llm_request_seconds
     )
