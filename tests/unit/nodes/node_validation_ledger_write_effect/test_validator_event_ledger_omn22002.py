@@ -221,6 +221,23 @@ async def test_same_events_yield_same_rows_on_two_independent_runs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_commit_row_count_equals_refusing_validator_count() -> None:
+    """One triggered event per refusing validator gives one row each, plus one per run event."""
+    refusing = ["a_validator", "b_validator", "c_validator"]
+    messages = [
+        _message(TRIGGERED_TOPIC, _triggered(name), offset=index)
+        for index, name in enumerate(refusing)
+    ]
+    messages.append(_message(RUN_TOPIC, _run_event(), offset=0))
+    db = _ConflictModellingDb()
+    await _persist(messages, db)
+    await _persist(messages, db)  # a replay of the whole run adds nothing
+    triggered_rows = [k for k in db.rows if k[0] == TRIGGERED_TOPIC]
+    assert len(triggered_rows) == len(refusing)
+    assert len(db.rows) == len(refusing) + 1
+
+
+@pytest.mark.asyncio
 async def test_unparseable_event_is_kept_with_fallback_fields() -> None:
     db = _ConflictModellingDb()
     raw = b"not json at all"

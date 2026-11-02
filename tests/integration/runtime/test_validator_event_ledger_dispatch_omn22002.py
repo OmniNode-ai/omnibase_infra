@@ -23,6 +23,9 @@ from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
+from omnibase_infra.handlers.handler_validator_event_ledger_project import (
+    HandlerValidatorEventLedgerProject,
+)
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
@@ -105,3 +108,56 @@ async def test_triggered_event_dispatches_to_the_validator_projection_handler() 
         0,
         11,
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_seam_intent_equals_direct_handler_intent() -> None:
+    """The row intent is the same whether the message is dispatched or handed to the handler."""
+    topic = EnumPlatformTopic.EVT_VALIDATOR_TRIGGERED_V1.value
+    contracts = [c for c in discover_contracts().contracts if c.name == _CONTRACT_NAME]
+    engine = MessageDispatchEngine()
+    report = await wire_from_manifest(
+        manifest=ModelAutoWiringManifest(contracts=(contracts[0],), errors=()),
+        dispatch_engine=engine,
+        event_bus=None,
+        container=MagicMock(name="container"),
+        subscribe_immediately=False,
+        result_appliers_by_contract={_CONTRACT_NAME: _RecordingApplier()},
+    )
+    assert report.total_failed == 0
+    engine.freeze()
+    correlation_id = uuid4()
+    message = ModelEventMessage(
+        topic=topic,
+        value=json.dumps(
+            {
+                "validator_name": "ci_inheritance_check",
+                "severity": "FAIL",
+                "finding_count": 1,
+                "locations": ["a.py:1"],
+                "repository": "omnibase_infra",
+                "head_sha": "f30b9f461344ba16dbec05ab21e29b40f11dbfc2",
+                "correlation_id": str(correlation_id),
+            }
+        ).encode(),
+        headers=ModelEventHeaders(
+            source="omnibase_core",
+            event_type=topic,
+            correlation_id=correlation_id,
+            timestamp=datetime(2026, 11, 2, 12, 0, tzinfo=UTC),
+        ),
+        offset="12",
+        partition=0,
+    )
+    envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+        payload=message,
+        correlation_id=correlation_id,
+        event_type=derive_event_type_alias_for_topic(topic),
+    )
+    dispatched = await engine.dispatch(topic=topic, envelope=envelope)
+    direct = await HandlerValidatorEventLedgerProject().handle(message)
+
+    assert dispatched.status == EnumDispatchStatus.SUCCESS, dispatched.error_message
+    (intent,) = dispatched.output_intents
+    assert direct.result is not None
+    assert intent.payload == direct.result.payload

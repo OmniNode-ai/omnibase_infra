@@ -38,12 +38,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/runtime/test_validator_event_ledger_dispatch_omn22002.py -q -p no:cacheprovider
   - id: dod-003
-    description: "The same fixture events yield the same ledger rows on two independent runs, so the bus overlay changes no row."
+    description: "AC4's broker-overlay half is NOT run here: no test in this repository starts the broker overlay, and the lab run is the only place it can be observed. This entry proves the in-process precondition: the ledger row is a pure function of the message (the same fixture events yield the same rows on two independent runs), and a message handed to the real wired dispatch engine yields the same append intent as one handed directly to the handler, so the projection has no bus-specific branch."
     source: generated
     binds_ac: [AC4]
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py -q -p no:cacheprovider -k "same_events"
+        check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py tests/integration/runtime/test_validator_event_ledger_dispatch_omn22002.py -q -p no:cacheprovider -k "same_events or dispatch_seam_intent_equals_direct"
   - id: dod-ac2-subset
     description: "AC2 is NOT met as written: the criterion asks for a duration, and neither wire event carries one (ModelValidatorRunEvent has one emitted_at and no start or end; ModelValidatorTriggeredEvent has no timestamp). The field that would be needed is a duration in the wire models, owned by omnibase_core. This entry binds AC2 only because the push gate refuses an unbound criterion; it proves the rest of AC2 (one triggered event yields one row whose stored event holds the validator id, repository, commit and verdict, and a replay adds no second row) and does not prove the duration."
     source: generated
@@ -52,12 +52,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py -q -p no:cacheprovider -k "triggered"
   - id: dod-ac3-count
-    description: "AC3's lab count is NOT proven by this entry: the row count for a canary commit read on the lab ledger is posted in the lab comment, not here. This entry binds AC3 only because the push gate refuses an unbound criterion; it proves the counting rule in process: two triggered events and one run event yield exactly three rows, one per event, so the triggered-event rows equal the number of refusing validators."
+    description: "AC3's lab count is NOT proven by this entry: the row count for a canary commit read on the lab ledger is posted in the lab comment, not here. This entry binds AC3 only because the push gate refuses an unbound criterion; it proves the counting rule in process: three triggered events (one per refusing validator) and one run event yield three triggered rows plus one run row, and replaying the whole run adds none."
     source: generated
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py -q -p no:cacheprovider -k "same_events"
+        check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py -q -p no:cacheprovider -k "commit_row_count_equals_refusing"
   - id: dod-deploy
     description: "Deploy probe: the projection contract GitHub serves at the PR branch subscribes to the validator-triggered topic through contract-declared topics. The live readback after the deploy agent rolls the image is the validation ledger row count on the lab, posted in the lab comment; this probe proves source identity only."
     source: generated
