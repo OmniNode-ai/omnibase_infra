@@ -20,7 +20,7 @@
 
 BEGIN;
 
-CREATE OR REPLACE VIEW projection_delegation_daily AS
+CREATE OR REPLACE VIEW public.projection_delegation_daily AS
 WITH per_day AS (
     SELECT
         tenant_id,
@@ -37,7 +37,7 @@ WITH per_day AS (
         COUNT(*) FILTER (WHERE tokens_input IS NULL)::int AS tokens_input_unmeasured,
         COUNT(*) FILTER (WHERE tokens_output IS NULL)::int AS tokens_output_unmeasured,
         MAX(COALESCE(written_at, created_at)) AS latest_written_at
-    FROM delegation_events
+    FROM public.delegation_events
     GROUP BY tenant_id, (COALESCE(written_at, created_at) AT TIME ZONE 'UTC')::date
 )
 SELECT
@@ -63,9 +63,9 @@ GROUP BY tenant_id;
 
 -- security_invoker so the tenant policy on delegation_events applies to the
 -- reader of this view, as 0040 set for the other aggregate views.
-ALTER VIEW projection_delegation_daily SET (security_invoker = true);
+ALTER VIEW public.projection_delegation_daily SET (security_invoker = true);
 
-GRANT SELECT ON projection_delegation_daily TO app_dashboard;
-GRANT SELECT ON projection_delegation_daily TO tenant_projection_writer;
+GRANT SELECT ON public.projection_delegation_daily TO app_dashboard;
+GRANT SELECT ON public.projection_delegation_daily TO tenant_projection_writer;
 
 COMMIT;

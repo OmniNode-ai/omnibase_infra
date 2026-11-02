@@ -23,12 +23,12 @@ NODE = "node_projection_delegation"
 FORWARD = ROOT / "docker/migrations/forward"
 VENDORED = {
     "0065_delegation_events_projection_cursor.sql": (
-        "e94046838ad555f063a6fbe524f6b033868be28ceae4014f85e022140231de2f",
-        "6856eeccfe4af74462e2f25ad347ad94952f3eb2",
+        "d32434e72e1ecd7125bbca6a2de08e1dece98a45ea997b92f1fda78ffe5dd970",
+        "8c750ceba2a4738efc5c6c4611afa9c307161a79",
     ),
     "0066_delegation_daily_view.sql": (
-        "c5ef1655d66bd0ce386a76e6a1307bb0ee9fad13dccf156f3cf252fc28fb8edb",
-        "28fb12081de5e66c544b7ff58b3012e22a1bb79f",
+        "4f3cde16ead205e1ff46657baf43c1112cf8191ee88feb34bd577e7191d26dfb",
+        "b9608a3b8de6f065446a3ef6ae2dba6b3a183c27",
     ),
 }
 

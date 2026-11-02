@@ -12,19 +12,20 @@
 -- place keeps its number: the dashboard walks the whole set on each read, so a
 -- stable number visits each run exactly once.
 --
--- The SQLite counterpart is a generated column equal to the store's integer
--- id (SqliteDatabaseAdapter store step omn21970_delegation_events_cursor).
+-- The SQLite counterpart is a column set to the store's integer id, filled on
+-- insert by a trigger (SqliteDatabaseAdapter store step
+-- omn21970_delegation_events_cursor).
 
 BEGIN;
 
-ALTER TABLE delegation_events ADD COLUMN IF NOT EXISTS projection_cursor BIGSERIAL;
-ALTER TABLE delegation_events ALTER COLUMN projection_cursor SET NOT NULL;
+ALTER TABLE public.delegation_events ADD COLUMN IF NOT EXISTS projection_cursor BIGSERIAL;
+ALTER TABLE public.delegation_events ALTER COLUMN projection_cursor SET NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_delegation_events_projection_cursor
-    ON delegation_events (projection_cursor);
+    ON public.delegation_events (projection_cursor);
 
 -- The writer inserts rows, so it takes nextval() from the column's sequence.
-GRANT USAGE ON SEQUENCE delegation_events_projection_cursor_seq
+GRANT USAGE ON SEQUENCE public.delegation_events_projection_cursor_seq
     TO tenant_projection_writer;
 
 COMMIT;
