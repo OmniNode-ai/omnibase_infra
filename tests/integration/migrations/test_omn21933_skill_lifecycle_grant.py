@@ -106,6 +106,10 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
     assert readback.returncode == 0, readback.stderr
     assert readback.stdout.strip() == "1"
     for tenant in ("omninode", "another-tenant", None):
+        # One psql process is one session, so SET ROLE and the tenant binding
+        # carry into the count. The tenant values are fixed literals of this
+        # test, and the count is read from a labelled line rather than the
+        # last line of whatever the session printed.
         tenant_args = ("-c", f"SET app.tenant_id = '{tenant}'") if tenant else ()
         visible = ephemeral_postgres.psql(
             "-At",
@@ -113,12 +117,15 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
             "SET ROLE tenant_projection_writer",
             *tenant_args,
             "-c",
-            "SELECT count(*) FROM public.skill_executions WHERE skill_name = 'readback'",
+            "SELECT 'bound=' || coalesce(current_setting('app.tenant_id', true), 'NULL')"
+            " || ' visible=' || count(*) FROM public.skill_executions"
+            " WHERE skill_name = 'readback'",
         )
         assert visible.returncode == 0, visible.stderr
-        assert visible.stdout.strip().splitlines()[-1] == (
-            "1" if tenant == "omninode" else "0"
-        )
+        assert (
+            f"bound={tenant or 'NULL'} visible={1 if tenant == 'omninode' else 0}"
+            in visible.stdout.splitlines()
+        ), visible.stdout
     for tenant_setting in ((), ("-c", "SET app.tenant_id = 'another-tenant'")):
         denied_write = ephemeral_postgres.psql(
             "-v",
@@ -159,6 +166,18 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
         )
         assert legacy.returncode == 0, legacy.stderr
         assert legacy.stdout.strip() == "omninode"
+        legacy_visible = ephemeral_postgres.psql(
+            "-At",
+            "-c",
+            "SET ROLE tenant_projection_writer",
+            "-c",
+            "SET app.tenant_id = 'omninode'",
+            "-c",
+            "SELECT 'legacy=' || count(*) FROM public.skill_executions"
+            " WHERE skill_name = 'legacy-row'",
+        )
+        assert legacy_visible.returncode == 0, legacy_visible.stderr
+        assert "legacy=1" in legacy_visible.stdout.splitlines(), legacy_visible.stdout
     denied = ephemeral_postgres.psql(
         "-v",
         "ON_ERROR_STOP=1",
@@ -169,7 +188,7 @@ def test_writer_holds_select_insert_update_after_the_vendored_migrations(
     assert "permission denied" in denied.stderr
 
 
-def test_create_targets_public_with_a_different_search_path(
+def test_deploy_chain_targets_public_with_a_different_search_path(
     ephemeral_postgres: EphemeralPostgres,
 ) -> None:
     result = ephemeral_postgres.psql(
@@ -180,16 +199,32 @@ def test_create_targets_public_with_a_different_search_path(
         "-c",
         "SET search_path TO shadow, public",
         "-f",
+        str(_ROLE),
+        "-f",
         str(_VENDOR / "0001_create_skill_executions.sql"),
+        "-f",
+        str(_VENDOR / "0002_grant_tenant_projection_writer_skill_executions.sql"),
         "-At",
         "-c",
         """
-        SELECT to_regclass('public.skill_executions') IS NOT NULL
-           AND to_regclass('shadow.skill_executions') IS NULL
+        SELECT 'chain=' || (
+            to_regclass('public.skill_executions') IS NOT NULL
+            AND to_regclass('shadow.skill_executions') IS NULL
+            AND EXISTS (
+                SELECT 1 FROM pg_catalog.pg_policies
+                WHERE schemaname = 'public' AND tablename = 'skill_executions'
+                  AND policyname = 'tenant_isolation')
+            AND has_table_privilege(
+                'tenant_projection_writer', 'public.skill_executions', 'SELECT')
+            AND has_table_privilege(
+                'tenant_projection_writer', 'public.skill_executions', 'INSERT')
+            AND has_table_privilege(
+                'tenant_projection_writer', 'public.skill_executions', 'UPDATE')
+        )
         """,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip().endswith("t")
+    assert "chain=true" in result.stdout.splitlines(), result.stdout
 
 
 def test_incomplete_populated_table_refuses_to_invent_required_values(
