@@ -413,6 +413,8 @@ if TYPE_CHECKING:
     )
     from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
+from omnibase_infra.handlers.handler_package_announcer import load_boot_runtime_config
+
 logger = logging.getLogger(__name__)
 
 # Matches DSNs, URLs, and connection strings that may contain credentials.
@@ -424,7 +426,7 @@ _STRICT_DISPATCHER_COVERAGE_ENV = "ONEX_STRICT_DISPATCHER_COVERAGE"
 # OMN-14507: staged rollout for the auto-wired consume boundary DLQ fix.
 # DEFAULT OFF (warn-first) -- see _boundary_dlq_enabled() below.
 _BOUNDARY_DLQ_ENV = "ONEX_BOUNDARY_DLQ_ENABLED"
-_BOUNDARY_DLQ_MAX_ATTEMPTS = 3
+_BOUNDARY_DLQ_MAX_ATTEMPTS = load_boot_runtime_config().boundary_dlq_max_attempts
 _BOUNDARY_DLQ_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.1, 0.4)
 
 # OMN-14498 / OMN-15029: strong references to the detached DLQ-routing tasks
@@ -9062,10 +9064,6 @@ def _materialize_known_handler_dependencies(
     if "dispatch_port" in constructor_params and "dispatch_port" in available:
         handler_dependencies.setdefault("dispatch_port", available["dispatch_port"])
     if "db_dsn" in constructor_params:
-        from omnibase_infra.runtime.overlay.contract_env_ref import (
-            expand_contract_env_refs,
-        )
-
         db_dsn = next(
             (
                 resolved.strip()
@@ -10772,7 +10770,9 @@ async def _interleave_contract(
 # Bounded background NOT_READY reconciliation (OMN-15215, OMN-13237 follow-up).
 DEFAULT_NOT_READY_RETRY_INITIAL_DELAY_SECONDS: float = 30.0
 DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS: float = 30.0
-DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = 5
+DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS: int = (
+    load_boot_runtime_config().not_ready_retry_max_attempts
+)
 
 
 async def reattach_not_ready_contracts(

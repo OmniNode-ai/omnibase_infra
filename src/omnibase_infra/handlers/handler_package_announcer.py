@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import inspect
 import logging
 from collections.abc import Callable, Iterable
@@ -57,6 +58,9 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors.error_contract_content_hash import (
     ContractContentHashError,
 )
+from omnibase_infra.models.node_announce.model_boot_runtime_config import (
+    ModelBootRuntimeConfig,
+)
 from omnibase_infra.models.node_announce.model_node_announcement_topic import (
     ModelNodeAnnouncementTopic,
 )
@@ -81,8 +85,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP: Final = "onex.nodes"
-
-_SETTLE_TIMEOUT_SECONDS: Final = 60.0
 
 # What importing an arbitrary installed node module can raise; the reader records it and
 # goes on, so one broken package never stops boot.
@@ -175,13 +177,36 @@ def read_contract_yaml(contract_path: Path) -> object:
         # OMN-18843: cold discovery gates the first consumer bind. Use the
         # safe LibYAML parser when available; the memo only helps later scans.
         # Both loaders reject Python object tags, with a portable fallback.
-        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)(f)
+        loader_class = (
+            yaml.CSafeLoader if hasattr(yaml, "CSafeLoader") else yaml.SafeLoader
+        )
+        loader = loader_class(f)
         try:
             raw = loader.get_single_data()
         finally:
             loader.dispose()
 
     return raw
+
+
+def load_boot_runtime_config(
+    contract_path: Path | None = None,
+) -> ModelBootRuntimeConfig:
+    """Read and validate the boot bounds from the announce contract or an overlay."""
+    if contract_path is None:
+        spec = importlib.util.find_spec(
+            "omnibase_infra.nodes.node_package_announce_effect"
+        )
+        if spec is None or not spec.submodule_search_locations:
+            raise FileNotFoundError("node_package_announce_effect package not found")
+        contract_path = (
+            Path(next(iter(spec.submodule_search_locations))) / "contract.yaml"
+        )
+    path = contract_path
+    raw = read_contract_yaml(path)
+    if not isinstance(raw, dict):
+        raise ValueError(f"Expected a contract mapping at {path}")
+    return ModelBootRuntimeConfig.model_validate(raw["runtime_config"])
 
 
 def _string_tuple(value: object) -> tuple[str, ...]:
@@ -431,9 +456,6 @@ class HandlerPackageAnnouncer:
     a durable bus where the lane has one. The handler holds no bus class name.
     """
 
-    def __init__(self, bus: ProtocolAnnounceBus[object]) -> None:
-        self._bus = bus
-
     @property
     def handler_type(self) -> EnumHandlerType:
         return EnumHandlerType.INFRA_HANDLER
@@ -443,7 +465,11 @@ class HandlerPackageAnnouncer:
         return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
-        self, request: ModelPackageAnnounceRequest
+        self,
+        request: ModelPackageAnnounceRequest,
+        *,
+        bus: ProtocolAnnounceBus[object],
+        settle_timeout_seconds: float,
     ) -> ModelPackageAnnounceResult:
         """Read the metadata, publish the announcements, return the catalog."""
         inventory = read_package_inventory(request.active_packages)
@@ -475,18 +501,18 @@ class HandlerPackageAnnouncer:
                 if seen >= expected:
                     settled.set()
 
-        await self._bus.start()
-        unsubscribe = await self._bus.subscribe(
+        await bus.start()
+        unsubscribe = await bus.subscribe(
             request.topic, on_message=on_message, group_id=request.catalog_group
         )
         try:
             for announcement in announcements:
-                await self._bus.publish(
+                await bus.publish(
                     request.topic,
                     announcement.entity_id.encode("utf-8"),
                     announcement.model_dump_json().encode("utf-8"),
                 )
-            await asyncio.wait_for(settled.wait(), timeout=_SETTLE_TIMEOUT_SECONDS)
+            await asyncio.wait_for(settled.wait(), timeout=settle_timeout_seconds)
         finally:
             await unsubscribe()
         return ModelPackageAnnounceResult(
@@ -554,8 +580,11 @@ async def run_boot_step0(
         if active_packages is not None
         else get_active_runtime_packages()
     )
-    return await HandlerPackageAnnouncer(bus).handle(
-        local_announce_request(packages, workload=workload)
+    handler = HandlerPackageAnnouncer()
+    return await handler.handle(
+        local_announce_request(packages, workload=workload),
+        bus=bus,
+        settle_timeout_seconds=load_boot_runtime_config().catalog_settle_timeout_seconds,
     )
 
 

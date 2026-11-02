@@ -9,6 +9,7 @@ startup after boot with and without injected announcements.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from datetime import UTC, datetime
@@ -258,10 +259,16 @@ class TestStartupHandlerWithoutAnnouncements:
     @pytest.mark.asyncio
     async def test_publishes_through_the_service(self) -> None:
         service = make_service()
-        handler = HandlerRuntimeIntrospectionStartup(service, make_config())
+        handler = HandlerRuntimeIntrospectionStartup()
         request = make_request()
 
-        result = await handler.handle(request)
+        result = await handler.handle(
+            request,
+            service=service,
+            config=make_config(),
+            event_bus=None,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
 
         assert result.published
         assert result.last_introspection_time is not None
@@ -272,28 +279,44 @@ class TestStartupHandlerWithoutAnnouncements:
 
     @pytest.mark.asyncio
     async def test_no_service_publishes_nothing(self) -> None:
-        handler = HandlerRuntimeIntrospectionStartup(None, make_config())
-        result = await handler.handle(make_request())
+        handler = HandlerRuntimeIntrospectionStartup()
+        result = await handler.handle(
+            make_request(),
+            service=None,
+            config=make_config(),
+            event_bus=None,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
         assert not result.published
         assert result.last_introspection_time is None
 
     @pytest.mark.asyncio
     async def test_disabled_publishes_nothing(self) -> None:
         service = make_service()
-        handler = HandlerRuntimeIntrospectionStartup(
-            service, ModelRuntimeIntrospectionConfig(enabled=False)
+        handler = HandlerRuntimeIntrospectionStartup()
+        result = await handler.handle(
+            make_request(),
+            service=service,
+            config=ModelRuntimeIntrospectionConfig(enabled=False),
+            event_bus=None,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
         )
-        result = await handler.handle(make_request())
         assert not result.published
         service.publish_introspection.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_recent_publish_is_throttled(self) -> None:
         service = make_service()
-        handler = HandlerRuntimeIntrospectionStartup(service, make_config())
+        handler = HandlerRuntimeIntrospectionStartup()
         recent = time.monotonic()
 
-        result = await handler.handle(make_request(last_introspection_time=recent))
+        result = await handler.handle(
+            make_request(last_introspection_time=recent),
+            service=service,
+            config=make_config(),
+            event_bus=None,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
 
         assert not result.published
         assert result.last_introspection_time == recent
@@ -303,9 +326,15 @@ class TestStartupHandlerWithoutAnnouncements:
     async def test_failure_keeps_the_previous_throttle_time(self) -> None:
         service = make_service()
         service.publish_introspection.side_effect = RuntimeError("bus down")
-        handler = HandlerRuntimeIntrospectionStartup(service, make_config())
+        handler = HandlerRuntimeIntrospectionStartup()
 
-        result = await handler.handle(make_request())
+        result = await handler.handle(
+            make_request(),
+            service=service,
+            config=make_config(),
+            event_bus=None,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
 
         assert not result.published
         assert result.last_introspection_time is None
@@ -314,8 +343,8 @@ class TestStartupHandlerWithoutAnnouncements:
     async def test_heartbeat_failure_is_logged_not_raised(self) -> None:
         service = make_service()
         service.start_heartbeat_task.side_effect = RuntimeError("no loop")
-        handler = HandlerRuntimeIntrospectionStartup(service, make_config())
-        await handler.start_heartbeat(uuid4())
+        handler = HandlerRuntimeIntrospectionStartup()
+        await handler.start_heartbeat(uuid4(), service=service, config=make_config())
         service.start_heartbeat_task.assert_awaited_once()
 
 
@@ -324,17 +353,23 @@ class TestStartupHandlerWithAnnouncements:
     async def test_publishes_one_envelope_per_announce_record(self) -> None:
         service = make_service()
         bus = make_bus()
-        handler = HandlerRuntimeIntrospectionStartup(service, make_config(), bus)
+        handler = HandlerRuntimeIntrospectionStartup()
         announcements = (
             make_announcement("node_a_effect"),
             make_announcement("node_b_effect"),
             make_announcement("node_gone_effect", EnumAnnouncementOperation.WITHDRAW),
         )
 
-        result = await handler.handle(make_request(announcements))
+        result = await handler.handle(
+            make_request(announcements),
+            service=service,
+            config=make_config(),
+            event_bus=bus,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
 
         assert result.published
-        service.publish_introspection.assert_not_awaited()
+        service.publish_introspection.assert_awaited_once()
         calls = bus.publish_envelope.await_args_list
         assert [c.kwargs["topic"] for c in calls] == [SUFFIX_NODE_INTROSPECTION] * 2
         envelopes: list[ModelEventEnvelope[object]] = [
@@ -365,11 +400,15 @@ class TestStartupHandlerWithAnnouncements:
                 self.published.append((topic, key, value))
 
         bus = RawBus()
-        handler = HandlerRuntimeIntrospectionStartup(
-            make_service(), make_config(), cast("ProtocolEventBusLike", bus)
-        )
+        handler = HandlerRuntimeIntrospectionStartup()
 
-        result = await handler.handle(make_request((make_announcement(),)))
+        result = await handler.handle(
+            make_request((make_announcement(),)),
+            service=make_service(),
+            config=make_config(),
+            event_bus=cast("ProtocolEventBusLike", bus),
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
 
         assert result.published
         ((topic, key, value),) = bus.published
@@ -381,9 +420,15 @@ class TestStartupHandlerWithAnnouncements:
     async def test_bus_failure_is_not_a_publish(self) -> None:
         bus = make_bus()
         bus.publish_envelope.side_effect = RuntimeError("bus down")
-        handler = HandlerRuntimeIntrospectionStartup(make_service(), make_config(), bus)
+        handler = HandlerRuntimeIntrospectionStartup()
 
-        result = await handler.handle(make_request((make_announcement(),)))
+        result = await handler.handle(
+            make_request((make_announcement(),)),
+            service=make_service(),
+            config=make_config(),
+            event_bus=bus,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
 
         assert not result.published
 
@@ -403,11 +448,15 @@ class TestStartupHandlerWithAnnouncements:
             async def stop_heartbeat_task(self) -> None:
                 return None
 
-        handler = HandlerRuntimeIntrospectionStartup(
-            ServiceWithoutIdentity(), make_config(), make_bus()
-        )
+        handler = HandlerRuntimeIntrospectionStartup()
 
-        result = await handler.handle(make_request((make_announcement(),)))
+        result = await handler.handle(
+            make_request((make_announcement(),)),
+            service=ServiceWithoutIdentity(),
+            config=make_config(),
+            event_bus=make_bus(),
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
 
         assert not result.published
 
@@ -435,7 +484,7 @@ class TestHeartbeatAfterBoot:
         process = make_process(service, announcements, bus)
         try:
             await process.start()
-            service.publish_introspection.assert_not_awaited()
+            service.publish_introspection.assert_awaited_once()
             history = await bus.get_event_history(topic=SUFFIX_NODE_INTROSPECTION)
             published = [json.loads(m.value)["payload"] for m in history]
             assert [p["node_name"] for p in published] == [
@@ -471,3 +520,76 @@ class TestHeartbeatAfterBoot:
             service.publish_introspection.assert_awaited_once()
         finally:
             await process.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure", [Exception("generic failure"), AssertionError("unexpected assertion")]
+)
+async def test_optional_startup_failures_preserve_boot(failure: Exception) -> None:
+    service = make_service()
+    service.publish_introspection.side_effect = failure
+    handler = HandlerRuntimeIntrospectionStartup()
+    previous = time.monotonic() - 100
+    result = await handler.handle(
+        make_request(last_introspection_time=previous),
+        service=service,
+        config=make_config(),
+        event_bus=None,
+        build_events=HandlerRegistrationFromAnnouncement.build_events,
+    )
+    assert not result.published
+    assert result.last_introspection_time == previous
+    service.start_heartbeat_task.side_effect = failure
+    await handler.start_heartbeat(uuid4(), service=service, config=make_config())
+    service.start_heartbeat_task.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["publish", "heartbeat"])
+async def test_optional_startup_boundaries_propagate_cancellation(
+    operation: str,
+) -> None:
+    service = make_service()
+    handler = HandlerRuntimeIntrospectionStartup()
+    if operation == "publish":
+        service.publish_introspection.side_effect = asyncio.CancelledError()
+        with pytest.raises(asyncio.CancelledError):
+            await handler.handle(
+                make_request(),
+                service=service,
+                config=make_config(),
+                event_bus=None,
+                build_events=HandlerRegistrationFromAnnouncement.build_events,
+            )
+    else:
+        service.start_heartbeat_task.side_effect = asyncio.CancelledError()
+        with pytest.raises(asyncio.CancelledError):
+            await handler.start_heartbeat(
+                uuid4(), service=service, config=make_config()
+            )
+
+
+@pytest.mark.asyncio
+async def test_runtime_presence_precedes_announced_nodes() -> None:
+    service = make_service()
+    bus = make_bus()
+    order: list[str] = []
+
+    async def runtime_presence(**kwargs: object) -> None:
+        order.append("runtime")
+
+    async def announced_presence(**kwargs: object) -> None:
+        order.append("announcement")
+
+    service.publish_introspection.side_effect = runtime_presence
+    bus.publish_envelope.side_effect = announced_presence
+    result = await HandlerRuntimeIntrospectionStartup().handle(
+        make_request((make_announcement(),)),
+        service=service,
+        config=make_config(),
+        event_bus=bus,
+        build_events=HandlerRegistrationFromAnnouncement.build_events,
+    )
+    assert result.published
+    assert order == ["runtime", "announcement"]

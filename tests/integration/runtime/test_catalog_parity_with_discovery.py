@@ -35,6 +35,7 @@ from omnibase_infra.handlers.handler_package_announcer import (
     ENTRY_POINT_GROUP,
     HandlerPackageAnnouncer,
     announcer_identity,
+    load_boot_runtime_config,
 )
 from omnibase_infra.models.node_announce.model_node_announcement_topic import (
     ModelNodeAnnouncementTopic,
@@ -167,7 +168,11 @@ async def test_catalog_equals_the_entry_point_scan(overlay: Overlay) -> None:
         catalog_group=f"catalog-parity-{uuid4().hex[:8]}",
     )
     try:
-        result = await HandlerPackageAnnouncer(bus).handle(request)
+        result = await HandlerPackageAnnouncer().handle(
+            request,
+            bus=bus,
+            settle_timeout_seconds=load_boot_runtime_config().catalog_settle_timeout_seconds,
+        )
     finally:
         stop = getattr(bus, "close", None)
         if stop is not None:

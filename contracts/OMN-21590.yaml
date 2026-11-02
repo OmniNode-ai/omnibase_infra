@@ -93,6 +93,21 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "docker exec omnibase-infra-postgres psql -U postgres -d omnibase_infra -tAc 'select count(*) from contracts' | grep -qv '^0$'"
+  - id: dod-omn21590-startup-operation-ports
+    description: "Startup publishes runtime presence before injected announcements, logs optional failures, propagates cancellation, and reads validated contract bounds."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_registration_from_announcement.py tests/unit/runtime/test_boot_runtime_config_omn21590.py -q --no-cov -o addopts=''"
+  - id: dod-omn21590-hosted-deploy-boot
+    description: "Hosted deploy check: exercise boot step 0, the in-process registry feed, and runtime startup without publishing a contract-registered record. A missing catalog entry, an emitted record, or absent runtime presence fails the check."
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_boot_step0_catalog.py tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py tests/unit/nodes/test_registration_from_announcement.py -q --no-cov -o addopts=''"
 emergency_bypass:
   enabled: false
   justification: ""

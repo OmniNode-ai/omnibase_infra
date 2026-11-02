@@ -1032,3 +1032,16 @@ def gate_manifest_on_required_secrets(
         image_sha=manifest.image_sha,
         deployment_sha=manifest.deployment_sha,
     )
+
+
+__all__ = [
+    "read_contract_yaml",
+    "discover_contracts",
+    "discover_contracts_cache_clear",
+    "discover_contracts_from_paths",
+    "env_secret_store_is_authoritative",
+    "required_secret_names",
+    "resolve_present_secret_names",
+    "drop_blank_secret_names",
+    "gate_manifest_on_required_secrets",
+]

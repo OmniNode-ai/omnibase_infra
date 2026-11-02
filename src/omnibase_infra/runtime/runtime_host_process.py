@@ -6717,6 +6717,9 @@ class RuntimeHostProcess:
         Args:
             correlation_id: Correlation ID for distributed tracing.
         """
+        from omnibase_infra.handlers.handler_registration_from_announcement import (
+            HandlerRegistrationFromAnnouncement,
+        )
         from omnibase_infra.handlers.handler_runtime_introspection_startup import (
             HandlerRuntimeIntrospectionStartup,
         )
@@ -6724,19 +6727,25 @@ class RuntimeHostProcess:
             ModelRuntimeIntrospectionStartupRequest,
         )
 
-        handler = HandlerRuntimeIntrospectionStartup(
-            self._introspection_service, self._introspection_config, self._event_bus
-        )
+        handler = HandlerRuntimeIntrospectionStartup()
         result = await handler.handle(
             ModelRuntimeIntrospectionStartupRequest(
                 correlation_id=correlation_id,
                 announcements=self._node_announcements,
                 last_introspection_time=self._last_introspection_time,
-            )
+            ),
+            service=self._introspection_service,
+            config=self._introspection_config,
+            event_bus=self._event_bus,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
         )
         self._last_introspection_time = result.last_introspection_time
         if result.published:
-            await handler.start_heartbeat(correlation_id)
+            await handler.start_heartbeat(
+                correlation_id,
+                service=self._introspection_service,
+                config=self._introspection_config,
+            )
 
     # =========================================================================
     # Gateway Methods (OMN-1899)

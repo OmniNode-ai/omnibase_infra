@@ -42,6 +42,7 @@ from omnibase_infra.handlers.handler_package_announcer import (
     HandlerPackageAnnouncer,
     announcer_identity,
     build_catalog_direct,
+    load_boot_runtime_config,
     read_package_inventory,
     run_boot_step0,
 )
@@ -232,7 +233,11 @@ async def test_a_boot_publishes_nothing_on_contract_registered(
     """AC4: step 0 publishes on the announcement topic and on no other."""
     bus = RecordingBus()
     with patch(_EP, return_value=three_contracts):
-        await HandlerPackageAnnouncer(bus).handle(_request())
+        await HandlerPackageAnnouncer().handle(
+            _request(),
+            bus=bus,
+            settle_timeout_seconds=load_boot_runtime_config().catalog_settle_timeout_seconds,
+        )
 
     topics = {topic for topic, _, _ in bus.published}
     assert topics == {ModelNodeAnnouncementTopic.suffix_for("main")}
@@ -247,8 +252,10 @@ async def test_the_catalog_is_the_same_on_a_second_bus_binding(
 ) -> None:
     with patch(_EP, return_value=three_contracts):
         on_memory = await run_boot_step0(workload="main")
-        on_recording = await HandlerPackageAnnouncer(RecordingBus()).handle(
-            _request(announcer_id=on_memory.announcements[0].announcer_id)
+        on_recording = await HandlerPackageAnnouncer().handle(
+            _request(announcer_id=on_memory.announcements[0].announcer_id),
+            bus=RecordingBus(),
+            settle_timeout_seconds=load_boot_runtime_config().catalog_settle_timeout_seconds,
         )
         direct = build_catalog_direct(
             read_package_inventory(None),
@@ -309,8 +316,10 @@ async def test_a_handler_outside_the_trusted_prefixes_is_refused_with_a_typed_re
     discover_contracts_cache_clear()
 
     with patch(_EP, return_value=eps):
-        result = await HandlerPackageAnnouncer(RecordingBus()).handle(
-            _request(policy=policy)
+        result = await HandlerPackageAnnouncer().handle(
+            _request(policy=policy),
+            bus=RecordingBus(),
+            settle_timeout_seconds=load_boot_runtime_config().catalog_settle_timeout_seconds,
         )
         manifest = discover_contracts(result)
 
