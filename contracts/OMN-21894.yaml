@@ -1,0 +1,110 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21894"
+title: "The shipped omnibase-infra package starts its HTTP MCP transport from a PyPI install"
+summary: "The streamable HTTP transport imports MCPServer from mcp.server.mcpserver, the declared range is mcp>=2.3.0,<3.0.0, the lock resolves mcp 2.x and the import guard tells a missing SDK from an installed SDK that lacks a module."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-sdk-resolution
+    statement: "The transport resolves against the highest mcp the declared range admits."
+    acceptance:
+      - id: AC1
+        statement: "A wheel built from the change, installed without the lock, builds the MCP application through create_app."
+      - id: AC2
+        statement: "Every mcp module imported under src exists in the installed SDK; a planted nonexistent import fails the check."
+      - id: AC3
+        statement: "No src file names mcp.server.fastmcp and uv.lock resolves mcp 2.x."
+      - id: AC4
+        statement: "The guard reports not installed only when mcp is absent and otherwise names the installed version and failing module."
+      - id: AC5
+        statement: "The MCP unit and integration tests pass on the new lock."
+evidence_requirements:
+  - kind: tests
+    description: "SDK resolution, guard and MCP transport tests."
+    command: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp tests/integration/services/mcp tests/integration/handlers/test_mcp_handler_integration.py -q --no-cov"
+  - kind: manual
+    description: "Hosted deploy-boundary readback asks the live package index for the mcp release the declared range now requires."
+    command: "deploy: curl -fsS https://pypi.org/pypi/mcp/2.3.0/json -o /dev/null"
+dod_evidence:
+  - id: dod-wheel-create-app
+    description: "Build the product wheel, install it without the lock in a fresh environment, and create an application with a registered tool from outside the checkout. The base wheel fails because its FastMCP import is absent from the resolved SDK."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |
+          set -eu
+          export PYTHONDONTWRITEBYTECODE=1
+          probe_dir="$(mktemp -d)"
+          trap 'rm -rf "$probe_dir"' EXIT
+          uv build --wheel --out-dir "$probe_dir/dist"
+          uv venv --python 3.12 "$probe_dir/venv"
+          uv pip install --python "$probe_dir/venv/bin/python" "$probe_dir"/dist/*.whl
+          cd "$probe_dir"
+          "$probe_dir/venv/bin/python" -I - <<'PY'
+          import importlib.metadata
+          from pathlib import Path
+          from types import SimpleNamespace
+
+          import omnibase_infra
+          from omnibase_infra.handlers.mcp.transport_streamable_http import (
+              TransportMCPStreamableHttp,
+          )
+
+          package_path = Path(omnibase_infra.__file__).resolve()
+          assert "site-packages" in package_path.parts, package_path
+          tool = SimpleNamespace(
+              name="mcp_resolution_smoke",
+              description="Registers a tool through the installed MCP SDK.",
+              parameters=[],
+          )
+          transport = TransportMCPStreamableHttp()
+          app = transport.create_app(
+              tools=[tool], tool_executor=lambda name, arguments: {"tool": name}
+          )
+          assert app is transport.app
+          assert transport._tool_handlers[tool.name]() == {"tool": tool.name}
+          print(
+              "MCP_WHEEL_APP_READBACK",
+              "mcp=" + importlib.metadata.version("mcp"),
+              "package=" + str(package_path),
+              "app=" + type(app).__name__,
+              "tool=" + tool.name,
+          )
+          PY
+  - id: dod-src-imports-resolve
+    description: "Every mcp import under src resolves and a planted nonexistent import is detected."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py -q --no-cov -k 'imported_by_src or planted or declared_floor'"
+  - id: dod-no-fastmcp
+    description: "No src file names the removed module and the lock resolves mcp 2.x."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: "! git grep -n 'mcp.server.fastmcp' -- src && grep -A1 '^name = \"mcp\"$' uv.lock | grep -q 'version = \"2\\.'"
+  - id: dod-guard-messages
+    description: "The guard distinguishes an absent SDK from an installed SDK lacking a module."
+    source: generated
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py -q --no-cov -k guard"
+  - id: dod-mcp-tests
+    description: "The MCP unit and integration tests pass on the new lock."
+    source: generated
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_transport_sdk_resolution.py tests/unit/handlers/mcp/test_transport_streamable_http.py -q --no-cov"
+  - id: dod-deploy-mcp-release-published
+    description: "The package index serves the mcp 2.3.0 release that the declared range requires, so a PyPI install of the shipped package can resolve it (deploy evidence)."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: "grep -q 'mcp>=2.3.0,<3.0.0' pyproject.toml && curl -fsS https://pypi.org/pypi/mcp/2.3.0/json -o /dev/null"
