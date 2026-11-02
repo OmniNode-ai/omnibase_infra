@@ -10,11 +10,21 @@ and after, and the result is a scope violation unless exactly the one declared c
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+import json
+import subprocess
+from typing import TYPE_CHECKING
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.enums.enum_standalone_compose_recreate_outcome import (
     EnumStandaloneComposeRecreateOutcome,
+)
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.models.model_standalone_compose_docker_config import (
+    ModelStandaloneComposeDockerConfig,
 )
 from omnibase_infra.models.model_standalone_compose_recreate_policy import (
     ModelStandaloneComposeRecreatePolicy,
@@ -28,11 +38,10 @@ from omnibase_infra.models.model_standalone_compose_recreate_result import (
 from omnibase_infra.models.model_standalone_compose_recreate_target import (
     ModelStandaloneComposeRecreateTarget,
 )
-from omnibase_infra.protocols.protocol_standalone_compose_docker import (
-    ProtocolStandaloneComposeDocker,
-    StandaloneComposeDockerError,
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
 )
-from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -52,7 +61,7 @@ def _declared(
 
 
 def _resolve(
-    docker: ProtocolStandaloneComposeDocker,
+    docker: HandlerStandaloneComposeDocker,
     policy: ModelStandaloneComposeRecreatePolicy,
     request: ModelStandaloneComposeRecreateRequest,
 ) -> tuple[ModelStandaloneComposeRecreateTarget | None, str | None, str | None]:
@@ -80,7 +89,7 @@ def _changed(before: dict[str, str], after: dict[str, str]) -> tuple[str, ...]:
 
 
 def refusal(
-    docker: ProtocolStandaloneComposeDocker,
+    docker: HandlerStandaloneComposeDocker,
     policy: ModelStandaloneComposeRecreatePolicy,
     request: ModelStandaloneComposeRecreateRequest,
 ) -> str | None:
@@ -89,7 +98,7 @@ def refusal(
 
 
 def serves(
-    docker: ProtocolStandaloneComposeDocker,
+    docker: HandlerStandaloneComposeDocker,
     policy: ModelStandaloneComposeRecreatePolicy,
     request: ModelStandaloneComposeRecreateRequest,
 ) -> bool:
@@ -104,7 +113,7 @@ def serves(
 
 
 def recreate_standalone_compose(
-    docker: ProtocolStandaloneComposeDocker,
+    docker: HandlerStandaloneComposeDocker,
     policy: ModelStandaloneComposeRecreatePolicy,
     request: ModelStandaloneComposeRecreateRequest,
 ) -> ModelStandaloneComposeRecreateResult:
@@ -120,7 +129,7 @@ def recreate_standalone_compose(
     before = docker.list_containers()
     try:
         docker.recreate_service(request.compose_file, env_file, request.service)
-    except StandaloneComposeDockerError as exc:
+    except InfraConnectionError as exc:
         after_failed = docker.list_containers()
         return ModelStandaloneComposeRecreateResult(
             correlation_id=request.correlation_id,
@@ -176,10 +185,97 @@ class HandlerStandaloneComposeRecreate:
     def handle(
         self, request: ModelStandaloneComposeRecreateRequest
     ) -> ModelStandaloneComposeRecreateResult:
-        docker_interface: type = ProtocolStandaloneComposeDocker
-        docker = cast(
-            "ProtocolStandaloneComposeDocker",
-            self._container.get_service(docker_interface),
-        )
+        docker = self._container.get_service(HandlerStandaloneComposeDocker)
         policy = self._container.get_service(ModelStandaloneComposeRecreatePolicy)
         return recreate_standalone_compose(docker, policy, request)
+
+
+class HandlerStandaloneComposeDocker:
+    """Read the whole host and force-recreate exactly one compose service.
+
+    Admission remains in the handler, using the node contract's policy. Commands
+    use an argument vector, an explicit working directory, and a bounded timeout.
+    The executable prefix is injectable for process-level integration tests.
+    """
+
+    def __init__(self, container: ModelONEXContainer) -> None:
+        self._config = container.get_service(ModelStandaloneComposeDockerConfig)
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
+
+    def _error(self, message: str, operation: str) -> InfraConnectionError:
+        return InfraConnectionError(
+            message,
+            context=ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation=operation,
+            ),
+        )
+
+    def _run(self, *arguments: str) -> str:
+        try:
+            completed = subprocess.run(
+                [*self._config.command, *arguments],
+                cwd=self._config.repo_root,
+                env=self._config.environment,
+                capture_output=True,
+                text=True,
+                timeout=self._config.timeout_seconds,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise self._error(sanitize_error_message(exc), arguments[0]) from exc
+        if completed.returncode:
+            raise self._error(
+                f"docker {arguments[0]} exited {completed.returncode}: "
+                f"{sanitize_error_string(completed.stderr)}",
+                arguments[0],
+            )
+        return completed.stdout
+
+    def list_containers(self) -> dict[str, str]:
+        """All containers, including stopped containers, with full IDs."""
+        output = self._run("ps", "--all", "--no-trunc", "--format", "{{json .}}")
+        containers: dict[str, str] = {}
+        try:
+            for line in output.splitlines():
+                row = json.loads(line)
+                name, container_id = row["Names"], row["ID"]
+                if (
+                    not isinstance(name, str)
+                    or not name
+                    or not isinstance(container_id, str)
+                    or not container_id
+                    or name in containers
+                ):
+                    raise ValueError("empty, duplicate or invalid Docker census row")
+                containers[name] = container_id
+        except (ValueError, KeyError, TypeError) as exc:
+            raise self._error("unreadable Docker container census", "ps") from exc
+        return containers
+
+    def recreate_service(self, compose_file: str, env_file: str, service: str) -> None:
+        """Force-recreate one admitted service without starting its dependencies."""
+        self._run(
+            "compose",
+            "--file",
+            compose_file,
+            "--env-file",
+            env_file,
+            "up",
+            "--detach",
+            "--no-deps",
+            "--force-recreate",
+            "--",
+            service,
+        )
+
+    def resolve_env_file(self, variable: str) -> str | None:
+        """Return the host's declared env file; empty declarations are absent."""
+        return self._config.environment.get(variable) or None

@@ -25,6 +25,7 @@ handler_routing:
   handlers:
     - operation: recreate
       handler: {name: HandlerStandaloneComposeRecreate, module: omnibase_infra.handlers.handler_standalone_compose_recreate}
+docker_timeout_seconds: 120
 allowed_lanes:
   - dev
 standalone_targets:

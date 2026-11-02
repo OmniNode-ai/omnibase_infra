@@ -13,7 +13,9 @@ import pytest
 from omnibase_infra.enums.enum_standalone_compose_recreate_outcome import (
     EnumStandaloneComposeRecreateOutcome,
 )
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.handlers.handler_standalone_compose_recreate import (
+    HandlerStandaloneComposeDocker,
     HandlerStandaloneComposeRecreate,
     recreate_standalone_compose,
     refusal,
@@ -26,10 +28,6 @@ from omnibase_infra.models.model_standalone_compose_recreate_request import (
     ModelStandaloneComposeRecreateRequest,
 )
 from omnibase_infra.nodes import node_standalone_compose_recreate_effect
-from omnibase_infra.protocols.protocol_standalone_compose_docker import (
-    ProtocolStandaloneComposeDocker,
-    StandaloneComposeDockerError,
-)
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -73,7 +71,7 @@ class FakeDocker:
     def recreate_service(self, compose_file: str, env_file: str, service: str) -> None:
         self.calls.append((compose_file, env_file, service))
         if self._fail:
-            raise StandaloneComposeDockerError("compose exited 1")
+            raise InfraConnectionError("compose exited 1")
         if self._recreates:
             self.containers[TARGET.container_key] = "id-floor-1"
         for name in self._also:
@@ -87,7 +85,7 @@ class FakeDocker:
 class FakeContainer:
     def __init__(self, docker: FakeDocker) -> None:
         self._services: dict[type, object] = {
-            ProtocolStandaloneComposeDocker: docker,
+            HandlerStandaloneComposeDocker: docker,
             ModelStandaloneComposeRecreatePolicy: POLICY,
         }
 
