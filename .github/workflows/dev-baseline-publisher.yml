@@ -40,7 +40,14 @@ jobs:
       ${{
         fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
-    timeout-minutes: 30
+    # OMN-22128: this was 30, below the suite it has to run, so from
+    # 2026-09-07 to 2026-11-02 every scheduled run was killed mid-pytest and
+    # reported `cancelled` (run 41380955296 ran 03:03:29Z-03:33:47Z and its
+    # post-job cleanup terminated orphan uv/python3/pytest/psql). The same
+    # marker selection measured 86 minutes of test time on clean dev (run
+    # 41446149536, summed across its 15 parallel splits) and this job runs it
+    # serially in one process, so the ceiling has to clear that with headroom.
+    timeout-minutes: 180
 
     permissions:
       contents: write   # needed to push baseline commit back to dev
@@ -117,7 +124,27 @@ jobs:
           git commit -m "chore(OMN-13027): update dev test-failure baseline [skip ci]" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          git push origin dev
+
+          # OMN-22128: a bare `git push origin dev` loses the baseline whenever
+          # dev moves during the suite, which — at well over an hour of tests —
+          # is almost every run. That is why every run from 2026-06-18 to
+          # 2026-09-06 ended `failure`: run 34008081727 finished the suite,
+          # committed the baseline as 8cca07378, then died on
+          # "! [rejected] dev -> dev (fetch first)" and the baseline was never
+          # published. Rebase our single baseline commit onto whatever dev is
+          # now and re-attempt, so a concurrent merge costs a retry, not the
+          # whole night's run.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:dev; then
+              echo "Baseline pushed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected on attempt ${attempt}; rebasing onto origin/dev."
+            git fetch origin dev
+            git rebase origin/dev
+          done
+          echo "::error::baseline push still rejected after 5 rebase attempts"
+          exit 1
 
       - name: Post summary
         if: always()

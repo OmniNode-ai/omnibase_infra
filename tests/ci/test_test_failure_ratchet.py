@@ -449,3 +449,119 @@ class TestBaselinePublisher:
         with baseline_path.open() as fh:
             data = yaml.safe_load(fh)
         assert "tests.unit" not in data["clusters"]
+
+
+# ---------------------------------------------------------------------------
+# The publisher workflow itself (OMN-22128)
+#
+# The ratchet gate's own refusal text tells a blocked PR to "run
+# dev-baseline-publisher on dev to add them to the baseline". That remedy was
+# inoperable for 4.5 months: all 138 scheduled runs from 2026-06-18 to
+# 2026-11-02 ended non-success, in two eras with two causes, and
+# config/validation/test-failure-baseline.yaml on dev still carried only its
+# own creation commit. Both causes are asserted here so neither can come back
+# silently, since a `cancelled` conclusion is not a failure and alarms nothing.
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PUBLISHER_WORKFLOW = (
+    _REPO_ROOT / ".github" / "workflows" / "dev-baseline-publisher.yml"
+)
+_BASELINE_FILE = (
+    _REPO_ROOT / "config" / "validation" / "test-failure-baseline.yaml"
+)
+
+#: Test time measured for the publisher's own marker selection on clean dev,
+#: summed across the 15 parallel splits of run 41446149536 (head f30b9f461).
+#: The publisher runs that selection serially in one process, so this is its
+#: floor, not its target.
+_MEASURED_SERIAL_SUITE_MINUTES = 86
+
+
+def _publisher_job() -> dict[str, object]:
+    with _PUBLISHER_WORKFLOW.open() as fh:
+        workflow = yaml.safe_load(fh)
+    job = workflow["jobs"]["publish-baseline"]
+    assert isinstance(job, dict)
+    return job
+
+
+class TestPublisherWorkflow:
+    """The publisher must be able to finish, and to land what it finished."""
+
+    def test_publisher_timeout_clears_the_measured_suite_floor(self) -> None:
+        """Era two (2026-09-07..2026-11-02, 70 runs): cancelled mid-pytest.
+
+        Run 41380955296 ran 03:03:29Z-03:33:47Z and its post-job cleanup
+        terminated orphan uv, python3, pytest and psql processes, so the job
+        died inside the test run and never reached the push at all. The job
+        timeout has to clear the serial suite with headroom.
+        """
+        timeout = _publisher_job()["timeout-minutes"]
+        assert isinstance(timeout, int), (
+            "publish-baseline must declare an integer timeout-minutes; "
+            f"got {timeout!r}"
+        )
+        assert timeout >= _MEASURED_SERIAL_SUITE_MINUTES, (
+            f"publish-baseline allows {timeout} minutes but the suite it runs "
+            f"serially measured {_MEASURED_SERIAL_SUITE_MINUTES} minutes of "
+            "test time on clean dev. A timeout at or under the suite kills the "
+            "job mid-pytest and reports `cancelled`, which no alarm reads."
+        )
+
+    def test_publisher_push_rebases_and_retries_onto_current_dev(self) -> None:
+        """Era one (2026-06-18..2026-09-06, 68 runs): push rejected.
+
+        Run 34008081727 finished the suite at 29m09s, wrote and committed the
+        baseline as 8cca07378 (1 file changed, 19 insertions, 25 deletions),
+        then died on "! [rejected] dev -> dev (fetch first)". A job that spends
+        an hour on tests always races a dev merge, so a single bare push loses
+        the baseline it just computed.
+        """
+        steps = _publisher_job()["steps"]
+        assert isinstance(steps, list)
+        push_steps = [
+            step
+            for step in steps
+            if isinstance(step, dict) and "git push" in str(step.get("run", ""))
+        ]
+        assert push_steps, "no step in publish-baseline pushes the baseline"
+
+        for step in push_steps:
+            run = str(step["run"])
+            assert "git rebase origin/dev" in run, (
+                f"step {step.get('name')!r} pushes the baseline without "
+                "rebasing onto the current origin/dev, so a merge landing "
+                "during the suite rejects it non-fast-forward and the "
+                "baseline is lost (run 34008081727)"
+            )
+            assert "git fetch origin dev" in run, (
+                f"step {step.get('name')!r} rebases without fetching first, "
+                "so it rebases onto a stale origin/dev"
+            )
+            # The retry must actually loop, not just rebase once and give up.
+            assert "for attempt in" in run, (
+                f"step {step.get('name')!r} has no retry loop around the "
+                "push, so a second concurrent merge still loses the baseline"
+            )
+
+    def test_committed_baseline_loads_through_the_publishers_own_loader(
+        self,
+    ) -> None:
+        """AC4's repo-side half: whatever is committed must stay parseable.
+
+        The publisher writes this file and the PR gate reads it, so a baseline
+        that the publisher's own loader cannot read would strand every open PR
+        with no way to baseline a dev-side failure.
+        """
+        assert _BASELINE_FILE.exists(), f"{_BASELINE_FILE} is missing"
+        baseline = publisher.load_baseline(_BASELINE_FILE)  # type: ignore[attr-defined]
+        assert isinstance(baseline, dict)
+        for field in ("generated_at", "generated_by", "repo", "ttl_days"):
+            assert field in baseline, (
+                f"committed baseline has no {field!r}; the publisher writes "
+                "all four and the gate's summary step reads them"
+            )
+        assert isinstance(baseline.get("clusters", {}), dict), (
+            "clusters must be a mapping of cluster key to entry"
+        )
