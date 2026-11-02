@@ -573,6 +573,11 @@ FENCED_LOCAL_ENVIRONMENT_RLS_IDS = (
 FENCED_DELEGATION_CAPABILITY_MAP_RLS_IDS = (
     "node:node_projection_delegation_capability_map:0002_force_rls_delegation_capability_cells.sql",
 )
+# OMN-21933: only the FORCE RLS step on skill_executions waits for an operator
+# release. The create (0001) applies on every lane.
+FENCED_SKILL_LIFECYCLE_RLS_IDS = (
+    "node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -591,6 +596,7 @@ EXPECTED_FENCE = (
     + FENCED_RUN_TRACE_RLS_IDS
     + FENCED_LOCAL_ENVIRONMENT_RLS_IDS
     + FENCED_DELEGATION_CAPABILITY_MAP_RLS_IDS
+    + FENCED_SKILL_LIFECYCLE_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
