@@ -23,7 +23,9 @@ runner (no stand-in for the database, no stand-in for the runner):
 
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import subprocess
 import time
 from collections.abc import Iterator
@@ -75,6 +77,7 @@ def _start_runner(
     with out.open("w", encoding="utf-8") as sink:
         return subprocess.Popen(
             ["sh", str(RUNNER)],
+            start_new_session=True,
             stdout=sink,
             stderr=subprocess.STDOUT,
             text=True,
@@ -116,7 +119,8 @@ def reaper() -> Iterator[list[subprocess.Popen[Any]]]:
     yield procs
     for proc in procs:
         if proc.poll() is None:
-            proc.kill()
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
 
 
@@ -178,7 +182,8 @@ def test_a_same_named_lock_holder_in_another_database_is_not_a_second_holder(
     # same lock id, in its own database, under the tag `$$` = 1 gives both. The
     # foreign session borrows this runner's tag, which is `$$`-based.
     foreign = subprocess.Popen(
-        [
+        start_new_session=True,
+        args=[
             pg16.psql,
             "-X",
             "-q",
@@ -236,7 +241,8 @@ def test_a_foreign_advisory_lock_with_a_wide_key_does_not_fail_the_run(
     foreign_database = "omn21928_wide_foreign"
     pg16.create_database(foreign_database)
     foreign = subprocess.Popen(
-        [
+        start_new_session=True,
+        args=[
             pg16.psql,
             "-X",
             "-q",

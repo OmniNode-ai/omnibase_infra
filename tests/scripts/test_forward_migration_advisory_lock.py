@@ -134,7 +134,9 @@ def strip_lock_block(text: str) -> str:
     remaining = lines[:start] + lines[end + 1 :]
     # The lock-free runner has no lock to assert on either.
     return "".join(
-        ln for ln in remaining if ln.strip() != "assert_migration_lock_still_held"
+        ln
+        for ln in remaining
+        if not ln.strip().startswith("assert_migration_lock_still_held")
     )
 
 
@@ -180,7 +182,7 @@ def test_runner_asserts_the_lock_survived_the_whole_run() -> None:
     calls = [
         ln
         for ln in _runner_text().splitlines()
-        if ln.strip() == "assert_migration_lock_still_held"
+        if ln.strip() == 'assert_migration_lock_still_held "the sentinel was set"'
     ]
     assert len(calls) == 1, (
         "expected exactly one final `assert_migration_lock_still_held` call so a "
@@ -614,6 +616,10 @@ def _resuming_signal_variant(text: str) -> str:
             out.append(COMBINED_SIGNAL_TRAP)
         elif line.startswith("trap 'release_migration_lock; echo"):
             continue  # the terminating signal handler is what we are removing
+        elif line.strip().startswith('assert_migration_lock_still_held "'):
+            # The pre-fix runner predates the per-file held-ness assertion,
+            # which would otherwise stop the resumed run at 002 (OMN-21928).
+            continue
         else:
             out.append(line)
     return "".join(out)
