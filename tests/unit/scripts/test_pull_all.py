@@ -1096,11 +1096,16 @@ class TestOmnimarketDriftRepair:
         call = calls_log.read_text()
         # No per-venv arguments: which venvs exist and how each is repaired is
         # the reconciler's business, not pull-all's. pull-all hands it the
-        # workspace root and nothing else -- that is the whole interface. The
+        # workspace root and the proven mode -- that is the whole interface. The
         # reconciler reads no OMNI_HOME (OMN-16632), so the root is an argument.
         workspace = infra_dir.parent
         assert f"--workspace {workspace} " in call
         assert str(infra_dir) not in call.replace(f"--workspace {workspace}", "")
+        # OMN-17305: the pull just advanced the omnimarket clone, and a default
+        # run installs that clone HEAD, a build the floor does not name, so the
+        # onex wrapper refuses every evidence command until someone restamps.
+        # pull-all never stamps the floor; it restores the proven commit.
+        assert call.split("|")[0].split() == ["--workspace", str(workspace), "--proven"]
         # Attributable: pull-all.sh's own stdout names the action.
         assert "reconciling workspace venvs" in result.stdout.lower()
 

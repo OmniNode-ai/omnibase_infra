@@ -15,9 +15,6 @@ Usage:
 
     # Get node class for DI resolution
     node_class = RegistryInfraLedgerProjection.get_node_class()
-
-    # Create node instance
-    node = RegistryInfraLedgerProjection.create_node(container)
     ```
 
 Related Tickets:

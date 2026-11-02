@@ -32,14 +32,12 @@ class RegistryInfraLlmCompletionEffect:
             HandlerLLMCompletion,
         )
 
-        handler = HandlerLLMCompletion()
-
         if container.service_registry is None:
             return
 
         await container.service_registry.register_instance(
             interface=HandlerLLMCompletion,
-            instance=handler,
+            instance=HandlerLLMCompletion(),
             scope=EnumInjectionScope.GLOBAL,
         )
         logger.info("Registered LLM completion handler")
