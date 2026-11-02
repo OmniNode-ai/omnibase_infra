@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumOnexChangeControlTopic(str, Enum):
     """Kafka topic enum for producer: onex-change-control.
@@ -18,6 +20,6 @@ class EnumOnexChangeControlTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_CONTRACT_DRIFT_DETECTED_V1 = "onex.evt.onex-change-control.contract-drift-detected.v1"  # onex.evt.onex-change-control.contract-drift-detected.v1
-    EVT_COSMETIC_COMPLIANCE_SCORED_V1 = "onex.evt.onex-change-control.cosmetic-compliance-scored.v1"  # onex.evt.onex-change-control.cosmetic-compliance-scored.v1
-    EVT_GOVERNANCE_CHECK_COMPLETED_V1 = "onex.evt.onex-change-control.governance-check-completed.v1"  # onex.evt.onex-change-control.governance-check-completed.v1
+    EVT_CONTRACT_DRIFT_DETECTED_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'onex-change-control', 'EVT_CONTRACT_DRIFT_DETECTED_V1')  # onex.evt.onex-change-control.contract-drift-detected.v1
+    EVT_COSMETIC_COMPLIANCE_SCORED_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'onex-change-control', 'EVT_COSMETIC_COMPLIANCE_SCORED_V1')  # onex.evt.onex-change-control.cosmetic-compliance-scored.v1
+    EVT_GOVERNANCE_CHECK_COMPLETED_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'onex-change-control', 'EVT_GOVERNANCE_CHECK_COMPLETED_V1')  # onex.evt.onex-change-control.governance-check-completed.v1

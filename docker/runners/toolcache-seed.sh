@@ -2,9 +2,11 @@
 # OMN-14027 C2 — snapshot and re-seed the Actions tool cache across the runner fleet.
 #
 # THE HAZARD THIS EXISTS FOR (found by live readback, 2026-08-14)
-# `RUNNER_TOOL_CACHE` for this fleet is /home/runner/actions-runner/_work/_tool,
-# which lives in the CONTAINER FILESYSTEM. Only /home/runner/.runner-creds is a
-# named volume. So `docker compose up --force-recreate` on the runner fleet
+# `RUNNER_TOOL_CACHE` for this fleet is <runner home>/actions-runner/_work/_tool,
+# which lives in the CONTAINER FILESYSTEM. Only <runner home>/.runner-creds is a
+# named volume. (OMN-21807 moved the general pool's whole _work tree, tool cache
+# included, onto a per-runner named volume, so omninode-runner-N now keeps it
+# across a recreate; the bracket below still covers a runner whose volume is new.) So `docker compose up --force-recreate` on the runner fleet
 # DESTROYS the entire fleet-wide tool cache. The measured steady state on
 # 2026-08-14 was 72/72 runners warm (Python 3.12.x + 3.13.15, uv 0.6.x-0.12.x);
 # a naive fleet recreate would take that to 0/72 and hand the next wave 72
@@ -27,7 +29,7 @@
 set -euo pipefail
 
 SNAPSHOT_ROOT="${OMNI_TOOLCACHE_SNAPSHOT_ROOT:-${HOME}/.omnibase/runners/toolcache-seed}"
-CONTAINER_TOOL_CACHE="/home/runner/actions-runner/_work/_tool"
+CONTAINER_TOOL_CACHE="${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/_tool"
 RUNNER_FILTER="${OMNI_RUNNER_FILTER:-^omninode-runner-}"
 
 usage() {

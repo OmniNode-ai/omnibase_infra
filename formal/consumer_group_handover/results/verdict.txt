@@ -1,0 +1,13 @@
+VERDICT: SAFE under the stated bounds (OMN-21288, T8): one partition, 6 events, fold then rollback then second fold, 4 procedure crashes, 3 consumer crashes; Model.cfg holds NoEventLost, NoDoubleEffect, NoDoubleProjection, FencedNoCommit and SecondFoldFresh over 826,715 states generated, 359,170 distinct, 0 left on queue.
+
+Rule the model supports (for T8 and T9, consumers whose handler cannot tolerate a repeat):
+- every cutover, fold or rollback or second fold, first fences BOTH sides (stops both consumers), then overwrites the destination group's commit with the commit of the side that LAST RAN, whatever the destination holds, then starts the destination;
+- a rollback is the same cutover back to the retired side, so it carries the reverse handover; without it the old container re-runs events the runtime already ran (mut_no_reverse: NoDoubleEffect);
+- the writers' copy-only-if-uncommitted rule must not be used for these consumers: a second fold then trusts the runtime group's stale commit (mut_stale_trust: SecondFoldFresh);
+- a retry after a crash must take the source from the side that last ran, not from the direction of the fold, or it copies a stale commit over the progress the destination already made (mut_recopy_fixed: NoDoubleEffect);
+- the fence must stop the consumers, not only mark them (mut_no_stop: FencedNoCommit); a cutover that copies nothing leaves the runtime group at latest and loses events (mut_no_copy: NoEventLost);
+- projection writers keep the copy-only-if-uncommitted rule (Writers.cfg holds): rollback and second fold replay events, and the UPSERT absorbs them (wit_writer_replay shows a replay occurs); a plain insert would project twice (mut_insert_projection: NoDoubleProjection).
+
+Not covered: partitions beyond the one modelled (the handover is per partition and the model argues one); rebalance timing and group membership; the window between a handler's effect and its commit (process and commit are one step, so a handler that cannot take Kafka's at-least-once redelivery still needs an idempotency key); retention below the first retained offset; OMN-21932 (a retired group named by a derived name that cannot express a literal id); image and overlay rolling back together.
+
+Runs: TLC 2026.10.30.154139 over the cfgs at commit 0ff19844c4505fcf1b82d8025f4d6b628d95ab0f. Exit codes: Model 0, Writers 0, each of the six mutants 12 and each of the four witnesses 12 (12 is TLC's invariant-violation exit).
