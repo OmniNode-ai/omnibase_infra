@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# PostgreSQL registration storage settings (OMN-22131).
+#
+# Read by ModelRegistrationStoragePostgresConfig.from_file. The handler holds
+# no pool size, timeout or circuit breaker literal: the wiring site loads this
+# block, adds the deployment values (DSN or host, password, port) and registers
+# the config in the container, and the handler resolves it with get_service.
+# Every key is required: a block that omits one fails to load.
+registration_storage_postgres:
+  database: omnibase_infra
+  user: postgres
+  # Maximum connections in the asyncpg pool.
+  pool_size: 10
+  # Wait, in seconds, for one query or statement.
+  timeout_seconds: 30.0
+  circuit_breaker:
+    threshold: 5
+    reset_timeout_seconds: 60.0
+    service_name: postgres.storage
+    transport_type: db

@@ -60,6 +60,7 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelStorageHealthCheckResult,
     ModelStorageQuery,
 )
+from tests.helpers.util_registration_storage_postgres import container_binding
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -476,15 +477,15 @@ class TestHandlerFactoryPattern:
                 HandlerRegistrationStoragePostgres,
             )
 
-            mock_container = MagicMock(spec=ModelONEXContainer)
             pg = _resolve_postgres_config()
             return HandlerRegistrationStoragePostgres(
-                container=mock_container,
-                host=pg["host"],
-                port=pg["port"],
-                database=pg["database"],
-                user=pg["user"],
-                password=pg["password"],
+                container_binding(
+                    host=pg["host"],
+                    port=pg["port"],
+                    database=pg["database"],
+                    user=pg["user"],
+                    password=pg["password"],
+                )
             )
         else:
             raise ValueError(f"Unknown handler type: {handler_type}")
@@ -692,7 +693,6 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
             HandlerRegistrationStoragePostgres,
         )
 
-        mock_container = MagicMock(spec=ModelONEXContainer)
         pg = _resolve_postgres_config()
         # node_registrations is handler-owned: no file in docker/migrations
         # creates it. The runtime constructs this handler with
@@ -700,13 +700,14 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
         # so the test does the same instead of depending on another test
         # having created the table first.
         handler = HandlerRegistrationStoragePostgres(
-            container=mock_container,
-            host=pg["host"],
-            port=pg["port"],
-            database=pg["database"],
-            user=pg["user"],
-            password=pg["password"],
-            auto_create_schema=True,
+            container_binding(
+                host=pg["host"],
+                port=pg["port"],
+                database=pg["database"],
+                user=pg["user"],
+                password=pg["password"],
+                auto_create_schema=True,
+            )
         )
 
         yield handler

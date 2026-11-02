@@ -50,6 +50,7 @@ from omnibase_infra.handlers.registration_storage.handler_registration_storage_p
 from omnibase_infra.handlers.registration_storage.protocol_registration_persistence import (
     ProtocolRegistrationPersistence,
 )
+from tests.helpers.util_registration_storage_postgres import container_binding
 
 # =============================================================================
 # Protocol Method Definitions
@@ -86,15 +87,14 @@ def postgres_handler() -> HandlerRegistrationStoragePostgres:
     Note: This creates the handler without initializing the connection pool.
     Protocol compliance tests only verify interface structure, not runtime behavior.
     """
-    mock_container = MagicMock(spec=ModelONEXContainer)
-    test_password = "test_password"
     return HandlerRegistrationStoragePostgres(
-        container=mock_container,
-        host="localhost",
-        port=5432,
-        database="test_db",
-        user="test_user",
-        password=test_password,
+        container_binding(
+            host="localhost",
+            port=5432,
+            database="test_db",
+            user="test_user",
+            password="test_password",
+        )
     )
 
 
@@ -402,12 +402,13 @@ class TestCrossHandlerProtocolCompliance:
             (
                 HandlerRegistrationStoragePostgres,
                 {
-                    "container": MagicMock(spec=ModelONEXContainer),
-                    "host": "localhost",
-                    "port": 5432,
-                    "database": "test",
-                    "user": "test",
-                    "password": "test",
+                    "container": container_binding(
+                        host="localhost",
+                        port=5432,
+                        database="test",
+                        user="test",
+                        password="test",
+                    ),
                 },
                 "postgresql",
             ),
@@ -433,12 +434,13 @@ class TestCrossHandlerProtocolCompliance:
             (
                 HandlerRegistrationStoragePostgres,
                 {
-                    "container": MagicMock(spec=ModelONEXContainer),
-                    "host": "localhost",
-                    "port": 5432,
-                    "database": "test",
-                    "user": "test",
-                    "password": "test",
+                    "container": container_binding(
+                        host="localhost",
+                        port=5432,
+                        database="test",
+                        user="test",
+                        password="test",
+                    ),
                 },
                 "postgresql",
             ),
@@ -464,12 +466,13 @@ class TestCrossHandlerProtocolCompliance:
             (
                 HandlerRegistrationStoragePostgres,
                 {
-                    "container": MagicMock(spec=ModelONEXContainer),
-                    "host": "localhost",
-                    "port": 5432,
-                    "database": "test",
-                    "user": "test",
-                    "password": "test",
+                    "container": container_binding(
+                        host="localhost",
+                        port=5432,
+                        database="test",
+                        user="test",
+                        password="test",
+                    ),
                 },
             ),
         ],
@@ -495,12 +498,13 @@ class TestCrossHandlerProtocolCompliance:
             (
                 HandlerRegistrationStoragePostgres,
                 {
-                    "container": MagicMock(spec=ModelONEXContainer),
-                    "host": "localhost",
-                    "port": 5432,
-                    "database": "test",
-                    "user": "test",
-                    "password": "test",
+                    "container": container_binding(
+                        host="localhost",
+                        port=5432,
+                        database="test",
+                        user="test",
+                        password="test",
+                    ),
                 },
             ),
         ],
@@ -547,12 +551,13 @@ class TestTypeAnnotationCompleteness:
             (
                 HandlerRegistrationStoragePostgres,
                 {
-                    "container": MagicMock(spec=ModelONEXContainer),
-                    "host": "localhost",
-                    "port": 5432,
-                    "database": "test",
-                    "user": "test",
-                    "password": "test",
+                    "container": container_binding(
+                        host="localhost",
+                        port=5432,
+                        database="test",
+                        user="test",
+                        password="test",
+                    ),
                 },
             ),
         ],
@@ -579,12 +584,13 @@ class TestTypeAnnotationCompleteness:
             (
                 HandlerRegistrationStoragePostgres,
                 {
-                    "container": MagicMock(spec=ModelONEXContainer),
-                    "host": "localhost",
-                    "port": 5432,
-                    "database": "test",
-                    "user": "test",
-                    "password": "test",
+                    "container": container_binding(
+                        host="localhost",
+                        port=5432,
+                        database="test",
+                        user="test",
+                        password="test",
+                    ),
                 },
             ),
         ],

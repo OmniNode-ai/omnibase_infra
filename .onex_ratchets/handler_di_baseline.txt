@@ -38,7 +38,6 @@ src/omnibase_infra/handlers/placement/handler_placement_runtime.py 7
 src/omnibase_infra/handlers/placement/handler_placement_serving.py 2
 src/omnibase_infra/handlers/placement/handler_placement_session.py 2
 src/omnibase_infra/handlers/registration_storage/handler_registration_storage_mock.py 1
-src/omnibase_infra/handlers/registration_storage/handler_registration_storage_postgres.py 5
 src/omnibase_infra/handlers/service_discovery/handler_service_discovery_mock.py 1
 src/omnibase_infra/nodes/node_architecture_validator/handlers/handler_architecture_validation.py 1
 src/omnibase_infra/nodes/node_architecture_validator/validators/validator_contract_declared_orchestrator_workflow.py 1

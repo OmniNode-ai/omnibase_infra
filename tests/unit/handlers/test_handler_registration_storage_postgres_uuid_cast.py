@@ -33,6 +33,7 @@ from omnibase_infra.handlers.registration_storage.handler_registration_storage_p
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelStorageQuery,
 )
+from tests.helpers.util_registration_storage_postgres import container_binding
 
 
 class _FakeAsyncpgUUID:
@@ -109,12 +110,13 @@ async def test_query_registrations_handles_asyncpg_pgproto_uuid() -> None:
     )
 
     handler = HandlerRegistrationStoragePostgres(
-        container=MagicMock(spec=ModelONEXContainer),
-        host="unused",
-        port=5432,
-        database="unused",
-        user="unused",
-        password="unused",
+        container_binding(
+            host="unused",
+            port=5432,
+            database="unused",
+            user="unused",
+            password="unused",
+        )
     )
 
     stub_pool = _StubPool(_StubConnection(rows=[row], count=1))

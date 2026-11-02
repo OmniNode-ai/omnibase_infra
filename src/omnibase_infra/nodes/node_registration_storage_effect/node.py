@@ -44,10 +44,8 @@ Pluggable Backends:
 
     # Create container and register handler
     container = ModelONEXContainer()
-    handler = HandlerRegistrationStoragePostgres(
-        container=container,
-        dsn="postgresql://...",
-    )
+    # Bind ModelRegistrationStoragePostgresConfig first; the handler resolves it.
+    handler = HandlerRegistrationStoragePostgres(container)
     RegistryInfraRegistrationStorage.register(container)
     RegistryInfraRegistrationStorage.register_handler(container, handler)
 

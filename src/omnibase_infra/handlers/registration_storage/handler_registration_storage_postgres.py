@@ -9,13 +9,14 @@ circuit breaker resilience.
 
 Connection Pooling:
     - Uses asyncpg connection pool for efficient database access
-    - Configurable pool size (default: 10)
+    - Pool size, timeout and circuit breaker come from the container-bound
+      ModelRegistrationStoragePostgresConfig
     - Pool gracefully closed on handler shutdown
 
 Circuit Breaker:
     - Uses MixinAsyncCircuitBreaker for consistent resilience
     - Three states: CLOSED (normal), OPEN (blocking), HALF_OPEN (testing)
-    - Configurable failure threshold and reset timeout
+    - Threshold and reset timeout come from the bound config
 
 SQL Security:
     All SQL queries in this module use parameterized queries with positional
@@ -41,10 +42,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 # Import asyncpg at module level to avoid redundant imports inside methods
@@ -65,8 +64,9 @@ from omnibase_infra.handlers.registration_storage.models import (
     ModelUpdateRegistrationRequest,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
-from omnibase_infra.models.network_binding import load_network_binding_settings
-from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.models.registration_storage import (
+    ModelRegistrationStoragePostgresConfig,
+)
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
     ModelRegistrationRecord,
@@ -77,18 +77,7 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelUpsertResult,
 )
 
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_registry_effect.protocols.protocol_postgres_adapter import (
-        ProtocolPostgresAdapter,
-    )
-
 logger = logging.getLogger(__name__)
-
-# Default configuration values
-DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 5
-DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT = 30.0
-DEFAULT_POOL_SIZE = 10
-DEFAULT_TIMEOUT_SECONDS = 30.0
 
 # SQL statements
 # NOTE: Database column is `registered_at` but model uses `created_at`. The column
@@ -163,111 +152,52 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
         handler_type: Returns "postgresql" identifier.
 
     Example:
-        >>> from omnibase_core.container import ModelONEXContainer
-        >>> container = ModelONEXContainer(...)
-        >>> handler = HandlerRegistrationStoragePostgres(
-        ...     container=container,
-        ...     postgres_adapter=postgres_adapter,
-        ...     circuit_breaker_config={"threshold": 5, "reset_timeout": 30.0},
-        ... )
+        >>> # The wiring site registers ModelRegistrationStoragePostgresConfig
+        >>> handler = HandlerRegistrationStoragePostgres(container)
         >>> result = await handler.store_registration(record)
     """
 
-    def __init__(
-        self,
-        container: ModelONEXContainer,
-        postgres_adapter: ProtocolPostgresAdapter | None = None,
-        dsn: str | None = None,
-        host: str | None = None,
-        port: int = load_network_binding_settings().postgres_port,
-        database: str = "omnibase_infra",
-        user: str = "postgres",
-        password: str | None = None,
-        pool_size: int = DEFAULT_POOL_SIZE,
-        circuit_breaker_config: ModelCircuitBreakerConfig
-        | dict[str, object]
-        | None = None,
-        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-        auto_create_schema: bool = False,
-    ) -> None:
+    def __init__(self, container: ModelONEXContainer) -> None:
         """Initialize HandlerRegistrationStoragePostgres.
 
         Args:
-            container: ONEX dependency injection container (required).
-            postgres_adapter: Optional existing PostgreSQL adapter (ProtocolPostgresAdapter).
-                If not provided, a new asyncpg connection pool will be created.
-            dsn: Optional PostgreSQL connection DSN (overrides host/port/etc).
-            host: PostgreSQL server hostname (default: "localhost").
-            port: PostgreSQL server port (default: 5432).
-            database: Database name (default: "omnibase_infra").
-            user: Database user (default: "postgres").
-            password: Optional database password.
-            pool_size: Connection pool size (default: 10).
-            circuit_breaker_config: Optional circuit breaker configuration.
-                Accepts ModelCircuitBreakerConfig or dict with keys:
-                - threshold: Max failures before opening (default: 5)
-                - reset_timeout_seconds: Seconds before reset (default: 60.0)
-                - service_name: Service identifier (default: "postgres.storage")
-            timeout_seconds: Operation timeout in seconds (default: 30.0).
-            auto_create_schema: If True, automatically create the node_registrations
-                table on first connection. Default is False. Production deployments
-                should use database migrations instead of auto-creation.
+            container: ONEX dependency injection container. It must hold a
+                ModelRegistrationStoragePostgresConfig, which names the
+                connection, pool size, statement timeout and circuit breaker.
         """
         self._container = container
-        # Normalize circuit breaker config to ModelCircuitBreakerConfig
-        if isinstance(circuit_breaker_config, ModelCircuitBreakerConfig):
-            cb_config = circuit_breaker_config
-        elif circuit_breaker_config is not None:
-            # Handle dict with legacy key names (reset_timeout -> reset_timeout_seconds)
-            config_dict = dict(circuit_breaker_config)
-            if (
-                "reset_timeout" in config_dict
-                and "reset_timeout_seconds" not in config_dict
-            ):
-                config_dict["reset_timeout_seconds"] = config_dict.pop("reset_timeout")
-            # Set defaults for service_name and transport_type if not provided
-            config_dict.setdefault("service_name", "postgres.storage")
-            config_dict.setdefault("transport_type", EnumInfraTransportType.DATABASE)
-            cb_config = ModelCircuitBreakerConfig(**config_dict)
-        else:
-            cb_config = ModelCircuitBreakerConfig(
-                service_name="postgres.storage",
-                transport_type=EnumInfraTransportType.DATABASE,
-            )
-
+        config = container.get_service(ModelRegistrationStoragePostgresConfig)
+        breaker = config.circuit_breaker
         self._init_circuit_breaker(
-            threshold=cb_config.threshold,
-            reset_timeout=cb_config.reset_timeout_seconds,
-            service_name=cb_config.service_name,
-            transport_type=cb_config.transport_type,
+            threshold=breaker.threshold,
+            reset_timeout=breaker.reset_timeout_seconds,
+            service_name=breaker.service_name,
+            transport_type=breaker.transport_type,
         )
 
-        # Store configuration — host is required via env var if not provided
-        self._dsn = dsn
-        self._host = host if host is not None else os.environ["POSTGRES_HOST"]  # ONEX_EXCLUDE: env  # fmt: skip
-        self._port = port
-        self._database = database
-        self._user = user
-        self._password = password
-        self._pool_size = pool_size
-        self._timeout_seconds = timeout_seconds
-        self._auto_create_schema = auto_create_schema
+        # DSN and password stay SecretStr until the pool is opened.
+        self._dsn = config.dsn
+        self._host = config.host
+        self._port = config.port
+        self._database = config.database
+        self._user = config.user
+        self._password = config.password
+        self._pool_size = config.pool_size
+        self._timeout_seconds = config.timeout_seconds
+        self._auto_create_schema = config.auto_create_schema
 
-        # Connection pool (initialized on first use)
+        # Connection pool and its lock are created on first use.
         self._pool: asyncpg.Pool | None = None
-        self._pool_lock = asyncio.Lock()
+        self._pool_lock: asyncio.Lock | None = None
         self._initialized = False
-
-        # External adapter (if provided)
-        self._postgres_adapter = postgres_adapter
 
         logger.info(
             "HandlerRegistrationStoragePostgres created",
             extra={
-                "host": host,
-                "port": port,
-                "database": database,
-                "pool_size": pool_size,
+                "host": self._host,
+                "port": self._port,
+                "database": self._database,
+                "pool_size": self._pool_size,
             },
         )
 
@@ -303,15 +233,18 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
         if self._pool is not None:
             return self._pool
 
+        if self._pool_lock is None:
+            self._pool_lock = asyncio.Lock()
         async with self._pool_lock:
             # Double-check after acquiring lock
             if self._pool is not None:
                 return self._pool
 
             try:
-                if self._dsn:
+                dsn = self._dsn.get_secret_value()
+                if dsn:
                     self._pool = await asyncpg.create_pool(
-                        dsn=self._dsn,
+                        dsn=dsn,
                         min_size=1,
                         max_size=self._pool_size,
                     )
@@ -321,7 +254,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                         port=self._port,
                         database=self._database,
                         user=self._user,
-                        password=self._password,
+                        password=self._password.get_secret_value() or None,
                         min_size=1,
                         max_size=self._pool_size,
                     )

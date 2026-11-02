@@ -101,10 +101,21 @@ class TestWireRegistrationStorage:
         ):
             await plugin._wire_registration_storage(config)  # type: ignore[attr-defined]
 
-        # Handler should have been created with auto_create_schema=True
-        mock_cls.assert_called_once()
-        call_kwargs = mock_cls.call_args
-        assert call_kwargs[1]["auto_create_schema"] is True
+        # OMN-22131: the handler takes only the container; the settings it
+        # resolves are bound first, with auto_create_schema=True.
+        mock_cls.assert_called_once_with(config.container)
+        from omnibase_infra.models.registration_storage import (
+            ModelRegistrationStoragePostgresConfig,
+        )
+
+        bound = [
+            c.kwargs["instance"]
+            for c in config.container.service_registry.register_instance.await_args_list
+            if c.kwargs["interface"] is ModelRegistrationStoragePostgresConfig
+        ]
+        assert len(bound) == 1
+        assert bound[0].auto_create_schema is True
+        assert bound[0].dsn.get_secret_value() == "postgresql://test:5432/db"
 
         # _ensure_pool should have been called to eagerly create table
         mock_handler._ensure_pool.assert_called_once()
