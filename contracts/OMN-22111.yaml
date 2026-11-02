@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22111
+title: The general CI runners are declared on h053, which has AVX2, and h051 stays off omnibase-ci
+summary: >-
+  This contract covers the repository side of the move of the general omnibase-ci runners off the primary host. A pool of eight runners is declared on h053 (Xeon E5-2680 v4, AVX2) with its own compose file, slice and git mirror units. h051 (no AVX2) keeps the opt-in label only, so no job that imports an AVX2 wheel can be placed there. Standing the pool up on the host, reading one passing job per repository from the run record, and lowering the primary host's count are runtime steps that follow the merge and are not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-h053-general-pool
+    statement: h053 declares a pool of eight general omnibase-ci runners with its own compose file, slice and git mirror units, and no omnibase-ci runner can sit on a host without AVX2.
+    acceptance:
+      - id: AC1
+        statement: The fleet config declares h053 with the action and action-multiarch classes and eight runners, the compose file names exactly those eight runners with the general and opt-in labels and the h051 anchor's limits, and the pool slice bounds the whole pool.
+      - id: AC3
+        statement: Every h051 runner is declared without the omnibase-ci label and the fleet row declares no action class for h051, so a job of the private repository whose tests import the pedalboard wheel (it runs on omnibase-ci) cannot be assigned to a host that cannot import its pedalboard wheel.
+evidence_requirements:
+  - kind: tests
+    description: The h053 pool declaration, the h051 opt-in invariant and the fleet totals tests pass.
+    command: uv run pytest tests/ci/test_hp053_pool_omn22111.py tests/ci/test_hp051_pool_omn17232.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py tests/unit/observability/runner_health/test_runner_fleet_config.py tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-h053-pool-declared
+    description: The fleet config and the h053 compose file, slice and mirror units agree on the eight general runners, their labels and limits.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_hp053_pool_omn22111.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q --no-cov -p no:randomly -k "h053 or hosts or declared_total or inventory"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-h051-stays-off-omnibase-ci
+    description: Parse the h051 services and the fleet rows and fail if any carries omnibase-ci.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_hp053_pool_omn22111.py tests/ci/test_hp051_pool_omn17232.py -q --no-cov -p no:randomly -k "without_avx2 or opt_in_label"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-h053-pool-source-readback
+    description: Hermetic readback of the h053 compose file at the evaluated commit; the eighth h053 runner service is absent at the merge base.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-hp053-ci-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "hp053-ci-runner-8" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
