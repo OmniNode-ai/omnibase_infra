@@ -42,3 +42,10 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/cli -q --no-cov -k walk_2026_11_02 -p no:randomly"
+  - id: dod-omn22183-deploy-guard-on-dev
+    binds_ac: [AC1]
+    description: The guard source on the landing branch carries the floor-marker check (hermetic; the change is compute-only and needs no live redeploy to be observed).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/delegation/model_floor_marker.py?ref=dev' --jq .content | base64 -d | grep -q 'def names_commit'"
