@@ -193,7 +193,7 @@ class NodeLaneMirror:
         self._producers = dict(mirror_producers)
         self._store = idempotency_store
         self._allowed_topics = frozenset(config.topics)
-        self._tenant_topics = frozenset(config.tenant_topics)
+        self._tenant_topics = config.tenant_topics
         self._tenant_slug = tenant_slug
         # OMN-17919: a record the mirror cannot identify is refused, and the
         # refusal is COUNTED. Silence is the failure mode this leg already had

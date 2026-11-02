@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from itertools import count
 from typing import cast
 
@@ -69,7 +69,15 @@ def _encode_headers(headers: object) -> dict[str, bytes]:
 
 
 class NodeLaneMirrorBusSource:
-    """``ProtocolGatewayConsumer`` over a container-resolved ``ProtocolEventBus``."""
+    """``ProtocolGatewayConsumer`` over a container-resolved ``ProtocolEventBus``.
+
+    The buffer is created by ``start``; nothing is constructed in ``__init__``.
+    """
+
+    _buffer: deque[ModelTransportMessage]
+    _available: asyncio.Event
+    _offsets: Iterator[int]
+    _unsubscribes: list[Callable[[], Awaitable[None]]]
 
     def __init__(
         self,
@@ -81,17 +89,19 @@ class NodeLaneMirrorBusSource:
         if not topics:
             raise ValueError("a lane-mirror bus source requires at least one topic")
         self._bus = event_bus
-        self._topics = tuple(topics)
+        self._topics = topics
         self._identity = node_identity
-        self._buffer: deque[ModelTransportMessage] = deque()
-        self._available = asyncio.Event()
-        self._offsets = count()
-        self._unsubscribes: list[Callable[[], Awaitable[None]]] = []
+        self._started = False
 
     async def start(self) -> None:
         """Subscribe to every declared topic on the runtime's bus."""
-        if self._unsubscribes:
+        if self._started:
             return
+        self._buffer = deque()
+        self._available = asyncio.Event()
+        self._offsets = count()
+        self._unsubscribes = []
+        self._started = True
         for topic in self._topics:
             self._unsubscribes.append(
                 await self._bus.subscribe(topic, self._identity, self._receive)
@@ -99,6 +109,8 @@ class NodeLaneMirrorBusSource:
 
     async def close(self) -> None:
         """Drop every subscription; buffered records are not committed."""
+        if not self._started:
+            return
         unsubscribes, self._unsubscribes = self._unsubscribes, []
         for unsubscribe in unsubscribes:
             await unsubscribe()
@@ -137,6 +149,8 @@ class NodeLaneMirrorBusSource:
 
     async def commit(self, message: object) -> None:
         """Nothing to persist: a polled record is already out of the buffer."""
+        if not isinstance(message, ModelTransportMessage):
+            raise TypeError("a lane-mirror bus source commits only its own records")
 
     async def nack(self, message: object) -> None:
         """Return the record to the head of the buffer for redelivery."""
