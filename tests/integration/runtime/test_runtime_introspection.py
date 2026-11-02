@@ -253,7 +253,7 @@ class TestStartupIntrospectionWithJitter:
         - Error is logged but doesn't block startup
         """
         # Configure mock to raise an error
-        mock_introspection_service.publish_introspection.side_effect = Exception(
+        mock_introspection_service.publish_introspection.side_effect = RuntimeError(
             "Kafka unavailable"
         )
 

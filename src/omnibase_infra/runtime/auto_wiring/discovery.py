@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Contract auto-discovery engine for ONEX auto-wiring.
 
-Scans ``onex.nodes`` entry points, locates sibling ``contract.yaml`` files,
-parses the contract subset needed for wiring, and builds a
-:class:`ModelAutoWiringManifest`.
+Reads the node catalog that boot step 0 built from the installed packages'
+announcements, parses the contract subset needed for wiring, and builds a
+:class:`ModelAutoWiringManifest`. It names no entry-point group: the metadata
+reader that does lives in :mod:`omnibase_infra.handlers.handler_package_announcer`
+(OMN-21590).
 
 This module is **pure** — no handler imports, no Kafka connections, no I/O
 beyond reading YAML files from disk.
@@ -14,15 +16,12 @@ Part of OMN-7653: Contract auto-discovery from onex.nodes entry points.
 
 from __future__ import annotations
 
-import inspect
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Final
 
-import yaml
-
+from omnibase_core.enums.enum_catalog_entry_state import EnumCatalogEntryState
 from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract import (
     ModelDbOwnershipSubcontract,
 )
@@ -30,9 +29,22 @@ from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import
     ModelRuntimeLaneScope,
 )
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.handlers.handler_package_announcer import (
+    build_catalog_direct,
+    local_announce_request,
+    read_contract_yaml,
+    read_package_inventory,
+    resolve_contract_path,
+)
 from omnibase_infra.models.model_discovery_skip import ModelDiscoverySkip
 from omnibase_infra.models.model_secret_gated_membership import (
     ModelSecretGatedMembership,
+)
+from omnibase_infra.models.node_announce.model_package_announce_result import (
+    ModelPackageAnnounceResult,
+)
+from omnibase_infra.models.node_announce.model_package_inventory import (
+    ModelPackageInventory,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -57,7 +69,7 @@ from omnibase_infra.utils.util_runtime_packages import (
 
 logger = logging.getLogger(__name__)
 
-ENTRY_POINT_GROUP = "onex.nodes"
+_resolve_contract_path = resolve_contract_path
 
 # Presence marker for a membership record (OMN-21423), never a secret value.
 _ABSENT: Final = "absent"
@@ -217,28 +229,20 @@ def discover_contracts_cache_clear() -> None:
 
 
 def _discovery_inputs(
+    inventory: ModelPackageInventory,
     active_packages: frozenset[str] | None,
 ) -> tuple[object, ...]:
     """Everything outside the contract files that can change the manifest.
 
-    The entry-point set (name, distribution, version) plus the two environment
-    switches the scan's skip predicates read:
-    ``_contract_targets_active_runtime_packages`` via ``active_packages`` and
-    ``_skip_dormant_cloud_gateway`` via cloud mirroring. A contract file's own
-    bytes are covered separately by the stat map, so they are not repeated here.
+    The package inventory's fingerprint (name, distribution, version of every
+    announced entry) plus the two environment switches the scan's skip
+    predicates read: ``_contract_targets_active_runtime_packages`` via
+    ``active_packages`` and ``_skip_dormant_cloud_gateway`` via cloud mirroring.
+    A contract file's own bytes are covered separately by the stat map, so they
+    are not repeated here.
     """
-    eps = tuple(
-        sorted(
-            (
-                ep.name,
-                ep.dist.name if ep.dist is not None else "unknown",
-                ep.dist.version if ep.dist is not None else "0.0.0",
-            )
-            for ep in entry_points(group=ENTRY_POINT_GROUP)
-        )
-    )
     packages = tuple(sorted(active_packages)) if active_packages is not None else None
-    return (eps, packages, is_gateway_cloud_mirroring_enabled())
+    return (inventory.fingerprint, packages, is_gateway_cloud_mirroring_enabled())
 
 
 def _stat_map(paths: tuple[Path, ...]) -> dict[str, tuple[int, int]] | None:
@@ -258,39 +262,26 @@ def _stat_map(paths: tuple[Path, ...]) -> dict[str, tuple[int, int]] | None:
     return out
 
 
-def _resolve_active_contract_paths(
-    active_packages: frozenset[str] | None,
-) -> tuple[tuple[Path, ...], bool]:
-    """Resolve each active entry point's contract path without parsing it.
-
-    This is the cheap half of the scan — measured in the deployed pod on
-    2026-09-26 at 0.052s for 544 entry points against 24.099s for the parsing
-    half — and it is what lets the memo be validated rather than trusted.
-
-    Returns ``(paths, complete)``. ``complete`` is False when any entry point
-    failed to load or resolve, which forces the full scan so the error is
-    recorded instead of being served from the memo.
-    """
-    paths: list[Path] = []
-    for ep in entry_points(group=ENTRY_POINT_GROUP):
-        dist = ep.dist
-        dist_name = dist.name if dist is not None else "unknown"
-        if not is_runtime_package_active(dist_name, active_packages):
-            continue
-        try:
-            node_cls = ep.load()
-            paths.append(_resolve_contract_path(node_cls))
-        except Exception:  # noqa: BLE001 - any failure means "rescan properly"
-            return tuple(paths), False
-    return tuple(paths), True
+def _resolved_paths(inventory: ModelPackageInventory) -> tuple[Path, ...]:
+    return tuple(r.contract_path for r in inventory.records if r.contract_path)
 
 
-def discover_contracts() -> ModelAutoWiringManifest:
-    """Scan all ``onex.nodes`` entry points and build an auto-wiring manifest.
+def discover_contracts(
+    announced: ModelPackageAnnounceResult | None = None,
+) -> ModelAutoWiringManifest:
+    """Build an auto-wiring manifest from the node catalog (OMN-21590).
 
-    **Memoized since OMN-19373.** A repeat call whose entry points, runtime-lane
-    environment and contract-file mtimes/sizes are all unchanged returns the
-    previous manifest instead of re-parsing. Measured in the deployed
+    The runtime no longer scans ``onex.nodes`` entry points here. Boot step 0
+    announces every installed package's contracts and builds the catalog
+    (:mod:`omnibase_infra.handlers.handler_package_announcer`); this function reads
+    that catalog. The kernel passes the result of its step 0. A caller with no
+    step 0 (the node inventory, the health monitor, a test) passes nothing and the
+    same announcements are folded into a catalog without a bus, so the manifest is
+    the one the kernel would have read.
+
+    **Memoized since OMN-19373.** A repeat call whose package inventory,
+    runtime-lane environment and contract-file mtimes/sizes are all unchanged
+    returns the previous manifest instead of re-parsing. Measured in the deployed
     ``omninode-runtime-effects`` pod on onex-dev, 2026-09-26: this function took
     24.036s and an immediate second call took 23.922s, of which
     ``_parse_contract`` over 544 entry points was 24.099s — the sweep was
@@ -303,18 +294,12 @@ def discover_contracts() -> ModelAutoWiringManifest:
     acceptance tolerance. Making the repeat scan cheap is what removes that
     stall; widening timeouts only moved where it showed up.
 
-    The memo is validated, not trusted: every call re-reads the entry-point set
-    and stats every contract file, and any difference — including a file that
-    has vanished — triggers the full scan. Set
+    The memo is validated, not trusted: every call re-reads the package
+    inventory and stats every contract file, and any difference — including a
+    file that has vanished — triggers the full scan. Set
     ``ONEX_AUTOWIRING_DISCOVERY_CACHE=0`` to disable it.
 
-    For each entry point, the engine:
-
-    1. Loads the entry point to obtain the node class (but does NOT instantiate it).
-    2. Resolves the ``contract.yaml`` file adjacent to the module that defines the class.
-    3. Parses the YAML and extracts the fields needed for wiring.
-
-    Errors on individual entry points are captured — they never abort the full scan.
+    Errors on individual entries are captured — they never abort the full scan.
 
     Duplicate contract names (same ``name`` field from two different packages) are
     detected and surfaced as :class:`ModelDiscoveryError` entries.  The first
@@ -327,36 +312,58 @@ def discover_contracts() -> ModelAutoWiringManifest:
     """
     active_packages = get_active_runtime_packages()
 
-    if not is_autowiring_discovery_cache_enabled():
-        manifest, _ = _scan_contracts(active_packages)
+    if announced is not None:
+        manifest, scanned_paths = _manifest_from_catalog(announced, active_packages)
+        if is_autowiring_discovery_cache_enabled():
+            stats = _stat_map(scanned_paths)
+            if stats is not None:
+                _DISCOVERY_MEMO.store(
+                    _discovery_inputs(announced.inventory, active_packages),
+                    stats,
+                    manifest,
+                )
         return manifest
 
-    inputs = _discovery_inputs(active_packages)
-    cached = _DISCOVERY_MEMO.manifest
-    if cached is not None and _DISCOVERY_MEMO.inputs == inputs:
-        paths, complete = _resolve_active_contract_paths(active_packages)
-        if complete:
-            current = _stat_map(paths)
-            if current is not None and current == _DISCOVERY_MEMO.stats:
-                logger.debug(
-                    "Auto-wiring discovery served from memo: "
-                    "%d contracts, %d contract files unchanged",
-                    cached.total_discovered,
-                    len(current),
-                )
-                return cached
+    inventory = read_package_inventory(active_packages)
 
-    manifest, scanned_paths = _scan_contracts(active_packages)
+    if not is_autowiring_discovery_cache_enabled():
+        return _manifest_from_catalog(
+            build_catalog_direct(inventory, local_announce_request(active_packages)),
+            active_packages,
+        )[0]
+
+    inputs = _discovery_inputs(inventory, active_packages)
+    cached = _DISCOVERY_MEMO.manifest
+    if (
+        cached is not None
+        and _DISCOVERY_MEMO.inputs == inputs
+        and inventory.resolution_complete
+    ):
+        current = _stat_map(_resolved_paths(inventory))
+        if current is not None and current == _DISCOVERY_MEMO.stats:
+            logger.debug(
+                "Auto-wiring discovery served from memo: "
+                "%d contracts, %d contract files unchanged",
+                cached.total_discovered,
+                len(current),
+            )
+            return cached
+
+    manifest, scanned_paths = _manifest_from_catalog(
+        build_catalog_direct(inventory, local_announce_request(active_packages)),
+        active_packages,
+    )
     stats = _stat_map(scanned_paths)
     if stats is not None:
         _DISCOVERY_MEMO.store(inputs, stats, manifest)
     return manifest
 
 
-def _scan_contracts(
+def _manifest_from_catalog(
+    announced: ModelPackageAnnounceResult,
     active_packages: frozenset[str] | None,
 ) -> tuple[ModelAutoWiringManifest, tuple[Path, ...]]:
-    """Run the full scan, parsing every active entry point's contract.
+    """Read the catalog step 0 built into a manifest, parsing each announced contract.
 
     Returns the manifest and every contract path that was resolved. The paths
     come back so the caller can fingerprint them, and they include files whose
@@ -371,72 +378,81 @@ def _scan_contracts(
     # cross-package duplicates before they reach the dispatch engine.
     seen_contract_names: dict[str, str] = {}
 
-    for ep in entry_points(group=ENTRY_POINT_GROUP):
-        dist = ep.dist
-        dist_name = dist.name if dist is not None else "unknown"
-        dist_version = dist.version if dist is not None else "0.0.0"
-        if not is_runtime_package_active(dist_name, active_packages):
-            logger.debug(
-                "Skipping contract discovery for inactive runtime package '%s'",
-                dist_name,
-            )
-            continue
-
-        try:
-            node_cls = ep.load()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Failed to load entry point '%s' from '%s': %s",
-                ep.name,
-                dist_name,
-                exc,
-            )
+    for record in announced.inventory.records:
+        dist_name = record.distribution
+        dist_version = record.version
+        if record.error_stage == "load":
             errors.append(
                 ModelDiscoveryError(
-                    entry_point_name=ep.name,
+                    entry_point_name=record.entry_point,
                     package_name=dist_name,
-                    error=f"Failed to load entry point: {exc}",
+                    error=f"Failed to load entry point: {record.error}",
+                )
+            )
+            continue
+        if record.error_stage == "resolve":
+            errors.append(
+                ModelDiscoveryError(
+                    entry_point_name=record.entry_point,
+                    package_name=dist_name,
+                    error=str(record.error),
                 )
             )
             continue
 
-        try:
-            contract_path = _resolve_contract_path(node_cls)
-        except (FileNotFoundError, TypeError) as exc:
-            logger.warning(
-                "No contract.yaml for entry point '%s' from '%s': %s",
-                ep.name,
-                dist_name,
-                exc,
-            )
-            errors.append(
-                ModelDiscoveryError(
-                    entry_point_name=ep.name,
-                    package_name=dist_name,
-                    error=str(exc),
-                )
-            )
+        contract_path = record.contract_path
+        if contract_path is None:
             continue
-
         resolved_paths.append(contract_path)
+
+        if record.error_stage == "parse":
+            errors.append(
+                ModelDiscoveryError(
+                    entry_point_name=record.entry_point,
+                    package_name=dist_name,
+                    error=f"Failed to parse contract: {record.error}",
+                    contract_path=contract_path,
+                    reason="parse_error",
+                )
+            )
+            continue
+
+        entry = announced.catalog.lookup(record.contract_name or "")
+        if (
+            entry is not None
+            and entry.state is EnumCatalogEntryState.REFUSED
+            and entry.package.distribution == dist_name
+            and entry.package.version == dist_version
+        ):
+            errors.append(
+                ModelDiscoveryError(
+                    entry_point_name=record.entry_point,
+                    package_name=dist_name,
+                    error=(
+                        f"Contract refused by catalog admission: {entry.refusal_reason}"
+                    ),
+                    contract_path=contract_path,
+                )
+            )
+            continue
 
         try:
             contract = _parse_contract(
                 contract_path=contract_path,
-                entry_point_name=ep.name,
+                entry_point_name=record.entry_point,
                 package_name=dist_name,
                 package_version=dist_version,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Failed to parse contract for '%s' from '%s': %s",
-                ep.name,
+                record.entry_point,
                 dist_name,
                 exc,
             )
             errors.append(
                 ModelDiscoveryError(
-                    entry_point_name=ep.name,
+                    entry_point_name=record.entry_point,
                     package_name=dist_name,
                     error=f"Failed to parse contract: {exc}",
                     contract_path=contract_path,
@@ -537,60 +553,6 @@ def discover_contracts_from_paths(
     )
 
 
-def _resolve_contract_path(node_cls: type) -> Path:
-    """Resolve the contract.yaml path for a node class or module.
-
-    Strategy:
-    1. If the object has a ``contract_path`` attribute, use it directly.
-    2. For namespace packages (no ``__file__``), search each path in ``__path__``.
-    3. Otherwise, look for ``contract.yaml`` in the same directory as the
-       module that defines the class.
-
-    Raises:
-        FileNotFoundError: If no contract.yaml can be located.
-        TypeError: If ``inspect.getfile`` cannot locate the source (re-raised
-            from caller's ``except (FileNotFoundError, TypeError)`` guard).
-    """
-    # Strategy 1: explicit contract_path attribute
-    explicit = getattr(node_cls, "contract_path", None)
-    if explicit is not None:
-        p = Path(str(explicit))
-        if p.is_file():
-            return p
-
-    # Strategy 2: namespace package — has __path__ but no __file__
-    # Entry points may resolve to namespace packages (directories without
-    # __init__.py).  inspect.getfile raises TypeError for these; check
-    # __path__ entries directly instead.
-    pkg_paths = getattr(node_cls, "__path__", None)
-    if pkg_paths is not None:
-        for pkg_dir in pkg_paths:
-            candidate = Path(pkg_dir) / "contract.yaml"
-            if candidate.is_file():
-                return candidate
-        raise FileNotFoundError(
-            f"No contract.yaml found in namespace package paths: {list(pkg_paths)}"
-        )
-
-    # Strategy 3: sibling contract.yaml (class or regular module)
-    source_file = inspect.getfile(node_cls)
-    module_dir = Path(source_file).parent
-    candidate = module_dir / "contract.yaml"
-    if candidate.is_file():
-        return candidate
-
-    # Strategy 4: parent directory (for cases where node.py is in a subdir)
-    parent_candidate = module_dir.parent / "contract.yaml"
-    if parent_candidate.is_file():
-        return parent_candidate
-
-    name = getattr(node_cls, "__name__", repr(node_cls))
-    raise FileNotFoundError(
-        f"No contract.yaml found for {name} "
-        f"(searched {module_dir} and {module_dir.parent})"
-    )
-
-
 def _parse_bool_field(raw_dict: dict, field_name: str, default: bool = False) -> bool:
     value = raw_dict.get(field_name, default)
     if not isinstance(value, bool):
@@ -599,27 +561,6 @@ def _parse_bool_field(raw_dict: dict, field_name: str, default: bool = False) ->
             f"got {type(value).__name__}"
         )
     return value
-
-
-def read_contract_yaml(contract_path: Path) -> object:
-    """Read contract YAML safely for discovery and pre-subscription wiring.
-
-    Cold wiring re-reads contract extensions after discovery. Keep those reads
-    on the same fast safe parser so they do not restore the pure-Python parse
-    delay before the first consumer bind (OMN-18843). I/O and parse errors
-    propagate to the caller, which owns the field's refusal semantics.
-    """
-    with open(contract_path) as f:
-        # OMN-18843: cold discovery gates the first consumer bind. Use the
-        # safe LibYAML parser when available; the memo only helps later scans.
-        # Both loaders reject Python object tags, with a portable fallback.
-        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)(f)
-        try:
-            raw = loader.get_single_data()
-        finally:
-            loader.dispose()
-
-    return raw
 
 
 def _extract_required_secrets(raw: dict) -> tuple[str, ...]:
@@ -1091,3 +1032,16 @@ def gate_manifest_on_required_secrets(
         image_sha=manifest.image_sha,
         deployment_sha=manifest.deployment_sha,
     )
+
+
+__all__ = [
+    "read_contract_yaml",
+    "discover_contracts",
+    "discover_contracts_cache_clear",
+    "discover_contracts_from_paths",
+    "env_secret_store_is_authoritative",
+    "required_secret_names",
+    "resolve_present_secret_names",
+    "drop_blank_secret_names",
+    "gate_manifest_on_required_secrets",
+]

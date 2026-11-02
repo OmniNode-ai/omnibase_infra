@@ -49,7 +49,6 @@ import importlib
 import json
 import logging
 import os
-import random
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
@@ -196,6 +195,9 @@ if TYPE_CHECKING:
     )
     from omnibase_core.models.envelope.model_message_envelope import (
         ModelMessageEnvelope,
+    )
+    from omnibase_core.models.events.contract_registration.model_node_announcement import (
+        ModelNodeAnnouncement,
     )
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
@@ -854,6 +856,7 @@ class RuntimeHostProcess:
         prefetch_policy: PrefetchPolicy = "disabled",
         config_prefetch_status: str = "pending",
         deployment_topology: ModelDeploymentTopology | None = None,
+        node_announcements: tuple[ModelNodeAnnouncement, ...] = (),
     ) -> None:
         """Initialize the runtime host process.
 
@@ -1484,6 +1487,7 @@ class RuntimeHostProcess:
         self._introspection_service: ProtocolNodeIntrospection | None = (
             introspection_service
         )
+        self._node_announcements = node_announcements
 
         # Introspection configuration for jitter, throttle, and heartbeat timing (OMN-1930)
         # Import at runtime to avoid circular import
@@ -6712,110 +6716,44 @@ class RuntimeHostProcess:
         self,
         correlation_id: UUID,
     ) -> None:
-        """Publish introspection event with jitter for stampede prevention (OMN-1930).
+        """Publish startup introspection, then start the heartbeat (OMN-1930).
 
-        This method announces node presence to the platform after handlers are
-        wired. It implements two key protections:
-
-        1. **Jitter**: Random delay before publishing to prevent thundering herd
-           when many nodes restart simultaneously (e.g., cluster restart or
-           rolling deployment).
-
-        2. **Throttling**: Skips introspection if the last one was too recent,
-           preventing stampede during rapid restart cycles.
-
-        After publishing the initial introspection event, this method also starts
-        the heartbeat background task for periodic liveness announcements.
+        Delegates to ``HandlerRuntimeIntrospectionStartup``, which applies the
+        jitter and throttle protections. The heartbeat task starts only after a
+        successful publish. A no-op when introspection is not configured,
+        disabled, or throttled.
 
         Args:
             correlation_id: Correlation ID for distributed tracing.
-
-        Note:
-            This method is a no-op if:
-            - introspection_service is None (not injected)
-            - introspection_config.enabled is False
-            - Throttle check fails (last introspection too recent)
-
-        Example:
-            Called automatically by start() after handlers are wired::
-
-                await self._publish_introspection_with_jitter(
-                    correlation_id=startup_correlation_id
-                )
         """
-        # Guard: Skip if introspection not configured
-        if self._introspection_service is None:
-            logger.debug("Introspection service not configured, skipping")
-            return
+        from omnibase_infra.handlers.handler_registration_from_announcement import (
+            HandlerRegistrationFromAnnouncement,
+        )
+        from omnibase_infra.handlers.handler_runtime_introspection_startup import (
+            HandlerRuntimeIntrospectionStartup,
+        )
+        from omnibase_infra.models.model_runtime_introspection_startup_request import (
+            ModelRuntimeIntrospectionStartupRequest,
+        )
 
-        if not self._introspection_config.enabled:
-            logger.debug("Introspection disabled by config, skipping")
-            return
-
-        # Throttle check: Skip if last introspection was too recent
-        if self._last_introspection_time is not None:
-            elapsed = time.monotonic() - self._last_introspection_time
-            if elapsed < self._introspection_config.throttle_min_interval_s:
-                logger.debug(
-                    "Introspection throttled",
-                    extra={
-                        "elapsed_seconds": elapsed,
-                        "throttle_min_interval_s": (
-                            self._introspection_config.throttle_min_interval_s
-                        ),
-                    },
-                )
-                return
-
-        # Apply jitter: Random delay to prevent thundering herd
-        jitter_ms = random.randint(0, self._introspection_config.jitter_max_ms)
-        if jitter_ms > 0:
-            logger.debug(
-                "Applying introspection jitter",
-                extra={"jitter_ms": jitter_ms},
-            )
-            await asyncio.sleep(jitter_ms / 1000.0)
-
-        # Publish introspection event
-        try:
-            await self._introspection_service.publish_introspection(
-                reason=EnumIntrospectionReason.STARTUP,
+        handler = HandlerRuntimeIntrospectionStartup()
+        result = await handler.handle(
+            ModelRuntimeIntrospectionStartupRequest(
                 correlation_id=correlation_id,
-            )
-
-            # Record time for throttle tracking immediately after publish
-            self._last_introspection_time = time.monotonic()
-
-            logger.info(
-                "Startup introspection published",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "jitter_ms": jitter_ms,
-                },
-            )
-
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-            # Log warning but don't fail startup - introspection is optional
-            logger.warning(
-                "Failed to publish startup introspection",
-                extra={
-                    "error": str(e),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return
-
-        # Start heartbeat task for periodic liveness announcements
-        # Separate try block: heartbeat failure shouldn't affect throttle tracking
-        try:
-            await self._introspection_service.start_heartbeat_task()
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "Failed to start heartbeat task",
-                extra={
-                    "error": str(e),
-                    "correlation_id": str(correlation_id),
-                },
+                announcements=self._node_announcements,
+                last_introspection_time=self._last_introspection_time,
+            ),
+            service=self._introspection_service,
+            config=self._introspection_config,
+            event_bus=self._event_bus,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
+        self._last_introspection_time = result.last_introspection_time
+        if result.published:
+            await handler.start_heartbeat(
+                correlation_id,
+                service=self._introspection_service,
+                config=self._introspection_config,
             )
 
     # =========================================================================
