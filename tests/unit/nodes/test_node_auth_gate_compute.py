@@ -137,7 +137,7 @@ class TestStep1WhitelistedPaths:
         """Memory files bypass all auth checks."""
         request = ModelAuthGateRequest(
             tool_name="Write",
-            target_path="/home/user/.claude/memory/notes.md",
+            target_path="/workspace/.claude/memory/notes.md",
         )
         decision = handler.handle(request)
 
@@ -148,7 +148,7 @@ class TestStep1WhitelistedPaths:
         """Project-specific memory files bypass auth checks."""
         request = ModelAuthGateRequest(
             tool_name="Write",
-            target_path="/home/user/.claude/projects/my-proj/memory/MEMORY.md",
+            target_path="/workspace/.claude/projects/my-proj/memory/MEMORY.md",
         )
         decision = handler.handle(request)
 
@@ -1108,11 +1108,6 @@ class TestRegistryInfraAuthGateCompute:
         """get_node_class returns the node class."""
         cls = RegistryInfraAuthGateCompute.get_node_class()
         assert cls is NodeAuthGateCompute
-
-    def test_create_node(self, mock_container: MagicMock) -> None:
-        """create_node creates instance."""
-        node = RegistryInfraAuthGateCompute.create_node(mock_container)
-        assert isinstance(node, NodeAuthGateCompute)
 
 
 # =============================================================================

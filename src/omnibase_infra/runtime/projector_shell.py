@@ -11,8 +11,7 @@ Features:
     - Three projection modes: upsert, insert_only, append
     - Parameterized SQL queries for injection protection
     - Bulk state queries for N+1 optimization
-    - Configurable query timeouts
-    - Optional state transition notification publishing
+    - Configurable query timeouts, optional state transition notification publishing
 
 Notification Publishing:
     When configured with a notification_publisher and notification_config,
@@ -80,6 +79,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 from omnibase_infra.runtime.mixins import MixinProjectorSqlOperations
 from omnibase_infra.runtime.mixins.mixin_projector_notification_publishing import (
@@ -229,7 +229,7 @@ class ProjectorShell(MixinProjectorNotificationPublishing, MixinProjectorSqlOper
     """
 
     # Default query timeout in seconds (30s is reasonable for projections)
-    DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
+    DEFAULT_QUERY_TIMEOUT_SECONDS: float = TIMEOUTS.database_query_seconds
 
     def __init__(
         self,

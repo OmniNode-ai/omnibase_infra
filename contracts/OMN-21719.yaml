@@ -65,3 +65,11 @@ dod_evidence:
         check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.runtime_timeouts import load_runtime_timeouts; load_runtime_timeouts()'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn21719-deploy-hosted-shipped-file
+    description: Hosted CI loads the shipped runtime timeouts YAML and verifies the capability probe binds its declared TTL; a missing file, invalid value or disconnected binding fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/integration/runtime_timeouts/test_runtime_timeouts_call_sites.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

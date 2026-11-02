@@ -283,6 +283,7 @@ def test_the_rolling_recreate_keeps_the_token_out_of_argv(
         _runner_cache_key_for_service() {{ echo deadbeefcafe0000; }}
         _runner_cache_ready() {{ return 0; }}
         wait_for_runner_online() {{ return 0; }}
+        wait_for_no_dead_containers() {{ return 0; }}
         DRY_RUN=false
         RUNNER_HOST=fake-host
         RUNNER_HOST_DIR="{harness["host_dir"]}"

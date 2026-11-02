@@ -44,7 +44,6 @@ Example:
     ... )
     >>>
     >>> container = ModelONEXContainer()
-    >>> node = RegistryInfraLedgerProjection.create_node(container)
     >>> # Handler can be used directly for unit testing
     >>> handler = HandlerLedgerProjection(container)
 """
