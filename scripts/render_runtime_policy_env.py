@@ -21,6 +21,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from omnibase_infra.models.contracts.model_dev_broker_memory_policy import (
     ModelDevBrokerMemoryPolicy,
 )
+from omnibase_infra.runtime.models import ModelSecretNamespaceRule
 from omnibase_infra.runtime.models.model_runtime_policy_contract import (
     ModelRuntimePolicyContract,
     RuntimeProfileName,
@@ -29,9 +30,6 @@ from omnibase_infra.runtime.models.model_runtime_process_policy import (
     RuntimeProcessName,
 )
 from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
-from omnibase_infra.runtime.models.model_secret_namespace_rule import (
-    ModelSecretNamespaceRule,
-)
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
@@ -188,6 +186,8 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
                 profile.secret_resolver_config_path
             )
             env[f"{prefix}_SECRET_RESOLVER_CONFIG_JSON"] = secret_resolver_config_json
+            if process.boot is not None:
+                env.update(process.boot.render_env(prefix))
             if process.folded_profiles:
                 # OMN-17427: written only when declared, so a lane that folds
                 # nothing renders exactly what it rendered before.
