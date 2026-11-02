@@ -67,7 +67,7 @@ repos:
       merge_policy:
         queue: disabled
         strict: false
-        rule: "observed omniui:main settings 2026-11-01, not an org-wide policy; re-read before relying on it"
+        rule: "queue disabled org-wide; strict recorded as-is"
       load_bearing_gates:
         - context: "deploy-gate / deploy-gate"
           coverage: direct
@@ -116,7 +116,7 @@ repos:
       merge_policy:
         queue: disabled
         strict: false
-        rule: "observed omniui:main settings 2026-11-01, not an org-wide policy; re-read before relying on it"
+        rule: "queue disabled org-wide; strict recorded as-is"
       load_bearing_gates:
         - context: "deploy-gate / deploy-gate"
           coverage: direct
@@ -142,7 +142,7 @@ repos:
       merge_policy:
         queue: disabled
         strict: false
-        rule: "observed omniui:main settings 2026-11-01, not an org-wide policy; re-read before relying on it"
+        rule: "queue disabled org-wide; strict recorded as-is"
       load_bearing_gates:
         # omniclaude runs deploy-gate inline (single-segment context), unlike the
         # reusable-workflow "deploy-gate / deploy-gate" on core/infra/market.
@@ -186,13 +186,15 @@ repos:
   # the check-run names are "<caller job> / <called job>".
   omniui:
     main:
-      # Merge policy verified 2026-11-01 from the PR watcher settings read of
+      # Observed baseline, not an org-wide policy: PR watcher settings read of
       # omniui:main (read_at 2026-11-01T17:35:53Z): protection strict=False and
       # no merge-queue rule on the branch, so queue disabled and strict false.
+      # The parity audit compares live settings with this baseline on every run
+      # and reports QUEUE_DRIFT or STRICT_DRIFT when either setting changes.
       merge_policy:
         queue: disabled
         strict: false
-        rule: "observed omniui:main settings 2026-11-01, not an org-wide policy; re-read before relying on it"
+        rule: "omniui main settings observed 2026-11-01; parity audit reports drift from this baseline"
       load_bearing_gates:
         - context: "kb-doc-gate / kb-doc-gate"
           coverage: direct

@@ -14,6 +14,8 @@ requirements:
         statement: "AC1: the manifest lists kb-doc-gate / kb-doc-gate and public-repo-hygiene / public-repo-hygiene under omniui main -- falsifier: at the PR head, loading scripts/enforcement_parity_manifest.yaml and reading repos.omniui.main.load_bearing_gates yields anything other than exactly those two contexts, each with coverage direct"
       - id: AC2
         statement: "AC2: the parity library tests pass with the new entry -- falsifier: uv run pytest tests/ci/test_required_context_parity.py -q fails"
+      - id: AC3
+        statement: "AC3: the shipped OmniUI merge-policy baseline produces no finding for unchanged settings and reports both QUEUE_DRIFT and STRICT_DRIFT when the settings change -- falsifier: the hosted-runner parity probe fails either assertion"
 evidence_requirements:
   - kind: tests
     description: "The parity library tests run over the changed manifest."
@@ -25,6 +27,7 @@ dod_evidence:
     binds_ac: [AC1]
     checks:
       - check_type: command
+        cwd: ${OMNI_HOME}/omnibase_infra
         check_value: 'python3 -c "import yaml; m=yaml.safe_load(open(\"scripts/enforcement_parity_manifest.yaml\")); g=m[\"repos\"][\"omniui\"][\"main\"][\"load_bearing_gates\"]; assert [(x[\"context\"],x[\"coverage\"]) for x in g]==[(\"kb-doc-gate / kb-doc-gate\",\"direct\"),(\"public-repo-hygiene / public-repo-hygiene\",\"direct\")], g"'
   - id: dod-002
     description: "The parity library tests pass over the changed manifest."
@@ -32,4 +35,25 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: command
+        cwd: ${OMNI_HOME}/omnibase_infra
         check_value: 'uv run pytest tests/ci/test_required_context_parity.py -q -p no:cacheprovider'
+  - id: dod-003
+    description: "Hosted-runner probe evaluates the shipped OmniUI merge-policy baseline with matching and changed settings, so missing policy or suppressed drift fails. The manifest is report-only and changes no deployed service."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        cwd: ${OMNI_HOME}/omnibase_infra
+        check_value: |-
+          uv run python - <<'PYPROBE'
+          import runpy
+          from pathlib import Path
+          import yaml
+          manifest = yaml.safe_load(Path("scripts/enforcement_parity_manifest.yaml").read_text())
+          policy = manifest["repos"]["omniui"]["main"]["merge_policy"]
+          assert policy["queue"] == "disabled" and policy["strict"] is False, policy
+          evaluate = runpy.run_path("scripts/audit_required_context_parity_lib.py")["evaluate_merge_policy_parity"]
+          assert evaluate("omniui", "main", policy, False, False) == []
+          findings = evaluate("omniui", "main", policy, True, True)
+          assert {item["class"] for item in findings} == {"QUEUE_DRIFT", "STRICT_DRIFT"}, findings
+          PYPROBE
