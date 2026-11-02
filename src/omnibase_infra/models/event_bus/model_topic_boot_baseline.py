@@ -29,6 +29,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _READ_AT_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+_COMMIT_SHA_PATTERN = r"^[0-9a-f]{40}$"
 
 
 class ModelTopicBootBaseline(BaseModel):
@@ -42,7 +43,7 @@ class ModelTopicBootBaseline(BaseModel):
     read_at: str = Field(pattern=_READ_AT_PATTERN)
     source: str = Field(min_length=1)
     repo_specs: int = Field(ge=0)
-    repo_specs_measured_at: str = Field(min_length=1)
+    repo_specs_measured_at: str = Field(pattern=_COMMIT_SHA_PATTERN)
 
     @model_validator(mode="after")
     def _repo_list_is_part_of_the_boot_list(self) -> ModelTopicBootBaseline:
@@ -57,16 +58,29 @@ class ModelTopicBootBaseline(BaseModel):
     @classmethod
     def from_yaml_file(cls, path: Path, *, lane: str) -> ModelTopicBootBaseline:
         """Load the record for ``lane`` from a baseline data file."""
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        lanes = document.get("lanes") if isinstance(document, dict) else None
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(
+                f"{path} cannot be read as a topic baseline: {type(exc).__name__}"
+            ) from exc
+        if not isinstance(document, dict):
+            raise ValueError(f"{path} is not a mapping")
+        schema_version = document.get("schema_version")
+        if not isinstance(schema_version, str) or not schema_version:
+            raise ValueError(f"{path} declares no string schema_version")
+        lanes = document.get("lanes")
         if not isinstance(lanes, dict) or lane not in lanes:
             raise ValueError(f"{path} declares no topic baseline for lane {lane!r}")
+        entry = lanes[lane]
+        if not isinstance(entry, dict):
+            raise ValueError(f"{path} lane {lane!r} is not a mapping")
+        if "lane" in entry or "schema_version" in entry:
+            raise ValueError(
+                f"{path} lane {lane!r} sets a key the file level already owns"
+            )
         return cls.model_validate(
-            {
-                "schema_version": str(document.get("schema_version", "")),
-                "lane": lane,
-                **lanes[lane],
-            }
+            {"schema_version": schema_version, "lane": lane, **entry}
         )
 
     def repo_specs_over(self, spec_count: int) -> int:

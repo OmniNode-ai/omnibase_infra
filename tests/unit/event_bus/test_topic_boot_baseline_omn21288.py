@@ -92,23 +92,22 @@ def test_boot_list_is_within_the_recorded_baseline(
     )
 
 
-def test_planted_extra_spec_at_boot_fails_the_check(
-    tmp_path: Path, boot_spec_count: int
+def test_committed_baseline_equals_the_boot_list(
+    baseline: ModelTopicBootBaseline, boot_spec_count: int
 ) -> None:
-    """AC-T29-2: one extra spec on the boot path puts the list over the record.
+    """The committed figure is exact, so one planted spec is always over it."""
+    assert baseline.repo_specs == boot_spec_count
 
-    The record is pinned to the measured boot count in a temporary data file, so
-    the verdict does not depend on the committed figure matching the boot exactly
-    (that equality is held by the integration test).
-    """
-    at_count = ModelTopicBootBaseline.from_yaml_file(
-        _baseline_file_with(tmp_path, boot_spec_count), lane="dev"
-    )
+
+def test_planted_extra_spec_at_boot_fails_the_committed_baseline(
+    baseline: ModelTopicBootBaseline, boot_spec_count: int
+) -> None:
+    """AC-T29-2: one extra spec on the boot path exceeds the committed record."""
     planted_count = _boot_spec_count_with_planted_spec()
 
     assert planted_count == boot_spec_count + 1
-    assert at_count.repo_specs_over(boot_spec_count) == 0
-    assert at_count.repo_specs_over(planted_count) == 1
+    assert baseline.repo_specs_over(boot_spec_count) == 0
+    assert baseline.repo_specs_over(planted_count) == 1
 
 
 def test_changing_the_declared_value_changes_the_verdict_without_a_code_edit(
@@ -159,3 +158,33 @@ def test_repo_list_larger_than_the_image_list_is_refused(tmp_path: Path) -> None
 def test_undeclared_lane_is_refused() -> None:
     with pytest.raises(ValueError, match="no topic baseline for lane"):
         ModelTopicBootBaseline.from_yaml_file(BASELINE_FILE, lane="nonexistent")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "schema_version: '1'\nlanes:\n  dev: 5\n",
+        "schema_version:\nlanes: {}\n",
+        "- a\n- b\n",
+        "a: [unclosed\n",
+    ],
+)
+def test_malformed_documents_raise_value_error(tmp_path: Path, text: str) -> None:
+    path = tmp_path / "boot_topic_specs.yaml"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError):
+        ModelTopicBootBaseline.from_yaml_file(path, lane="dev")
+
+
+def test_missing_file_raises_value_error(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        ModelTopicBootBaseline.from_yaml_file(tmp_path / "absent.yaml", lane="dev")
+
+
+def test_measured_at_must_be_a_commit_sha(tmp_path: Path) -> None:
+    document = yaml.safe_load(BASELINE_FILE.read_text(encoding="utf-8"))
+    document["lanes"]["dev"]["repo_specs_measured_at"] = "yesterday"
+    path = tmp_path / "boot_topic_specs.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(ValidationError):
+        ModelTopicBootBaseline.from_yaml_file(path, lane="dev")
