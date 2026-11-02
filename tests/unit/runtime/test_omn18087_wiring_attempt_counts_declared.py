@@ -45,6 +45,6 @@ def test_reconciliation_loop_defaults_to_the_declared_count() -> None:
 
 def test_handler_wiring_binds_the_declared_counts() -> None:
     assert (
-        handler_wiring._BOUNDARY_DLQ_MAX_ATTEMPTS == TIMEOUTS.boundary_dlq_max_attempts
+        TIMEOUTS.boundary_dlq_max_attempts == handler_wiring._BOUNDARY_DLQ_MAX_ATTEMPTS
     )
     assert not hasattr(handler_wiring, "DEFAULT_NOT_READY_RETRY_MAX_ATTEMPTS")
