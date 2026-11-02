@@ -43,7 +43,7 @@ dod_evidence:
     binds_ac: [AC5]
     checks:
       - check_type: command
-        check_value: "env FACTORY_FLOOR_BIND_ADDR=192.0.2.1 FACTORY_FLOOR_PORT=8088 FACTORY_FLOOR_SERVE_DIR=/srv/example-site docker compose -f docker/docker-compose.factory-floor-web.yml config --format json | jq -e '.services[\"factory-floor-web\"].ports | length == 1 and .[0].host_ip == \"192.0.2.1\" and (.[0].published | tostring) == \"8088\" and .[0].target == 8080'"
+        check_value: "env FACTORY_FLOOR_BIND_ADDR=192.0.2.1 FACTORY_FLOOR_PORT=8088 FACTORY_FLOOR_SERVE_DIR=/srv/example-site FACTORY_FLOOR_ACCESS_DIR=/srv/example-access docker compose -f docker/docker-compose.factory-floor-web.yml config --format json | jq -e '.services[\"factory-floor-web\"].ports | length == 1 and .[0].host_ip == \"192.0.2.1\" and (.[0].published | tostring) == \"8088\" and .[0].target == 8080'"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-003-deploy-render
     description: "Hosted deploy probe: render the actual Compose deployment and assert the one-address port and exact read-only nginx file mount, then check the browser policy. Compose unavailability is a failure, never a skip."

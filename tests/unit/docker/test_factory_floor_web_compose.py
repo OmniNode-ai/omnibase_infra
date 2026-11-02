@@ -29,12 +29,25 @@ REQUIRED = (
     "FACTORY_FLOOR_BIND_ADDR",
     "FACTORY_FLOOR_PORT",
     "FACTORY_FLOOR_SERVE_DIR",
+    "FACTORY_FLOOR_ACCESS_DIR",
 )
 RENDER_ENV = {
     "FACTORY_FLOOR_BIND_ADDR": "192.0.2.1",
     "FACTORY_FLOOR_PORT": "8088",
     "FACTORY_FLOOR_SERVE_DIR": "/srv/example-site",
+    "FACTORY_FLOOR_ACCESS_DIR": "/srv/example-access",
 }
+GATE_MARKER = "operator-only report gate"
+GATED_PATHS = (
+    "/reports/decision-quality/",
+    "/reports/decision-quality",
+    "/reports/decision-quality/index.html",
+    "/reports/decision-quality/decision-quality.md",
+    "/reports/decision-quality/manifest.json",
+    "//reports//decision-quality/",
+    "/reports/x/../decision-quality/",
+    "/reports/%64ecision-quality/decision-quality.md",
+)
 
 
 def _service() -> dict[str, Any]:
@@ -160,6 +173,10 @@ def test_serve_directory_is_mounted_read_only_and_the_container_is_locked_down()
     serve = [v for v in volumes if "FACTORY_FLOOR_SERVE_DIR" in v]
     assert len(serve) == 1
     assert serve[0].endswith(":/srv/site:ro")
+    access = [v for v in volumes if "FACTORY_FLOOR_ACCESS_DIR" in v]
+    assert len(access) == 1
+    assert access[0].endswith(":/etc/nginx/access:ro")
+    assert "FACTORY_FLOOR_SERVE_DIR" not in access[0]
     assert all(
         v.endswith(":ro") if isinstance(v, str) else v["read_only"] is True
         for v in volumes
@@ -223,13 +240,14 @@ def test_nginx_locations_declare_no_add_header_except_the_decision_map() -> None
     assert [loc[0][1:] for loc in locations] == [
         ["~", "/\\."],
         ["=", "/healthz"],
+        ["~", "^/reports/decision-quality(?:/|$)"],
         ["/"],
         ["/reports/decision-map/"],
     ]
     for location in locations[:3]:
         names = [s[0][0] for s in _walk(_body(location))]
         assert "add_header" not in names, location[0]
-    dotfiles, health, _, decision_map = locations
+    dotfiles, health, _, _, decision_map = locations
     assert [s[0] for s in _body(dotfiles)] == [["return", "404"]]
     health_names = [s[0][0] for s in _body(health)]
     assert ["return", "200", '"ok\\n"'] in [s[0] for s in _body(health)]
@@ -333,6 +351,27 @@ def test_compose_renders_one_published_port_on_the_given_address() -> None:
     assert len(serve) == 1
     assert serve[0]["read_only"] is True
     assert serve[0]["source"] == RENDER_ENV["FACTORY_FLOOR_SERVE_DIR"]
+    access = [v for v in volumes if v["target"] == "/etc/nginx/access"]
+    assert len(access) == 1
+    assert access[0]["read_only"] is True
+    assert access[0]["source"] == RENDER_ENV["FACTORY_FLOOR_ACCESS_DIR"]
+
+
+def test_operator_gate_denies_after_the_generated_include_and_reads_only_the_access_directory() -> (
+    None
+):
+    text = NGINX.read_text(encoding="utf-8")
+    assert GATE_MARKER in text
+    (gate,) = [
+        s
+        for s in _children(_server(), "location")
+        if s[0][1:] == ["~", "^/reports/decision-quality(?:/|$)"]
+    ]
+    steps = [s[0] for s in _body(gate)]
+    assert steps[0] == ["include", "/etc/nginx/access/*.conf"]
+    # first match wins: the allow lines of the include come before this deny, so the deny refuses the rest
+    assert steps[1] == ["deny", "all"]
+    assert not [s for s in steps if s[0] == "allow"]
 
 
 def _fetch(
@@ -362,20 +401,40 @@ def _container_logs(name: str) -> str:
 
 
 @pytest.fixture(scope="module")
-def nginx_address(
+def nginx_address(nginx_container: tuple[str, str, int, Path]) -> tuple[str, int]:
+    return nginx_container[1], nginx_container[2]
+
+
+@pytest.fixture(scope="module")
+def nginx_container(
     tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[tuple[str, int]]:
-    """The pinned image running the committed nginx.conf with the compose file's lock-down."""
+) -> Iterator[tuple[str, str, int, Path]]:
+    """The pinned image running the committed nginx.conf with the compose file's lock-down.
+
+    Yields the container name, the published host and port, and the host directory mounted at /etc/nginx/access
+    (empty to start: no include, so the operator-only path is closed to everyone).
+    """
     site = tmp_path_factory.mktemp("site")
     site.chmod(0o755)
+    access = tmp_path_factory.mktemp("access")
+    access.chmod(0o755)
     files = {
         "index.html": "<!doctype html><title>floor</title>" + "<p>x</p>" * 400,
         "factory-floor.json": json.dumps({"generated_at": "t", "pad": "y" * 3000}),
         ".hidden": "secret",
+        "reports/index.html": "<!doctype html><title>reports</title>",
+        "reports/decision-quality/index.html": "<!doctype html><title>private</title>",
+        "reports/decision-quality/decision-quality.md": "# private report\n",
+        "reports/decision-quality/manifest.json": json.dumps({"reports": []}),
     }
     for file_name, text in files.items():
-        (site / file_name).write_text(text, encoding="utf-8")
-        (site / file_name).chmod(0o644)
+        target = site / file_name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        target.chmod(0o644)
+    for directory in site.rglob("*"):
+        if directory.is_dir():
+            directory.chmod(0o755)
     service = _service()
     name = f"factory-floor-web-test-{uuid.uuid4().hex[:12]}"
     started = subprocess.run(
@@ -400,6 +459,8 @@ def nginx_address(
             f"{site}:/srv/site:ro",
             "-v",
             f"{NGINX}:/etc/nginx/nginx.conf:ro",
+            "-v",
+            f"{access}:/etc/nginx/access:ro",
             str(service["image"]),
         ],
         capture_output=True,
@@ -424,9 +485,93 @@ def nginx_address(
                 pass
             assert time.monotonic() < deadline, _container_logs(name)
             time.sleep(0.3)
-        yield host, int(port)
+        yield name, host, int(port), access
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+
+
+def _set_include(name: str, access: Path, text: str | None) -> None:
+    """Write (or remove) the generated include the way the publish does, then reload the server."""
+    include = access / "operator-only.conf"
+    if text is None:
+        include.unlink(missing_ok=True)
+    else:
+        include.write_text(text, encoding="utf-8")
+        include.chmod(0o644)
+    done = subprocess.run(
+        ["docker", "exec", name, "nginx", "-s", "reload"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    time.sleep(1.0)
+
+
+def _source_address_seen_by_nginx(name: str, host: str, port: int) -> str:
+    """The source address nginx logs for a request from this test: what an allow line must name to admit it."""
+    _fetch(host, port, "GET", "/healthz")
+    lines = subprocess.run(
+        ["docker", "logs", name], capture_output=True, text=True, check=False
+    ).stdout.splitlines()
+    return lines[-1].split()[0]
+
+
+@pytest.mark.parametrize("path", GATED_PATHS)
+def test_running_nginx_gate_is_closed_to_everyone_while_no_include_exists(
+    nginx_container: tuple[str, str, int, Path], path: str
+) -> None:
+    name, host, port, access = nginx_container
+    _set_include(name, access, None)
+    code, headers, body = _fetch(host, port, "GET", path)
+    assert code == 403
+    assert b"private" not in body
+    assert headers["cache-control"] == "no-store"
+    assert _fetch(host, port, "GET", "/")[0] == 200
+    assert _fetch(host, port, "GET", "/reports/index.html")[0] == 200
+
+
+@pytest.mark.parametrize("path", GATED_PATHS)
+def test_running_nginx_gate_refuses_an_address_the_include_does_not_name(
+    nginx_container: tuple[str, str, int, Path], path: str
+) -> None:
+    name, host, port, access = nginx_container
+    _set_include(name, access, "allow 203.0.113.9;\nallow 2001:db8::9;\n")
+    try:
+        assert _fetch(host, port, "GET", path)[0] == 403
+        assert _fetch(host, port, "HEAD", path)[0] == 403
+    finally:
+        _set_include(name, access, None)
+
+
+def test_running_nginx_gate_admits_exactly_the_address_the_include_names_and_only_for_get_and_head(
+    nginx_container: tuple[str, str, int, Path],
+) -> None:
+    name, host, port, access = nginx_container
+    source = _source_address_seen_by_nginx(name, host, port)
+    _set_include(name, access, f"allow {source};\n")
+    try:
+        for path in GATED_PATHS:
+            code, _headers, body = _fetch(host, port, "GET", path)
+            # a real file or a directory index for each path; none is a refusal
+            assert code in (200, 404), (path, code)
+            assert code != 403, path
+        code, headers, body = _fetch(host, port, "GET", "/reports/decision-quality/")
+        assert code == 200
+        assert b"private" in body
+        assert headers["cache-control"] == "no-store"
+        assert _fetch(host, port, "POST", "/reports/decision-quality/")[0] == 403
+        config = subprocess.run(
+            ["docker", "exec", name, "nginx", "-T"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        assert GATE_MARKER in config
+        assert f"allow {source};" in config
+    finally:
+        _set_include(name, access, None)
+    assert _fetch(host, port, "GET", "/reports/decision-quality/")[0] == 403
 
 
 @pytest.mark.parametrize(

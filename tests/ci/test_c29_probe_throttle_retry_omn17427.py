@@ -16,6 +16,7 @@ import argparse
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -122,7 +123,9 @@ class _Customer:
 @pytest.fixture
 def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     recorded: list[float] = []
-    monkeypatch.setattr(probe.time, "sleep", recorded.append)
+    # probe.time is the process-global time module: swap the probe's own
+    # reference, never time.sleep itself, so no other thread is recorded.
+    monkeypatch.setattr(probe, "time", SimpleNamespace(sleep=recorded.append))
     monkeypatch.setattr(probe.shutil, "which", lambda _: "/usr/bin/strace")
     monkeypatch.setenv("C29_TEST_KEY", "sk-test-not-a-real-key")
     return recorded
@@ -157,6 +160,17 @@ def test_a_throttled_keyed_run_is_repeated_and_the_success_is_graded(
     assert obs["run_dir"].endswith("run-1")
     graded = json.loads(obs["run_files"]["receipt.json"])
     assert graded["status"] == "success"
+
+
+def test_a_sleep_outside_the_probe_is_not_recorded(sleeps: list[float]) -> None:
+    # The fixture must capture the probe's backoff only. Patching the global
+    # time.sleep let any other thread in the xdist worker (an exponential
+    # 1ms retry loop) append to the record and flip the equality asserts.
+    import time
+
+    time.sleep(0.001)
+
+    assert sleeps == []
 
 
 def test_a_run_that_is_not_throttled_is_not_repeated(

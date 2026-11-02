@@ -243,7 +243,7 @@ def test_generated_runtime_effects_requires_deploy_agent_hmac_secret() -> None:
 
 _CLAUDE_CREDS_VOLUME = (
     "${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-"
-    "/var/lib/omninode/optional-bind-source-absent}:/home/omniinfra/.claude:ro"
+    "/var/lib/omninode/optional-bind-source-absent}:/home/${RUNTIME_USER_NAME:-omniinfra}/.claude:ro"
 )
 
 
@@ -265,10 +265,13 @@ def test_runtime_effects_defaults_unset_optional_claude_credentials_to_a_directo
 
     volumes = compose["services"]["runtime-effects"]["volumes"]
     assert _CLAUDE_CREDS_VOLUME in volumes
-    assert not any("/dev/null:/home/omniinfra/.claude" in volume for volume in volumes)
+    assert not any(
+        "/dev/null:/home/${RUNTIME_USER_NAME:-omniinfra}/.claude" in volume
+        for volume in volumes
+    )
     assert (
         "${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:"
-        "/home/omniinfra/.codex/auth.json:ro" in volumes
+        "/home/${RUNTIME_USER_NAME:-omniinfra}/.codex/auth.json:ro" in volumes
     )
 
 
