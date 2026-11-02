@@ -220,3 +220,59 @@ def test_a_same_named_lock_holder_in_another_database_is_not_a_second_holder(
     assert "Sentinel set. Migration gate will report HEALTHY." in out.read_text(
         encoding="utf-8"
     )
+
+
+def test_a_foreign_advisory_lock_with_a_wide_key_does_not_fail_the_run(
+    pg16: Pg16Cluster, tmp_path: Path, reaper: list[subprocess.Popen[Any]]
+) -> None:
+    """Measured on slot 1 (OMN-21928): the probe raised ``bigint out of range``.
+
+    ``classid * 4294967296`` was evaluated for every advisory lock on the server,
+    and another service's lock with a key whose high word is 2**31 or more (any
+    negative bigint key) overflows it, so the probe read "not held" while the
+    lock was held. ``pg_advisory_lock(-1)`` is such a key.
+    """
+    databases = ("omn21928_wide_service", "omn21928_wide_app", "omn21928_wide_cloud")
+    foreign_database = "omn21928_wide_foreign"
+    pg16.create_database(foreign_database)
+    foreign = subprocess.Popen(
+        [
+            pg16.psql,
+            "-X",
+            "-q",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            str(pg16.port),
+            "-U",
+            "postgres",
+            "-d",
+            foreign_database,
+            "-c",
+            "SELECT pg_advisory_lock(-1), pg_sleep(120)",
+        ],
+        env={**os.environ, "PGPASSWORD": ""},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    reaper.append(foreign)
+    deadline = time.monotonic() + 15
+    while True:
+        wide = _scalar(
+            pg16,
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+            "AND classid >= 2147483648;",
+        )
+        if wide == "1" or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert wide == "1", "positive control: the server holds one wide-key lock"
+
+    out = tmp_path / "runner.out"
+    proc = _start_runner(pg16, _tree(tmp_path), databases, out)
+    reaper.append(proc)
+
+    assert proc.wait(timeout=90) == 0, out.read_text(encoding="utf-8")
+    assert "Sentinel set. Migration gate will report HEALTHY." in out.read_text(
+        encoding="utf-8"
+    )
