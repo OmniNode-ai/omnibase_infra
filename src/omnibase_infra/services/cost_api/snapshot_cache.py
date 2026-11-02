@@ -1,19 +1,20 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Process-local cache for latest cost projection snapshots; topics from cost_api_topics.yaml."""
+"""Process-local cache for latest cost projection snapshots.
+
+Entries are keyed by topic and window; the topics come from the registry API node
+contract (``config.cost_snapshot_topics``) and are injected by the caller. That
+contract section is the only declaration of these topics; a writer stores a snapshot
+under the same ``ModelCostSnapshotTopics`` values the routes read with.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
 
-from omnibase_infra.models.cost_api import load_cost_api_topics
-
 SnapshotPayload = Mapping[str, object]
 
-TOPIC_COST_SUMMARY = load_cost_api_topics().summary
-TOPIC_COST_BY_REPO = load_cost_api_topics().by_repo
-TOPIC_COST_TOKEN_USAGE = load_cost_api_topics().token_usage
 
 _LATEST: dict[tuple[str, str], dict[str, object]] = {}
 
@@ -37,9 +38,6 @@ def clear_latest_snapshots() -> None:
 
 
 __all__ = [
-    "TOPIC_COST_BY_REPO",
-    "TOPIC_COST_SUMMARY",
-    "TOPIC_COST_TOKEN_USAGE",
     "clear_latest_snapshots",
     "get_latest_snapshot",
     "store_latest_snapshot",
