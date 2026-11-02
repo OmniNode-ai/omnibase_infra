@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-22183
+title: "The drift guard accepts a canonical omnimarket clone detached at the floor marker's commit"
+summary: >
+  Onboarding leaves every clone on a detached HEAD at its anchor and stamps the commit it proved into .onex-workspace-floor.json. The drift guard behind onex delegate refused that state as a DETACHED HEAD. It now accepts a canonical omnimarket clone detached at the commit the floor marker names and still refuses a clone detached anywhere else, or with no floor commit, with the converge-canonical-clone.sh repair. The guide half is the omniclaude pull request for the same ticket.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22183-detached-at-floor
+    statement: A canonical clone detached at the floor marker's commit is accepted; detached elsewhere is refused with the repair command.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a canonical clone detached at the commit the floor marker names is accepted by the guard -- falsifier: uv run pytest tests/unit/cli/test_omnimarket_drift_guard.py -q -k walk_2026_11_02"
+      - id: AC2
+        statement: "AC2: a canonical clone detached at any other commit is still refused with the repair command -- falsifier: uv run pytest tests/unit/cli/test_omnimarket_drift_guard.py -q -k walk_2026_11_02"
+      - id: AC4
+        statement: "AC4: a regression test built from the recorded refusal (fixture under tests/fixtures/onboarding_walk_2026_11_02/) fails on the broken guard and passes on the fix -- falsifier: uv run pytest tests/unit/cli -q -k walk_2026_11_02"
+evidence_requirements:
+  - kind: tests
+    description: "The drift guard tests pass"
+    command: "uv run pytest tests/unit/cli/test_omnimarket_drift_guard.py tests/unit/cli/test_omnimarket_drift_guard_ancestor_lag_omn18753.py tests/unit/cli/test_omnimarket_drift_guard_off_registry_omn17255.py tests/unit/cli/test_omnimarket_drift_guard_inherited_git_env_omn19267.py -q --no-cov -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22183-ac1-ac2-guard
+    binds_ac: [AC1, AC2]
+    description: The walk_2026_11_02 guard tests cover detached at the floor commit (accepted) and detached elsewhere or with no floor commit (refused with the repair command).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/cli/test_omnimarket_drift_guard.py -q --no-cov -k walk_2026_11_02 -p no:randomly"
+  - id: dod-omn22183-ac4-regression-test
+    binds_ac: [AC4]
+    description: The recorded-refusal fixture test runs green on the fix (the accepted case fails on the old guard with the DETACHED HEAD refusal).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/cli -q --no-cov -k walk_2026_11_02 -p no:randomly"

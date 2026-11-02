@@ -144,10 +144,9 @@ from omnibase_infra.cli.enum_off_registry_reason import EnumOffRegistryReason
 from omnibase_infra.cli.enum_off_registry_verdict import EnumOffRegistryVerdict
 from omnibase_infra.cli.model_off_registry_check import ModelOffRegistryCheck
 from omnibase_infra.cli.model_omnimarket_lag_stamp import ModelOmnimarketLagStamp
-from omnibase_infra.cli.protocol_drift_guard_verdict import (
-    ProtocolDriftGuardVerdict,
-)
+from omnibase_infra.cli.protocol_drift_guard_verdict import ProtocolDriftGuardVerdict
 from omnibase_infra.cli.workspace_reconcile import ReconcileFn
+from omnibase_infra.models.delegation.model_floor_marker import ModelFloorMarker
 from omnibase_infra.models.delegation.model_omnimarket_registry_stamp import (
     ModelOmnimarketRegistryStamp,
 )
@@ -923,31 +922,23 @@ def check_omnimarket_drift(
         return _run_off_registry_check()
 
     # OMN-17313: a detached checkout cannot prove installed provenance by
-    # itself. Judge it BEFORE the commit comparison below -- because that
-    # comparison PASSES on exactly this fault. The venv is pinned to the local
-    # clone HEAD by reconcile-workspace-venvs.sh (OMN-16366), so when the clone
-    # detaches the venv faithfully reproduces the frozen commit and the two
-    # sides agree. Drift then reads as zero while both are arbitrarily stale
-    # relative to the upstream branch. Live case, 2026-08-31: the clone sat
-    # detached at a commit on an unmerged PR branch that existed on no remote
-    # for two days, this guard reported clean the whole time, and the routing
-    # authority resolved pre-fix content from that tree (OMN-6790 regression
-    # re-appearing on the client path).
-    #
-    # No `reconcile` is attempted on this branch. The bound reconciler installs
-    # packages into the venv; it cannot re-attach a git clone or make an
-    # unreadable clone trustworthy, so invoking it here would burn an install
-    # and then refuse anyway with a message about the wrong subsystem. The
-    # OMN-17427 first attempts proof against the fetched remote default. Only
-    # an unverifiable installed package reaches the historical refusal below.
+    # itself, and the commit comparison below PASSES on exactly this fault: the
+    # venv is pinned to the clone HEAD (OMN-16366), so both sides agree while
+    # both are stale (live case 2026-08-31, a clone detached on an unmerged PR
+    # commit for two days). No `reconcile` is attempted here: it installs
+    # packages and cannot re-attach a clone. OMN-17427 first tries proof against
+    # the fetched remote default; only an unverifiable package reaches the refusal.
     attachment = CanonicalCloneAttachment.ATTACHED
     omni_home_path = Path(omni_home) if omni_home else None
     if omni_home_path and (omni_home_path / "omnimarket" / ".git").exists():
         attachment = canonical_clone_attachment(omni_home=omni_home)
-    # OMN-17427: registry clones are mirrors, not mutable dispatch sources.
-    # Preserve the OMN-17313 refusal for unmerged or unverifiable installed
-    # code, but do not require re-attaching a mirror to execute a proven VCS
-    # package. The receipt names both code and reference, including any lag.
+    # OMN-22183: onboarding leaves every clone detached at its anchor and stamps
+    # the commit it proved into the floor marker. A clone whose HEAD is that
+    # commit is at its proven state; detached anywhere else still refuses below.
+    if ModelFloorMarker.names_commit(omni_home_path, canonical):
+        attachment = CanonicalCloneAttachment.ATTACHED
+    # OMN-17427: registry clones are mirrors; a proven VCS package runs without
+    # re-attaching one. The receipt names both code and reference, including lag.
     if attachment is CanonicalCloneAttachment.DETACHED and omni_home:
         registry_stamp = resolve_detached_registry_stamp(
             omni_home=omni_home, checkout_commit=canonical
@@ -989,36 +980,22 @@ def check_omnimarket_drift(
                 DRIFT_OVERRIDE_ENV,
             )
             return None
-        else:
-            raise OmnimarketDriftError(
-                f"{attachment_detail} To dispatch anyway despite the drift "
-                f"(results are NOT evidence), set {DRIFT_OVERRIDE_ENV}=1."
-            )
+        raise OmnimarketDriftError(
+            f"{attachment_detail} To dispatch anyway despite the drift "
+            f"(results are NOT evidence), set {DRIFT_OVERRIDE_ENV}=1."
+        )
 
     installed = installed_omnimarket_commit()
     if installed == canonical:
         return None
 
     # OMN-18814. A strict ANCESTOR of the clone head is a staleness fact, not a
-    # provenance failure: those bytes are merged, reviewed and reachable from
-    # the head, they are simply not the tip. Proceed and STAMP the lag, so the
-    # receipt says how far behind the run was instead of the run not happening.
-    #
-    # Placed after the exact-match return and BEFORE every refusal branch
-    # below, and reached only when a canonical clone resolved and is attached
-    # -- the off-registry branch (OMN-17255) and the detached-clone branch both
-    # return or raise above this point, so neither changes behaviour.
-    #
-    # `allow_drift` is deliberately NOT consulted here. That flag is the
-    # operator's manual, unbounded opt-out and it is untouched by this change;
-    # an ancestor lag proceeds on its own merits, so consulting the flag would
-    # make an automatic, bounded decision look like it needed the manual one.
-    #
-    # `reconcile` is deliberately NOT invoked either. It installs packages, and
-    # spending that latency mid-dispatch to close a lag that is already safe to
-    # proceed on would charge a human for a run that was going to succeed. The
-    # reconciler that DOES close the lag is the tick (OMN-18815), off the hot
-    # path. The refusal branches below still reconcile exactly as before.
+    # provenance failure: proceed and STAMP the lag in the receipt. Placed after
+    # the exact-match return and BEFORE every refusal branch, so the off-registry
+    # and detached-clone branches (which return or raise above) are unchanged.
+    # `allow_drift` is deliberately NOT consulted (a bounded automatic decision
+    # must not look like it needed the manual opt-out) and `reconcile` is NOT
+    # invoked (the tick, OMN-18815, closes the lag off the hot path).
     if installed is not None and omni_home:
         ancestor_lag = resolve_ancestor_lag(
             installed=installed,
