@@ -514,11 +514,21 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
     # node_projection_local_environment contract merges and the pin advances
     # past it; the expiry module names it.
-    _vendored_read_write(
-        "local_environment",
-        "node_projection_local_environment",
-        "0000_create_local_environment.sql",
-        schema="public",
+    # OMN-19991: the same infra-first window as local_environment; this repo
+    # vendors node_projection_local_alerts/0000-0002 ahead of the omnimarket node
+    # contract that declares the relation. 0001 grants tenant_projection_writer
+    # SELECT, INSERT, UPDATE. Retired when omnimarket's node_projection_local_alerts
+    # contract merges and the pin advances past it; the expiry module names it.
+    # OMN-19986: the same window for node_projection_local_identity/0000-0002,
+    # the API Keys page's local identity. 0001 grants tenant_projection_writer
+    # SELECT, INSERT, UPDATE. Retired when omnimarket's
+    # node_projection_local_identity contract merges and the pin advances past
+    # it; the expiry module names it.
+    *(
+        _vendored_read_write(
+            t, f"node_projection_{t}", f"0000_create_{t}.sql", schema="public"
+        )
+        for t in ("local_environment", "local_alerts", "local_identity")
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
