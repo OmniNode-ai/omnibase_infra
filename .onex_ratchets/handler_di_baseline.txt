@@ -5,7 +5,6 @@
 # what the file holds, and an entry the base revision lacks or holds lower fails.
 # No file that a canon-audit finding names is listed.
 # Do not add a line; do not raise a count.
-src/omnibase_infra/handlers/done_write_receipt_guard.py 1
 src/omnibase_infra/handlers/handler_broker_principal_apply.py 4
 src/omnibase_infra/handlers/handler_broker_principal_list.py 3
 src/omnibase_infra/handlers/handler_broker_principal_verify.py 5
@@ -14,8 +13,8 @@ src/omnibase_infra/handlers/handler_db.py 1
 src/omnibase_infra/handlers/handler_declared_state_apply.py 1
 src/omnibase_infra/handlers/handler_declared_state_reconcile.py 3
 src/omnibase_infra/handlers/handler_dev_boot_guard.py 3
-src/omnibase_infra/handlers/handler_dev_lane_branch_install.py 5
-src/omnibase_infra/handlers/handler_dev_lane_pin.py 3
+src/omnibase_infra/handlers/handler_dev_lane_branch_install.py 3
+src/omnibase_infra/handlers/handler_dev_lane_pin.py 1
 src/omnibase_infra/handlers/handler_filesystem.py 1
 src/omnibase_infra/handlers/handler_gmail_api.py 1
 src/omnibase_infra/handlers/handler_hotpatch_ledger_reconcile.py 3
