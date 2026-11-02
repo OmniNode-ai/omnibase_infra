@@ -2539,8 +2539,7 @@ def build_generated_tool_invoke_suffix(tool_name: str) -> str:
     """
     event = _to_kebab_event_name(tool_name)
     suffix = f"onex.cmd.{GENERATED_TOOL_PRODUCER}.{event}-invoke.v1"
-    result = validate_topic_suffix(suffix)
-    if not result.is_valid:
+    if not (result := validate_topic_suffix(suffix)).is_valid:
         raise OnexError(f"Invalid generated invoke suffix '{suffix}': {result.error}")
     return suffix
 
@@ -2559,8 +2558,7 @@ def build_generated_tool_result_suffix(tool_name: str) -> str:
     """
     event = _to_kebab_event_name(tool_name)
     suffix = f"onex.evt.{GENERATED_TOOL_PRODUCER}.{event}-result.v1"
-    result = validate_topic_suffix(suffix)
-    if not result.is_valid:
+    if not (result := validate_topic_suffix(suffix)).is_valid:
         raise OnexError(f"Invalid generated result suffix '{suffix}': {result.error}")
     return suffix
 
