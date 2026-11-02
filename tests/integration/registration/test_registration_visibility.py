@@ -46,6 +46,9 @@ pytestmark = pytest.mark.integration
 # One fixed reading for the injected clock and the event timestamp, so the
 # handler's time-dependent output is asserted against a known value.
 TEST_NOW = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
+# Distinct from TEST_NOW so a handler reading the event time instead of the
+# injected clock is detected.
+EVENT_TIMESTAMP = datetime(2025, 6, 15, 11, 0, 0, tzinfo=UTC)
 
 
 # =============================================================================
@@ -123,7 +126,7 @@ class TestRegistrationHandlerInterface:
             node_type=EnumNodeKind.EFFECT,
             node_version=ModelSemVer(major=1, minor=0, patch=0),
             correlation_id=correlation_id,
-            timestamp=TEST_NOW,
+            timestamp=EVENT_TIMESTAMP,
         )
 
         input_id = uuid4()
@@ -153,6 +156,7 @@ class TestRegistrationHandlerInterface:
         assert output.correlation_id == correlation_id
         # Verify the injected clock reading and input id reach the output
         assert output.timestamp == TEST_NOW
+        assert output.timestamp != EVENT_TIMESTAMP
         assert output.input_envelope_id == input_id
 
 
