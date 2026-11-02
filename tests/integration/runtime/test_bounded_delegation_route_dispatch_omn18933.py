@@ -32,8 +32,19 @@ from omnibase_infra.runtime.bounded_delegation_routes import (
     resolve_bounded_delegation_route,
 )
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
+from tests.helpers.cli_registry_stand_in import (
+    install_stand_in_registry,
+    wiring_authority,
+)
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _declared_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dispatch with no budget arguments resolves the class's declared budget (OMN-21604)."""
+    install_stand_in_registry(monkeypatch, wiring_authority())
+
 
 _EXTERNAL = "192.0.2.10:47092"
 _INTERNAL = "redpanda:9092"
@@ -104,7 +115,11 @@ async def _dispatch(
     monkeypatch.setattr(port_module, "resolve_bounded_delegation_route", _resolve)
     bus = EventBusKafka(
         config=ModelKafkaEventBusConfig(
-            bootstrap_servers=bootstrap_servers, environment=environment
+            bootstrap_servers=bootstrap_servers,
+            environment=environment,
+            # OMN-21604: the lanes' poll interval, whose dispatch deadline covers
+            # a class's ceiling plus margin; the 300 s library default does not.
+            max_poll_interval_ms=1_800_000,
         )
     )
     port = port_module.RuntimeDelegationDispatchPort(

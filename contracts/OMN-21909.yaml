@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21909
+title: "A retired deploy instance is declared unavailable in the routing table: its stack stopped, its data exported and its agent booted out"
+summary: The operator agreed to take the Docker stack off the Mac Studio. Its instance served no client, consumer group or route, so config/deploy_lane_routing.yaml keeps the row, which the compose overlay and its tests pin, with available false and a retirement note. The stop, the export and the launchd bootout are host actions recorded on the ticket.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21909-retired-instance-declared
+    statement: The routing table says an instance with no route and no default role runs nothing, and the host actions that retired it are recorded on the ticket.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the routing table declares the retired instance available false with a retirement note, and no route names it -- falsifier: uv run pytest over the routing table test file with -k for the unavailable and no-route tests"
+      - id: AC2
+        statement: "AC2: every database dump and the topic size record are on the lab host with a checksum file that matches the checksums taken at the source -- falsifier: sha256sum -c over the checksum file on the lab host, compared with the source stream hashes on the ticket"
+      - id: AC3
+        statement: "AC3: the deploy agent label is not loaded and its plist is kept outside LaunchAgents -- falsifier: launchctl print of the label exits non-zero and the kept plist path exists"
+      - id: AC4
+        statement: "AC4: no container of the compose project is running and its volumes still exist -- falsifier: with Docker up, docker ps for the compose project label lists none and docker volume ls lists its volumes"
+evidence_requirements:
+  - kind: tests
+    description: The routing table test file pins the declared state over the committed table.
+    command: uv run --frozen pytest tests/ci/test_dev_200_verify_targets_omn19507.py -q --no-cov -k "unavailable or no_route_names"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21909-ac1-table-declares-retired
+    description: An instance no route names and that is not the default declares available false, read over the committed table; this test fails against the table before this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_200_verify_targets_omn19507.py -q --no-cov -k "unavailable or no_route_names"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21909-host-actions-on-ticket
+    description: Host facts cannot be read from a hosted runner. This check shows only the committed table; the checksums, the launchd read and the stopped stack are read on the host at the time and recorded on the ticket as the evidence for these criteria.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_200_verify_targets_omn19507.py -q --no-cov -k "unavailable or no_route_names"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+      - AC3
+      - AC4

@@ -14,7 +14,6 @@ Available Exports:
     - ModelPatternCandidate: Input model for pattern candidates
     - ModelPlannedCheck: Individual check within a validation plan
     - ModelValidationPlan: Output model for validation plans
-    - RegistryInfraValidationOrchestrator: DI registry
 
 Tracking:
     - OMN-2147: Validation Skeleton Orchestrator + Executor
@@ -28,14 +27,10 @@ from omnibase_infra.nodes.node_validation_orchestrator.models import (
 from omnibase_infra.nodes.node_validation_orchestrator.node import (
     NodeValidationOrchestrator,
 )
-from omnibase_infra.nodes.node_validation_orchestrator.registry import (
-    RegistryInfraValidationOrchestrator,
-)
 
 __all__: list[str] = [
     "ModelPatternCandidate",
     "ModelPlannedCheck",
     "ModelValidationPlan",
     "NodeValidationOrchestrator",
-    "RegistryInfraValidationOrchestrator",
 ]
