@@ -24,6 +24,8 @@ node_version:
   minor: 0
   patch: 0
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 description: >
   Transitional HTTP bridge that exposes the contract.resolve compute node (NodeContractResolveCompute) as a synchronous FastAPI service. Allows the dashboard (Node.js/Express) to resolve overlaid contracts via POST /api/nodes/contract.resolve without a Kafka round-trip. Emits onex.contract.resolve.completed to Kafka fire-and-forget for observability. Identical contract, events, and registry entry to the production node — only the execution path (HTTP vs. Kafka) changes in the transition.
 
@@ -59,6 +61,16 @@ config:
   cors_allow_headers:
     - "*"
 # ---------------------------------------------------------------------------
+# HTTP mount (OMN-21288, one-runtime plan T16)
+# ---------------------------------------------------------------------------
+# The runtime serves the resolver's ASGI app on its own HTTP port under this
+# prefix, before consumer wiring completes. The factory takes no arguments.
+# The resolver's routes are POST /api/nodes/contract.resolve and, inside the
+# mount, GET /api/nodes/health.
+http_mount:
+  factory: "omnibase_infra.services.contract_resolver.main:create_mounted_app"
+  path_prefix: "/api/nodes"
+# ---------------------------------------------------------------------------
 # IO operations
 # ---------------------------------------------------------------------------
 io_operations:
@@ -87,7 +99,7 @@ io_operations:
 # Events (same as production contract.resolve node — OMN-2754)
 # ---------------------------------------------------------------------------
 produced_events:
-  - name: "onex.contract.resolve.completed"
+  - name: onex.contract.resolve.completed
     description: "Emitted fire-and-forget after each successful resolution. Carries resolved_hash and overlay_refs."
     model:
       name: "ModelContractResolveCompletedEvent"

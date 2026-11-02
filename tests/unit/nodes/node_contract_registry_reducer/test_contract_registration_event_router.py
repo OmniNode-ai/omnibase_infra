@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -230,6 +231,125 @@ def create_event_message(
 # =============================================================================
 # Test Classes
 # =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_announced_reducer_failure_does_not_abort_remaining_contracts(
+    router: ContractRegistrationEventRouter,
+    mock_reducer: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_state = router.state
+    payload = MagicMock()
+    payload.intent_type = "postgres.upsert_contract"
+    payload.correlation_id = uuid4()
+    intent = ModelIntent(
+        intent_type="extension",
+        target="postgres://contracts/successful-node",
+        payload=payload,
+    )
+    output = mock_reducer.reduce.return_value.model_copy(update={"intents": (intent,)})
+    mock_reducer.reduce.side_effect = [RuntimeError("reduction failed"), output]
+    execute_intents = AsyncMock()
+    monkeypatch.setattr(router, "_execute_intents", execute_intents)
+    failed = create_contract_registered_event().model_copy(
+        update={"node_name": "failed-node"}
+    )
+    successful = create_contract_registered_event().model_copy(
+        update={"node_name": "successful-node"}
+    )
+
+    with caplog.at_level(logging.ERROR):
+        for event in (failed, successful):
+            await router.register_announced(
+                event, event.correlation_id, topic="catalog"
+            )
+            if event is failed:
+                assert router.state is initial_state
+                execute_intents.assert_not_awaited()
+
+    calls = mock_reducer.reduce.call_args_list
+    assert [call.args[1] for call in calls] == [failed, successful]
+    assert [call.args[2]["offset"] for call in calls] == [0, 1]
+    assert all(call.args[0] is initial_state for call in calls)
+    assert router.state is output.result
+    execute_intents.assert_awaited_once_with((intent,), successful.correlation_id)
+    failures = [
+        record
+        for record in caplog.records
+        if "Failed to process announced contract" in record.getMessage()
+    ]
+    assert len(failures) == 1
+    assert failures[0].levelno == logging.ERROR
+    assert failures[0].contract_name == failed.node_name
+    assert failures[0].event_id == str(failed.event_id)
+    assert str(failed.correlation_id) in failures[0].getMessage()
+    assert str(successful.correlation_id) not in failures[0].getMessage()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "postgresql://user:synthetic-secret@localhost/db",
+        "password=synthetic-secret",
+        "token=synthetic-secret",
+    ],
+)
+async def test_announced_error_logging_redacts_exception_information(
+    router: ContractRegistrationEventRouter,
+    mock_reducer: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+    message: str,
+) -> None:
+    error = RuntimeError(message)
+    mock_reducer.reduce.side_effect = error
+    with caplog.at_level("ERROR"):
+        await router.register_announced(
+            create_contract_registered_event(), uuid4(), topic="catalog"
+        )
+
+    assert "synthetic-secret" not in caplog.text
+    records = [
+        r for r in caplog.records if "Failed to process announced contract" in r.message
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+    assert record.exc_info[1] is not error
+    assert record.exc_info[2] is None
+    safe_error = record.exc_info[1]
+    assert safe_error is not None
+    assert str(safe_error) == "RuntimeError: [REDACTED - potentially sensitive data]"
+    assert safe_error.args == (str(safe_error),)
+    assert safe_error.__cause__ is None
+    assert safe_error.__context__ is None
+    formatter = logging.Formatter("%(levelname)s %(message)s")
+    for surface in (
+        str(record.msg),
+        str(record.args),
+        record.getMessage(),
+        str(safe_error.args),
+        formatter.formatException(record.exc_info),
+        formatter.format(record),
+        record.exc_text or "",
+        caplog.text,
+    ):
+        assert "synthetic-secret" not in surface
+
+
+@pytest.mark.asyncio
+async def test_announced_cancellation_propagates(
+    router: ContractRegistrationEventRouter, mock_reducer: MagicMock
+) -> None:
+    mock_reducer.reduce.side_effect = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await router.register_announced(
+            create_contract_registered_event(), uuid4(), topic="catalog"
+        )
 
 
 class TestMessageParsingContractRegistered:
