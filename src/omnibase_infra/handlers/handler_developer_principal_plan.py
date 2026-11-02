@@ -241,7 +241,7 @@ def _derived_grants(
             "operations": sorted(operations),
         }
         if _PLACEHOLDER in name:
-            grant["create_topic"] = "write" in operations
+            grant["create_topic"] = bool({"read", "write"} & operations)
         grants.append(grant)
     return grants, text.encode("utf-8")
 

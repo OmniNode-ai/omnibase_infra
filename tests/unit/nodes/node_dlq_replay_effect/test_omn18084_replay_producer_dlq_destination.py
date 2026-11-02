@@ -138,7 +138,7 @@ def _dlq_payload(
             "offset": 6574,
             "partition": 0,
         },
-        "failure_reason": "JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+        "failure_reason": f"{error_type}: Expecting value: line 1 column 1 (char 0)",
         "failure_timestamp": "2026-09-09T18:22:41.104312+00:00",
         "correlation_id": str(uuid4()),
         "retry_count": retry_count,

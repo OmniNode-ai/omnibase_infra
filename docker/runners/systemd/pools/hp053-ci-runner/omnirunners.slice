@@ -1,0 +1,11 @@
+[Unit]
+Description=OmniNode CI runner pool on h053, the HP ProLiant Gen9 (OMN-22111)
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=56G
+MemoryMax=64G
+MemorySwapMax=2G
+CPUAccounting=yes
+CPUWeight=25

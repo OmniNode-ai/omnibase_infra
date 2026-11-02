@@ -232,23 +232,24 @@ def test_a_machine_row_may_bind_grant_roles_the_issuer_does_not_grant(
     assert granted[0] == granted[1]
 
 
-def test_grant_roles_without_a_role_defaults_to_developer_and_is_refused(
-    declaration: lpi.Declaration, tmp_path: Path
-) -> None:
-    with pytest.raises(lpi.DeclarationError, match="only a machine binds grant_roles"):
-        lpi.load_overlay(
-            _overlay(tmp_path, {**DEVELOPER_ROW, "grant_roles": ["x"]}), declaration
-        )
-
-
+@pytest.mark.parametrize(
+    "row",
+    [
+        pytest.param({**DEVELOPER_ROW, "grant_roles": ["x"]}, id="no-role-defaults"),
+        pytest.param(
+            {**DEVELOPER_ROW, "role": "developer", "grant_roles": ["x"]},
+            id="explicit-developer",
+        ),
+        pytest.param(
+            {**DEVELOPER_ROW, "role": "admin", "grant_roles": ["x"]}, id="unknown-role"
+        ),
+    ],
+)
 def test_only_a_machine_row_binds_grant_roles(
-    declaration: lpi.Declaration, tmp_path: Path
+    declaration: lpi.Declaration, tmp_path: Path, row: dict[str, object]
 ) -> None:
     with pytest.raises(lpi.DeclarationError, match="only a machine binds grant_roles"):
-        lpi.load_overlay(
-            _overlay(tmp_path, {**DEVELOPER_ROW, "grant_roles": ["host-drift-fleet"]}),
-            declaration,
-        )
+        lpi.load_overlay(_overlay(tmp_path, row), declaration)
 
 
 # --- the drift check -----------------------------------------------------------
