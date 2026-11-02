@@ -43,7 +43,7 @@ async def run_lane_mirror_guard(
     SOURCE lane at the coordinate it was written to -- proof that the lane's
     producer is connected to the source broker. A Kafka client bootstraps at
     the configured address once and thereafter follows the ADVERTISED address
-    it is handed, and on .201 both lane brokers advertise the bare name
+    it is handed, and both lane brokers can advertise the same bare name
     ``redpanda`` while this forwarder is joined to both lane networks.
     Retrying the same connection reaches the same broker; only dropping it and
     bootstrapping again at the configured address can land elsewhere.
