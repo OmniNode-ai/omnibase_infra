@@ -89,6 +89,7 @@ from omnibase_core.models.dispatch.model_dispatch_bus_command import (
 from omnibase_core.models.event_bus.model_event_headers import ModelEventHeaders
 from omnibase_core.models.event_bus.model_event_message import ModelEventMessage
 from omnibase_infra.enums.enum_runtime_backend import EnumRuntimeBackend
+from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
@@ -97,10 +98,6 @@ from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngres
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
 
 logger = logging.getLogger(__name__)
-
-# Default health probe timeout — deliberately short so AUTO mode fails fast
-# when the runtime is genuinely down rather than blocking the caller.
-_HEALTH_PROBE_TIMEOUT_SECONDS = 2.0
 
 
 class NodeInvocationAdapter:
@@ -130,7 +127,7 @@ class NodeInvocationAdapter:
         *,
         backend: EnumRuntimeBackend = EnumRuntimeBackend.AUTO,
         routes: Mapping[str, ModelRuntimeLocalIngressRoute] | None = None,
-        health_probe_timeout: float = _HEALTH_PROBE_TIMEOUT_SECONDS,
+        health_probe_timeout: float = RUNTIME_TIMEOUTS.health_probe_seconds,
     ) -> None:
         self._event_bus = event_bus
         self._backend = backend
@@ -196,7 +193,7 @@ class NodeInvocationAdapter:
         correlation_id: UUID | None = None,
         command_name: str = "node.invocation",
         requester: str = "node_invocation_adapter",
-        timeout_seconds: int = 120,
+        timeout_seconds: int = RUNTIME_TIMEOUTS.local_dispatch_seconds,
         state_store: ModelLocalStateStore | None = None,
     ) -> dict[str, object]:
         """Dispatch a node command and wait for a terminal result.
@@ -327,9 +324,7 @@ class NodeInvocationAdapter:
             timeout_seconds=min(max(timeout_seconds, 1), 600),
         )
         broker = RuntimePatternBBroker(
-            self._event_bus,
-            command_topic=command_topic,
-            routes=routes,
+            self._event_bus, command_topic=command_topic, routes=routes
         )
         _route, result = await broker.dispatch_request(command)
         result_dict: dict[str, object] = {}
@@ -517,7 +512,9 @@ class NodeInvocationAdapter:
 
         # Give the event loop a chance to deliver the terminal event.
         try:
-            await asyncio.wait_for(terminal_received.wait(), timeout=0.5)
+            await asyncio.wait_for(
+                terminal_received.wait(), timeout=RUNTIME_TIMEOUTS.terminal_seconds
+            )
         except TimeoutError:
             collected_result.setdefault("status", "local_dispatch_timeout")
             collected_result.setdefault("command_topic", command_topic)

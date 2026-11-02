@@ -11,9 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_core.constants.constants_runtime_profiles import (
     REGISTERED_RUNTIME_PROFILES,
 )
-from omnibase_infra.runtime.models.model_secret_namespace_rule import (
-    ModelSecretNamespaceRule,
-)
+from omnibase_infra.models.model_runtime_boot_policy import ModelRuntimeBootPolicy
+from omnibase_infra.runtime.models import ModelSecretNamespaceRule
 
 # OMN-18114: `tenant-projection` joins the three shared kernels as a fourth
 # runtime process a lane may declare. It is OPTIONAL per lane (see
@@ -70,6 +69,8 @@ class ModelRuntimeProcessPolicy(BaseModel):
     # runtime reads it as ONEX_RUNTIME_FOLDED_PROFILES and the auto-wiring
     # ownership filter attaches the folded roles' contracts in this process.
     folded_profiles: tuple[str, ...] = ()
+    # OMN-18087: boot bound, join limit, join priority and memory limit.
+    boot: ModelRuntimeBootPolicy | None = None
 
     @field_validator("folded_profiles")
     @classmethod
