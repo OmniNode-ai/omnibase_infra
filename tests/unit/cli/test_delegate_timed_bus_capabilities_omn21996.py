@@ -14,14 +14,11 @@ from omnibase_core.protocols.runtime.protocol_local_runtime_bus import (
 from omnibase_core.protocols.runtime.protocol_local_runtime_message import (
     ProtocolLocalRuntimeMessage,
 )
-from omnibase_infra.cli.receipt_mode import DelegatePhaseStopwatch
 from omnibase_infra.models.delegation.model_delegate_phase_timed_bus import (
+    DelegatePhaseStopwatch,
     DelegatePhaseTimedBus,
     DelegatePhaseTimedUngroupedBus,
     wrap_delegate_bus,
-)
-from omnibase_infra.protocols.protocol_delegate_phase_stopwatch import (
-    ProtocolDelegatePhaseStopwatch,
 )
 
 pytestmark = pytest.mark.unit
@@ -136,6 +133,6 @@ async def test_async_reader_receives_original_arguments_and_unsubscribe() -> Non
     assert calls == [("topic", callback)]
 
 
-def test_wrapper_type_hints_resolve_without_cli_stopwatch() -> None:
+def test_wrapper_type_hints_resolve_to_models_stopwatch() -> None:
     for target in (DelegatePhaseTimedBus.__init__, wrap_delegate_bus):
-        assert get_type_hints(target)["stopwatch"] is ProtocolDelegatePhaseStopwatch
+        assert get_type_hints(target)["stopwatch"] is DelegatePhaseStopwatch

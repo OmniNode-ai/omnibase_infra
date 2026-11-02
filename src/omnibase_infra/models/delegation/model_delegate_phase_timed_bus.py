@@ -14,7 +14,9 @@ method.
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable
+import time
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from typing import cast
 
 from omnibase_core.protocols.runtime.protocol_local_runtime_bus import (
@@ -26,16 +28,60 @@ from omnibase_core.protocols.runtime.protocol_local_runtime_message import (
     ProtocolLocalRuntimeMessage,
 )
 from omnibase_infra.enums.enum_delegate_phase import EnumDelegatePhase
-from omnibase_infra.protocols.protocol_delegate_phase_stopwatch import (
-    ProtocolDelegatePhaseStopwatch,
+from omnibase_infra.models.delegation.model_delegate_phase_durations import (
+    ModelDelegatePhaseDurations,
 )
+
+
+class DelegatePhaseStopwatch:
+    """Accumulate completed spans using an injectable monotonic clock."""
+
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._started: dict[EnumDelegatePhase, float] = {}
+        self._totals: dict[EnumDelegatePhase, float] = {}
+
+    def begin(self, phase: EnumDelegatePhase) -> None:
+        """Start a span, refusing to replace an already running span."""
+        if self.is_running(phase):
+            raise ValueError(f"Phase {phase.value} is already running")
+        self._started[phase] = self._clock()
+
+    def end(self, phase: EnumDelegatePhase) -> None:
+        """End a running span and add its elapsed seconds to the phase total."""
+        if not self.is_running(phase):
+            raise ValueError(f"Phase {phase.value} is not running")
+        elapsed = self._clock() - self._started.pop(phase)
+        self._totals[phase] = self._totals.get(phase, 0.0) + elapsed
+
+    @contextmanager
+    def phase(self, phase: EnumDelegatePhase) -> Iterator[None]:
+        """Record a span, including elapsed time when its body raises."""
+        self.begin(phase)
+        try:
+            yield
+        finally:
+            self.end(phase)
+
+    def is_running(self, phase: EnumDelegatePhase) -> bool:
+        """Whether a phase has a span that has begun and has not ended."""
+        return phase in self._started
+
+    def durations(self) -> ModelDelegatePhaseDurations:
+        """Snapshot completed totals, leaving phases with no ended span absent."""
+        return ModelDelegatePhaseDurations.model_validate(
+            {
+                f"{phase.value}_seconds": self._totals.get(phase)
+                for phase in EnumDelegatePhase
+            }
+        )
 
 
 class DelegatePhaseTimedBus:
     """Time the client's bus calls, forwarding their arguments unchanged."""
 
     def __init__(
-        self, inner: ProtocolLocalRuntimeBus, stopwatch: ProtocolDelegatePhaseStopwatch
+        self, inner: ProtocolLocalRuntimeBus, stopwatch: DelegatePhaseStopwatch
     ) -> None:
         self._inner = inner
         self._stopwatch = stopwatch
@@ -101,7 +147,7 @@ class DelegatePhaseTimedUngroupedBus(DelegatePhaseTimedBus):
 
 
 def wrap_delegate_bus(
-    inner: ProtocolLocalRuntimeBus, stopwatch: ProtocolDelegatePhaseStopwatch
+    inner: ProtocolLocalRuntimeBus, stopwatch: DelegatePhaseStopwatch
 ) -> DelegatePhaseTimedBus:
     """Wrap ``inner`` so a delegation's terminals are read with no group when it can."""
     if isinstance(inner, ProtocolLocalRuntimeUngroupedBus):
