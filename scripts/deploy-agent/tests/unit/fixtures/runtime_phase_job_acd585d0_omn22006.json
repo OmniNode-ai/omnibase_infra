@@ -1,0 +1,46 @@
+{
+  "source": {
+    "job_record": "GET /job/acd585d0-8a06-4028-8124-dc648a235a5e on the dev deploy agent, read-only, 2026-11-02T11:09Z",
+    "containers": "the 19 application containers of compose project omnibase-infra named in the OMN-22006 brief (orchestrator measurement, 2026-11-02), mapped to their compose service names",
+    "hashes": "synthetic: the running hash and image id equal the rendered ones, which is what 'a redeploy that changed nothing about a container' means; the dev host's own labels were not read"
+  },
+  "job_record": {
+    "correlation_id": "acd585d0-8a06-4028-8124-dc648a235a5e",
+    "status": "success",
+    "phase_results": {
+      "preflight": "success",
+      "git": "success",
+      "compose_gen": "success",
+      "seed": "success",
+      "core": "success",
+      "runtime": "success",
+      "verification": "success"
+    },
+    "accepted_at": "2026-11-02T10:27:13.481401+00:00",
+    "completed_at": "2026-11-02T10:50:13.178658+00:00",
+    "verify_recreate": [],
+    "oneshot_reruns": []
+  },
+  "project": "omnibase-infra",
+  "containers": [
+    {"container": "omninode-runtime", "service": "omninode-runtime"},
+    {"container": "omninode-runtime-effects", "service": "runtime-effects"},
+    {"container": "omnibase-infra-runtime-worker-1", "service": "runtime-worker"},
+    {"container": "omninode-contract-resolver", "service": "omninode-contract-resolver"},
+    {"container": "omnibase-intelligence-api", "service": "intelligence-api"},
+    {"container": "onex-api", "service": "onex-api"},
+    {"container": "omninode-cost-estimator-web", "service": "cost-estimator-web"},
+    {"container": "omninode-skill-lifecycle-consumer", "service": "skill-lifecycle-consumer"},
+    {"container": "omninode-context-audit-consumer", "service": "context-audit-consumer"},
+    {"container": "omninode-agent-actions-consumer", "service": "agent-actions-consumer"},
+    {"container": "omninode-infra-routing-decisions-consumer", "service": "infra-routing-decisions-consumer"},
+    {"container": "omnimarket-projection-api", "service": "projection-api"},
+    {"container": "omnimarket-projection-tenant-registry-writer", "service": "projection-tenant-registry-writer"},
+    {"container": "omnimarket-projection-delegation-writer", "service": "projection-delegation-writer"},
+    {"container": "omnimarket-projection-registration-writer", "service": "projection-registration-writer"},
+    {"container": "omnimarket-projection-savings-writer", "service": "projection-savings-writer"},
+    {"container": "omnimarket-projection-tenant-credentials-writer", "service": "projection-tenant-credentials-writer"},
+    {"container": "omnimarket-projection-live-events-writer", "service": "projection-live-events-writer"},
+    {"container": "omnimarket-projection-claude-hook-events-writer", "service": "projection-claude-hook-events-writer"}
+  ]
+}
