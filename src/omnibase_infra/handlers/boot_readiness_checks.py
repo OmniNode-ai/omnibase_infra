@@ -65,7 +65,7 @@ def required_topics_without_partitions(
     """
     required = event_bus_readiness.get("required_topics")
     assigned = event_bus_readiness.get("assignments")
-    if not isinstance(required, list | tuple) or not isinstance(assigned, Mapping):
+    if not isinstance(required, (list, tuple)) or not isinstance(assigned, Mapping):
         return ()
     return tuple(sorted(str(t) for t in required if not assigned.get(t)))
 
@@ -85,7 +85,7 @@ def verify_roster_partition(
         excluded=tuple(sorted(excluded)),
         unaccounted=tuple(sorted(names - attempted - excluded)),
         in_both=tuple(sorted(attempted & excluded)),
-        foreign=tuple(sorted((attempted | excluded) - names)),
+        foreign=tuple(sorted(attempted.union(excluded) - names)),
     )
 
 

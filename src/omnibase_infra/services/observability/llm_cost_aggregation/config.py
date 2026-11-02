@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.models.network_binding import ModelLoopbackHealthServerBinding
 from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED,
 )
@@ -25,7 +26,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
 logger = logging.getLogger(__name__)
 
 
-class ConfigLlmCostAggregation(BaseSettings):
+class ConfigLlmCostAggregation(ModelLoopbackHealthServerBinding, BaseSettings):
     """Configuration for the LLM cost aggregation Kafka consumer.
 
     Environment variables use the OMNIBASE_INFRA_LLM_COST_ prefix.
@@ -205,14 +206,6 @@ class ConfigLlmCostAggregation(BaseSettings):
         ge=1024,
         le=65535,
         description="Port for HTTP health check endpoint",
-    )
-    health_check_host: str = Field(
-        default="127.0.0.1",  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
-        description=(
-            "Host/IP for health check server binding. Defaults to localhost-only "
-            "for safety. Container deployments should explicitly set '0.0.0.0' to "
-            "expose the health endpoint on all network interfaces."
-        ),
     )
     health_check_staleness_seconds: int = Field(
         default=300,

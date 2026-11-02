@@ -33,7 +33,6 @@ src/omnibase_infra/handlers/handler_topic_catalog_postgres.py 3
 src/omnibase_infra/handlers/handler_work_ledger_query.py 3
 src/omnibase_infra/handlers/handler_workspace_runtime_config_materializer.py 2
 src/omnibase_infra/handlers/models/graph/contract_descriptor.py 1
-src/omnibase_infra/handlers/models/mcp/model_mcp_handler_config.py 1
 src/omnibase_infra/handlers/placement/handler_placement_election.py 2
 src/omnibase_infra/handlers/placement/handler_placement_etcd.py 3
 src/omnibase_infra/handlers/placement/handler_placement_runtime.py 7
@@ -56,7 +55,7 @@ src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_constan
 src/omnibase_infra/nodes/node_board_probe_effect/handlers/handler_consumer_flow.py 4
 src/omnibase_infra/nodes/node_board_probe_effect/handlers/handler_forwarder_refused_topic.py 4
 src/omnibase_infra/nodes/node_board_probe_effect/models/enum_board_check_id.py 1
-src/omnibase_infra/nodes/node_build_loop_write_effect/handlers/handler_build_loop_append.py 5
+src/omnibase_infra/nodes/node_build_loop_write_effect/handlers/handler_build_loop_append.py 3
 src/omnibase_infra/nodes/node_bus_forwarder_effect/handlers/handler_consume_inbound.py 1
 src/omnibase_infra/nodes/node_bus_forwarder_effect/handlers/handler_forward_outbound.py 1
 src/omnibase_infra/nodes/node_bus_forwarder_effect/services/service_gateway_delivery.py 3
@@ -78,7 +77,7 @@ src/omnibase_infra/nodes/node_contract_resolver_bridge/node.py 1
 src/omnibase_infra/nodes/node_decision_store_effect/handlers/handler_write_conflict.py 1
 src/omnibase_infra/nodes/node_decision_store_effect/handlers/handler_write_decision.py 1
 src/omnibase_infra/nodes/node_decision_store_query_compute/handlers/handler_query_decisions.py 1
-src/omnibase_infra/nodes/node_delegation_chain_ledger_effect/handlers/handler_delegation_chain_ledger.py 5
+src/omnibase_infra/nodes/node_delegation_chain_ledger_effect/handlers/handler_delegation_chain_ledger.py 4
 src/omnibase_infra/nodes/node_delta_bundle_effect/handlers/handler_update_outcome.py 1
 src/omnibase_infra/nodes/node_delta_bundle_effect/handlers/handler_write_bundle.py 1
 src/omnibase_infra/nodes/node_delta_metrics_effect/handlers/handler_upsert_metrics.py 1
@@ -93,7 +92,7 @@ src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/offer_companion_so
 src/omnibase_infra/nodes/node_gateway_attach_effect/handlers/handler_gateway_attach.py 3
 src/omnibase_infra/nodes/node_gateway_attach_effect/handlers/handler_gateway_detach.py 1
 src/omnibase_infra/nodes/node_gateway_attach_effect/handlers/handler_gateway_heartbeat.py 3
-src/omnibase_infra/nodes/node_gateway_link_health_write_effect/handlers/handler_gateway_link_health_upsert.py 5
+src/omnibase_infra/nodes/node_gateway_link_health_write_effect/handlers/handler_gateway_link_health_upsert.py 3
 src/omnibase_infra/nodes/node_gmail_archive_cleanup_effect/handlers/handler_gmail_archive_cleanup.py 3
 src/omnibase_infra/nodes/node_gmail_intent_poller_effect/handlers/handler_gmail_intent_poll.py 2
 src/omnibase_infra/nodes/node_in_progress_probe_hygiene_effect/handlers/handler_in_progress_probe_hygiene.py 1
@@ -101,8 +100,8 @@ src/omnibase_infra/nodes/node_invariant_evaluate_compute/evaluator_invariant.py 
 src/omnibase_infra/nodes/node_kafka_replay_compute/handlers/handler_replay.py 1
 src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py 3
 src/omnibase_infra/nodes/node_lab_proof_run_effect/handlers/handler_lab_proof_run.py 1
-src/omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_append.py 4
-src/omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_query.py 4
+src/omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_append.py 3
+src/omnibase_infra/nodes/node_ledger_write_effect/handlers/handler_ledger_query.py 3
 src/omnibase_infra/nodes/node_llm_completion_effect/handlers/handler_llm_completion.py 3
 src/omnibase_infra/nodes/node_llm_embedding_effect/handlers/handler_embedding_openai_compatible.py 1
 src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py 3
@@ -170,7 +169,7 @@ src/omnibase_infra/nodes/node_setup_orchestrator/handlers/handler_setup_orchestr
 src/omnibase_infra/nodes/node_sibling_sha_pin_ratchet_compute/runtime_sibling_sha_pin_ratchet.py 1
 src/omnibase_infra/nodes/node_sync_revert_watchdog_effect/handlers/handler_sync_revert_watchdog.py 1
 src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/handler_topic_migration_executor.py 1
-src/omnibase_infra/nodes/node_validation_ledger_write_effect/handlers/handler_validation_ledger_append.py 4
+src/omnibase_infra/nodes/node_validation_ledger_write_effect/handlers/handler_validation_ledger_append.py 3
 src/omnibase_infra/nodes/node_vector_store_effect/contract_descriptor.py 1
 src/omnibase_infra/nodes/node_vector_store_effect/handlers/handler_vector_search.py 2
 src/omnibase_infra/nodes/node_vector_store_effect/handlers/handler_vector_upsert.py 2

@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21882
+title: "TLA+ model of the host bring-up run: one active run per host at a fence, one terminal per run id, no action after a successor verifies"
+summary: >-
+  Adds formal/host_bringup, a TLA+ model of one host bring-up run (task T0 of the host bring-up plan), with a Model.cfg, one mutant configuration per invariant, a witness configuration, committed TLC output bound to the spec and cfg digest, and a design-review verdict in results/. Model.cfg passes OneActivePerFence, NeedsReadSatisfied, WaitNeverPassesUnchecked, AtMostOneTerminal, AbandonedClosed, NoLandAfterSuccessorVerify, StaleHolderRefused and NoActionOutsideLock; each mutant configuration gives a counterexample on the invariant it is named for. The model reuses the lease design of formal/generic_lease and follows the layout of formal/declared_state_reconcile. No bring-up node or script is built here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21882-transcribed-acceptance-criteria
+    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the model passes TLC and each mutant configuration fails -- falsifier: uv run pytest tests/formal/test_host_bringup_model.py -q'
+      - id: AC2
+        statement: 'AC2: the model states: at most one active run per host at a fence, no action on a target whose needs did not read satisfied in the same pass, at most one terminal per run id, and no action of an old holder after a successor verifies -- falsifier: one mutant per invariant in the pytest run'
+      - id: AC3
+        statement: 'AC3: a design review verdict is recorded on this ticket as a comment before T3 starts -- falsifier: the ticket has no verdict comment'
+evidence_requirements:
+  - kind: tests
+    description: The TLC output of the model and every mutant and witness configuration matches the current spec and cfg digest, the model holds every invariant, each mutant reports the violation it is named for, and results/ holds a verdict.
+    command: uv run pytest tests/formal/test_host_bringup_model.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21882-ac1-model-and-mutants
+    description: formal/host_bringup/results/Model.out, bound to results/model.sha256, reports no error with 0 states left on queue, and every mut_*.out reports its named invariant violated.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/formal/test_host_bringup_model.py -q -k "digest or passing or mutant"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21882-ac2-invariant-per-mutant
+    description: Model.cfg states each of the eight invariants of the plan's T0 and each has a mutant configuration whose output reports that invariant violated.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/formal/test_host_bringup_model.py -q -k "states_every_invariant or mutant_fails"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21882-ac3-verdict
+    description: formal/host_bringup/results/design_review_verdict.txt is headed "# Design-review verdict" and names OMN-21882; the same verdict is posted as a comment on the ticket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/formal/test_host_bringup_model.py -q -k verdict
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
