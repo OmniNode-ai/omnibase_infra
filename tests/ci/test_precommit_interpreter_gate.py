@@ -7,43 +7,74 @@ pre-commit hook whose ``entry:`` shells out to a bare ``python`` refuses every
 ``git commit`` on macOS outside an activated venv ("Executable `python` not
 found"), because macOS ships ``python3`` only. Same class as OMN-16958
 (omnimemory's ``validate-spdx-headers``).
+
+These tests drive the runtime that backs the core precommit-interpreter-resolution
+hook (``omnibase_core.nodes.node_precommit_interpreter_check_compute``) over a
+temporary repository root holding a written ``.pre-commit-config.yaml``.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
+import yaml
+
+from omnibase_core.nodes.node_precommit_interpreter_check_compute.runtime_precommit_interpreter_check import (
+    main as core_main,
+)
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-GATE = REPO_ROOT / "scripts" / "validation" / "validate_precommit_interpreter.py"
-CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
+CORE_MODULE = (
+    "omnibase_core.nodes.node_precommit_interpreter_check_compute"
+    ".runtime_precommit_interpreter_check"
+)
+
+# The core rule refuses to report a pass when it scanned fewer than ten local hooks.
+_FILLER_HOOKS = 10
 
 
-def _load() -> Any:
-    spec = importlib.util.spec_from_file_location(
-        f"precommit_interpreter_gate_{Path(__file__).stem}", GATE
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+def _hook(hook_id: str, entry: str) -> dict[str, str]:
+    return {"id": hook_id, "name": hook_id, "entry": entry, "language": "system"}
 
 
-@pytest.fixture(scope="module")
-def gate() -> Any:
-    return _load()
+def _write_config(root: Path, entries: list[str]) -> None:
+    hooks = [
+        _hook(f"filler-{i}", "uv run python scripts/ci/filler.py")
+        for i in range(_FILLER_HOOKS)
+    ]
+    hooks.extend(_hook(f"case-{i}", entry) for i, entry in enumerate(entries))
+    config = {"repos": [{"repo": "local", "hooks": hooks}]}
+    (root / ".pre-commit-config.yaml").write_text(yaml.safe_dump(config))
 
 
-@pytest.mark.unit
-def test_gate_script_exists_and_is_executable() -> None:
-    assert GATE.is_file()
+def _run_gate(root: Path, capsys: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
+    rc = core_main(["--root", str(root)])
+    captured = capsys.readouterr()
+    return rc, captured.out, captured.err
+
+
+def _violations(err: str) -> list[str]:
+    return [line for line in err.splitlines() if line.startswith("  - ")]
+
+
+def _check_entry(
+    root: Path, capsys: pytest.CaptureFixture[str], entry: str
+) -> tuple[int, str, str]:
+    _write_config(root, [entry])
+    return _run_gate(root, capsys)
+
+
+def _check_script_line(
+    root: Path, capsys: pytest.CaptureFixture[str], line: str
+) -> tuple[int, str, str]:
+    scripts = root / "scripts"
+    scripts.mkdir()
+    (scripts / "hook.sh").write_text(f"#!/usr/bin/env bash\n{line}\n")
+    _write_config(root, ["bash scripts/hook.sh"])
+    return _run_gate(root, capsys)
 
 
 @pytest.mark.unit
@@ -57,9 +88,14 @@ def test_gate_script_exists_and_is_executable() -> None:
         "bash -c 'python scripts/ci/x.py'",
     ],
 )
-def test_bare_interpreter_entry_is_rejected(gate: Any, entry: str) -> None:
-    violations = gate._scan_entry("some-hook", entry)
-    assert violations, f"expected a violation for {entry!r}"
+def test_bare_interpreter_entry_is_rejected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], entry: str
+) -> None:
+    rc, _, err = _check_entry(tmp_path, capsys, entry)
+    assert rc == 1, f"expected a violation for {entry!r}"
+    violations = _violations(err)
+    assert len(violations) == 1, err
+    assert violations[0].startswith("  - case-0: ")
     assert "bare" in violations[0]
 
 
@@ -78,14 +114,21 @@ def test_bare_interpreter_entry_is_rejected(gate: Any, entry: str) -> None:
         ".pre-commit-hooks/reject-deploy-gate-skip-token.sh",
     ],
 )
-def test_resolvable_interpreter_entry_is_accepted(gate: Any, entry: str) -> None:
-    assert gate._scan_entry("some-hook", entry) == []
+def test_resolvable_interpreter_entry_is_accepted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], entry: str
+) -> None:
+    rc, out, err = _check_entry(tmp_path, capsys, entry)
+    assert rc == 0, err
+    assert out.startswith("OK: ")
 
 
 @pytest.mark.unit
-def test_suppression_marker_is_honored(gate: Any) -> None:
+def test_suppression_marker_is_honored(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     entry = "python scripts/ci/x.py  # precommit-interp-ok: illustrative"
-    assert gate._scan_entry("some-hook", entry) == []
+    rc, _, err = _check_entry(tmp_path, capsys, entry)
+    assert rc == 0, err
 
 
 @pytest.mark.unit
@@ -96,35 +139,39 @@ def test_suppression_marker_is_honored(gate: Any) -> None:
         "python scripts/ci/x.py  # precommit-interp-ok:",
     ],
 )
-def test_suppression_marker_requires_a_reason(gate: Any, entry: str) -> None:
-    violations = gate._scan_entry("some-hook", entry)
-    assert violations, f"bare suppression marker bypassed the gate: {entry!r}"
+def test_suppression_marker_requires_a_reason(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], entry: str
+) -> None:
+    rc, _, err = _check_entry(tmp_path, capsys, entry)
+    assert rc == 1, f"bare suppression marker bypassed the gate: {entry!r}"
+    assert _violations(err)
 
 
 @pytest.mark.unit
-def test_shell_script_bare_python_is_rejected(gate: Any, tmp_path: Path) -> None:
-    script = tmp_path / "hook.sh"
-    script.write_text(
+def test_shell_script_bare_python_is_rejected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "hook.sh").write_text(
         "#!/usr/bin/env bash\n"
         "# python foo.py  <- a comment, not an invocation\n"
         "command -v python3 >/dev/null && python3 -c 'import yaml'\n"
         "python scripts/ci/x.py\n"
     )
-    monkey_root = gate.REPO_ROOT
-    gate.REPO_ROOT = tmp_path
-    try:
-        violations = gate._scan_script(script)
-    finally:
-        gate.REPO_ROOT = monkey_root
-    assert len(violations) == 1
-    assert violations[0].startswith("hook.sh:4:")
+    _write_config(tmp_path, ["bash scripts/hook.sh"])
+    rc, _, err = _run_gate(tmp_path, capsys)
+    assert rc == 1, err
+    violations = _violations(err)
+    assert len(violations) == 1, err
+    assert violations[0].startswith("  - scripts/hook.sh:4:")
 
 
 @pytest.mark.unit
 def test_live_config_has_no_bare_interpreter_hooks() -> None:
     """The repo's own committed config must satisfy the rule (RED before fix)."""
     result = subprocess.run(
-        [sys.executable, str(GATE)],
+        [sys.executable, "-m", CORE_MODULE, "--root", str(REPO_ROOT)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -137,16 +184,14 @@ def test_live_config_has_no_bare_interpreter_hooks() -> None:
 
 
 @pytest.mark.unit
-def test_gate_fails_closed_on_vacuous_scan(gate: Any, tmp_path: Path) -> None:
+def test_gate_fails_closed_on_vacuous_scan(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A parse regression that scans nothing must fail, not silently pass."""
-    empty = tmp_path / ".pre-commit-config.yaml"
-    empty.write_text("repos: []\n")
-    original = gate.CONFIG_PATH
-    gate.CONFIG_PATH = empty
-    try:
-        assert gate.main() == 1
-    finally:
-        gate.CONFIG_PATH = original
+    (tmp_path / ".pre-commit-config.yaml").write_text("repos: []\n")
+    rc, out, err = _run_gate(tmp_path, capsys)
+    assert rc == 1, out
+    assert "vacuous" in err
 
 
 # --- CodeRabbit findings on PR #2223: bypass shapes that must NOT slip through
@@ -167,8 +212,12 @@ def test_gate_fails_closed_on_vacuous_scan(gate: Any, tmp_path: Path) -> None:
         "bash -c 'FOO=1 python scripts/ci/x.py'",
     ],
 )
-def test_bypass_shapes_are_rejected(gate: Any, entry: str) -> None:
-    assert gate._scan_entry("some-hook", entry), f"bypass not caught: {entry!r}"
+def test_bypass_shapes_are_rejected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], entry: str
+) -> None:
+    rc, _, err = _check_entry(tmp_path, capsys, entry)
+    assert rc == 1, f"bypass not caught: {entry!r}"
+    assert _violations(err)
 
 
 @pytest.mark.unit
@@ -184,8 +233,11 @@ def test_bypass_shapes_are_rejected(gate: Any, entry: str) -> None:
         "bash -c 'uv run python a.py && uv run python b.py'",
     ],
 )
-def test_uv_run_variants_stay_accepted(gate: Any, entry: str) -> None:
-    assert gate._scan_entry("some-hook", entry) == []
+def test_uv_run_variants_stay_accepted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], entry: str
+) -> None:
+    rc, _, err = _check_entry(tmp_path, capsys, entry)
+    assert rc == 0, err
 
 
 @pytest.mark.unit
@@ -202,17 +254,11 @@ def test_uv_run_variants_stay_accepted(gate: Any, entry: str) -> None:
     ],
 )
 def test_shell_command_positions_are_scanned(
-    gate: Any, tmp_path: Path, line: str
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], line: str
 ) -> None:
-    script = tmp_path / "hook.sh"
-    script.write_text(f"#!/usr/bin/env bash\n{line}\n")
-    original = gate.REPO_ROOT
-    gate.REPO_ROOT = tmp_path
-    try:
-        violations = gate._scan_script(script)
-    finally:
-        gate.REPO_ROOT = original
-    assert violations, f"bare python not caught in {line!r}"
+    rc, _, err = _check_script_line(tmp_path, capsys, line)
+    assert rc == 1, f"bare python not caught in {line!r}"
+    assert _violations(err)
 
 
 @pytest.mark.unit
@@ -227,27 +273,19 @@ def test_shell_command_positions_are_scanned(
     ],
 )
 def test_resolvable_shell_lines_stay_accepted(
-    gate: Any, tmp_path: Path, line: str
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], line: str
 ) -> None:
-    script = tmp_path / "hook.sh"
-    script.write_text(f"#!/usr/bin/env bash\n{line}\n")
-    original = gate.REPO_ROOT
-    gate.REPO_ROOT = tmp_path
-    try:
-        violations = gate._scan_script(script)
-    finally:
-        gate.REPO_ROOT = original
-    assert violations == [], f"false positive on {line!r}: {violations}"
+    rc, _, err = _check_script_line(tmp_path, capsys, line)
+    assert rc == 0, f"false positive on {line!r}: {err}"
+    assert _violations(err) == []
 
 
 @pytest.mark.unit
-def test_script_suppression_marker_requires_a_reason(gate: Any, tmp_path: Path) -> None:
-    script = tmp_path / "hook.sh"
-    script.write_text("#!/usr/bin/env bash\npython x.py # precommit-interp-ok\n")
-    original = gate.REPO_ROOT
-    gate.REPO_ROOT = tmp_path
-    try:
-        violations = gate._scan_script(script)
-    finally:
-        gate.REPO_ROOT = original
-    assert violations
+def test_script_suppression_marker_requires_a_reason(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc, _, err = _check_script_line(
+        tmp_path, capsys, "python x.py # precommit-interp-ok"
+    )
+    assert rc == 1, err
+    assert _violations(err)

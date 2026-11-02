@@ -55,8 +55,6 @@ PRE_EXISTING_STAGED_HOOKS = frozenset(
         # is out of scope here. Discovered once _staged_scoped_hook_ids()
         # stopped requiring an explicit files: regex (a types_or: filter is
         # just as much a staged-scope signal as files: is).
-        "check-ai-slop",
-        "exposed-identifier-gate",
         "no-env-fallbacks",
         "onex-validate-markdown-links",
         "reject-deploy-gate-skip-token",
