@@ -651,6 +651,11 @@ requirements:
     acceptance:
       - id: AC190
         statement: "omninode_runtime holds SELECT, INSERT and UPDATE on delegation_lab_jobs and delegation_lab_job_outbox on every supported profile, and node_llm_delegation_call_effect 0000 is vendored byte-identical"
+  - id: req-omn17427-model-baseline-no-stale
+    statement: The hardcoded model config baseline carries no entry whose line is absent from the file it names at the current tree.
+    acceptance:
+      - id: AC191
+        statement: 'AC191: every entry in config/hardcoded_model_config_baseline.yaml matches sha1(line.strip()) of a line of its file, and an entry for a line the file does not hold is detected -- falsifier: uv run --frozen pytest tests/ci/test_model_config_baseline_no_stale_omn17427.py -n 0 -q --no-cov; fails at the merge base, where 37 stale entries existed'
   - id: req-omn17427-c29-failed-receipt-layer
     statement: The C29 probe grades a failed delegation receipt from the layer that carries its key and attempts, and names a provider throttle as the first reason while the verdict stays FAIL.
     acceptance:
@@ -709,7 +714,7 @@ requirements:
     statement: The core dev-merge tag, compatible range, tag-only source, lock and moved consumers agree on version 0.47.58.
     acceptance:
       - id: AC17427630002
-        statement: 'The core tag dev-20261031202655-5bb91ae7e720, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
+        statement: 'The core tag dev-20261101203942-2080333acfaf, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
   - id: req-omn17427-first-party-dev-merge-tags
     statement: 'Stage 0 of the goal: the dev lane boots its composed runtime on first-party dev-merge tags. Every vendored sibling (core, spi, omnimarket) is staged at its newest dev-merge tag with no caller opt-in, a sibling with no tag is refused instead of built from its branch, the image installs spi from the staged tree, and the build fails when any first-party package of the image resolves from a sha, a branch, a release or an exact version.'
     acceptance:
@@ -958,6 +963,9 @@ evidence_requirements:
   - kind: tests
     description: The first-party source audit against throwaway environments, each violation planted, and the contract, the clone manifest, the deploy agent and the Dockerfile agreeing on the same package set.
     command: uv run pytest tests/scripts/test_first_party_sources_omn17427.py -q
+  - kind: tests
+    description: Every baseline entry is matched against sha1 of the stripped lines of the file it names; a planted absent line and a missing file are each reported. At the merge base 37 entries are stale.
+    command: uv run --frozen pytest tests/ci/test_model_config_baseline_no_stale_omn17427.py -n 0 -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -3267,7 +3275,7 @@ dod_evidence:
       - AC17427004001
       - AC17427004002
   - id: dod-omn17427-core-dev-tag-pin
-    description: Pin identity at dev-20261031202655-5bb91ae7e720, moved imports, typed shape checker and compatible-version seams; the pin test fails at the merge base, which pins the earlier tag.
+    description: Pin identity at dev-20261101203942-2080333acfaf, moved imports, typed shape checker and compatible-version seams; the pin test fails at the merge base, which pins the earlier tag.
     source: manual
     checks:
       - check_type: test_passes
@@ -3275,7 +3283,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427630002]
   - id: dod-omn17427-core-dev-tag-deploy
-    description: Hosted-runner check of tag identity at dev-20261031202655-5bb91ae7e720 and moved imports without services, containers or credentials; runtime boot proof is separate.
+    description: Hosted-runner check of tag identity at dev-20261101203942-2080333acfaf and moved imports without services, containers or credentials; runtime boot proof is separate.
     source: manual
     checks:
       - check_type: command
@@ -3387,3 +3395,11 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q --no-cov
         cwd: .
     binds_ac: [AC17427547801, AC17427547802, AC17427547803]
+  - id: dod-omn17427-model-baseline-no-stale
+    description: Reads config/hardcoded_model_config_baseline.yaml and the files it names at the current tree and hashes each stripped line; fails at the merge base, where 37 entries named lines no longer present.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_model_config_baseline_no_stale_omn17427.py -n 0 -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC191]

@@ -2152,21 +2152,24 @@ repos:
         files: ^(docker/(Dockerfile\.runtime|docker-compose\..*\.yml|catalog/.*\.ya?ml)|src/omnibase_infra/docker/catalog/.*\.py|tests/(unit/docker/test_delegation_routing_tiers_path_binding_omn15645\.py|fixtures/omn15645_worker_tiers_live_contact\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
-      # OMN-21288: projection writers, consumers and effects run inside the one
-      # runtime container. Refuses a dev-stack service that runs one outside it;
-      # the services that still do are a shrink-only list in the test.
-      - id: dev-stack-runtime-only
-        name: Check the dev stack runs no workload outside the runtime container
-        entry: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+      # OMN-21891 (OMN-21288 AC-2): every service of every lane's compose files is the
+      # runtime, a declared dependency, a one-shot or a baselined entry, and the runtime
+      # runs one replica. The allowlist and the shrink-only baseline are the data file
+      # config/validation/stack_shape.yaml; the check is omnibase_core's stack-shape
+      # validator. Any docker/docker-compose*.yml triggers it, as does the data file. The
+      # per-file plant loop (judges the tree once per compose file) runs in the CI job only.
+      - id: stack-shape
+        name: Check every compose service is the runtime, a dependency, a one-shot or baselined
+        entry: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k "not every_compose_file"
         language: system
-        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(docker/docker-compose[^/]*\.yml|docker/catalog/.*\.ya?ml|config/validation/stack_shape\.yaml|tests/(unit/validation/test_checker_stack_shape\.py|fixtures/stack_shape/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: dev-tenant-projection-fold
         name: Check the primary dev tenant projection fold
         entry: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         language: system
-        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|runtime-policy\.env|dev-tenant-fold-required-env\.manifest\.txt)|contracts/services/runtime_policy\.contract\.yaml|scripts/runtime_build/compose_files\.sh|tests/unit/docker/test_dev_(tenant_projection_fold|stack_runtime_only)_omn21288\.py|\.pre-commit-config\.yaml)$
+        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|runtime-policy\.env|dev-tenant-fold-required-env\.manifest\.txt)|contracts/services/runtime_policy\.contract\.yaml|scripts/runtime_build/compose_files\.sh|config/validation/stack_shape\.yaml|tests/unit/docker/test_dev_tenant_projection_fold_omn21288\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: check-dev-tenant-fold-required-env-vars
