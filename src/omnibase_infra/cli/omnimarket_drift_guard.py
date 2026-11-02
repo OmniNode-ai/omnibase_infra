@@ -932,11 +932,6 @@ def check_omnimarket_drift(
     omni_home_path = Path(omni_home) if omni_home else None
     if omni_home_path and (omni_home_path / "omnimarket" / ".git").exists():
         attachment = canonical_clone_attachment(omni_home=omni_home)
-    # OMN-22183: onboarding leaves every clone detached at its anchor and stamps
-    # the commit it proved into the floor marker. A clone whose HEAD is that
-    # commit is at its proven state; detached anywhere else still refuses below.
-    if ModelFloorMarker.names_commit(omni_home_path, canonical):
-        attachment = CanonicalCloneAttachment.ATTACHED
     # OMN-17427: registry clones are mirrors; a proven VCS package runs without
     # re-attaching one. The receipt names both code and reference, including lag.
     if attachment is CanonicalCloneAttachment.DETACHED and omni_home:
@@ -946,6 +941,9 @@ def check_omnimarket_drift(
         if registry_stamp is not None:
             logger.warning("%s", registry_stamp.line)
             return registry_stamp
+        # OMN-22183: only a proven detached checkout can use the floor fallback.
+        if ModelFloorMarker.names_commit(omni_home_path, canonical):
+            attachment = CanonicalCloneAttachment.ATTACHED
     if attachment is not CanonicalCloneAttachment.ATTACHED:
         assert omni_home_path is not None
         converge_cmd = str(

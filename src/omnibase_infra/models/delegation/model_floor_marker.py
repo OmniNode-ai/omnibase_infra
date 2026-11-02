@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["FLOOR_MARKER_FILE", "ModelFloorMarker"]
 
@@ -20,14 +20,15 @@ class ModelFloorMarker(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
-    omnimarket_commit: str = ""
+    # Abbreviations cannot identify an immutable floor without repository lookup.
+    omnimarket_commit: str = Field(default="", pattern=r"^(?:[0-9a-fA-F]{40})?$")
 
     @classmethod
     def names_commit(cls, root: Path | None, commit: str) -> bool:
         """True when the marker under ``root`` names ``commit``.
 
-        A missing, unreadable or malformed marker, or one with no commit,
-        names nothing: the caller treats it as "no floor", never as a match.
+        Only full hexadecimal SHAs match, ignoring case. A missing, unreadable
+        or malformed marker, including an abbreviated SHA, names nothing.
         """
         if not root:
             return False
@@ -36,4 +37,7 @@ class ModelFloorMarker(BaseModel):
             marker = cls.model_validate(raw)
         except (OSError, ValueError):
             return False
-        return bool(marker.omnimarket_commit) and marker.omnimarket_commit == commit
+        return (
+            bool(marker.omnimarket_commit)
+            and marker.omnimarket_commit.lower() == commit.lower()
+        )
