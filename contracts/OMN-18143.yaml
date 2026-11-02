@@ -1,8 +1,8 @@
 schema_version: 1.0.0
 ticket_id: OMN-18143
-title: the dev runtime phase's convergence read names every profile its services need, so a profile-gated dev-lane service no longer aborts the deploy
+title: the dev runtime phase's convergence read names every profile its services need, and the runtime-phase compose up that follows the explicit image builds passes --no-build
 summary: >-
-  Lane dev-redeploy-window-1102. The deploy agent's rendered-hash read (`compose config --hash <services>`) ran under `--profile runtime` and named cost-estimator-web, whose compose profile is `cost-estimator`; compose enables the profile of a service named on an `up` command line but not on `config --hash`, so the read failed with `no such service: cost-estimator-web` and aborted dev deploy da6bc43b. An explicit service list is now rendered with every declared profile enabled; the `["*"]` form keeps exactly the requested profile. This pull request fixes that one failure only; it does not claim the ticket's own six criteria, which concern the redeploy effect's publish monitor.
+  Lane dev-redeploy-window-1102. The deploy agent's rendered-hash read (`compose config --hash <services>`) ran under `--profile runtime` and named cost-estimator-web, whose compose profile is `cost-estimator`; compose enables the profile of a service named on an `up` command line but not on `config --hash`, so the read failed with `no such service: cost-estimator-web` and aborted dev deploy da6bc43b. An explicit service list is now rendered with every declared profile enabled; the `["*"]` form keeps exactly the requested profile. Second change (lane compose-up-pr-1102): the deploy agent builds every image in _compose_build and _build_dev_lane_only_services and then runs compose up without --no-build, so compose may build again inside the runtime-phase ceiling, which is derived from start periods and does not see a build; the RUNTIME-phase compose up of a FULL rebuild and the single-scope compose up now pass --no-build. This pull request does not claim the ticket's own six criteria, which concern the redeploy effect's publish monitor.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -12,10 +12,20 @@ requirements:
     acceptance:
       - id: AC7
         statement: 'AC7: `_rendered_config_hashes` for an explicit list that names cost-estimator-web returns real compose hashes, under profile runtime and under no profile; the `["*"]` form keeps exactly the requested profile and excludes cost-estimator-web. The test reads the profiles from this repository and invokes compose config without starting containers.'
+  - id: req-omn18143-compose-up-no-build
+    statement: The FULL-scope RUNTIME-phase compose up and the single-scope compose up that follow the explicit image builds forbid a second build, and the default of a caller that did not build is unchanged.
+    acceptance:
+      - id: AC8
+        statement: "AC8: the compose-up command the agent builds for the RUNTIME phase of a FULL rebuild carries --no-build, and a plain _compose_up still omits it -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_compose_up_no_build_after_explicit_build_omn18143.py -q (fails on the parent commit)"
+      - id: AC9
+        statement: "AC9: forbidding compose's build leaves the CORE pull policy at always -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_compose_up_no_build_after_explicit_build_omn18143.py -q -k core_pull_policy"
 evidence_requirements:
   - kind: "tests"
     description: "Compose returns hashes for named services across profiles and preserves the selected-profile service set."
     command: "uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_config_hash_enables_named_profiles_omn18143.py -q -p no:cacheprovider"
+  - kind: tests
+    description: The command-line and FULL-rebuild call-site tests of the --no-build change.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_compose_up_no_build_after_explicit_build_omn18143.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ""
@@ -31,3 +41,30 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC7
+  - id: dod-omn18143-ac8-runtime-up-no-build
+    description: The RUNTIME-phase compose up of a FULL rebuild is called with compose_may_build=False and the argv carries --no-build; the default argv does not.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_compose_up_no_build_after_explicit_build_omn18143.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn18143-ac9-core-pull-policy-kept
+    description: A CORE up that forbids compose's build still pulls with policy always.
+    source: manual
+    binds_ac:
+      - AC9
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_compose_up_no_build_after_explicit_build_omn18143.py -q -n 0 --no-cov -k core_pull_policy
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn18143-single-scope-up-no-build
+    description: Single-scope CORE and RUNTIME rebuilds pass compose_may_build=False for both whole-scope and explicitly named service lists.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_compose_up_no_build_after_explicit_build_omn18143.py -q -n 0 --no-cov -k single_scope
+        cwd: ${OMNI_HOME}/omnibase_infra
