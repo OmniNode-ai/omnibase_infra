@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 """MCP server lifecycle timeouts (OMN-22130)."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelMcpServerTimeouts(BaseModel):
@@ -19,9 +21,19 @@ class ModelMcpServerTimeouts(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    shutdown_seconds: float = Field(default=5.0, gt=0)
-    cancel_seconds: float = Field(default=1.0, gt=0)
-    startup_seconds: float = Field(default=2.0, gt=0)
+    shutdown_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
+    cancel_seconds: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+    startup_seconds: float = Field(default=2.0, gt=0, allow_inf_nan=False)
+
+    @field_validator(
+        "shutdown_seconds", "cancel_seconds", "startup_seconds", mode="before"
+    )
+    @classmethod
+    def _refuse_bool(cls, value: Any) -> Any:
+        """Refuse ``true``/``false``: pydantic would read them as 1.0/0.0 seconds."""
+        if isinstance(value, bool):
+            raise ValueError("a timeout is a number of seconds, not a boolean")
+        return value
 
 
 __all__ = ["ModelMcpServerTimeouts"]
