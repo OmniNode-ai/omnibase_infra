@@ -25,10 +25,17 @@ requirements:
     acceptance:
       - id: AC5
         statement: "AC5: prepr_verify_lane.sh --slot 1 on h201 at the OMN-18087 t6-carry head completes the image build past the first-party audit (not exit 10) and prepr_teardown_slot.sh --slot 1 then reads CLEAN, with the commands and exit codes in the pull request body -- falsifier: the pull request body lacks the audit line for omnibase-infra with kind branch accepted in the slot context, or the teardown verdict"
+  - id: req-omn21928-dev-lane-open-pr
+    statement: The deploy agent may build a declared open pull request's branch head on the dev lane, for that pull request's repository only, with siblings on dev-merge tags; the image records a branch build naming the pull request and its head, and every other lane keeps refusing a branch build.
+    acceptance:
+      - id: AC6
+        statement: "AC6: the dev lane accepts a declared open pull request's branch for its own repository and the build provenance names the pull request and its head sha -- falsifier: uv run pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q -k dev_lane_accepts_declared_open_pr_branch_for_its_own_repository"
+      - id: AC7
+        statement: "AC7: the stability, judge, collaborator and prod paths refuse a branch build, and a sibling branch is still refused on the dev lane with a declaration -- falsifier: uv run pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q -k 'refuse_a_branch_build or sibling_branch_still_refused'"
 evidence_requirements:
   - kind: tests
-    description: The staging, audit-context and declared-data tests of this change.
-    command: uv run --frozen pytest tests/unit/validation/test_first_party_slot_context_omn21928.py tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q --no-cov -k "first_party_slot_context or sibling_branch_still_fails_on_slot or declared_context or stages_siblings_at_dev_tag"
+    description: The staging, audit-context, declared-data and dev-lane open pull request tests of this change.
+    command: uv run --frozen pytest tests/unit/validation/test_first_party_slot_context_omn21928.py tests/unit/validation/test_first_party_open_pr_context_omn21928.py tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q --no-cov -k "first_party_slot_context or sibling_branch_still or declared_context or stages_siblings_at_dev_tag or open_pr or refuse_a_branch_build"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -82,3 +89,27 @@ dod_evidence:
           doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/validation/first_party_sources.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
           grep -q '^pre_pr_slot_context: pre-pr-slot$' <<<"$doc"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21928-ac6-dev-lane-open-pr
+    description: The dev lane's build context for a declared open pull request accepts the target at the declared head, the provenance carries first_party_declared_pr and the target stays a branch build with no dev-merge tag; the integration test stages real trees, installs real wheels and runs the audit in the default, undeclared, wrong-head and declared cases.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q --no-cov -k dev_lane_accepts_declared_open_pr_branch_for_its_own_repository
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_first_party_open_pr_build_omn21928.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21928-ac7-other-paths-refuse-a-branch
+    description: The stability, judge, collaborator and prod paths refuse a declared branch build, in the audit's lane selection and in the signed command model, and a sibling branch is refused on the dev lane even with a declaration.
+    source: manual
+    binds_ac:
+      - AC7
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q --no-cov -k "refuse_a_branch_build or sibling_branch_still_refused"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_open_pr_declaration_omn21928.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra/scripts/deploy-agent

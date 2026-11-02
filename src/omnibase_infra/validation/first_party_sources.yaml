@@ -29,6 +29,19 @@
 # staged from a branch; pre_pr_slot_context names that context for the slot
 # entrypoint (scripts/runtime_build/prepr_verify_lane.sh).
 #
+# open_pr_context (OMN-21928): the context of a deploy-agent build of a DECLARED
+# OPEN PULL REQUEST's branch. Only a lane named in open_pr_lanes may build in it;
+# every other lane (stability, judge, collaborator, prod) builds in
+# default_context and so keeps refusing a branch build. The context sets
+# requires_declared_pr, so the target is accepted only when the signed command's
+# declaration (repository, pull request number, head sha) names the target
+# repository and the exact commit that was staged; the declaration is recorded in
+# build-provenance.json as first_party_declared_pr and the target stays a branch
+# build there, never a dev merge. A branch image is not a promotion premise: the
+# workspace build stamps it stability-candidate with non-main lineage, which the
+# prod promotion gate refuses. The next merge-driven deploy builds the dev-merge
+# tag again, which returns the dev lane to main lineage.
+#
 # omnibase_compat is not a first-party package of the dev lane (OMN-21284): it is
 # being retired, it has no dev-merge tags and gets none, and until its last
 # consumer drops it the image takes it from the lock like any other dependency.
@@ -53,8 +66,13 @@ packages:
     install: build-context
 default_context: dev-lane
 pre_pr_slot_context: pre-pr-slot
+open_pr_context: dev-lane-open-pr
+open_pr_lanes: [dev]
 build_contexts:
   - name: dev-lane
     target_accepts: []
   - name: pre-pr-slot
     target_accepts: [branch]
+  - name: dev-lane-open-pr
+    target_accepts: [branch, sha]
+    requires_declared_pr: true

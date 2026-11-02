@@ -23,7 +23,10 @@ A build runs the audit in a named build context declared in the policy data
 context of a pre-PR slot also accepts the TARGET package (the one installed
 from the build context) staged from a branch, because a slot builds the
 unmerged branch under test; a vendored sibling needs a dev-merge tag in every
-context.
+context. The deploy agent's build of a declared open pull request (OMN-21928) runs
+in a context that accepts the target only when a declaration names the target
+repository and the exact commit staged; ``build_context_for_lane`` gives every
+other lane the default context.
 
 Two entry points, both usable without importing the rest of ``omnibase_infra``
 (load the file by path where the package is not installed):
@@ -90,6 +93,7 @@ class BuildContext:
 
     name: str
     target_accepts: tuple[str, ...]
+    requires_declared_pr: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,6 +103,8 @@ class FirstPartyContract:
     packages: tuple[FirstPartyPackage, ...]
     default_context: str
     pre_pr_slot_context: str
+    open_pr_context: str
+    open_pr_lanes: tuple[str, ...]
     contexts: tuple[BuildContext, ...]
 
     def context(self, name: str) -> BuildContext:
@@ -128,6 +134,7 @@ class InstalledSource:
     install_url: str = ""
     detail: str = ""
     accepted_in: str = ""
+    declared_pr: str = ""
 
     @property
     def ok(self) -> bool:
@@ -139,6 +146,33 @@ class InstalledSource:
 
 def normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+@dataclass(frozen=True)
+class DeclaredPr:
+    """The open pull request a build declares: ``<repo>#<number>@<head sha>``."""
+
+    repo: str
+    number: int
+    head_sha: str
+
+    def render(self) -> str:
+        return f"{self.repo}#{self.number}@{self.head_sha}"
+
+
+_DECLARED_PR = re.compile(r"^([a-z][a-z0-9_]*)#([1-9][0-9]*)@([0-9a-f]{40})$")
+
+
+def parse_declared_pr(text: str) -> DeclaredPr | None:
+    """The declaration ``text`` spells; ``None`` for empty text, ``ValueError`` otherwise."""
+    if not text:
+        return None
+    match = _DECLARED_PR.match(text)
+    if match is None:
+        raise ValueError(
+            f"declared pull request {text!r} is not <repo>#<number>@<40-hex head sha>"
+        )
+    return DeclaredPr(match[1], int(match[2]), match[3])
 
 
 def load_contract(path: Path = CONTRACT_PATH) -> FirstPartyContract:
@@ -157,6 +191,7 @@ def load_contract(path: Path = CONTRACT_PATH) -> FirstPartyContract:
         BuildContext(
             name=str(item["name"]),
             target_accepts=tuple(str(kind) for kind in item["target_accepts"]),
+            requires_declared_pr=bool(item.get("requires_declared_pr", False)),
         )
         for item in raw["build_contexts"]
     )
@@ -166,14 +201,25 @@ def load_contract(path: Path = CONTRACT_PATH) -> FirstPartyContract:
         packages=packages,
         default_context=str(raw["default_context"]),
         pre_pr_slot_context=str(raw["pre_pr_slot_context"]),
+        open_pr_context=str(raw["open_pr_context"]),
+        open_pr_lanes=tuple(str(lane) for lane in raw["open_pr_lanes"]),
         contexts=contexts,
     )
     names = [context.name for context in contexts]
     if len(set(names)) != len(names):
         raise ValueError(f"{path}: build_contexts repeats a name: {names}")
-    for declared in (contract.default_context, contract.pre_pr_slot_context):
+    for declared in (
+        contract.default_context,
+        contract.pre_pr_slot_context,
+        contract.open_pr_context,
+    ):
         if declared not in names:
             raise ValueError(f"{path}: context {declared!r} is not in build_contexts")
+    if not contract.context(contract.open_pr_context).requires_declared_pr:
+        raise ValueError(
+            f"{path}: open_pr_context {contract.open_pr_context!r} must set "
+            "requires_declared_pr, or any branch would build in it undeclared"
+        )
     for context in contexts:
         unsupported = set(context.target_accepts) - _TARGET_RELAXABLE_KINDS
         if unsupported:
@@ -307,12 +353,15 @@ def audit_environment(
     search_paths: Sequence[str] | None = None,
     required: Iterable[str] = (),
     context: str | None = None,
+    declared_pr: DeclaredPr | None = None,
 ) -> list[InstalledSource]:
     """One ``InstalledSource`` per first-party distribution found, plus an
     ``absent`` row for each ``required`` distribution that is not installed.
 
     ``context`` names the build context the audit runs in (the policy's
-    ``default_context`` when ``None``); an unknown name raises ``KeyError``.
+    ``default_context`` when ``None``); an unknown name raises ``KeyError``. A context
+    that sets ``requires_declared_pr`` accepts the target only when ``declared_pr``
+    names the target's repository and the exact commit that was staged.
     """
     build_context = contract.context(context or contract.default_context)
     dists: dict[str, importlib.metadata.Distribution] = {}
@@ -347,9 +396,82 @@ def audit_environment(
             and not source.ok
             and source.kind in build_context.target_accepts
         ):
-            source = replace(source, accepted_in=build_context.name)
+            source = _accept_target(source, build_context, declared_pr)
         found.append(source)
     return found
+
+
+def _accept_target(
+    source: InstalledSource,
+    build_context: BuildContext,
+    declared_pr: DeclaredPr | None,
+) -> InstalledSource:
+    """``source`` accepted in ``build_context``, or unchanged where a declaration is required and absent."""
+    if not build_context.requires_declared_pr:
+        return replace(source, accepted_in=build_context.name)
+    if declared_pr is None:
+        return replace(
+            source,
+            detail=f"{source.detail}; the {build_context.name} build context "
+            "needs a declared open pull request and none was given",
+        )
+    if declared_pr.repo != source.repo or declared_pr.head_sha != source.commit:
+        return replace(
+            source,
+            detail=f"{source.detail}; the declared pull request "
+            f"{declared_pr.render()} does not name {source.repo} at "
+            f"{source.commit[:12] or '-'}",
+        )
+    return replace(
+        source, accepted_in=build_context.name, declared_pr=declared_pr.render()
+    )
+
+
+def build_context_for_lane(
+    lane: str,
+    declared_pr: str = "",
+    *,
+    contract_path: Path = CONTRACT_PATH,
+) -> tuple[str, str]:
+    """(build context, declaration) the audit of a ``lane`` build runs with.
+
+    A lane without a declaration, and every lane the policy does not name in
+    ``open_pr_lanes``, gets the default context. A declaration on a lane outside
+    ``open_pr_lanes`` is refused with ``ValueError``: the stability, judge,
+    collaborator and prod paths never build a branch.
+    """
+    contract = load_contract(contract_path)
+    declaration = parse_declared_pr(declared_pr)
+    if declaration is None:
+        return contract.default_context, ""
+    if lane not in contract.open_pr_lanes:
+        raise ValueError(
+            f"lane {lane!r} cannot build a declared open pull request "
+            f"{declaration.render()}; only {sorted(contract.open_pr_lanes)} can"
+        )
+    return contract.open_pr_context, declaration.render()
+
+
+def audit_build_args(
+    lane: str, declared_pr: str = "", *, contract_path: Path = CONTRACT_PATH
+) -> list[str]:
+    """The build arguments that name a ``lane`` build's audit context.
+
+    Empty for a build that declares no open pull request, so its command and its
+    audit (the default context) are unchanged. A declaration on a lane the policy
+    does not name in ``open_pr_lanes`` is refused with ``ValueError``.
+    """
+    context, declared = build_context_for_lane(
+        lane, declared_pr, contract_path=contract_path
+    )
+    if not declared:
+        return []
+    return [
+        "--build-arg",
+        f"FIRST_PARTY_BUILD_CONTEXT={context}",
+        "--build-arg",
+        f"FIRST_PARTY_DECLARED_PR={declared}",
+    ]
 
 
 def violations(sources: Iterable[InstalledSource]) -> list[InstalledSource]:
@@ -361,6 +483,8 @@ def describe(source: InstalledSource) -> str:
     line = f"{source.distribution}: {source.kind} ({where}) {source.detail}".rstrip()
     if source.accepted_in:
         line += f" [accepted in the {source.accepted_in} build context]"
+    if source.declared_pr:
+        line += f" [declared open pull request {source.declared_pr}]"
     return line
 
 
@@ -493,6 +617,7 @@ def run_audit(
     search_paths: Sequence[str] | None = None,
     contract_path: Path = CONTRACT_PATH,
     context: str | None = None,
+    declared_pr: str = "",
 ) -> int:
     """Audit the installed environment; print one line per package; 1 on a finding.
 
@@ -501,7 +626,9 @@ def run_audit(
     is audited with ``staging_record=/app/build-provenance.json``. With
     ``record_into`` the classification is written into that build-provenance.json.
     ``context`` is the build context the audit runs in; ``None`` or an empty
-    string is the policy's default (dev-lane) context.
+    string is the policy's default (dev-lane) context. ``declared_pr`` is the
+    ``<repo>#<number>@<head sha>`` text of the open pull request the build declares;
+    a context that requires one accepts the target only at that exact head.
     """
     contract = load_contract(contract_path)
     staging = json.loads(staging_record.read_text(encoding="utf-8"))
@@ -513,11 +640,15 @@ def run_audit(
         search_paths=search_paths,
         required=require,
         context=context_name,
+        declared_pr=parse_declared_pr(declared_pr),
     )
     if record_into is not None:
         manifest = json.loads(record_into.read_text(encoding="utf-8"))
         manifest["first_party_sources"] = [source.to_dict() for source in sources]
         manifest["first_party_build_context"] = context_name
+        accepted_pr = next((s.declared_pr for s in sources if s.declared_pr), "")
+        if accepted_pr:
+            manifest["first_party_declared_pr"] = accepted_pr
         manifest.setdefault("per_repo_vcs_provenance", {})["build_context"] = (
             staging.get("build_context", {})
         )
