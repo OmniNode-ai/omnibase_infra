@@ -102,6 +102,21 @@ def test_no_route_names_dev_200_while_no_runner_carries_host_200() -> None:
     assert "dev-200" not in routed
 
 
+def test_an_instance_no_route_names_is_declared_unavailable() -> None:
+    """OMN-21909: an instance with no route and no default role runs nothing.
+
+    The table must say so, so a route added by mistake resolves to the default
+    instance instead of waiting on an agent that no longer runs.
+    """
+    table = load_table()
+    routed = {str(row.get("instance")) for row in table.get("routes") or ()}
+    idle = set(_instances()) - routed - {str(table["default_instance"])}
+    # Positive control: the table holds such an instance today.
+    assert idle
+    for name in idle:
+        assert _instances()[name].get("available") is False, name
+
+
 def test_compose_dev_200_declares_a_settle_budget_inside_its_bounds() -> None:
     """The verify job derives its ceiling from the routed lane's declaration.
 

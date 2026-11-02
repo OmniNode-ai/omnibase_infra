@@ -1,5 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# no-migration: OMN-21536 moves the handler's cache behind a collaborator; this test reads
+# it through that collaborator and changes no table or column.
 
 # Copyright (c) 2026 OmniNode Team
 """Unit tests for HandlerTopicCatalogPostgres.
@@ -148,11 +150,11 @@ class TestHandlerTopicCatalogPostgresLifecycle:
 
         # Populate the cache
         await handler.build_catalog(correlation_id=uuid4())
-        assert len(handler._cache) > 0
+        assert len(handler._cache.entries) > 0
 
         # Shutdown clears it
         await handler.shutdown()
-        assert handler._cache == {}
+        assert handler._cache.entries == {}
 
 
 # ---------------------------------------------------------------------------
