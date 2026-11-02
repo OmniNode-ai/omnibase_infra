@@ -32,6 +32,11 @@ requirements:
         statement: "AC6: the dev lane accepts a declared open pull request's branch for its own repository and the build provenance names the pull request and its head sha -- falsifier: uv run pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q -k dev_lane_accepts_declared_open_pr_branch_for_its_own_repository"
       - id: AC7
         statement: "AC7: the stability, judge, collaborator and prod paths refuse a branch build, and a sibling branch is still refused on the dev lane with a declaration -- falsifier: uv run pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q -k 'refuse_a_branch_build or sibling_branch_still_refused'"
+  - id: req-omn21928-lock-holder
+    statement: The forward-migration runner checks that its advisory-lock holder session is still ours at each file it applies, stops at the step where the lock is lost and names the step, and does not count another database's same-named session as a second holder.
+    acceptance:
+      - id: AC8
+        statement: "AC8: a slot bring-up whose forward-migration lock holder is killed mid-run stops at the next file with the lost-lock cause, and a same-named holder of another database is not a second holder -- falsifier: uv run pytest tests/integration/migrations/test_forward_migration_lock_holder_omn21928.py -q"
 evidence_requirements:
   - kind: tests
     description: The staging, audit-context, declared-data and dev-lane open pull request tests of this change.
@@ -109,4 +114,19 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21928-ac8-forward-migration-lock-holder
+    description: Hosted-runner deploy probe reads the runner from GitHub at the checked-out commit and requires the lost-lock failure that names the step, so a checkout without the change fails it. The real-PostgreSQL proof is the test file, run on a lab host and cited in the pull request body.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/run-forward-migrations.sh?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'advisory lock .* was lost before' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_forward_migration_advisory_lock.py -q -n 0 --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
