@@ -25,9 +25,8 @@ MODEL_CONFIG_BASELINE = "config/hardcoded_model_config_baseline.yaml"
 
 
 def _line_key(line: str) -> str:
-    return hashlib.sha1(  # nosec B324 - baseline keying, not security
-        line.strip().encode("utf-8")
-    ).hexdigest()
+    digest = hashlib.sha1(line.strip().encode("utf-8"), usedforsecurity=False)
+    return digest.hexdigest()
 
 
 def _entries(baseline: Path) -> list[dict[str, Any]]:
