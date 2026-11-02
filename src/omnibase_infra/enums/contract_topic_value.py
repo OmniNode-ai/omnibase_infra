@@ -49,6 +49,8 @@ def _contract_topics(source: str) -> frozenset[str]:
     """
     try:
         if Path(source).is_absolute():
+            if Path(source).suffix != ".yaml":
+                raise ValueError(f"{source}: contract source must be a .yaml file")
             text = Path(source).read_text(encoding="utf-8")
         else:
             data = pkgutil.get_data("omnibase_infra", source)

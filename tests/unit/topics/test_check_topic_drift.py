@@ -63,6 +63,19 @@ class TestExtractSuffixValues:
         with pytest.raises(TypeError, match="SUFFIX_NODE_REGISTRATION"):
             _extract_suffix_values(py_file)
 
+    def test_unresolvable_enum_member_fails_loudly(self, tmp_path: Path) -> None:
+        """A SUFFIX_* naming a missing generated enum member is an error."""
+        py_file = tmp_path / "suffixes.py"
+        py_file.write_text(
+            textwrap.dedent("""\
+                from omnibase_infra.enums.generated import EnumPlatformTopic
+
+                SUFFIX_MISSING: str = EnumPlatformTopic.NO_SUCH_MEMBER_V1.value
+            """)
+        )
+        with pytest.raises(AttributeError, match="NO_SUCH_MEMBER_V1"):
+            _extract_suffix_values(py_file)
+
     def test_resolves_generated_enum_member_values(self, tmp_path: Path) -> None:
         """SUFFIX_* = EnumProducerTopic.MEMBER.value resolves to the enum's string."""
         py_file = tmp_path / "suffixes.py"
@@ -87,13 +100,19 @@ class TestExtractSuffixValues:
             / "topics"
             / "platform_topic_suffixes.py"
         )
-        defined = {
-            node.target.id
-            for node in ast.walk(ast.parse(constants_file.read_text()))
-            if isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.target.id.startswith("SUFFIX_")
-        }
+        defined: set[str] = set()
+        for node in ast.walk(ast.parse(constants_file.read_text())):
+            if isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+            elif isinstance(node, ast.Assign):
+                targets = node.targets
+            else:
+                continue
+            defined.update(
+                target.id
+                for target in targets
+                if isinstance(target, ast.Name) and target.id.startswith("SUFFIX_")
+            )
         extracted = _extract_suffix_values(constants_file)
         assert defined - set(extracted) == set()
         assert extracted["SUFFIX_NODE_REGISTRATION"] == (
