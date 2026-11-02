@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 NODES = REPO_ROOT / "docker" / "migrations" / "forward" / "nodes"
 TENANT_A = "00000000-0000-0000-0000-000000000001"
 TENANT_B = "00000000-0000-0000-0000-000000000002"
+TENANT_C = "00000000-0000-0000-0000-000000000003"
 TABLES = ("local_identity", "local_alerts")
 
 
@@ -91,9 +92,7 @@ def _insert_identity(
     conn: psycopg2.extensions.connection,
     *,
     tenant_id: str = TENANT_A,
-    subject: str = "",
 ) -> None:
-    del subject  # the identity is one row per tenant
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO public.local_identity (tenant_id, minted_at, event_id) "
@@ -129,6 +128,13 @@ def _insert_alert(
 INSERTS: dict[str, Callable[..., None]] = {
     "local_identity": _insert_identity,
     "local_alerts": _insert_alert,
+}
+#: A second row for another tenant: local_alerts needs a distinct subject so the
+#: refusal under test is the RLS check and not the primary key; local_identity
+#: is one row per tenant and takes no subject.
+OTHER_ROW: dict[str, dict[str, str]] = {
+    "local_identity": {},
+    "local_alerts": {"subject": "compose/valkey"},
 }
 KEYS = {
     "local_identity": ["tenant_id"],
@@ -264,13 +270,81 @@ def test_writer_can_insert_only_its_tenant_and_cannot_read_another(
         with pytest.raises(
             psycopg2.errors.InsufficientPrivilege, match="row-level security policy"
         ):
-            INSERTS[table](writer, tenant_id=TENANT_B, subject="compose/valkey")
+            INSERTS[table](writer, tenant_id=TENANT_B, **OTHER_ROW[table])
 
         with writer.cursor() as cur:
             cur.execute(_select("tenant_id", table))
             assert cur.fetchall() == [(TENANT_A,)]
     finally:
         writer.close()
+
+
+@pytest.mark.parametrize("table", TABLES)
+def test_writer_cannot_update_another_tenant_or_move_a_row_out_of_its_own(
+    table: str,
+    applied: psycopg2.extensions.connection,
+    ephemeral_postgres: EphemeralPostgres,
+) -> None:
+    """UPDATE is granted, so both RLS clauses must hold for it too.
+
+    USING hides another tenant's row from an UPDATE (zero rows touched), and
+    WITH CHECK refuses an UPDATE that rewrites the writer's own row to another
+    tenant.
+    """
+    member = f"{table}_update_member"
+    INSERTS[table](applied, tenant_id=TENANT_B)
+    with applied.cursor() as cur:
+        cur.execute(
+            sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOBYPASSRLS INHERIT").format(
+                sql.Identifier(member)
+            )
+        )
+        cur.execute(
+            sql.SQL("GRANT tenant_projection_writer TO {}").format(
+                sql.Identifier(member)
+            )
+        )
+    applied.commit()
+
+    writer = ephemeral_postgres.connect(user=member)
+    try:
+        writer.autocommit = True
+        with writer.cursor() as cur:
+            cur.execute("SET ROLE tenant_projection_writer")
+            cur.execute("SELECT set_config('app.tenant_id', %s, false)", (TENANT_A,))
+        INSERTS[table](writer)
+
+        with writer.cursor() as cur:
+            cur.execute(
+                sql.SQL(
+                    "UPDATE {} SET tenant_id = tenant_id WHERE tenant_id = %s"
+                ).format(sql.Identifier("public", table)),
+                (TENANT_B,),
+            )
+            assert cur.rowcount == 0
+
+        with (
+            writer.cursor() as cur,
+            pytest.raises(
+                psycopg2.errors.InsufficientPrivilege, match="row-level security policy"
+            ),
+        ):
+            cur.execute(
+                sql.SQL("UPDATE {} SET tenant_id = %s WHERE tenant_id = %s").format(
+                    sql.Identifier("public", table)
+                ),
+                (TENANT_C, TENANT_A),
+            )
+    finally:
+        writer.close()
+
+    with applied.cursor() as cur:
+        cur.execute(
+            sql.SQL("SELECT tenant_id FROM {} ORDER BY tenant_id").format(
+                sql.Identifier("public", table)
+            )
+        )
+        assert cur.fetchall() == [(TENANT_A,), (TENANT_B,)]
 
 
 @pytest.mark.parametrize("table", TABLES)

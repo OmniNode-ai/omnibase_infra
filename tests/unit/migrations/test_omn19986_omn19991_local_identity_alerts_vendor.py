@@ -66,23 +66,26 @@ _VENDORED = [
     ),
 ]
 
+_DIGESTS = [(node, name, sha256) for node, name, sha256, _ in _VENDORED]
+_CLASSES = [(node, name, klass) for node, name, _, klass in _VENDORED]
+
 _TABLES = [
     ("local_identity", "node_projection_local_identity"),
     ("local_alerts", "node_projection_local_alerts"),
 ]
 
 
-@pytest.mark.parametrize(("node", "name", "sha256", "klass"), _VENDORED)
+@pytest.mark.parametrize(("node", "name", "sha256"), _DIGESTS)
 def test_vendored_bytes_match_the_pinned_omnimarket_source(
-    node: str, name: str, sha256: str, klass: str
+    node: str, name: str, sha256: str
 ) -> None:
     artifact = _FORWARD / "nodes" / node / name
     assert hashlib.sha256(artifact.read_bytes()).hexdigest() == sha256
 
 
-@pytest.mark.parametrize(("node", "name", "sha256", "klass"), _VENDORED)
+@pytest.mark.parametrize(("node", "name", "sha256"), _DIGESTS)
 def test_the_vendor_has_exactly_one_checksum_bound_ledger_row(
-    node: str, name: str, sha256: str, klass: str
+    node: str, name: str, sha256: str
 ) -> None:
     artifact = f"nodes/{node}/{name}"
     rows = [
@@ -104,9 +107,9 @@ def test_the_vendor_has_exactly_one_checksum_bound_ledger_row(
     ]
 
 
-@pytest.mark.parametrize(("node", "name", "sha256", "klass"), _VENDORED)
+@pytest.mark.parametrize(("node", "name", "klass"), _CLASSES)
 def test_the_vendor_is_declared_with_its_class(
-    node: str, name: str, sha256: str, klass: str
+    node: str, name: str, klass: str
 ) -> None:
     classes = yaml.safe_load((_ROOT / "config/migration_classes.yaml").read_text())
     assert classes["migrations"][f"forward/nodes/{node}/{name}"] == klass
