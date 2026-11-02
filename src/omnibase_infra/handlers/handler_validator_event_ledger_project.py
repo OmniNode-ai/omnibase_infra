@@ -16,8 +16,16 @@ and the Kafka position that makes a replay of the same message a duplicate.
 No duration is recorded: neither wire model carries one (``ModelValidatorRunEvent``
 has a single ``emitted_at``, ``ModelValidatorTriggeredEvent`` has no timestamp).
 
-An event that matches neither wire model is kept, with fallback ``run_id`` and
-``repo_id``, so the ledger never drops what the broker delivered.
+The wire model is chosen by the topic the message arrived on, never by trial
+parsing: a payload that does not validate against its own topic's model is kept,
+with fallback ``run_id`` and ``repo_id``, so the ledger never drops what the broker
+delivered.
+
+``occurred_at`` has one source per event type, because the wire models differ: a
+run event carries ``emitted_at`` (a naive value is read as UTC); a triggered event
+carries no timestamp, so the message header time is used. A message without a
+Kafka partition and offset is refused, because those two numbers, with the topic,
+are the row's idempotency key and a default would merge distinct messages.
 
 No topic is named here: the node contract declares the subscriptions and routes
 each topic to this handler, and the topic arrives on the consumed message.
@@ -40,7 +48,13 @@ from omnibase_core.models.validation.model_validator_run_event import (
 from omnibase_core.models.validation.model_validator_triggered_event import (
     ModelValidatorTriggeredEvent,
 )
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models.intent_target_uris import load_intent_target_uris
 from omnibase_infra.models.validation_ledger import (
@@ -68,6 +82,7 @@ class HandlerValidatorEventLedgerProject:
         self, request: ModelEventMessage
     ) -> ModelHandlerOutput[ModelIntent]:
         message = self._coerce(request)
+        partition, offset = self._position(message)
         run_id, repo_id, occurred_at = self._row_identity(message)
         payload = ModelPayloadValidationLedgerAppend(
             run_id=run_id,
@@ -76,8 +91,8 @@ class HandlerValidatorEventLedgerProject:
             event_version=self._version(message.topic),
             occurred_at=occurred_at,
             kafka_topic=message.topic,
-            kafka_partition=message.partition if message.partition is not None else 0,
-            kafka_offset=self._offset(message.offset),
+            kafka_partition=partition,
+            kafka_offset=offset,
             envelope_bytes=base64.b64encode(message.value).decode("ascii"),
             envelope_hash=hashlib.sha256(message.value).hexdigest(),
             correlation_id=message.headers.correlation_id,
@@ -104,17 +119,22 @@ class HandlerValidatorEventLedgerProject:
     def _row_identity(message: ModelEventMessage) -> tuple[UUID, str, datetime]:
         """Return (run_id, repo_id, occurred_at) for the event on ``message``."""
         header_time = message.headers.timestamp
+        fallback = (
+            uuid5(NAMESPACE_URL, hashlib.sha256(message.value).hexdigest()),
+            _UNKNOWN_REPOSITORY,
+            header_time,
+        )
         try:
-            triggered = ModelValidatorTriggeredEvent.model_validate_json(message.value)
-        except ValidationError:
-            pass
-        else:
-            return triggered.correlation_id, triggered.repository, header_time
-        try:
+            if message.topic == EnumPlatformTopic.EVT_VALIDATOR_TRIGGERED_V1.value:
+                triggered = ModelValidatorTriggeredEvent.model_validate_json(
+                    message.value
+                )
+                return triggered.correlation_id, triggered.repository, header_time
+            if message.topic != EnumPlatformTopic.EVT_VALIDATOR_RUN_V1.value:
+                return fallback
             run = ModelValidatorRunEvent.model_validate_json(message.value)
         except ValidationError:
-            digest = hashlib.sha256(message.value).hexdigest()
-            return uuid5(NAMESPACE_URL, digest), _UNKNOWN_REPOSITORY, header_time
+            return fallback
         try:
             run_id = UUID(run.report_ref)
         except ValueError:
@@ -137,11 +157,21 @@ class HandlerValidatorEventLedgerProject:
         return ModelEventMessage.model_validate(payload)
 
     @staticmethod
-    def _offset(offset: str | None) -> int:
+    def _position(message: ModelEventMessage) -> tuple[int, int]:
+        """Return (partition, offset); refuse a message that has no broker position."""
         try:
-            return int(offset) if offset is not None else 0
-        except ValueError:
-            return 0
+            if message.partition is None or message.offset is None:
+                raise ValueError("partition and offset are both required")
+            return message.partition, int(message.offset)
+        except ValueError as exc:
+            raise ProtocolConfigurationError(
+                "validator event has no usable Kafka partition and offset, which key its ledger row",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=message.headers.correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="project_validator_event",
+                ),
+            ) from exc
 
     @staticmethod
     def _version(topic: str) -> str:

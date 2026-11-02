@@ -26,6 +26,7 @@ import yaml
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumResponseStatus
 from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.handlers.handler_db import HandlerDb
@@ -228,3 +229,43 @@ async def test_unparseable_event_is_kept_with_fallback_fields() -> None:
     assert row[1] == "unknown"
     assert row[8] == raw
     assert base64.b64decode(base64.b64encode(raw)) == raw
+
+
+@pytest.mark.asyncio
+async def test_payload_is_read_by_its_topic_model_only() -> None:
+    """A run payload on the triggered topic is kept as fallback, never projected as a run."""
+    db = _ConflictModellingDb()
+    await _persist(
+        [
+            _message(TRIGGERED_TOPIC, _run_event(), offset=1),
+            _message(RUN_TOPIC, _triggered(), offset=2),
+        ],
+        db,
+    )
+    rows = sorted(db.rows.values(), key=lambda row: row[7])
+    assert [row[1] for row in rows] == ["unknown", "unknown"]
+    assert [row[0] == _RUN_ID for row in rows] == [False, False]
+
+
+@pytest.mark.asyncio
+async def test_run_event_with_naive_emitted_at_is_read_as_utc() -> None:
+    db = _ConflictModellingDb()
+    body = {**_run_event(), "emitted_at": "2026-11-02T11:59:00"}
+    await _persist([_message(RUN_TOPIC, body, offset=4)], db)
+    (row,) = db.rows.values()
+    assert row[4] == datetime(2026, 11, 2, 11, 59, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("offset", "partition"),
+    [(None, 0), ("5", None), ("not-a-number", 0)],
+)
+async def test_message_without_a_broker_position_is_refused(
+    offset: str | None, partition: int | None
+) -> None:
+    message = _message(TRIGGERED_TOPIC, _triggered(), offset=0).model_copy(
+        update={"offset": offset, "partition": partition}
+    )
+    with pytest.raises(ProtocolConfigurationError):
+        await HandlerValidatorEventLedgerProject().handle(message)
