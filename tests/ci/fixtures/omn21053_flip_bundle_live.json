@@ -3,7 +3,7 @@
     "source": "omnibase_core scripts/ci/verify_flip_bundle.py run in the omnibase_infra worktree against base_ref ae5fca1228a3 for each flipped node (OMN-21053)",
     "captured_utc": "2026-10-14T06:04:07Z",
     "source_file": "scripts/ci/canonical_handler_shape_baseline.py",
-    "source_sha256": "767a1043cbcae50c5237eb9e72e9bee53fa862c982bb6c460184ad0359c0f98b"
+    "source_sha256": "bbc461f4e75f9fc83b5836c53643cd58643430c1c8b6ba340ae1363a958b87d5"
   },
   "base_ref": "ae5fca1228a3",
   "runs": [
