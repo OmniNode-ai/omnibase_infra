@@ -308,7 +308,12 @@ def test_compose_refusal_ignores_a_dotenv_beside_the_compose_file(
     )
     done = _compose_config({}, compose=copy)
     assert done.returncode != 0, done.stdout
-    assert "required variable FACTORY_FLOOR_BIND_ADDR is missing a value" in done.stderr
+    # Compose reports whichever missing value it interpolates first, so any of the three proves the .env
+    # beside the compose file did not satisfy the refusal.
+    assert any(
+        f"required variable {name} is missing a value" in done.stderr
+        for name in REQUIRED
+    ), done.stderr
 
 
 def test_compose_renders_one_published_port_on_the_given_address() -> None:
