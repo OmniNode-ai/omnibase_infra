@@ -30,32 +30,10 @@ class RegistryInfraRegistryApiEffect:
     properly configured ``NodeRegistryApiEffect`` instances.
 
     Example:
-        >>> from omnibase_core.models.container import ModelONEXContainer
         >>> from omnibase_infra.nodes.node_registry_api_effect.registry import (
         ...     RegistryInfraRegistryApiEffect,
         ... )
-        >>> container = ModelONEXContainer()
-        >>> effect = RegistryInfraRegistryApiEffect.create(container)
     """
-
-    @staticmethod
-    def create(container: ModelONEXContainer) -> NodeRegistryApiEffect:
-        """Create a ``NodeRegistryApiEffect`` instance via container injection.
-
-        Args:
-            container: ONEX dependency injection container.  Optional
-                protocols (``ProjectionReaderRegistration``,
-                ``ProjectionReaderContract``)
-                may be registered to enable full backend connectivity.
-
-        Returns:
-            Configured ``NodeRegistryApiEffect`` instance.
-        """
-        from omnibase_infra.nodes.node_registry_api_effect.node import (
-            NodeRegistryApiEffect,
-        )
-
-        return NodeRegistryApiEffect(container)
 
     @staticmethod
     def get_required_protocols() -> list[str]:
