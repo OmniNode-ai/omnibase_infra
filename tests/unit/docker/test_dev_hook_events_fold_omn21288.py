@@ -4,8 +4,8 @@
 
 ``node_projection_claude_hook_events`` had its own container beside
 ``omninode-runtime``, and the main runtime excluded the node so the consumer
-group had one owner. The fold removes both halves together: no compose file
-declares the writer, no compose file sets the exclusion, and the deploy handler
+group had one owner. The fold removes both active owners together: the dev stack keeps the writer
+inert, main no longer excludes the node, and the deploy handler
 retires a previous revision's writer container before main is recreated.
 
 The consumer group id carries ``KAFKA_INSTANCE_ID``; the retired writer set the
@@ -15,10 +15,17 @@ same ``runtime-main`` value as main, so main resumes from its committed offsets.
 from __future__ import annotations
 
 import re
+import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from tests.scripts.test_deploy_runtime_folded_services_omn21288 import (
+    DEV_PROJECT,
+    _function,
+    _harness,
+)
 from tests.unit.docker.test_dev_tenant_projection_fold_omn21288 import (
     dev_stack_services,
 )
@@ -78,14 +85,81 @@ def test_no_deploy_set_starts_or_builds_the_writer() -> None:
     assert WRITER not in events
 
 
-def test_deploy_handler_retires_the_previous_writer_before_main_restarts() -> None:
-    deploy = DEPLOY.read_text(encoding="utf-8")
-    assert _array(deploy, "RETIRED_NODE_CARRIER_SERVICES") == [WRITER]
-    retire = deploy[deploy.index("OMN-21288: retire folded roles") :]
-    loop = retire[: retire.index("local cmd=(")]
-    assert '"${RETIRED_NODE_CARRIER_SERVICES[@]}"' in loop
-    assert "docker stop" in loop
-    assert "docker rm" in loop
-    assert "-v" not in re.findall(r"docker rm[^\n]*", loop)[0].split()
-    # Retirement precedes the compose up that recreates main.
-    assert retire.index("docker stop") < retire.index("up -d --no-deps")
+@pytest.mark.parametrize("scope", ["omninode-runtime", "runtime-worker", ""])
+@pytest.mark.parametrize("containers", ["writer-a\nwriter-b\n", ""])
+@pytest.mark.parametrize("failure", ["", "ps", "stop", "rm"])
+def test_deploy_handler_retires_the_previous_writer_before_main_restarts(
+    tmp_path: Path, scope: str, containers: str, failure: str
+) -> None:
+    """Execute the handler against old labelled containers absent from compose."""
+    calls = tmp_path / "calls"
+    calls.touch()
+    retired = _array(DEPLOY.read_text(), "RETIRED_NODE_CARRIER_SERVICES")
+    assert retired == [WRITER]
+    harness = (
+        _harness("", DEV_PROJECT)
+        + "\nreadonly RETIRED_NODE_CARRIER_SERVICES=("
+        + " ".join(shlex.quote(service) for service in retired)
+        + ")\n"
+        + _function("restart_services")
+        + f"\nCALLS={shlex.quote(str(calls))}"
+        + f"\nWRITER={shlex.quote(WRITER)}"
+        + f"\nCONTAINERS={shlex.quote(containers)}"
+        + f"\nFAILURE={shlex.quote(failure)}"
+        + f"\nRUNTIME_BUILD_SERVICES=({shlex.quote(scope) if scope else ''})"
+        + "\nRUNTIME_BUILD_SERVICES_OVERRIDE=scoped"
+        + r"""
+log_step() { :; }
+log_info() { :; }
+log_cmd() { :; }
+resolve_compose_file_args() { local -n out="$1"; out=(); }
+exclude_cloud_database_services() { :; }
+COMPOSE_PROFILE=runtime
+RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=60
+docker() {
+    printf '%s\n' "$*" >> "$CALLS"
+    [[ "$1" != "$FAILURE" ]] || return 9
+    case "$1" in
+        ps)
+            [[ "$*" == "ps -aq --filter label=com.docker.compose.project=$PROJECT --filter label=com.docker.compose.service=$WRITER" ]] || return 8
+            printf '%s' "$CONTAINERS" ;;
+        stop | rm) ;;
+        *) return 8 ;;
+    esac
+}
+compose_up_bounded() { shift; printf 'UP %s\n' "$*" >> "$CALLS"; }
+restart_services /tmp "$PROJECT"
+"""
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness], capture_output=True, text=True, check=False
+    )
+    lines = calls.read_text().splitlines()
+    if scope != "omninode-runtime":
+        assert result.returncode == 0, result.stderr
+        assert not any(line.startswith(("ps ", "stop ", "rm ")) for line in lines)
+        assert len(lines) == bool(scope)
+        if scope:
+            assert lines[0].endswith(scope)
+        return
+    assert lines[0] == (
+        f"ps -aq --filter label=com.docker.compose.project={DEV_PROJECT} "
+        f"--filter label=com.docker.compose.service={WRITER}"
+    )
+    failed = failure == "ps" or (bool(containers) and failure in {"stop", "rm"})
+    assert (result.returncode != 0) == failed, result.stderr
+    if failed:
+        assert not any(line.startswith("UP ") for line in lines)
+        if failure == "stop":
+            assert not any(line.startswith("rm ") for line in lines)
+        return
+    assert lines[-1].startswith("UP docker compose ")
+    assert lines[-1].endswith("omninode-runtime")
+    if containers:
+        assert lines[1:3] == [
+            "stop --time 30 writer-a writer-b",
+            "rm writer-a writer-b",
+        ]
+    else:
+        assert len(lines) == 2
+    assert WRITER not in lines[-1]
