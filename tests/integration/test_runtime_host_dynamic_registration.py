@@ -24,6 +24,11 @@ from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 pytestmark = [pytest.mark.integration]
 
 
+@pytest.fixture(autouse=True)
+def _test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONEX_ENVIRONMENT", "test")
+
+
 VALID_CONTRACT_YAML = """\
 name: node_dynamic_test
 handler_id: proto.dynamic_test
@@ -144,7 +149,13 @@ def _make_process(
     process._node_identity.node_name = "test-node"
     process._node_identity.version = "v1"
     process._dynamic_contract_unsubscribe = None
-    process._config = None
+    process._config = {
+        "contract_hotload": {
+            "enabled": True,
+            "mode": "on_demand",
+            "allowed_environments": ["test"],
+        }
+    }
     process.materialized: list[tuple[str, object, UUID]] = []
     process._get_environment_from_config = MagicMock(return_value="test")
 
