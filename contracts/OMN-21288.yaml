@@ -189,7 +189,7 @@ dod_evidence:
     binds_ac: [AC2401]
   - id: dod-omn21288-t24-dev-lane-numbers
     description: >-
-      The census run on the dev lane (read-only against the lab host, 2026-11-02T00:30Z), recorded as its table rows, reads 16 runtime-image containers with 4 on onex-runtime, 6 on python -m omnimarket handler_*, 4 on python -m consumer, 1 uvicorn and 1 omnimarket-projection-api; the plan's 17 counted one more (the lane-mirror forwarder), absent from the matched set of this run. The live command and its result are in the PR body's Lab line.
+      The census run on the dev lane (read-only on the lab host that runs it, 2026-11-02T01:43Z), recorded as its table rows, reads 17 runtime-image containers in compose project omnibase-infra with 4 on onex-runtime, 6 on python -m omnimarket handler_*, 4 on python -m consumer, 2 uvicorn and 1 omnimarket-projection-api. The plan's baseline counted a lane-mirror forwarder inside its 17; the census finds the two onex-gateway-forwarder containers in their own compose projects (omninode-gateway, omninode-lane-mirror). The live command and its result are in the PR body's Lab line.
     source: manual
     checks:
       - check_type: test_passes

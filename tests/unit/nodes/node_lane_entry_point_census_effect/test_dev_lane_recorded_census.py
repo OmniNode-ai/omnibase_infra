@@ -27,9 +27,11 @@ def _containers() -> list[dict[str, str]]:
     return json.loads(RECORDED.read_text(encoding="utf-8"))["containers"]
 
 
-def test_dev_lane_runs_sixteen_runtime_image_containers_four_on_onex_runtime() -> None:
+def test_dev_lane_runs_seventeen_runtime_image_containers_four_on_onex_runtime() -> (
+    None
+):
     containers = _containers()
-    assert len(containers) == 16
+    assert len(containers) == 17
     assert sum(c["family"] == "onex-runtime" for c in containers) == 4
     assert {c["container"] for c in containers if c["verdict"] == "allowed"} == {
         c["container"] for c in containers if c["family"] == "onex-runtime"
@@ -53,6 +55,18 @@ def test_other_entry_points_match_the_plan_table() -> None:
     )
     assert kinds == {
         "python -m ...consumer": 4,
-        "uvicorn": 1,
+        "uvicorn": 2,
         "omnimarket-projection-api": 1,
     }
+
+
+def test_the_gateway_forwarders_run_outside_the_dev_project_and_read_remove() -> None:
+    relays = json.loads(RECORDED.read_text(encoding="utf-8"))["relays"]
+    assert {r["container"] for r in relays} == {
+        "omninode-gateway-forwarder",
+        "omninode-lane-mirror-capacity-a",
+    }
+    assert {(r["family"], r["verdict"]) for r in relays} == {
+        ("onex-gateway-forwarder", "remove")
+    }
+    assert not {r["project"] for r in relays} & {"omnibase-infra"}

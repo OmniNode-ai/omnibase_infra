@@ -1,11 +1,17 @@
 {
-  "recorded": "2026-11-02T00:30Z",
-  "source": "census run on the dev lane, read-only, compose project omnibase-infra; table rows of the run",
+  "recorded": "2026-11-02T01:43Z",
+  "source": "census run from branch omn-21288-lane-entry-point-census at cac5f5d83 on lab host h201 against its local docker daemon, read-only; table rows of the run",
+  "compose_project": "omnibase-infra",
   "containers": [
     {
       "container": "omnibase-infra-runtime-worker-1",
       "family": "onex-runtime",
       "verdict": "allowed"
+    },
+    {
+      "container": "omnibase-intelligence-api",
+      "family": "uvicorn",
+      "verdict": "remove"
     },
     {
       "container": "omnimarket-projection-api",
@@ -81,6 +87,20 @@
       "container": "omninode-skill-lifecycle-consumer",
       "family": "python -m ...consumer",
       "verdict": "remove"
+    }
+  ],
+  "relays": [
+    {
+      "container": "omninode-gateway-forwarder",
+      "family": "onex-gateway-forwarder",
+      "verdict": "remove",
+      "project": "omninode-gateway"
+    },
+    {
+      "container": "omninode-lane-mirror-capacity-a",
+      "family": "onex-gateway-forwarder",
+      "verdict": "remove",
+      "project": "omninode-lane-mirror"
     }
   ]
 }
