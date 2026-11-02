@@ -9,7 +9,6 @@ take that model as its one argument and to answer with the response model.
 
 from __future__ import annotations
 
-import ast
 import importlib
 import inspect
 from pathlib import Path
@@ -42,25 +41,17 @@ def _routed_handlers() -> list[tuple[str, dict[str, str], dict[str, str]]]:
     ]
 
 
-def _imported_from(module_name: str, name: str) -> str | None:
-    source = Path(str(importlib.import_module(module_name).__file__)).read_text(
-        encoding="utf-8"
-    )
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.ImportFrom) and node.module is not None:
-            if any(alias.name == name for alias in node.names):
-                return node.module
-    return None
+_ROUTED_HANDLERS = _routed_handlers()
 
 
 def test_the_contract_routes_nine_handlers() -> None:
-    assert len(_routed_handlers()) == 9
+    assert len(_ROUTED_HANDLERS) == 9
 
 
 @pytest.mark.parametrize(
     ("operation", "handler", "input_model"),
-    _routed_handlers(),
-    ids=[row[0] for row in _routed_handlers()],
+    _ROUTED_HANDLERS,
+    ids=[row[0] for row in _ROUTED_HANDLERS],
 )
 def test_routed_handler_takes_its_contract_input_model(
     operation: str,
@@ -78,18 +69,9 @@ def test_routed_handler_takes_its_contract_input_model(
 
     params = list(inspect.signature(handler_cls.handle).parameters)
     assert params == ["self", "request"], f"{handler_name}.handle takes {params}"
-    # Resolve the annotations the way the runtime does, so a string annotation, a
-    # qualified name and a ``from __future__ import annotations`` module all agree;
-    # the handler's own import of the model then pins the module identity.
-    hints = get_type_hints(
-        handler_cls.handle,
-        localns={
-            model_name: model_cls,
-            "ModelRegistryApiResponse": ModelRegistryApiResponse,
-        },
-    )
+    # Resolve the annotations from the handler module's own globals, with no
+    # namespace override: a stale or shadowed model name in the handler fails here
+    # (NameError) or resolves to a different class and fails the identity check.
+    hints = get_type_hints(handler_cls.handle)
     assert hints["request"] is model_cls
     assert hints["return"] is ModelRegistryApiResponse
-    source_module = _imported_from(handler_module, model_name)
-    assert source_module is not None
-    assert getattr(importlib.import_module(source_module), model_name) is model_cls
