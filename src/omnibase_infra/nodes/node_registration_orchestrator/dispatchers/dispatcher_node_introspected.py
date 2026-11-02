@@ -330,7 +330,11 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # NOTE: The "wrong topic" routing bug (OMN-4880) has been fixed — output_events are
             # now routed per-event-type via DispatchResultApplier.topic_router.
             if (
-                (self._settings or ModelRegistrationSettings.from_contract()).auto_ack
+                (
+                    self._settings.auto_ack
+                    if self._settings is not None
+                    else ModelRegistrationSettings.auto_ack_from_contract()
+                )
                 and self._event_bus is not None
                 and any(
                     isinstance(e, ModelNodeRegistrationAccepted) for e in output_events

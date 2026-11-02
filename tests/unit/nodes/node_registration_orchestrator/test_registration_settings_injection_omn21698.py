@@ -24,6 +24,7 @@ import pytest
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.registration.events.model_node_registration_accepted import (
     ModelNodeRegistrationAccepted,
@@ -127,6 +128,23 @@ async def test_uninjected_dispatcher_resolves_the_contract_declaration(
     dispatcher, publish = _dispatcher(None)
     await dispatcher.handle(_envelope())
     publish.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auto_ack", ["true", "false"])
+@pytest.mark.parametrize("interval", ["", "invalid"])
+async def test_auto_ack_dispatch_does_not_parse_unrelated_liveness_setting(
+    monkeypatch: pytest.MonkeyPatch, auto_ack: str, interval: str
+) -> None:
+    monkeypatch.setenv(ENV_AUTO_ACK, auto_ack)
+    monkeypatch.setenv(ENV_INTERVAL, interval)
+    dispatcher, publish = _dispatcher(None)
+
+    result = await dispatcher.handle(_envelope())
+
+    assert result.status == EnumDispatchStatus.SUCCESS
+    assert publish.await_count == (1 if auto_ack == "true" else 0)
 
 
 @pytest.mark.unit

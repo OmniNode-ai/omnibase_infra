@@ -78,6 +78,20 @@ class ModelRegistrationSettings(BaseModel):
     liveness_interval_seconds: int = Field(default=DEFAULT_LIVENESS_INTERVAL_SECONDS)
 
     @classmethod
+    def auto_ack_from_contract(cls) -> bool:
+        """Resolve only the auto-ACK switch at call time.
+
+        Introspection dispatch does not consume the liveness interval. Keep its
+        switch independent so an invalid interval cannot fail that dispatch.
+        """
+        from omnibase_infra.runtime.overlay.contract_env_ref import (
+            expand_contract_env_refs,
+        )
+
+        auto_ack, _ = _declared_descriptor()
+        return expand_contract_env_refs(auto_ack).lower() == "true"
+
+    @classmethod
     def from_contract(cls) -> ModelRegistrationSettings:
         """Resolve the settings the contract declares, at call time.
 
@@ -89,7 +103,7 @@ class ModelRegistrationSettings(BaseModel):
             expand_contract_env_refs,
         )
 
-        auto_ack, interval = _declared_descriptor()
+        _, interval = _declared_descriptor()
         resolved_interval = expand_contract_env_refs(interval)
         try:
             liveness_interval_seconds = int(resolved_interval)
@@ -104,7 +118,7 @@ class ModelRegistrationSettings(BaseModel):
                 ),
             ) from e
         return cls(
-            auto_ack=expand_contract_env_refs(auto_ack).lower() == "true",
+            auto_ack=cls.auto_ack_from_contract(),
             liveness_interval_seconds=liveness_interval_seconds,
         )
 
