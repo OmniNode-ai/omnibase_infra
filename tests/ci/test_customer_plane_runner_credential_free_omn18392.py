@@ -34,6 +34,8 @@ from typing import Any, cast
 import pytest
 import yaml
 
+from tests.ci._runner_compose_text import RUNNER_HOME, read_runner_compose
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +64,7 @@ CONTROL_SERVICE = "omninode-runner-1"
 # still does NOT carry the general-pool label, which is asserted separately
 # below precisely so an edit to this string cannot silently relax it.
 EXPECTED_LABELS = "self-hosted,omnibase-customer-plane,linux,x64,arch-amd64"
-LAB_CREDENTIALS_TARGET = "/home/runner/.lab-credentials"
+LAB_CREDENTIALS_TARGET = RUNNER_HOME + "/.lab-credentials"
 DOCKER_SOCKET = "/var/run/docker.sock"
 
 # The eight variables the probe's "Confirm this runner holds no platform
@@ -82,7 +84,7 @@ PROBE_FORBIDDEN_ENV = (
 
 
 def _compose(path: Path = COMPOSE_FILE) -> dict[str, Any]:
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    loaded = yaml.safe_load(read_runner_compose(path))
     assert isinstance(loaded, dict)
     return loaded
 
