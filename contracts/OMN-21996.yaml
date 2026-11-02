@@ -52,3 +52,11 @@ dod_evidence:
         check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/delegation/model_delegate_phase_timed_bus.py?ref=omn-21996-delegate-timed-bus-ungrouped' --jq .content | base64 -d | grep -q 'class DelegatePhaseTimedUngroupedBus'"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: ["AC3"]
+  - id: dod-omn21996-ac2-runtime-factory-integration
+    description: >-
+      The delegate runtime's own bus factory wraps a bus with the group-less read as DelegatePhaseTimedUngroupedBus and the run-scoped subscribe takes the group-less read.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_timed_runtime_ungrouped_omn21996.py -q --no-cov
+    binds_ac: ["AC2"]
