@@ -19,6 +19,7 @@ or depend on this module.
 
 from __future__ import annotations
 
+import os
 from hashlib import sha256
 
 from pydantic import BaseModel
@@ -30,7 +31,10 @@ from omnibase_core.models.delegation.wire import (
 from omnibase_infra.cli.model_delegate_attempt import ModelDelegateAttempt
 from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
 
-_TASK_CLASS_TIMEOUT_CEILING_SECONDS = 240
+#: The ceiling the fixture declares unless a test sets this variable, which is
+#: how a test stands in for a site overlay that raises the class's ceiling.
+CEILING_ENV_VAR = "FIXTURE_CORRELATED_NOOP_CEILING_SECONDS"
+_DEFAULT_TASK_CLASS_TIMEOUT_CEILING_SECONDS = 240
 _TERMINAL_DELIVERY_MARGIN_SECONDS = 60
 _FIXTURE_RESPONSE_CONTRACT = b"correlated-noop fixture response contract: plain_text"
 _FIXTURE_CONTRACT_SHA256 = sha256(_FIXTURE_RESPONSE_CONTRACT).hexdigest()
@@ -55,8 +59,13 @@ class HandlerCorrelatedNoop:
     def handle(
         self, request: ModelCorrelatedNoopRequest
     ) -> ModelDelegateSkillFixtureTerminal:
+        ceiling_seconds = int(
+            os.environ.get(
+                CEILING_ENV_VAR, str(_DEFAULT_TASK_CLASS_TIMEOUT_CEILING_SECONDS)
+            )
+        )
         execution_timeout_seconds = (
-            _TASK_CLASS_TIMEOUT_CEILING_SECONDS
+            ceiling_seconds
             if request.requested_timeout_seconds is None
             else request.requested_timeout_seconds
         )
@@ -76,7 +85,7 @@ class HandlerCorrelatedNoop:
             status="completed",
             budget_evidence=ModelDelegationBudgetEvidence(
                 requested_timeout_seconds=request.requested_timeout_seconds,
-                task_class_timeout_ceiling_seconds=_TASK_CLASS_TIMEOUT_CEILING_SECONDS,
+                task_class_timeout_ceiling_seconds=ceiling_seconds,
                 execution_timeout_seconds=execution_timeout_seconds,
                 terminal_delivery_margin_seconds=_TERMINAL_DELIVERY_MARGIN_SECONDS,
             ),

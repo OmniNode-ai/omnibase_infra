@@ -281,3 +281,24 @@ def test_model_config_baseline_names_its_zero_date() -> None:
     """The non-empty model-config baseline names the date it reaches zero."""
     header = (ROOT / MODEL_CONFIG_BASELINE).read_text("utf-8").split("entries:")[0]
     assert re.search(r"Target zero: \d{4}-\d{2}-\d{2}\b", header), header
+
+
+LOCAL_HOME_PATH = re.compile(r"/(?:home|Users)/[A-Za-z0-9_.-]+/")
+
+
+def test_lab_proof_plan_tests_name_no_home_directory() -> None:
+    """The lab proof plan tests hold no home-directory literal.
+
+    check-local-paths-compute judges every file a change touches, so a path of
+    this shape in a file any change edits turns the Core Validators job red on
+    each pull request whose range includes that edit.
+    """
+    offenders = [
+        f"{path.relative_to(ROOT)}:{number}"
+        for path in sorted(
+            (ROOT / "tests/unit/nodes/node_lab_proof_plan_compute").glob("*.py")
+        )
+        for number, line in enumerate(path.read_text("utf-8").splitlines(), start=1)
+        if LOCAL_HOME_PATH.search(line + "/")
+    ]
+    assert offenders == []
