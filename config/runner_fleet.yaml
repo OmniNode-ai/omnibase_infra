@@ -181,6 +181,28 @@ hosts:
     runner_name_prefix: hp051-ci-runner
     expected_count: 4
     classes: [action-multiarch]
+  # h053 -- HP ProLiant Gen9 (hp-gen9), Xeon E5-2680 v4 Broadwell, 56 threads,
+  # 125 GiB, amd64 WITH AVX2 (OMN-22111; RULING 2026-11-02T13:33:32Z under
+  # OMN-17232). The general `omnibase-ci` runners leave the primary host here:
+  # unlike h051 this CPU has avx2, fma, bmi1, bmi2, movbe and f16c and no
+  # AVX-512 (/proc/cpuinfo read 2026-11-02), so it takes any job the primary
+  # host's runners take. Measured on the host the same day: pedalboard 0.9.22
+  # (cp312), the wheel that dies with SIGILL on h051, imports and runs, and the
+  # 119 unit tests of the private repository that imports it pass. So the pool
+  # carries `omnibase-ci` beside the opt-in `omnibase-ci-multiarch`, no
+  # workflow changes, and the router's `action` floor counts it. Eight runners
+  # at 6 GiB are 48 GiB of the 66 GiB available there with the lab-work units
+  # running, inside the pool's own slice and git mirror
+  # (docker/runners/systemd/pools/hp053-ci-runner/). The primary host's share
+  # is lowered AFTER one passing job per repository is read from this pool
+  # (`deploy-runners.sh --retire-surplus`), not by this declaration. The host
+  # is an ssh alias, h053, that each operator's ssh config resolves. Deployed
+  # with `deploy-runners.sh --host=h053`.
+  - host: h053
+    arch: amd64
+    runner_name_prefix: hp053-ci-runner
+    expected_count: 8
+    classes: [action, action-multiarch]
   # .200 -- Mac Studio M2 Ultra, arm64, always-on (OMN-19657, operator approval
   # ledger 2026-09-25T18:27:30Z, answering the open question at ledger
   # 2026-09-25T10:29:02Z). One verify runner, labelled host-200, for the
@@ -284,7 +306,7 @@ git_mirror:
   bind_address: 172.18.0.1
   docker_network: docker_default
   port: 9418
-  mirror_root: /home/jonah/.omnibase/runners/git-mirror
+  mirror_root: ~/.omnibase/runners/git-mirror
   refresh_interval_seconds: 120
   # One upstream fetch per repo per interval, for the whole fleet. Enforced
   # twice: systemd Type=oneshot will not overlap runs, and the refresh script
@@ -325,9 +347,9 @@ git_mirror:
 # download -- manufacturing the exact stampede C2 exists to prevent. Every fleet
 # recreate must be bracketed by docker/runners/toolcache-seed.sh.
 tool_cache:
-  path: /home/runner/actions-runner/_work/_tool
+  path: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/_tool
   durable: false
-  snapshot_root: /home/jonah/.omnibase/runners/toolcache-seed
+  snapshot_root: ~/.omnibase/runners/toolcache-seed
   seed_script: docker/runners/toolcache-seed.sh
   recreate_procedure: knowledge_base:runbooks/c2-git-mirror-egress-rollout.md
 # OMN-15736 — local caching DNS resolver (unbound) endpoint. Scaling
