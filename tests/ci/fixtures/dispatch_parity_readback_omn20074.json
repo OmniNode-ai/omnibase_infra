@@ -26,10 +26,10 @@
   "retired": {
     "captured_utc": "2026-11-01T07:46:35.315093+00:00",
     "corpus": {
-      "contracts_discovered": 160,
+      "contracts_discovered": 161,
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 139
+        "omnibase_infra": 140
       },
       "discovery_errors": 0,
       "distinct_subscribe_topics": 96,
@@ -38,6 +38,6 @@
       "type_scoped_dispatchers": 76,
       "probe_count": 1097
     },
-    "snapshot_sha256": "612db89f2d418609014b27849d8a351a549074b5b9aca4fa8758e0377b9a3541"
+    "snapshot_sha256": "b6e1474bc3f4be4610a89d1c055d6941031f11ec628d69375bb03cd83f8b27b2"
   }
 }
