@@ -651,6 +651,11 @@ requirements:
     acceptance:
       - id: AC190
         statement: "omninode_runtime holds SELECT, INSERT and UPDATE on delegation_lab_jobs and delegation_lab_job_outbox on every supported profile, and node_llm_delegation_call_effect 0000 is vendored byte-identical"
+  - id: req-omn17427-model-baseline-no-stale
+    statement: The hardcoded model config baseline carries no entry whose line is absent from the file it names at the current tree.
+    acceptance:
+      - id: AC191
+        statement: 'AC191: every entry in config/hardcoded_model_config_baseline.yaml matches sha1(line.strip()) of a line of its file, and an entry for a line the file does not hold is detected -- falsifier: uv run --frozen pytest tests/ci/test_model_config_baseline_no_stale_omn17427.py -n 0 -q --no-cov; fails at the merge base, where 37 stale entries existed'
   - id: req-omn17427-c29-failed-receipt-layer
     statement: The C29 probe grades a failed delegation receipt from the layer that carries its key and attempts, and names a provider throttle as the first reason while the verdict stays FAIL.
     acceptance:
@@ -963,6 +968,9 @@ evidence_requirements:
   - kind: tests
     description: The first-party source audit against throwaway environments, each violation planted, and the contract, the clone manifest, the deploy agent and the Dockerfile agreeing on the same package set.
     command: uv run pytest tests/scripts/test_first_party_sources_omn17427.py -q
+  - kind: tests
+    description: Every baseline entry is matched against sha1 of the stripped lines of the file it names; a planted absent line and a missing file are each reported. At the merge base 37 entries are stale.
+    command: uv run --frozen pytest tests/ci/test_model_config_baseline_no_stale_omn17427.py -n 0 -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -3392,6 +3400,14 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q --no-cov
         cwd: .
     binds_ac: [AC17427547801, AC17427547802, AC17427547803]
+  - id: dod-omn17427-model-baseline-no-stale
+    description: Reads config/hardcoded_model_config_baseline.yaml and the files it names at the current tree and hashes each stripped line; fails at the merge base, where 37 entries named lines no longer present.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_model_config_baseline_no_stale_omn17427.py -n 0 -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC191]
   - id: dod-omn17427-c29-throttle-test-isolation
     description: The throttle-retry test fixture swaps the probe's own time reference, so a sleep from another thread is not recorded; the new test fails against the former global patch.
     source: manual
