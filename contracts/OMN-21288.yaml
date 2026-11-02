@@ -49,6 +49,18 @@ requirements:
       - id: AC7
         statement: |-
           AC7: a planted factory error, a non-ASGI factory result, an unimportable factory, a malformed declaration, an overlapping or runtime-shadowing prefix each raise at boot with nothing mounted, and a failing lifespan makes every request answer 503 -- falsifier: the failing-mount tests in tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py fail at the merge base and pass on the branch
+  - id: req-omn21288-ac8-resolver-mount
+    statement: "One-runtime plan T16: the contract resolver's ASGI factory and path prefix are declared by a runtime contract, so the runtime can serve the resolver on its own HTTP port."
+    acceptance:
+      - id: AC10
+        statement: |-
+          AC10: node_contract_resolver_bridge's contract.yaml declares http_mount (factory omnibase_infra.services.contract_resolver.main:create_mounted_app, path_prefix /api/nodes); loaded through contract discovery and served by the runtime's aiohttp server, GET /api/nodes/health and POST /api/nodes/contract.resolve answer over a real port -- falsifier: tests/integration/handlers/http_mount/test_contract_resolver_mount_omn21288.py fails at the merge base and passes on the branch
+  - id: req-omn21288-ac9-mount-before-wiring
+    statement: "One-runtime plan T16: the mount serves before consumer wiring completes, and a failing factory fails boot instead of serving partly."
+    acceptance:
+      - id: AC9
+        statement: |-
+          AC9: bootstrap() starts the health server and attaches the contracts' http_mount blocks before wire_from_manifest, so a request issued while a planted slow wiring step is still running is answered, and a planted factory error fails boot with exit code 1 before wiring is reached -- falsifier: tests/unit/runtime/test_service_kernel_early_http_mount_omn21288.py fails at the merge base and passes on the branch
   - id: req-omn21288-receipt-mode-ungrouped
     statement: "The receipt-mode caller joins no consumer group, so a hook firing on every command leaves no Empty group on the broker."
     acceptance:
@@ -218,6 +230,24 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mount_live_port_omn21288.py -k planted_factory_error -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC7]
+  - id: dod-omn21288-ac8-resolver-mount-served
+    description: >-
+      Run the resolver mount tests: the bridge contract.yaml is loaded through discover_contracts_from_paths, its http_mount block is built by the runtime's aiohttp server, and real GET /api/nodes/health and POST /api/nodes/contract.resolve requests on the bound port are answered by the resolver (a bad body answers 422). The tests assert the http_mount declaration the merge-base contract lacks, so the run fails there. No container is created or restarted by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_contract_resolver_mount_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC10]
+  - id: dod-omn21288-ac9-mount-before-wiring
+    description: >-
+      Drive the real bootstrap() with a real ServiceHealth on a free port and a wiring engine that blocks: while it is blocked, the bridge mount answers its health and a resolution (and /health still answers 503 because the runtime is not attached); with a planted factory error bootstrap returns 1 and the wiring engine is never called, and nothing listens on the port. At the merge base the health server starts after wiring, so the request is refused and the wiring engine is reached; the run fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_service_kernel_early_http_mount_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC9]
   - id: dod-omn21288-receipt-mode-ungrouped
     description: "The receipt-mode handler subscribes through subscribe_ungrouped and the in-memory bus shows no named group from it. 14 of the 33 tests in the file fail at the merge base, whose handler joins a receipt-mode-client.<hex12> group."
     source: manual
@@ -264,4 +294,4 @@ context:
   remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
   worker_integration: "The independently owned worker fold must preserve both overlays and union main.folded_profiles to [workers, tenant-projection]; then remove runtime-worker from SEPARATE_SERVICES as well. This branch never changes the worker branch."
-  http_mount_remaining: "T15 omnibase_infra half only. Remaining: (1) the intelligence-api http_mount declaration lives in omniintelligence's node contract, not in this repository; (2) the kernel awaits no mount today: service_kernel.py carries unfixed hardcoded-model-config findings and cannot be edited, so a lifespan failure is a 503 on every route rather than a nonzero exit; (3) retire the intelligence-api container as a deploy step after the mount answers on the runtime's port."
+  http_mount_remaining: "T16 omnibase_infra half only. The resolver's compose service is NOT retired here. The runtime serves the resolver on its own HTTP port (ONEX_HTTP_PORT, 8085 on the dev lane) under /api/nodes, while the compose service keeps answering on 8091. Remaining: (1) the live early-serve request on a proving lane is owed until the prepr-slot hold is released (slot proof owed); (2) point the dashboard proxy at the runtime port and retire the omninode-contract-resolver service in a later deploy step; (3) the intelligence-api http_mount declaration (omniintelligence) and its container retirement."

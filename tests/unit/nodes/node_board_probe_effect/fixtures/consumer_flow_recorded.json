@@ -3,12 +3,12 @@
     "samples": [
       [
         {
-          "consumer_group": "local.omnibase_infra.node_gateway_link_health_projection_compute.consume.1.0.0",
-          "topic": "onex.evt.omnibase-infra.gateway-heartbeat.v1",
+          "consumer_group": "local.omnibase_infra.node_ledger_projection_compute.consume.1.6.1",
+          "topic": "onex.evt.platform.node-heartbeat.v1",
           "window_start": "2026-09-26T19:40:26.257435+00:00",
-          "messages_in": 2,
+          "messages_in": 4,
           "messages_out": 0,
-          "flow_state": "STALLED"
+          "flow_state": "CONSUMING"
         },
         {
           "consumer_group": "local.omnimarket.projection_consumer_flow.consume.1.0.1",
@@ -20,7 +20,7 @@
         },
         {
           "consumer_group": "local.omnimarket.other.consume.1.0.0",
-          "topic": "onex.evt.x.v1",
+          "topic": "onex.evt.omnimarket.projection-consumer-flow-applied.v1",
           "window_start": "2026-09-26T19:40:26.257435+00:00",
           "messages_in": 0,
           "messages_out": 0,
@@ -29,12 +29,12 @@
       ],
       [
         {
-          "consumer_group": "local.omnibase_infra.node_gateway_link_health_projection_compute.consume.1.0.0",
-          "topic": "onex.evt.omnibase-infra.gateway-heartbeat.v1",
+          "consumer_group": "local.omnibase_infra.node_ledger_projection_compute.consume.1.6.1",
+          "topic": "onex.evt.platform.node-heartbeat.v1",
           "window_start": "2026-09-26T19:41:26.257435+00:00",
-          "messages_in": 2,
+          "messages_in": 4,
           "messages_out": 0,
-          "flow_state": "STALLED"
+          "flow_state": "CONSUMING"
         },
         {
           "consumer_group": "local.omnimarket.projection_consumer_flow.consume.1.0.1",
@@ -46,7 +46,7 @@
         },
         {
           "consumer_group": "local.omnimarket.other.consume.1.0.0",
-          "topic": "onex.evt.x.v1",
+          "topic": "onex.evt.omnimarket.projection-consumer-flow-applied.v1",
           "window_start": "2026-09-26T19:41:26.257435+00:00",
           "messages_in": 0,
           "messages_out": 0,
@@ -55,12 +55,12 @@
       ],
       [
         {
-          "consumer_group": "local.omnibase_infra.node_gateway_link_health_projection_compute.consume.1.0.0",
-          "topic": "onex.evt.omnibase-infra.gateway-heartbeat.v1",
+          "consumer_group": "local.omnibase_infra.node_ledger_projection_compute.consume.1.6.1",
+          "topic": "onex.evt.platform.node-heartbeat.v1",
           "window_start": "2026-09-26T19:42:26.257435+00:00",
-          "messages_in": 2,
+          "messages_in": 4,
           "messages_out": 0,
-          "flow_state": "STALLED"
+          "flow_state": "CONSUMING"
         },
         {
           "consumer_group": "local.omnimarket.projection_consumer_flow.consume.1.0.1",
@@ -72,7 +72,7 @@
         },
         {
           "consumer_group": "local.omnimarket.other.consume.1.0.0",
-          "topic": "onex.evt.x.v1",
+          "topic": "onex.evt.omnimarket.projection-consumer-flow-applied.v1",
           "window_start": "2026-09-26T19:42:26.257435+00:00",
           "messages_in": 0,
           "messages_out": 0,
@@ -81,24 +81,24 @@
       ],
       [
         {
-          "consumer_group": "local.omnibase_infra.node_gateway_link_health_projection_compute.consume.1.0.0",
-          "topic": "onex.evt.omnibase-infra.gateway-heartbeat.v1",
-          "window_start": "2026-09-26T19:43:26.257435+00:00",
-          "messages_in": 2,
-          "messages_out": 0,
-          "flow_state": "STALLED"
-        },
-        {
-          "consumer_group": "local.omnimarket.projection_consumer_flow.consume.1.0.1",
+          "consumer_group": "local.omnibase_infra.node_ledger_projection_compute.consume.1.6.1",
           "topic": "onex.evt.platform.node-heartbeat.v1",
           "window_start": "2026-09-26T19:43:26.257435+00:00",
+          "messages_in": 4,
+          "messages_out": 0,
+          "flow_state": "CONSUMING"
+        },
+        {
+          "consumer_group": "local.omnimarket.projection_consumer_flow.consume.1.0.1",
+          "topic": "onex.evt.platform.node-heartbeat.v1",
+          "window_start": "2026-09-26T19:43:26.257435+00:00",
           "messages_in": 565,
           "messages_out": 565,
           "flow_state": "FLOWING"
         },
         {
           "consumer_group": "local.omnimarket.other.consume.1.0.0",
-          "topic": "onex.evt.x.v1",
+          "topic": "onex.evt.omnimarket.projection-consumer-flow-applied.v1",
           "window_start": "2026-09-26T19:43:26.257435+00:00",
           "messages_in": 0,
           "messages_out": 0,
