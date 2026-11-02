@@ -979,9 +979,10 @@ def active_dev_instance() -> str:
 
 
 def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
-    return load_dev_boot_guard().folded_dev_services(
+    services: set[str] = load_dev_boot_guard().folded_dev_services(
         _load_runtime_policy_env(), lane_folded_profiles(lane)
     )
+    return services
 
 
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
