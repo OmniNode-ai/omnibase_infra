@@ -47,6 +47,7 @@ LOCK_ID = 100010
 # window in which the run is "inside file 001" is opened and closed by the test
 # itself rather than by a sleep that a slow host could outlast.
 GATE_ID = 2192801
+GATE_TAG = "omn21928-gate"
 
 
 def _scalar(
@@ -76,8 +77,6 @@ def _start_runner(
     pg16: Pg16Cluster, migrations_dir: Path, databases: tuple[str, str, str], out: Path
 ) -> subprocess.Popen[str]:
     service_database, application_database, cloud_database = databases
-    for database in databases:
-        pg16.create_database(database)
     with out.open("w", encoding="utf-8") as sink:
         return subprocess.Popen(
             ["sh", str(RUNNER)],
@@ -105,10 +104,19 @@ def _start_runner(
         )
 
 
+def _create_databases(pg16: Pg16Cluster, databases: tuple[str, str, str]) -> None:
+    for database in databases:
+        pg16.create_database(database)
+
+
 def _hold_gate(
-    pg16: Pg16Cluster, reaper: list[subprocess.Popen[Any]]
+    pg16: Pg16Cluster, reaper: list[subprocess.Popen[Any]], database: str
 ) -> subprocess.Popen[Any]:
-    """A session that holds the gate key until it is killed; returns once it is granted."""
+    """A session that holds the gate key until it is killed; returns once it is granted.
+
+    Advisory locks are per database, so the gate must be taken in the database
+    the runner applies its first file to.
+    """
     gate = subprocess.Popen(
         start_new_session=True,
         args=[
@@ -122,11 +130,11 @@ def _hold_gate(
             "-U",
             "postgres",
             "-d",
-            "postgres",
+            database,
             "-c",
             f"SELECT pg_advisory_lock({GATE_ID}), pg_sleep(600)",
         ],
-        env={**os.environ, "PGPASSWORD": ""},
+        env={**os.environ, "PGPASSWORD": "", "PGAPPNAME": GATE_TAG},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -135,9 +143,11 @@ def _hold_gate(
     while time.monotonic() < deadline:
         held = _scalar(
             pg16,
-            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted "
-            "AND classid = 0 AND objid = :'key'::oid;",
+            "SELECT count(*) FROM pg_locks l JOIN pg_database d ON d.oid = l.database "
+            "WHERE l.locktype = 'advisory' AND l.granted AND l.classid = 0 "
+            "AND l.objid = :'key'::oid AND d.datname = :'db';",
             key=str(GATE_ID),
+            db=database,
         )
         if held == "1":
             return gate
@@ -145,8 +155,15 @@ def _hold_gate(
     raise AssertionError("the gate session never held its advisory lock")
 
 
-def _release_gate(gate: subprocess.Popen[Any]) -> None:
-    os.killpg(gate.pid, signal.SIGKILL)
+def _release_gate(pg16: Pg16Cluster, gate: subprocess.Popen[Any]) -> None:
+    """Free the gate on the server: a backend inside pg_sleep does not notice its client leaving."""
+    ended = _scalar(
+        pg16,
+        "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
+        "WHERE application_name = :'tag';",
+        tag=GATE_TAG,
+    )
+    assert ended == "1", "positive control: exactly one gate session was ended"
     gate.wait(timeout=30)
 
 
@@ -195,7 +212,8 @@ def test_a_holder_killed_mid_run_stops_the_run_at_the_next_file(
 ) -> None:
     databases = ("omn21928_kill_service", "omn21928_kill_app", "omn21928_kill_cloud")
     out = tmp_path / "runner.out"
-    gate = _hold_gate(pg16, reaper)
+    _create_databases(pg16, databases)
+    gate = _hold_gate(pg16, reaper, databases[0])
     proc = _start_runner(pg16, _tree(tmp_path, gated=True), databases, out)
     reaper.append(proc)
     _wait_for(out, "apply 001_first.sql", proc)
@@ -209,7 +227,7 @@ def test_a_holder_killed_mid_run_stops_the_run_at_the_next_file(
     )
     assert killed == "1", "positive control: exactly one holder session was killed"
     # Only now does file 001 finish: the holder was gone for the whole of it.
-    _release_gate(gate)
+    _release_gate(pg16, gate)
 
     assert proc.wait(timeout=90) != 0
     text = out.read_text(encoding="utf-8")
@@ -230,6 +248,7 @@ def test_an_unharmed_run_applies_every_file_and_sets_the_sentinel(
     """Positive control for the pins around it: the same tree, nobody touches the holder."""
     databases = ("omn21928_ok_service", "omn21928_ok_app", "omn21928_ok_cloud")
     out = tmp_path / "runner.out"
+    _create_databases(pg16, databases)
     proc = _start_runner(pg16, _tree(tmp_path), databases, out)
     reaper.append(proc)
 
@@ -246,7 +265,8 @@ def test_a_same_named_lock_holder_in_another_database_is_not_a_second_holder(
     foreign_database = "omn21928_dup_foreign"
     pg16.create_database(foreign_database)
     out = tmp_path / "runner.out"
-    gate = _hold_gate(pg16, reaper)
+    _create_databases(pg16, databases)
+    gate = _hold_gate(pg16, reaper, databases[0])
     proc = _start_runner(pg16, _tree(tmp_path, gated=True), databases, out)
     reaper.append(proc)
     _wait_for(out, "apply 001_first.sql", proc)
@@ -294,7 +314,7 @@ def test_a_same_named_lock_holder_in_another_database_is_not_a_second_holder(
             break
         time.sleep(0.2)
     assert visible == "2", "positive control: the server sees two granted holders"
-    _release_gate(gate)
+    _release_gate(pg16, gate)
 
     assert proc.wait(timeout=90) == 0, out.read_text(encoding="utf-8")
     assert "Sentinel set. Migration gate will report HEALTHY." in out.read_text(
@@ -350,6 +370,7 @@ def test_a_foreign_advisory_lock_with_a_wide_key_does_not_fail_the_run(
     assert wide == "1", "positive control: the server holds one wide-key lock"
 
     out = tmp_path / "runner.out"
+    _create_databases(pg16, databases)
     proc = _start_runner(pg16, _tree(tmp_path), databases, out)
     reaper.append(proc)
 
