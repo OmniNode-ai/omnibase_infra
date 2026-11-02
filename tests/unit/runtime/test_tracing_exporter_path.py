@@ -11,12 +11,10 @@ Spans only reach Phoenix when the exporter URL carries the signal path.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 from omnibase_infra.runtime.tracing import configure_tracing
 
@@ -26,59 +24,36 @@ _BASE = "http://phoenix:6006"
 _TRACES = "http://phoenix:6006/v1/traces"
 
 
-@pytest.fixture
-def captured_exporters(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[object]]:
-    """Run ``configure_tracing`` with a real exporter and capture it, no global provider."""
-    monkeypatch.setenv("OTEL_SERVICE_NAME", "test-service")
-    monkeypatch.delenv("OTEL_TRACES_EXPORTER", raising=False)
-    exporters: list[object] = []
-
-    def _capture(exporter: object) -> object:
-        exporters.append(exporter)
-        return object()
-
-    with (
-        patch("opentelemetry.sdk.trace.export.BatchSpanProcessor", _capture),
-        patch("opentelemetry.trace.set_tracer_provider"),
-        patch("opentelemetry.sdk.trace.TracerProvider.add_span_processor"),
-    ):
-        yield exporters
-
-
-class TestSdkEndpointSemantics:
-    """The recorded probe: passing ``endpoint=`` skips the SDK's signal path."""
-
-    def test_endpoint_keyword_is_used_verbatim(self) -> None:
-        assert OTLPSpanExporter(endpoint=_BASE)._endpoint == _BASE
-
-    def test_environment_resolution_appends_traces_path(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", _BASE)
-        assert OTLPSpanExporter()._endpoint == _TRACES
-
-
 class TestConfigureTracingExporterUrl:
-    """``configure_tracing`` must target ``<endpoint>/v1/traces``."""
+    """Assert public constructor arguments and provider wiring, without SDK internals."""
 
     @pytest.mark.parametrize(
         "configured",
-        [_BASE, f"{_BASE}/", _TRACES],
-        ids=["bare", "trailing-slash", "already-traces-path"],
+        [_BASE, f"{_BASE}/", _TRACES, f"{_TRACES}/"],
+        ids=["bare", "trailing-slash", "already-traces-path", "traces-trailing-slash"],
     )
     def test_exporter_targets_traces_path(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        captured_exporters: list[object],
-        configured: str,
+        self, monkeypatch: pytest.MonkeyPatch, configured: str
     ) -> None:
         monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", configured)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "test-service")
+        monkeypatch.delenv("OTEL_TRACES_EXPORTER", raising=False)
+        with (
+            patch(
+                "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter"
+            ) as exporter,
+            patch("opentelemetry.sdk.trace.export.BatchSpanProcessor") as processor,
+            patch("opentelemetry.sdk.trace.TracerProvider") as provider,
+            patch("opentelemetry.trace.set_tracer_provider") as install,
+        ):
+            assert configure_tracing() is True
 
-        assert configure_tracing() is True
-
-        (exporter,) = captured_exporters
-        assert isinstance(exporter, OTLPSpanExporter)
-        assert exporter._endpoint == _TRACES
+        exporter.assert_called_once_with(endpoint=_TRACES)
+        processor.assert_called_once_with(exporter.return_value)
+        provider.return_value.add_span_processor.assert_called_once_with(
+            processor.return_value
+        )
+        install.assert_called_once_with(provider.return_value)
 
 
 class TestNoLanAddressInTrackedSource:

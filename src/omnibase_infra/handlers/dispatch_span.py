@@ -6,6 +6,9 @@
 message category, the success flag and the duration in milliseconds. The tracer
 is acquired inside the call, after ``configure_tracing`` has had its chance to
 install a provider; with no ``TracerProvider`` set the wrapper adds no span.
+
+This leaf helper imports OpenTelemetry and the dispatch result model only. It
+does not import runtime modules, so the runtime can use it without an import cycle.
 """
 
 from __future__ import annotations
