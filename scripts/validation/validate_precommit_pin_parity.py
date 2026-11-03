@@ -29,15 +29,10 @@ after confirming (by hand, via `git diff <old-rev> <new-rev>` in omnibase_core)
 that both sides really do reference the same validator, not two independently
 pinned tools that happen to share an upstream repo.
 
-KNOWN DRIFT (intentionally NOT yet enforced here): the `check-url-authority`
-pre-commit hook pins omnibase_core `be4f95460dcd6865264ab0713a5b1cc48b41aef9`
-while `.github/workflows/url-authority-gate.yml` pins the same
-`validator_url_authority` at `8a53a063bd28f643d08b4cbbc6dd5c7c9f6435df`. That is
-a live DRIFT-3 this gate is designed to catch, but resolving it requires bumping
-one side's core SHA (a change with its own baseline blast-radius) and is tracked
-separately (see PR body / follow-up ticket). Add the url-authority row to
-PIN_PAIRS in the SAME change that converges the two SHAs, so this gate lands
-green and then stays converged.
+KNOWN DRIFT (not yet enforced): `.github/workflows/url-authority-gate.yml` pins core
+`8a53a063...`, apart from the `check-url-authority` hook rev; add its row to PIN_PAIRS
+in the change that converges the two. A workflow with no literal pin passes when it
+reads the hook's rev from `.pre-commit-config.yaml` by hook id (one home, no drift).
 """
 
 from __future__ import annotations
@@ -85,6 +80,10 @@ def _find_ci_pins(ci_text: str) -> list[str]:
     return [m.group(1) for m in _CI_PIN_RE.finditer(ci_text)]
 
 
+def _reads_hook_rev(ci_text: str, hook_id: str) -> bool:
+    return ".pre-commit-config.yaml" in ci_text and f'"id"] == "{hook_id}"' in ci_text
+
+
 def main() -> int:
     if not CONFIG_PATH.is_file():
         print(f"ERROR: {CONFIG_PATH} not found", file=sys.stderr)
@@ -112,7 +111,10 @@ def main() -> int:
             )
             continue
 
-        ci_pins = _find_ci_pins(ci_workflow_path.read_text(encoding="utf-8"))
+        ci_text = ci_workflow_path.read_text(encoding="utf-8")
+        ci_pins = _find_ci_pins(ci_text)
+        if not ci_pins and _reads_hook_rev(ci_text, hook_id):
+            continue
         if not ci_pins:
             violations.append(
                 f"pin-parity: no CI-pinned SHA found in {ci_workflow_rel} "

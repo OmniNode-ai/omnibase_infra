@@ -44,7 +44,7 @@ dependencies = [
     # imports its public request and decision models. A resolve below this
     # floor lacks that contract-backed gate surface.
     "omnibase-core>=0.47.58,<0.48.0",
-    "omnibase-spi==0.23.11",
+    "omnibase-spi>=0.23.12,<0.24.0",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.7",
     # ============================================================================
@@ -263,14 +263,14 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-spi==0.23.11",
+    "omnibase-spi>=0.23.12,<0.24.0",
     "omnibase-compat==0.5.7",
 ]
 
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261102080237-7e087d566f24" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261103173624-74e0b0f12767" }
 
 
 [tool.ruff]
