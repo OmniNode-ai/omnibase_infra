@@ -410,7 +410,7 @@ required_validators:
     ci_workflow_keywords:
       - "aislop"
       - "ai-slop"
-      - "check_ai_slop"
+      - "runtime_ai_slop_check"
     excludes:
       allowed: ["^docs/", "^CHANGELOG\\.md$"]
       forbidden: ["^src/"]

@@ -1,0 +1,42 @@
+schema_version: 1.0.0
+ticket_id: OMN-21939
+title: omnibase_infra deletes its repository copies of core validators and consumes the core hook ids (AC1, AC2)
+summary: Deletes scripts/validation/check_exposed_identifiers.py, scripts/check_release_identity.py, scripts/validation/check_ai_slop.py and scripts/validation/validate_precommit_interpreter.py with their local hook entries, and consumes exposed-identifier-gate, check-release-identity, check-ai-slop and precommit-interpreter-resolution from the omnibase_core hook repository. CI steps run the same core runtimes. Tests that drove the deleted scripts are repointed at the core runtimes or deleted with them. scripts/ci/skip_count_ratchet.py and scripts/ci/check_integration_skips.py stay, because the core nodes do not yet carry the consumer baseline selftest and the require_each_curated_module rule.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The hook ids resolve to the core hook repository and the tests that referenced the deleted scripts pass against the core runtimes.
+    command: uv run pytest tests/ci/test_core_validator_hooks_omn21939.py tests/ci/test_exposed_identifier_gate.py tests/ci/test_incident_replay_omn17320.py tests/ci/test_precommit_interpreter_gate.py tests/ci/test_incident_replay_omn16958.py tests/scripts/test_fresh_deploy_fitness_gates.py tests/ci/test_changed_file_attribution_range_omn18058.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-core-hook-ids
+    description: The four hook ids resolve to the omnibase_core hook repository and their scripts are absent.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_core_validator_hooks_omn21939.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-repointed-tests
+    description: The tests that referenced the deleted scripts pass against the core runtimes.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_exposed_identifier_gate.py tests/ci/test_incident_replay_omn17320.py tests/ci/test_precommit_interpreter_gate.py tests/ci/test_incident_replay_omn16958.py tests/scripts/test_fresh_deploy_fitness_gates.py tests/ci/test_changed_file_attribution_range_omn18058.py tests/ci/test_incident_replay_coverage_omn15547.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-core-validators
+    statement: Repository copies of core validators are deleted and the core hook ids are consumed.
+    acceptance:
+      - id: AC1
+        statement: git grep for the deleted script names on the PR head returns nothing outside sha-pinned captured fixtures, and each consumed hook id in .pre-commit-config.yaml resolves to repo https://github.com/OmniNode-ai/omnibase_core.
+      - id: AC2
+        statement: No test or workflow in the repository still calls a deleted script, and the affected tests pass.
