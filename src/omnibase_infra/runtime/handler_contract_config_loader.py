@@ -552,14 +552,9 @@ def extract_handler_config(
     # Extract security configuration (basic contracts - top level)
     security = contract.get("security", {})
     if isinstance(security, dict):
-        if "trusted_namespace" in security:
-            config["trusted_namespace"] = security["trusted_namespace"]
-
-        if "audit_logging" in security:
-            config["audit_logging"] = security["audit_logging"]
-
-        if "requires_authentication" in security:
-            config["requires_authentication"] = security["requires_authentication"]
+        for name in ("trusted_namespace", "audit_logging", "requires_authentication"):
+            if name in security:
+                config[name] = security[name]
 
     # Extract metadata configuration (rich contracts)
     metadata = contract.get("metadata", {})
@@ -581,9 +576,8 @@ def extract_handler_config(
         if isinstance(metadata_security, dict):
             # Tool access configuration (for MCP)
             tool_access = metadata_security.get("tool_access", {})
-            if isinstance(tool_access, dict):
-                if "max_tools" in tool_access:
-                    config["max_tools"] = tool_access["max_tools"]
+            if isinstance(tool_access, dict) and "max_tools" in tool_access:
+                config["max_tools"] = tool_access["max_tools"]
 
     logger.debug(
         "Extracted handler config from contract",
