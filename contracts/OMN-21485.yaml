@@ -26,11 +26,19 @@ dod_evidence:
       - check_type: test_passes
         check_value: "uv run --frozen pytest tests/ci/test_proofs_target_stability_lane_omn21485.py -q -p no:cacheprovider -k proofs_target_stability_lane"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21485-ac2-c28-reads-resolved-lane
+    description: "AC2 as hosted CI can grade it: the scheduled C28 proof resolves the stability lane and reads the containers of that lane's compose project, never the dev lane's. Fails at the merge base, where C28 reads the base compose project."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ci/test_proofs_target_stability_lane_omn21485.py -q -p no:cacheprovider -k proofs_target_stability_lane_c28_reads_the_resolved_lane"
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21485-ac2-scheduled-stability-run
-    description: "AC2 is a lab observation: with the dev lane stopped, the newest scheduled C28 run grades on the stability lane. Hosted CI has no lab lane, so only the local Done gate runs it, after the stability overlay and secrets are set."
+    description: "Lab observation, not graded by hosted CI: with the dev lane stopped, the newest scheduled C28 run concludes success on the stability lane. Only the local Done gate runs it, after the stability overlay and secrets are set; binds no criterion."
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC2]
+    binds_ac: []
     checks:
       - check_type: command
         check_value: "gh run list --repo OmniNode-ai/omnibase_infra --workflow chain-canary-c28-consumer-flow.yml --event schedule --limit 1 --json conclusion --jq '.[0].conclusion' | grep -qx success"
