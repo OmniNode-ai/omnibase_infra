@@ -1,0 +1,43 @@
+schema_version: 1.0.0
+ticket_id: OMN-22356
+title: The lab device cap is seven per login, so the operator login can hold h106's machine principal (AC1)
+summary: Raises max_devices_per_login in deploy/lab/developer-principal-grants.yaml from 6 to 7 so h106 (omnidad) can be issued a lab bus principal under the operator's login, which already holds six machines. Pool hosts hold the same permissions as their peers. Data only, the same change and test shape as OMN-21864; the cap test moves to this ticket and pins seven.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The lab declaration loads through the issuer's own reader and holds a cap of seven; the issuer, driven with it and a fake broker, issues seven devices to one login, refuses the eighth and still rotates a held device at the cap.
+    command: uv run --frozen pytest tests/scripts/test_lab_device_cap_omn22356.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-lab-device-cap-seven
+    description: The lab declaration, read by the issuer's load_declaration, holds max_devices_per_login of 7, and the issuer admits a seventh device and refuses an eighth. At the merge base the cap is 6, so the seventh device is refused and the tests fail there.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_lab_device_cap_omn22356.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-lab-device-cap-seven-deploy-probe
+    description: Hosted-runner deploy probe reads the lab declaration from GitHub at the checked-out commit and requires the cap of seven, so a checkout without the change fails it.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/deploy/lab/developer-principal-grants.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q '^max_devices_per_login: 7$' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-lab-device-cap-seven
+    statement: One tailnet login can hold seven machine principals on the lab broker.
+    acceptance:
+      - id: AC1
+        statement: The lab declaration's max_devices_per_login is 7, a test reads it through the issuer's own load_declaration, and the issuer driven with it issues seven devices to one login, refuses the eighth and rotates a held device at the cap.

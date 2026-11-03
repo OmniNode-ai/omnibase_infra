@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.38.71",
+  "package_version": "0.38.77",
   "protocol_count": 25,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
@@ -879,9 +879,9 @@
         "handle": {
           "parameters": [
             {
-              "name": "envelope",
+              "name": "request",
               "kind": "POSITIONAL_OR_KEYWORD",
-              "annotation": "ModelEventEnvelope[ModelNodeHeartbeatEvent]",
+              "annotation": "ModelInjectedRequest[ModelNodeHeartbeatEvent]",
               "default": null
             }
           ],
