@@ -32,13 +32,13 @@ def _manifest() -> dict[str, Any]:
 
 
 def test_the_lab_manifest_loads_through_the_planner() -> None:
-    """The real manifest passes the planner's own load-time validation."""
+    """The real manifest passes the planner's own validation against the registry."""
     if str(_SCRIPTS) not in sys.path:
         sys.path.insert(0, str(_SCRIPTS))
-    from lane_census_plan import load_manifest, validate_hosts
+    from lane_census_plan import load_manifest, load_registry, validate_hosts
 
     manifest = load_manifest(LAB_MANIFEST)
-    validate_hosts(manifest)
+    validate_hosts(manifest, load_registry())
     assert len(manifest["lanes"]) >= 8
 
 

@@ -39,10 +39,10 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
                          `profile_gated`) is nevertheless running. The inverse
                          of container_absent: for this kind ABSENT is correct
                          and PRESENT is the drift (OMN-16803)
-  lane_on_undeclared_host — a lane is running on a host its `hosts:` list does
-                         not name (OMN-19088). Matched by declared container
-                         name, compose project label or lane label, running
-                         containers only
+  lane_on_undeclared_host — a lane is running on a host whose registry `lanes`
+                         list does not name it (OMN-19088). Matched by declared
+                         container name, compose project label or lane label,
+                         running containers only
 
 Every kind, with its one severity, is declared in ``CENSUS_FINDING_KINDS``; the
 eleven lab-sync kinds that compare the inventory with the generated desired
@@ -71,14 +71,18 @@ comparisons are not run and the plan says so (``lab_sync_evaluated: false``). A
 declared facet the collector did not supply (``Packages`` on a row,
 ``broker_config``, ``github_runners``) raises, never reads clean.
 
-Host scoping (OMN-19088): every lane declares the host(s) it runs on
-(`hosts:`, naming entries of the top-level `hosts:` registry). The census
-evaluates only the lanes declared for the host it runs on and reports the rest
-in `lanes_not_applicable`, rather than filing every service of every other
-host's lanes as absent. The host is resolved from the envelope's `host` (the
-driver passes `LANE_CENSUS_HOST`, default `hostname`) through the registry's
-aliases. A host the registry does not declare is REFUSED: evaluating every lane
-there is the defect this closes, and evaluating none would be a silent clean.
+Host scoping (OMN-19088, registry OMN-22152): the host registry (each host, the
+names it reports, the lanes it may host) is overlay data of the lane census
+node, read from the `registry:` key of the file `$LANE_CENSUS_REGISTRY` names;
+the manifest's `hosts:` block and per-lane `hosts:` lists are not read. The
+census evaluates only the lanes the registry lists for the host it runs on and
+reports the rest in `lanes_not_applicable`, rather than filing every service of
+every other host's lanes as absent. The host is resolved from the envelope's
+`host` (the driver passes `LANE_CENSUS_HOST`, default `hostname`) through the
+registry's names and aliases. A host the registry does not declare is REFUSED:
+evaluating every lane there is the defect this closes, and evaluating none would
+be a silent clean. An unset, missing or invalid registry ends the run with the
+not-configured exit.
 
 Fail-fast policy: any drift on a non-optional lane is a hard signal. There is no
 warn-only mode (gates-block policy). The driver exits non-zero on drift.
@@ -86,7 +90,7 @@ warn-only mode (gates-block policy). The driver exits non-zero on drift.
 Input envelope (stdin JSON):
   {
     "lane": "<lane name>" | null,   # null => reconcile all non-optional lanes
-    "host": "<hostname or host id>", # required; resolved via the hosts registry
+    "host": "<hostname or host id>", # required; resolved via the host registry
     "containers": [                 # `docker ps -a --format '{{json .}}'` rows,
       {"Names": "...", "State": "running"|"exited"|...,
        "Image": "repo:tag", "Labels": "k=v,k2=v2",
@@ -319,6 +323,10 @@ LANE_CENSUS_RELATIVE = Path("config") / "lab" / "lane-census"
 MANIFEST_NAME = "lane-manifest.yaml"
 SNAPSHOT_NAME = "census-snapshot.json"
 
+#: OMN-22152: the absolute path of the lane census node's overlay.yaml, whose
+#: ``registry:`` key is the host registry (not the manifest's).
+ENV_REGISTRY = "LANE_CENSUS_REGISTRY"
+
 
 class LaneCensusConfigError(RuntimeError):
     """The private lane census directory cannot be located."""
@@ -365,6 +373,37 @@ def default_manifest_path() -> Path:
 def default_snapshot_path() -> Path:
     """The committed census in the lane census dir."""
     return _required_file(SNAPSHOT_NAME)
+
+
+def _registry_model() -> Any:
+    """The registry model, loaded by path: this script runs without the package."""
+    name = "model_lane_census_registry"
+    if name not in sys.modules:
+        root = Path(__file__).resolve().parents[1] / "src" / "omnibase_infra"
+        spec = importlib.util.spec_from_file_location(
+            name, root / "models" / "lane_census" / f"{name}.py"
+        )
+        assert spec is not None and spec.loader is not None
+        sys.modules[name] = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sys.modules[name])
+    return sys.modules[name]
+
+
+def load_registry(path: Path | None = None) -> Any:
+    """The host registry, from the file ``$LANE_CENSUS_REGISTRY`` names (OMN-22152)."""
+    registry_file = path or os.environ.get(ENV_REGISTRY, "").strip()
+    try:
+        if not registry_file:
+            raise ValueError(f"{ENV_REGISTRY} is unset")
+        data = yaml.safe_load(Path(registry_file).read_text(encoding="utf-8"))
+        return _registry_model().ModelLaneCensusRegistry.from_overlay(data)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
+        raise LaneCensusConfigError(
+            f"the lane census host registry is not configured: {exc}; set "
+            f"{ENV_REGISTRY} to the absolute path of the lane census node's "
+            "overlay.yaml (the node's `registry path` verb prints it). This "
+            "repository ships no host registry"
+        ) from exc
 
 
 def load_manifest(path: Path | None = None) -> dict[str, Any]:
@@ -516,79 +555,21 @@ def _container_health_findings(
     return findings
 
 
-def _normalize_host(name: str) -> str:
-    """Lowercase short name: ``Stickybeatz.local`` and ``x.tailnet.ts.net`` -> first label."""
-    return name.strip().lower().rstrip(".").split(".", 1)[0]
+def validate_hosts(manifest: dict[str, Any], registry: Any) -> None:
+    """Refuse a registry that cannot attribute a census (``ModelLaneCensusRegistry.validate``)."""
+    try:
+        registry.validate(manifest["lanes"], _AMBIGUOUS_HOST_NAMES)
+    except ValueError as exc:
+        raise HostDeclarationError(f"{exc} ({ENV_REGISTRY})") from exc
 
 
-def validate_hosts(manifest: dict[str, Any]) -> None:
-    """Refuse a manifest whose host declarations cannot attribute a census.
-
-    Every lane must name at least one registered host, every alias must be
-    claimed by exactly one host, and no alias may be a name that identifies no
-    single host. A lane with no host would be evaluated nowhere, which is a
-    silent clean; an alias claimed twice would evaluate one host's lanes on
-    another.
-    """
-    registry = manifest.get("hosts")
-    if not isinstance(registry, dict) or not registry:
-        raise HostDeclarationError("lane manifest declares no 'hosts' registry")
-
-    claimed: dict[str, str] = {}
-    for host_id, spec in registry.items():
-        aliases = (spec or {}).get("aliases") or []
-        if not isinstance(aliases, list):
-            raise HostDeclarationError(f"host {host_id!r}: 'aliases' must be a list")
-        for name in [host_id, *aliases]:
-            key = _normalize_host(str(name))
-            if not key:
-                raise HostDeclarationError(f"host {host_id!r} declares an empty name")
-            if key in _AMBIGUOUS_HOST_NAMES:
-                raise HostDeclarationError(
-                    f"host {host_id!r} declares {name!r}, which identifies no single "
-                    "host (every Docker Desktop daemon reports 'docker-desktop')"
-                )
-            owner = claimed.get(key)
-            if owner is not None and owner != host_id:
-                raise HostDeclarationError(
-                    f"name {name!r} is claimed by both host {owner!r} and host "
-                    f"{host_id!r}; a census there cannot be attributed"
-                )
-            claimed[key] = host_id
-
-    for lane_name, lane_spec in manifest["lanes"].items():
-        hosts = lane_spec.get("hosts")
-        if not isinstance(hosts, list) or not hosts:
-            raise HostDeclarationError(
-                f"lane {lane_name!r} declares no 'hosts'; every lane must name the "
-                "host(s) it runs on"
-            )
-        for host_id in hosts:
-            if host_id not in registry:
-                raise HostDeclarationError(
-                    f"lane {lane_name!r} names host {host_id!r}, which the 'hosts' "
-                    "registry does not declare"
-                )
-
-
-def resolve_host(raw: str, manifest: dict[str, Any]) -> str:
+def resolve_host(raw: str, manifest: dict[str, Any], registry: Any) -> str:
     """Resolve a hostname, daemon name or host id to exactly one host id."""
-    validate_hosts(manifest)
-    key = _normalize_host(raw or "")
-    if not key:
-        raise HostDeclarationError(
-            "no host given: the census must be told which host it runs on "
-            "(LANE_CENSUS_HOST, default `hostname`)"
-        )
-    for host_id, spec in manifest["hosts"].items():
-        names = [host_id, *((spec or {}).get("aliases") or [])]
-        if key in {_normalize_host(str(n)) for n in names}:
-            return str(host_id)
-    raise HostDeclarationError(
-        f"host {raw!r} is declared by no entry of the lane manifest's 'hosts' "
-        "registry. Declare it (with the lanes it runs) before running the census "
-        "there; evaluating every lane on an undeclared host is the OMN-19088 defect"
-    )
+    validate_hosts(manifest, registry)
+    try:
+        return str(registry.resolve(raw))
+    except ValueError as exc:
+        raise HostDeclarationError(f"{exc} ({ENV_REGISTRY})") from exc
 
 
 def _undeclared_presence(
@@ -596,6 +577,7 @@ def _undeclared_presence(
     lane_spec: dict[str, Any],
     host_id: str,
     containers: list[tuple[str, dict[str, Any], dict[str, str]]],
+    declared_hosts: list[str],
 ) -> list[dict[str, str]]:
     """AC-2: a lane RUNNING on a host its declaration does not name is a finding.
 
@@ -622,10 +604,10 @@ def _undeclared_presence(
             lane_name,
             "lane_on_undeclared_host",
             running_here[0],
-            f"lane {lane_name!r} is declared for host(s) "
-            f"{', '.join(lane_spec.get('hosts', []))} but is running on "
-            f"{host_id!r}: {', '.join(running_here)}. Stop it here, or declare "
-            f"{host_id!r} in the lane's 'hosts' in the same change",
+            f"lane {lane_name!r} is listed by host(s) "
+            f"{', '.join(declared_hosts)} but is running on "
+            f"{host_id!r}: {', '.join(running_here)}. Stop it here, or add the "
+            f"lane to {host_id!r}'s registry `lanes` in the same change",
         )
     ]
 
@@ -1322,15 +1304,21 @@ def _labels_to_dict(labels: Any) -> dict[str, str]:
     return out
 
 
-def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
-    """Build the deterministic drift plan from the desired manifest + actual state."""
+def build_plan(
+    envelope: dict[str, Any], manifest: dict[str, Any], registry: Any = None
+) -> dict[str, Any]:
+    """Build the deterministic drift plan from the desired manifest + actual state.
+
+    ``registry`` is the host registry, else the one ``$LANE_CENSUS_REGISTRY`` names.
+    """
     validate_service_bounds(manifest)
     requested_lane = envelope.get("lane")
     containers = envelope.get("containers", [])
     networks = set(envelope.get("networks", []))
     runtime_tag = envelope.get("runtime_tag")
     default_pattern = manifest.get("default_image_tag_pattern", ".+")
-    host_id = resolve_host(str(envelope.get("host") or ""), manifest)
+    registry = registry or load_registry()
+    host_id = resolve_host(str(envelope.get("host") or ""), manifest, registry)
 
     actual_by_name: dict[str, dict[str, Any]] = {}
     lane_labels: dict[str, set[str]] = {}
@@ -1359,10 +1347,13 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
     not_applicable: list[str] = []
     skipped_optional_down: list[str] = []
     for lane_name, lane_spec in target_lanes.items():
-        if host_id not in lane_spec["hosts"]:
+        if lane_name not in registry.lanes_of(host_id):
             not_applicable.append(lane_name)
+            declared = registry.hosts_of(lane_name)
             findings.extend(
-                _undeclared_presence(lane_name, lane_spec, host_id, labelled_rows)
+                _undeclared_presence(
+                    lane_name, lane_spec, host_id, labelled_rows, declared
+                )
             )
             continue
         checked.append(lane_name)
@@ -1402,7 +1393,9 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
 def main() -> int:
     try:
         manifest = load_manifest()
-    except LaneCensusConfigError as exc:
+        registry = load_registry()
+        validate_hosts(manifest, registry)
+    except (LaneCensusConfigError, HostDeclarationError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_NOT_CONFIGURED
     envelope = json.load(sys.stdin)
@@ -1421,7 +1414,7 @@ def main() -> int:
         if documents is None:
             envelope["desired_state_error"] = reason
     try:
-        plan = build_plan(envelope, manifest)
+        plan = build_plan(envelope, manifest, registry)
     except HostDeclarationError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_HOST_UNDECLARED

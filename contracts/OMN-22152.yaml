@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-22152
+title: "The lane census collector reads the host registry from the lane census node's overlay"
+summary: >
+  The reader half of the ticket's first criterion. The census planner (scripts/lane_census_plan.py) and its driver (scripts/lane-census-check.sh) read which hosts exist, the names each reports and the lanes each may host from the registry key of the file LANE_CENSUS_REGISTRY names, and place lanes by the registry's lanes lists. The manifest's own hosts block and each lane's hosts list are no longer read. Unset, missing or invalid, the census stops with the not-configured exit before it reads the container engine. The other reader of the old block moves with it: the desired-state render input and node. The schema and read path live in the omnimarket node, the lab values in the private overlay; this pull request reads only the file the variable names and ships together with those two.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22152-registry-reader
+    statement: The collector resolves its host and places lanes from the registry named by LANE_CENSUS_REGISTRY, and refuses a registry that cannot attribute a census.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the planner resolves the host and places lanes from the registry's rows, and a manifest hosts block or per-lane hosts list that contradicts the registry changes nothing -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q -k 'not driver and not planner_exits'"
+      - id: AC2
+        statement: "AC2: an unset, missing or invalid LANE_CENSUS_REGISTRY ends the run with exit 3 naming the variable and the node's registry path verb, and the driver does so before the container engine is read -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q -k exits_3"
+      - id: AC3
+        statement: "AC3: a registry that claims an alias twice, names an ambiguous alias or an empty name, leaves a manifest lane unlisted, or lists a lane the manifest lacks is refused -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q -k 'refused or invariant'"
+      - id: AC4
+        statement: "AC4: a registry host that lists no lane runs the census with every lane not applicable, a lane running on a host that does not list it is lane_on_undeclared_host, and a host listing the lanes it had gets the byte-identical plan -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q -k 'no_lane or undeclared or byte_identical'"
+      - id: AC5
+        statement: "AC5: the desired-state render reads the registry, not the manifest's hosts block: it takes registry rows as an input and refuses a host or lane the registry does not list -- falsifier: uv run pytest tests/unit/scripts/test_render_desired_state.py -q"
+evidence_requirements:
+  - kind: tests
+    description: "The lane census tests pass reading the registry"
+    command: "uv run pytest tests/unit/scripts tests/ci -q --no-cov -p no:randomly -m 'not lab_overlay' -k 'lane_census or lane-census or render_desired_state'"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22152-ac1-registry-placement
+    binds_ac: [AC1]
+    description: The host-scope tests resolve hosts and place lanes from the neutral registry, and prove the manifest's old hosts declaration is not read.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q --no-cov -p no:randomly -k 'not driver and not planner_exits'"
+  - id: dod-omn22152-ac2-not-configured
+    binds_ac: [AC2]
+    description: An unset, missing or invalid registry exits 3 naming LANE_CENSUS_REGISTRY, and the driver exits 3 before its container-engine stub is called once.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q --no-cov -p no:randomly -k exits_3"
+  - id: dod-omn22152-ac3-invariants
+    binds_ac: [AC3]
+    description: Each registry invariant has a case that refuses it, with the neutral registry accepted as the positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q --no-cov -p no:randomly -k 'refused or invariant or registry_validates'"
+  - id: dod-omn22152-ac4-host-cases
+    binds_ac: [AC4]
+    description: The no-lane host, the lane on an unlisted host and the golden plans produced by the planner that read the manifest's hosts are compared byte for byte.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q --no-cov -p no:randomly -k 'no_lane or undeclared or byte_identical or finding_clears'"
+  - id: dod-omn22152-ac5-other-readers
+    binds_ac: [AC5]
+    description: The desired-state render refuses a host or lane the registry does not list.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/scripts/test_render_desired_state.py -q --no-cov -p no:randomly"

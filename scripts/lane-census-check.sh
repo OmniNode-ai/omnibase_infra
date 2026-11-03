@@ -62,15 +62,27 @@
 # desired-state kinds are not graded and the plan says so; set and unreadable, the
 # census is drift (desired_state_unreadable) and exits 30.
 #
+# THE HOST REGISTRY (OMN-22152). Which hosts exist for the census, the names each
+# one reports and the lanes each may host are overlay data of the lane census
+# node, not the manifest's. LANE_CENSUS_REGISTRY holds the absolute path of the
+# node's overlay.yaml (`python -m omnimarket.nodes.node_lane_census_effect
+# registry path` prints it) and the planner reads that file's `registry:` key.
+# The manifest's own `hosts:` block and per-lane `hosts:` lists are not read.
+# Unset, or naming a file that does not exist, the census stops here with exit 3
+# before it reads the container engine; a file that is unreadable or invalid
+# stops the planner with exit 3 the same way.
+#
 # Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps
-#             (an interpreter without PyYAML, or no lane manifest under
-#             ONEX_WORKSPACE_CONFIG_ROOT/config/lab/lane-census and no
-#             LANE_MANIFEST. OMN-20934),
+#             or configuration (an interpreter without PyYAML, no lane manifest
+#             under ONEX_WORKSPACE_CONFIG_ROOT/config/lab/lane-census and no
+#             LANE_MANIFEST (OMN-20934), or no usable host registry named by
+#             LANE_CENSUS_REGISTRY (OMN-22152)),
 #             4 inventory unobservable (BOTH Engine API and bounded CLI failed —
 #               fail-loud, NO drift event; deliberately distinct from 30 so a host
 #               we cannot see is never reported as a host that is down. OMN-15466),
 #             5 host undeclared (LANE_CENSUS_HOST, default `hostname`, names no entry
-#               of the manifest's `hosts:` registry — no plan, no event. OMN-19088),
+#               of the host registry LANE_CENSUS_REGISTRY names — no plan, no
+#               event. OMN-19088, OMN-22152),
 #             8 drift detected and the drift event was NOT published (no broker
 #               container named, or the produce failed). A drift that reached the
 #               bus is 30; one that did not is 8, so a unit's exit code says
@@ -82,9 +94,10 @@
 # requires SASL). The earlier `rpk ... --brokers "$KAFKA_BOOTSTRAP_SERVERS"`
 # branch could not run on any lab host and is gone.
 #
-# Host scoping (OMN-19088): only the lanes the manifest declares for this host
+# Host scoping (OMN-19088): only the lanes the host registry lists for this host
 # are evaluated; the rest are reported in `lanes_not_applicable`, and one of
-# them found RUNNING here is a `lane_on_undeclared_host` finding.
+# them found RUNNING here is a `lane_on_undeclared_host` finding. A registry
+# host that lists no lane runs the census with every lane not applicable.
 #
 # Runs on .201 via the SHARED onex-disk-gc.timer (4th ExecStart — coordinated with
 # OMN-13008 rather than a second timer). Log: ~/.local/log/onex/lane-census.log
@@ -112,7 +125,7 @@ OBSERVED_TOPIC="onex.evt.omnibase-infra.lane-census-observed.v1"
 OBSERVED_OUT=""
 # Inventory unobservable — NOT drift. See the exit-code table above (OMN-15466).
 EXIT_INVENTORY_UNAVAILABLE=4
-# Host not declared in the manifest's hosts registry — NOT drift (OMN-19088).
+# Host not declared in the host registry — NOT drift (OMN-19088).
 EXIT_HOST_UNDECLARED=5
 # OMN-19414: the planner could not read the desired state named by
 # LANE_CENSUS_DESIRED_STATE. Its plan carries a desired_state_unreadable finding,
@@ -204,14 +217,19 @@ command -v "$LANE_CENSUS_PYTHON" >/dev/null 2>&1 || {
 # lane_census_plan.py with the offending interpreter never named, which is what
 # made the CI failure above take a live dispatch to diagnose.
 if ! "$LANE_CENSUS_PYTHON" -c 'import yaml' >/dev/null 2>&1; then
-  echo "ERROR: interpreter '$LANE_CENSUS_PYTHON' cannot import PyYAML, which" >&2
-  echo "       lane_census_plan.py needs to read the lane manifest." >&2
+  echo "ERROR: interpreter '$LANE_CENSUS_PYTHON' cannot import PyYAML, which lane_census_plan.py needs to read the lane manifest." >&2
   echo "       In CI, set LANE_CENSUS_PYTHON to the project venv interpreter," >&2
   echo "       e.g. LANE_CENSUS_PYTHON=\"\$(uv run python -c 'import sys; print(sys.executable)')\"" >&2
   exit 3
 fi
 
 command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found" >&2; exit 3; }
+
+# OMN-22152: the planner reads the host registry from the file LANE_CENSUS_REGISTRY
+# names. Stop here, before the inventory collector touches the container engine,
+# when it is unset or names no file (nothing above reads the engine): a census
+# that cannot say which host it describes describes none.
+[[ -f "${LANE_CENSUS_REGISTRY:-}" ]] || { echo "ERROR: the lane census host registry is not configured: LANE_CENSUS_REGISTRY is '${LANE_CENSUS_REGISTRY:-unset}', not a file; set it to the absolute path of the lane census node's overlay.yaml (the node's \`registry path\` verb prints it)" >&2; exit 3; }
 
 HOST="${LANE_CENSUS_HOST:-$(hostname)}"
 log "Starting (lane=${LANE:-ALL}, host=$HOST, $( [[ "$DRY_RUN" == true ]] && echo DRY-RUN || echo LIVE ))"
@@ -349,10 +367,10 @@ memory_pass() {
 }
 
 
-# OMN-19088: the planner evaluates only the lanes the manifest declares for this
+# OMN-19088: the planner evaluates only the lanes the host registry lists for this
 # host and reports the others not-applicable. It resolves HOST through the
-# manifest's `hosts:` registry and refuses (exit 5) a host that registry does
-# not declare. No plan exists for such a host, so nothing is emitted, written or
+# `registry:` of the file LANE_CENSUS_REGISTRY names (OMN-22152) and refuses
+# (exit 5) a host that registry does not declare. No plan exists for such a host, so nothing is emitted, written or
 # published: a census that cannot say which host it describes describes none.
 set +e
 PLAN_JSON="$(echo "$ENVELOPE_JSON" | LANE_CENSUS_HOST="$HOST" "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_plan.py" 2>"$SCRATCH/plan.err")"
@@ -364,8 +382,8 @@ the plan carries desired_state_unreadable and this census does not read clean."
 elif [[ $PLAN_RC -ne 0 ]]; then
   while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/plan.err"
   if [[ $PLAN_RC -eq $EXIT_HOST_UNDECLARED ]]; then
-    log "ABORT: host '$HOST' is not declared in the lane manifest's hosts registry. \
-Publishing NO census — declare the host and its lanes first."
+    log "ABORT: host '$HOST' is not declared in the host registry named by LANE_CENSUS_REGISTRY. \
+Publishing NO census — declare the host and its lanes there first."
   else
     log "ABORT: the lane planner failed (exit $PLAN_RC)."
   fi
@@ -373,7 +391,7 @@ Publishing NO census — declare the host and its lanes first."
 fi
 
 # OMN-19959: the memory pass runs once the planner has accepted this host, so a
-# host the manifest does not declare (exit 5) publishes nothing at all, as
+# host the registry does not declare (exit 5) publishes nothing at all, as
 # OMN-19088 requires. It runs before the drift handling, so a drifted or clean
 # census publishes it alike.
 if [[ "$MEMORY" == true && $MEMORY_RC -eq 0 ]]; then
