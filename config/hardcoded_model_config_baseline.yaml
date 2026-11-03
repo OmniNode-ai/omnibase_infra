@@ -2855,12 +2855,6 @@ entries:
   - path: src/omnibase_infra/handlers/registration_storage/handler_registration_storage_postgres.py
     family: O
     content_sha1: 43a189ba6485387b31f910efb179d48356b54b30
-  - path: src/omnibase_infra/handlers/registration_storage/handler_registration_storage_postgres.py
-    family: O
-    content_sha1: 685b4d21447586d391a911fb9a5e9a0e2042f180
-  - path: src/omnibase_infra/handlers/registration_storage/handler_registration_storage_postgres.py
-    family: O
-    content_sha1: fb19595d5f36dd0ed78f313f05ba4f3cb13e1030
   - path: src/omnibase_infra/idempotency/store_sqlite.py
     family: O
     content_sha1: 6a557761214544a27ce2d008ad9db36a2846a5a0

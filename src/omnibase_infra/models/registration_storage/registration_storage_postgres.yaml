@@ -16,6 +16,5 @@ registration_storage_postgres:
   timeout_seconds: 30.0
   circuit_breaker:
     threshold: 5
-    reset_timeout_seconds: 60.0
     service_name: postgres.storage
     transport_type: db

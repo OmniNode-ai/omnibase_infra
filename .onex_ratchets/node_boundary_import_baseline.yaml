@@ -47,7 +47,6 @@ edges:
   - omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres -> omnibase_infra.nodes.node_registration_storage_effect.models:ModelStorageQuery
   - omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres -> omnibase_infra.nodes.node_registration_storage_effect.models:ModelStorageResult
   - omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres -> omnibase_infra.nodes.node_registration_storage_effect.models:ModelUpsertResult
-  - omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres -> omnibase_infra.nodes.node_registry_effect.protocols.protocol_postgres_adapter:ProtocolPostgresAdapter
   - omnibase_infra.handlers.registration_storage.models.model_update_registration_request -> omnibase_infra.nodes.node_registration_storage_effect.models:ModelRegistrationUpdate
   - omnibase_infra.handlers.registration_storage.protocol_registration_persistence -> omnibase_infra.nodes.node_registration_storage_effect.models:ModelDeleteResult
   - omnibase_infra.handlers.registration_storage.protocol_registration_persistence -> omnibase_infra.nodes.node_registration_storage_effect.models:ModelRegistrationRecord
