@@ -281,6 +281,8 @@ def test_only_the_decision_map_directory_may_load_two_pinned_cdn_scripts() -> No
     assert len(policies) == 2
     default, scoped = policies
     assert "http" not in default
+    # The decision map's location repeats the whole policy, so it must also let only this origin frame its pages.
+    assert "frame-ancestors 'self';" in scoped
     assert f"script-src 'self' 'unsafe-inline' {cdn} {elk};" in scoped
     # Exactly the two pinned URLs appear as origins, however the policy is spaced or ordered.
     assert re.findall(r"https?://\S+?(?=[;\s]|$)", scoped) == [cdn, elk]
