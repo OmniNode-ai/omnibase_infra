@@ -4,9 +4,11 @@
 
 The handler is built from the container alone, and its server timeouts come
 from the handler contract through ``initialize(config)``, never from literals
-held in the module. The two-profile case runs the full server start and stop
-path with a fake lifecycle and a fake uvicorn server, once with the in-memory
-binding (Kafka off) and once with the Redpanda overlay binding (Kafka on).
+held in the module. The kafka-flag case runs the server start and stop path
+with a fake lifecycle and a fake uvicorn server, once with ``kafka_enabled``
+off (the in-memory profile's value) and once on (the Redpanda overlay's value).
+It proves the flag reaches the lifecycle config and the container and contract
+timeouts are used in both; it binds no real Kafka or overlay service.
 """
 
 from __future__ import annotations
@@ -102,16 +104,16 @@ class _StuckServer:
         await asyncio.Event().wait()
 
 
-_PROFILES = {
-    "inmemory": {"kafka_enabled": False},
-    "redpanda-overlay": {"kafka_enabled": True},
+_KAFKA_FLAG_CASES = {
+    "kafka-off": {"kafka_enabled": False},
+    "kafka-on": {"kafka_enabled": True},
 }
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("profile", sorted(_PROFILES))
-async def test_server_lifecycle_uses_injected_container_and_contract_timeouts(
-    profile: str, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("case", sorted(_KAFKA_FLAG_CASES))
+async def test_kafka_flag_passthrough_with_injected_container_and_contract_timeouts(
+    case: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _FakeLifecycle.built.clear()
     monkeypatch.setattr(handler_mcp_module, "MCPServerLifecycle", _FakeLifecycle)
@@ -129,7 +131,7 @@ async def test_server_lifecycle_uses_injected_container_and_contract_timeouts(
     handler = HandlerMCP(container=container)
     await handler.initialize(
         {
-            **_PROFILES[profile],
+            **_KAFKA_FLAG_CASES[case],
             "auth_enabled": False,
             "host": "127.0.0.1",
             "port": 18090,
@@ -143,7 +145,7 @@ async def test_server_lifecycle_uses_injected_container_and_contract_timeouts(
 
     (lifecycle,) = _FakeLifecycle.built
     assert lifecycle.container is container
-    assert lifecycle.config.kafka_enabled is _PROFILES[profile]["kafka_enabled"]
+    assert lifecycle.config.kafka_enabled is _KAFKA_FLAG_CASES[case]["kafka_enabled"]
     assert handler._mcp_registry is lifecycle.registry
     assert handler._mcp_executor is lifecycle.executor
     assert startup_waits == [0.25]
