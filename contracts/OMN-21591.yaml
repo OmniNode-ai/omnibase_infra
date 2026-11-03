@@ -47,6 +47,13 @@ dod_evidence:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/test_domain_plugin_discovery.py tests/unit/runtime/test_domain_plugin_discovery_seam.py tests/unit/runtime/test_domain_plugin_shutdown.py tests/unit/runtime/test_boot_step0_catalog.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -n 0 -q --no-cov -o addopts=''"
   - id: dod-omn21591-deploy
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, the runtime container carries the overlay key the policy contract renders and imports the selection handler, so the kernel can select the delegation plugin from the catalog. It reads the dev lane's runtime container, which a hosted runner does not have, so only the local Done gate runs it."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import os; from omnibase_infra.handlers.handler_kernel_plugin_selection import HandlerKernelPluginSelection; assert os.environ[\"ONEX_RUNTIME_KERNEL_PLUGINS\"] == \"delegation\"'"
+  - id: dod-omn21591-hosted-deploy-key
     description: "Deploy-scope check the hosted runner can run: the runtime policy contract renders ONEX_RUNTIME_KERNEL_PLUGINS=delegation into docker/runtime-policy.env, and every runtime service that sets the active package surface also requires the key; a rendered value that differs from the tracked env file, or a service without the key, fails it."
     source: manual
     execution_scope: hosted_and_local
