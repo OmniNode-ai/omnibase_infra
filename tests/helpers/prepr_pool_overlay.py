@@ -25,6 +25,10 @@ POOL_CONFIG_ROOT = (
 
 
 @pytest.fixture(autouse=True)
-def pool_overlay_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(POOL_CONFIG_ROOT))
+def pool_overlay_env(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Iterator[Path]:
+    # a lab_overlay test reads the lab's own files from the root its job fetched
+    if request.node.get_closest_marker("lab_overlay") is None:
+        monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(POOL_CONFIG_ROOT))
     return POOL_CONFIG_ROOT

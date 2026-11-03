@@ -2992,4 +2992,7 @@ def test_local_transport_remote_host_still_uses_ssh(
         "ok",
     )
     assert calls[0][:3] == ["ssh", "-o", "BatchMode=yes"]
-    assert calls[0][-2:] == [host.ssh_target, pool.remote_prefix() + command]
+    assert calls[0][-2:] == [
+        host.ssh_target,
+        pool.settings().remote_command_prefix + command,
+    ]
