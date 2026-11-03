@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.render_runtime_policy_env import load_contract, render_env
 from tests.scripts.test_deploy_runtime_folded_services_omn21288 import (
     DEV_PROJECT,
     _function,
@@ -51,13 +52,6 @@ def _services(overlay: Path) -> dict[str, dict[str, object]]:
     services = parsed["services"]
     assert isinstance(services, dict)
     return services
-
-
-def _declaration(text: str, name: str) -> str:
-    """The handler's own ``readonly NAME=(...)`` declaration, verbatim."""
-    match = re.search(rf"^readonly {name}=\(.*?\)$", text, re.M | re.S)
-    assert match, name
-    return match.group(0)
 
 
 def _array(text: str, name: str) -> list[str]:
@@ -115,13 +109,14 @@ def test_deploy_handler_retires_the_previous_writer_before_main_restarts(
     """Execute the handler against old labelled containers absent from compose."""
     calls = tmp_path / "calls"
     calls.touch()
-    retired = _array(DEPLOY.read_text(), "RETIRED_NODE_CARRIER_SERVICES")
-    assert retired == [WRITER]
+    # The retirement list is the policy's, rendered once: the handler declares none.
+    assert "RETIRED_NODE_CARRIER_SERVICES" not in DEPLOY.read_text(encoding="utf-8")
+    process = load_contract().profiles["dev"].processes["main"]
+    assert list(process.retired_services) == [WRITER]
+    assert render_env(load_contract())["DEV_RUNTIME_MAIN_RETIRED_SERVICES"] == WRITER
     harness = (
-        _harness("", DEV_PROJECT)
-        + "\n"
-        + _declaration(DEPLOY.read_text(), "RETIRED_NODE_CARRIER_SERVICES")
-        + "\n"
+        _harness("", DEV_PROJECT, dev_profiles="projection-writer-savings")
+        + f"\nDEV_RUNTIME_MAIN_RETIRED_SERVICES={shlex.quote(WRITER)}\n"
         + _function("restart_services")
         + f"\nCALLS={shlex.quote(str(calls))}"
         + f"\nWRITER={shlex.quote(WRITER)}"
@@ -138,6 +133,9 @@ exclude_cloud_database_services() { :; }
 COMPOSE_PROFILE=runtime
 RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=60
 docker() {
+    # The folded savings writer has no old container here; only the retired
+    # hook-events writer's census is recorded and made to fail.
+    [[ "$1" != ps || "$*" == *"service=$WRITER" ]] || return 0
     printf '%s\n' "$*" >> "$CALLS"
     [[ "$1" != "$FAILURE" ]] || return 9
     case "$1" in

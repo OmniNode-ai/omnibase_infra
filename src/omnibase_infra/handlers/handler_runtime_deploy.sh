@@ -262,14 +262,6 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     cost-estimator-web
 )
 
-# OMN-21288: services whose compose declaration is gone because their node now
-# runs inside omninode-runtime. They are named in no restart or build set; the
-# only thing left to do for them is retire a container of the previous revision
-# before main is recreated, so the node's consumer group has one owner at a time.
-# The group id carries main's KAFKA_INSTANCE_ID, so main resumes from the retired
-# writer's committed offsets. Retiring is a stop-and-remove with no -v.
-readonly RETIRED_NODE_CARRIER_SERVICES=(projection-claude-hook-events-writer)
-
 # OMN-18012: dev-lane Kafka clients that are declared in the BASE compose file
 # and that no deploy path restarted.
 #
@@ -369,8 +361,15 @@ resolve_lane_folded_services() {
     LANE_FOLDED_SERVICES=()
     # Each folding lane is selected by its declared project and policy.
     local folded_profiles=""
+    # OMN-21288: services whose node main runs with no profile of its own (the
+    # claude hook-events projection). Their container of the previous revision
+    # is retired with the folded ones, from the same policy (the dev branch below
+    # seeds LANE_FOLDED_SERVICES with them), so the node's
+    # consumer group has one owner at a time; main's KAFKA_INSTANCE_ID is the
+    # group id the retired writer used, so main resumes from its offsets.
     if [[ -n "${DEV_COMPOSE_PROJECT:-}" && "${compose_project}" == "${DEV_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}"
+        IFS=',' read -r -a LANE_FOLDED_SERVICES <<< "${DEV_RUNTIME_MAIN_RETIRED_SERVICES:-}"
     elif [[ -n "${STABILITY_TEST_COMPOSE_PROJECT:-}" \
         && "${compose_project}" == "${STABILITY_TEST_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:-}"
@@ -3824,10 +3823,8 @@ restart_services() {
     local folded_service container_ids
     resolve_lane_folded_services "${compose_project}" || return 1
     # Only a recreate of main takes over the folded roles.
-    local main_takes_over=true
-    [[ " ${lane_services[*]} " == *" omninode-runtime "* ]] || main_takes_over=false
-    for folded_service in "${LANE_FOLDED_SERVICES[@]}" "${RETIRED_NODE_CARRIER_SERVICES[@]}"; do
-        [[ "${main_takes_over}" == true ]] || continue
+    [[ " ${lane_services[*]} " == *" omninode-runtime "* ]] || LANE_FOLDED_SERVICES=()
+    for folded_service in "${LANE_FOLDED_SERVICES[@]}"; do
         container_ids="$(docker ps -aq \
             --filter "label=com.docker.compose.project=${compose_project}" \
             --filter "label=com.docker.compose.service=${folded_service}")" || return 1

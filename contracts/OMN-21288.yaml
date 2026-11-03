@@ -377,6 +377,15 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_omn19513_hook_events_writer.py tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC11]
+  - id: dod-omn21288-ac11-deploy-agent-retirement
+    description: >-
+      The deploy agent retires the hook-events writer container of the previous revision from the same policy list the deploy handler reads (retired_services in the runtime policy contract): stop with a 30 s grace, then remove with volumes kept, only for the primary dev instance, failing loud on a failed census, stop or remove, and skipping any other dev instance and any non-dev lane. The extended test fails at the merge base, where the policy carries no retired services.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC11]
 context:
   remaining_after_this_change: "AC2 end state remains pending the remaining baselined workload folds; the stack-shape data and baseline are unchanged in this revision."
   tenant_fold_proof: "The live fold readings are post-merge through the deploy agent. This revision's unit and broker proofs do not deploy dev."

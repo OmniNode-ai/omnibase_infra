@@ -189,7 +189,12 @@ def _all_healthy(read_containers: Callable[[], list[ModelDevBootContainer]]) -> 
 
 
 def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> set[str]:
-    """Retirement uses the same contract mapping as the compose gates."""
+    """Retirement uses the same contract mapping as the compose gates.
+
+    A lane that folds nothing (any other dev instance) retires nothing. On the
+    lane that folds, the services main carries with no profile of its own
+    (``DEV_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded ones.
+    """
     if not folded:
         return set()
     mapping = json.loads(policy.get("DEV_RUNTIME_MAIN_FOLDABLE_SERVICES", "{}"))
@@ -206,7 +211,14 @@ def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> se
         raise RuntimeError("invalid dev foldable service mapping")
     if missing := folded - mapping.keys():
         raise RuntimeError(f"fold policy maps no service for {sorted(missing)}")
-    return {mapping[profile] for profile in folded}
+    retired = {
+        service.strip()
+        for service in policy.get("DEV_RUNTIME_MAIN_RETIRED_SERVICES", "").split(",")
+        if service.strip()
+    }
+    if any(not re.fullmatch(r"[a-z][a-z0-9-]*", service) for service in retired):
+        raise RuntimeError("invalid dev retired service list")
+    return {*(mapping[profile] for profile in folded), *retired}
 
 
 def fold_compose_env(policy: Mapping[str, str], primary: bool) -> dict[str, str]:
@@ -220,7 +232,9 @@ def fold_compose_env(policy: Mapping[str, str], primary: bool) -> dict[str, str]
                     if primary
                     else ("runtime" if key.endswith("_RUNTIME_PROFILE") else "full")
                 )
-            elif key.endswith(("_FOLDED_PROFILES", "_FOLDABLE_SERVICES")):
+            elif key.endswith(
+                ("_FOLDED_PROFILES", "_FOLDABLE_SERVICES", "_RETIRED_SERVICES")
+            ):
                 selected[key] = value
     return selected
 
