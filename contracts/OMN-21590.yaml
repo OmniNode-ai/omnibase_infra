@@ -1,0 +1,154 @@
+# OMN-21590 contract file for omnibase_infra: the runtime reads the announcement catalog and stops scanning and pushing.
+schema_version: "1.0.0"
+ticket_id: "OMN-21590"
+title: "Contract hot loading A2: The runtime reads the announcement catalog and stops scanning entry points and pushing contracts to the registry"
+summary: "Boot step 0 announces every installed package's contracts on an in-memory bus and builds the node catalog before the container exists; discovery reads that catalog instead of scanning entry points; the kernel no longer publishes contract-registered records; the registration orchestrator gains an adapter from an announcement and the runtime's identity to the introspection event it consumes, and heartbeat startup moved out of the replaced introspection method unchanged."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn21590-catalog-read
+    statement: "The runtime builds its catalog from announcements in boot step 0 and reads it; it neither scans entry points in a container-side module nor publishes contract-registered records."
+    acceptance:
+      - id: AC1
+        statement: "AC1: on omnimarket's real installed package set, the catalog's names, hashes and contract paths equal what `discover_contracts` returned before the change -- falsifier: one name, hash or path differs."
+      - id: AC2
+        statement: "AC2: In `full_load` mode with hot load off, the boot attach report is byte-identical to the report before the change on a fixture manifest -- falsifier: a diff."
+      - id: AC3
+        statement: "AC3: `git grep -n \"entry_points(\" src/omnibase_infra/runtime` finds no match in a module the container imports -- falsifier: a match."
+      - id: AC4
+        statement: "AC4: A boot publishes no record on `contract-registered.v1` -- falsifier: a record."
+      - id: AC5
+        statement: "AC5: The registration orchestrator's existing tests pass with the introspection event replaced by an announcement, a node registers and a heartbeat is published on its schedule after boot -- falsifier: a registration test fails, or no heartbeat arrives."
+      - id: AC6
+        statement: "AC6: Each expansion of the announcement topic template passes core's topic validator -- falsifier: a unit test."
+      - id: AC7
+        statement: "AC7: The same parity test passes on the in-memory bus and against a real broker (testcontainers) with only the overlay differing -- falsifier: either differs."
+evidence_requirements:
+  - kind: tests
+    description: "Step 0, parity, attach report, registration adapter and topic template tests pass."
+    command: "uv run pytest tests/unit/runtime/test_boot_step0_catalog.py tests/unit/runtime/test_boot_attach_report_omn21590.py tests/integration/runtime/test_catalog_parity_with_discovery.py tests/unit/nodes/test_registration_from_announcement.py tests/unit/topics/test_node_announcement_topic_template.py -n 0 -q --no-cov -o addopts=''"
+dod_evidence:
+  - id: dod-omn21590-ac1-parity
+    description: "The catalog's names, hashes and contract paths equal an independent restatement of the entry-point scan over the installed package set."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/runtime/test_catalog_parity_with_discovery.py -n 0 -q --no-cov -o addopts='' -k 'catalog_equals or reads_the_same'"
+  - id: dod-omn21590-ac2-attach
+    description: "The boot attach report on a fixture manifest is byte-identical to the golden recorded from the code before the catalog existed."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_boot_attach_report_omn21590.py -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn21590-ac3-no-scan
+    description: "No module the container side imports names an entry-point call, and the discovery module imports none."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_boot_step0_catalog.py -n 0 -q --no-cov -o addopts='' -k 'entry_point'"
+  - id: dod-omn21590-ac4-no-push
+    description: "Step 0 publishes on the announcement topic only, the kernel holds no contract-registered producer, and the registry chain is fed in process."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_boot_step0_catalog.py tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py tests/integration/runtime/test_contract_registered_producer_omn21031.py -n 0 -q --no-cov -o addopts='' -k 'contract_registered or registry_chain or producer or runs_step0'"
+  - id: dod-omn21590-ac5-registration
+    description: "A node registers through the real introspected-node handler from an announcement and the heartbeat is started after boot."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_registration_from_announcement.py tests/unit/nodes/node_registration_orchestrator/test_handler_node_introspected.py -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn21590-ac6-topics
+    description: "Every workload expansion of the announcement topic template passes the topic validator."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/topics/test_node_announcement_topic_template.py -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn21590-ac7-parity-both-buses
+    description: "The parity test body runs on the in-memory bus and against a testcontainers broker, differing only in the overlay value that binds the bus."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/runtime/test_catalog_parity_with_discovery.py -n 0 -q --no-cov -o addopts='' -k 'catalog_equals'"
+  - id: dod-omn21590-deploy
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, public.contracts still holds rows although the boot publishes no contract-registered record, because the kernel feeds the registry router from the node catalog in process. It reads the dev lane's postgres container, which a hosted runner does not have, so only the local Done gate runs it."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "docker exec omnibase-infra-postgres psql -U postgres -d omnibase_infra -tAc 'select count(*) from contracts' | grep -qv '^0$'"
+  - id: dod-omn21590-startup-operation-ports
+    description: "Startup publishes runtime presence before injected announcements, logs optional failures, propagates cancellation, and reads validated contract bounds."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_registration_from_announcement.py tests/unit/runtime/test_boot_runtime_config_omn21590.py -q --no-cov -o addopts=''"
+  - id: dod-omn21590-hosted-deploy-boot
+    description: "Hosted deploy check: exercise boot step 0, the in-process registry feed, and runtime startup without publishing a contract-registered record. A missing catalog entry, an emitted record, or absent runtime presence fails the check."
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_boot_step0_catalog.py tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py tests/unit/nodes/test_registration_from_announcement.py -q --no-cov -o addopts=''"
+  - id: dod-omn21590-partial-publish-heartbeat
+    description: "A successful runtime presence publish retains its throttle timestamp and starts the heartbeat when optional announcement identity lookup or publication fails; cancellation still propagates."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_registration_from_announcement.py -q --no-cov -o addopts='' -k 'announcement_failure_preserves or announced_node_publish_propagates'"
+  - id: dod-omn21590-announced-error-boundary
+    description: "A failed announced-contract reduction logs its correlation id and leaves later contracts processable; cancellation propagates."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/node_contract_registry_reducer/test_contract_registration_event_router.py -q --no-cov -o addopts='' -k 'announced_'"
+  - id: dod-omn21590-topic-identity
+    description: "Workload names with underscores or surrounding whitespace are refused rather than sharing another workload's announcement topic."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/topics/test_node_announcement_topic_template.py -q --no-cov -o addopts=''"
+  - id: dod-omn21590-path-redaction
+    description: "Only contract paths are normalized for the byte-identical attach-report check; path strings in descriptions remain visible, and symlinked fixture roots compare identically."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_boot_attach_report_omn21590.py -q --no-cov -o addopts=''"
+  - id: dod-omn21590-announced-failure-diagnostics
+    description: "Distinct catalog contracts are processed in order after a reduction failure; the single error identifies the failed contract and event, only the successful contract executes intents, and exception messages, arguments and formatted traces contain no credentials."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/node_contract_registry_reducer/test_contract_registration_event_router.py -q --no-cov -o addopts='' -k 'announced_'"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
