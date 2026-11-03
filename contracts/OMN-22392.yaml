@@ -29,10 +29,10 @@ dod_evidence:
       - check_type: command
         check_value: uv run pytest tests/unit/runtime/test_omn22392_consumer_group_census.py -q -p no:cacheprovider
   - id: dod-002
-    description: "Proving-lane readback, open until a lane redeploys: the count of zero-member groups on the dev broker read before and after one redeploy stays within 60 (29 to 30 were read on 2026-11-03; a per-boot id would add one per consumer, about 400). It reads the dev broker's admin metrics, which a hosted runner cannot reach, so only the local Done gate runs it."
+    description: "Proving-lane readback, open until a lane redeploys: the count of zero-member groups on the dev broker read before and after one redeploy stays within 60 (29 to 30 were read on 2026-11-03; a per-boot id would add one per consumer, about 400). It reads the dev broker's admin metrics, which a hosted runner cannot reach, so only the local Done gate runs it and it binds no criterion here: dod-004 binds AC2 to the part a hosted run can prove, and this readback is the live half of AC2 that stays open."
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC2]
+    binds_ac: []
     checks:
       - check_type: command
         check_value: >-
@@ -44,3 +44,10 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: uv run pytest tests/unit/runtime/test_omn22392_consumer_group_census.py -q -p no:cacheprovider
+  - id: dod-004
+    description: "The hosted half of AC2: the group id of an infra-owned consumer is identical across two boots (the instance discriminator is a declared literal, not a per-boot value), so a redeploy of an infra-owned consumer cannot add a group. It does not read a broker, so the before and after redeploy count stays with dod-002."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/test_omn22392_consumer_group_census.py::test_every_declared_instance_id_is_a_boot_stable_literal tests/unit/runtime/test_omn22392_consumer_group_census.py::test_instance_discriminator_is_deterministic_across_boots -q -p no:cacheprovider
