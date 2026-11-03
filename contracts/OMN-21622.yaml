@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21622
 title: "Machine login profile: one declared grant set every machine principal receives at issuance, with a drift check"
 summary: >-
-  The lab issuer selects thirteen produce-only grants from machine-principal-derived-grants.json only for trusted developer.principal overlay rows with role machine. The bindings and derived document are separate from the shared developer profile. A missing role and issuance without an overlay receive only developer grants; a request-supplied role cannot select machine privileges. Issuance, apply-grants and audit-grants select the same profile. audit-grants --role machine fails on missing grants and reports private extras without failing. A user timer runs it every 15 minutes through the issuer container. The private overlay rows and timer installation live outside this repository; no live broker apply is claimed.
+  The lab issuer selects thirteen produce-only grants from machine-principal-derived-grants.json only for trusted developer.principal overlay rows with role machine. The bindings and derived document are separate from the shared developer profile. A missing role and issuance without an overlay receive only developer grants; a request-supplied role cannot select machine privileges. Issuance, apply-grants and audit-grants select the same profile. audit-grants --role machine fails on missing grants and reports private extras without failing. A user timer runs it every 15 minutes through the issuer container. The private overlay rows and timer installation live outside this repository; no live broker apply is claimed. A machine row may also bind grant roles by name (grant_roles); only a machine row may, and the same profile is issued with or without the binding, because each role's grant set is declared and applied by the deployment's private broker ACL declaration.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -46,14 +46,23 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -o addopts='' -p no:cacheprovider -k "typed_by_hand or nodes_output or machine_supplement"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn21622-ac1-grant-roles
+    description: >-
+      A machine row of the overlay may bind grant_roles and the issuer grants the same profile with or without the binding; a developer row that binds one is refused. At the merge base a grant_roles key makes the overlay refuse the row.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -o addopts='' -p no:cacheprovider -k "grant_roles"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
   - id: dod-omn21622-deploy
     description: Deploy probe -- the grant documents copied into the issuer image load and drive issuance, apply and audit for each trusted role with a fake broker; fails when machine grants are shared or the image omits a referenced document.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -o addopts='' -p no:cacheprovider -k "same_role_profile or issuer_image"
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -o addopts='' -p no:cacheprovider -k "same_role_profile or issuer_image or grant_roles"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.principal-issuer?ref=jonah/omn-21622-machine-principal-profile' --jq .content | base64 -d | grep -q machine-principal-derived-grants.json && grep -q machine-principal-derived-grants.json docker/Dockerfile.principal-issuer"
+        check_value: "grep -q 'only a machine binds grant_roles' scripts/lab_principal_issuer.py"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]

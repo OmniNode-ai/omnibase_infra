@@ -221,6 +221,32 @@ repos:
       - id: handler-di-gate
         require_serial: true
         args: [--baseline, .onex_ratchets/handler_di_baseline.txt]
+      # OMN-21939: four validators this repo used to run from its own script
+      # copies. The rule code is omnibase_core's; only the inputs stay here.
+      # OMN-17320 exposed-identifier gate: salted-SHA256 denylist of customer
+      # identifiers that must never re-enter this PUBLIC repo. The denylist is
+      # this repo's file and holds digests, never plaintext. Escape hatch, per
+      # line only, ticket + reason required:
+      #   # onex-allow-exposed-identifier OMN-XXXXX reason="<concrete reason>"
+      - id: exposed-identifier-gate
+        require_serial: true
+        args: [--mode, blocking, --denylist, scripts/validation/exposed_identifiers_denylist.json]
+        exclude: ^(archived/|workspace/sibling-repos/).*$
+      # OMN-13412 fresh-deploy fitness: no packaged-source change on a
+      # published version without a bump. Wired as required CI too.
+      - id: check-release-identity
+        require_serial: true
+      # The core manifest excludes docs/ and CHANGELOG.md; this repo has always
+      # checked them, so the exclude is narrowed back to nothing.
+      - id: check-ai-slop
+        require_serial: true
+        exclude: ^$
+      # OMN-16958 interpreter-resolution ratchet: fails closed when a hook
+      # `entry:` -- or a shell script it calls -- shells out to a bare `python`,
+      # or an `entry:` shells out to a bare `python3`. Sanctioned form is
+      # `uv run python <script>`. CI twin: .github/workflows/precommit-parity-gate.yml.
+      - id: precommit-interpreter-resolution
+        require_serial: true
   # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
   # "Ci runners should be for private repos only"). Refuses a staged workflow job
   # whose runs-on is, or can resolve to, a self-hosted label unless omnibase_core's
@@ -684,24 +710,6 @@ repos:
         exclude: ^(tests/|archived/).*\.py$
         pass_filenames: true # Only check changed files, not entire codebase
         stages: [pre-push] # Moved to pre-push: ~1-5s for changed files only
-      # OMN-17320: exposed-identifier gate. Salted-SHA256 denylist of customer
-      # identifiers that must never re-enter this PUBLIC repo. OMN-17288 scrubbed a
-      # live tenant slug from five files here; three hours later an unrelated lane
-      # reintroduced it in omnimarket with every gate green. The denylist holds
-      # digests, never plaintext -- writing the literal into a pattern list in a
-      # public repo would be the very occurrence the gate prevents.
-      # Same script + same denylist as omnimarket (byte-identical; parity pinned by
-      # tests/ci/test_exposed_identifier_gate.py::test_cross_repo_fingerprint_pin).
-      # Escape hatch, per line only, ticket + reason required:
-      #   # onex-allow-exposed-identifier OMN-XXXXX reason="<concrete reason>"
-      - id: exposed-identifier-gate
-        require_serial: true
-        name: Exposed identifier gate (OMN-17320)
-        entry: uv run --frozen python scripts/validation/check_exposed_identifiers.py --mode blocking
-        language: system
-        pass_filenames: true
-        stages: [pre-commit]
-        exclude: ^(archived/|workspace/sibling-repos/).*$
       # OMN-19407: the onex CLI keeps no hand-written vocabulary. Operator
       # ruling 2026-09-24: everything is fetched from the registry. Refuses a
       # `*_CHOICES` literal, a click.Choice over a literal list, and a
@@ -1115,13 +1123,6 @@ repos:
         entry: uv run --frozen python scripts/check_context_field_presence.py
         language: system
         files: ^src/.*/contract\.yaml$
-        stages: [pre-commit]
-      - id: check-release-identity
-        name: No code merged onto a published version without a bump (OMN-13412)
-        entry: uv run --frozen python scripts/check_release_identity.py
-        language: system
-        files: ^(src/.*\.py|pyproject\.toml)$
-        pass_filenames: false
         stages: [pre-commit]
       # OMN-13873: dep-provenance gate — forbid first-party git-source overrides.
       # omnibase-core / omnibase-spi / omnibase-compat must resolve from PyPI, not
@@ -1997,14 +1998,6 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
-      - id: check-ai-slop
-        require_serial: true
-        name: Check for AI-slop patterns
-        language: system
-        entry: uv run --frozen python scripts/validation/check_ai_slop.py --strict
-        types_or: [python, markdown]
-        pass_filenames: true
-        stages: [pre-commit]
       # Topic naming lint — validate onex.{kind}.{producer}.{event}.v{n} convention
       # (OMN-3188: YAML contracts; OMN-3259: Python enum/constant files)
       # Triggers on contract*.yaml OR any *.py change; always scans full source tree.
@@ -2440,22 +2433,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
-        files: ^(\.pre-commit-config\.yaml|scripts/.*\.(sh|py)|\.pre-commit-hooks/.*\.sh)$
-      # OMN-16958 (port of omnimarket's OMN-17219 guard, unchanged):
-      # interpreter-resolution ratchet. Fails closed the moment a hook `entry:`
-      # -- or a shell script it calls -- shells out to a bare `python`, or an
-      # `entry:` shells out to a bare `python3`. macOS ships no bare `python`
-      # outside an activated venv, so such a hook refuses every `git commit` for
-      # anyone not inside one; a bare `python3` bypasses the project
-      # environment. Sanctioned form is `uv run python <script>`. Wired as BOTH
-      # this hook and a CI step in .github/workflows/precommit-parity-gate.yml
-      # (enforcement, not detection).
-      - id: precommit-interpreter-resolution
-        name: Pre-commit interpreter-resolution gate (OMN-17219)
-        entry: uv run --frozen python scripts/validation/validate_precommit_interpreter.py
-        language: system
-        pass_filenames: false
         stages: [pre-commit]
         files: ^(\.pre-commit-config\.yaml|scripts/.*\.(sh|py)|\.pre-commit-hooks/.*\.sh)$
       # Pin-parity ratchet: fails closed the moment the pre-commit `rev:` pin
