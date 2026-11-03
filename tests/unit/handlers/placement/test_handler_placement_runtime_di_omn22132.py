@@ -80,11 +80,13 @@ class FakeElection:
         self.epoch = 0
         self._wins = wins
         self.stepped_down = 0
+        self.campaigns = 0
 
     def acting(self) -> bool:
         return self.epoch != 0
 
     async def campaign_once(self) -> bool:
+        self.campaigns += 1
         if self._wins:
             self.epoch = 11
         return self.acting()
@@ -239,6 +241,12 @@ async def test_registry_wires_the_handler_over_an_in_memory_store(
         report = await runtime.serving_report()
         assert report.min_serving == settings.min_serving
         assert report.verdict is EnumPlacementHealthVerdict.FAIL
+        readback = await runtime.serving_report(min_serving=1)
+        assert readback.verdict is EnumPlacementHealthVerdict.OK
+        assert [(c.node_key, c.serving, c.runtime_ids) for c in readback.counts] == [
+            ("any_node", 1, ("rt-1",)),
+            ("primary_node", 1, ("rt-1",)),
+        ]
     finally:
         await runtime.stop()
 
@@ -304,11 +312,36 @@ def _build(
     )
 
 
-def test_handler_copies_the_nodes_and_elections_mappings() -> None:
-    elections = {"primary_node": FakeElection(wins=True)}
-    runtime = _build(session=FakeSession(), elections=elections)
-    elections["ghost"] = FakeElection(wins=True)
-    assert set(runtime._elections) == {"primary_node"}
+async def test_handler_copies_the_nodes_and_elections_mappings() -> None:
+    """Mutating the caller's mappings after construction does not reach the handler."""
+    real, ghost = FakeElection(wins=True), FakeElection(wins=True)
+    elections = {"primary_node": real}
+    nodes = _nodes(FakeNode(), FakeNode())
+    runtime = HandlerPlacementRuntime(
+        runtime_id="rt-1",
+        session=FakeSession(),
+        elections=elections,
+        nodes=nodes,
+        serving_reader=_no_serving,
+        lock=asyncio.Lock(),
+        min_serving=1,
+        keepalive_interval_s=0.1,
+        campaign_interval_s=0.01,
+        fence_tick_s=0.01,
+    )
+    elections["ghost"] = ghost
+    del nodes["any_node"]
+    await runtime.start()
+    try:
+        for _ in range(100):
+            if "primary_node" in runtime.started_nodes():
+                break
+            await asyncio.sleep(0.01)
+        assert runtime.started_nodes() == {"any_node": 0, "primary_node": 11}
+        assert ghost.campaigns == 0
+        assert not runtime.may_publish("ghost")
+    finally:
+        await runtime.stop()
 
 
 @pytest.mark.parametrize(
