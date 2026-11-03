@@ -17,15 +17,43 @@ them to its own error classes and exit codes.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import os
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
-__all__ = ["ModelLaneCensusRegistry"]
+__all__ = ["ModelLaneCensusRegistry", "registry_path"]
+
+#: The node overlay a registry default is looked up in: the first
+#: ``<root>/node_lane_census_effect/overlay.yaml`` under the overlay roots, the
+#: lookup the lane census node itself makes.
+_NODE_OVERLAY = Path("node_lane_census_effect") / "overlay.yaml"
 
 #: The keys of one registry row. A row carries exactly these.
 _ROW_KEYS = frozenset({"name", "aliases", "lanes"})
 
 _Host = tuple[str, tuple[str, ...], tuple[str, ...]]
+
+
+def registry_path(environ: Mapping[str, str]) -> str:
+    """The registry file the collector reads (OMN-22152), from ``environ``.
+
+    ``LANE_CENSUS_REGISTRY`` when it is set, taken as given: a path that is not a
+    file is the caller's error to report, never silently replaced. Unset, the
+    lane census node's own overlay, the first ``node_lane_census_effect/overlay.yaml``
+    under ``ONEX_SKILL_OVERLAY_ROOTS``, so a caller that carries the overlay
+    roots needs no second variable. Raises ``ValueError`` when neither names a file.
+    """
+    explicit = environ.get("LANE_CENSUS_REGISTRY", "").strip()
+    if explicit:
+        return explicit
+    for root in environ.get("ONEX_SKILL_OVERLAY_ROOTS", "").split(os.pathsep):
+        if root and (Path(root) / _NODE_OVERLAY).is_file():
+            return str(Path(root) / _NODE_OVERLAY)
+    raise ValueError(
+        "LANE_CENSUS_REGISTRY is unset and no root of ONEX_SKILL_OVERLAY_ROOTS "
+        f"holds {_NODE_OVERLAY}"
+    )
 
 
 def _short_name(name: str) -> str:

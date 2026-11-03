@@ -23,6 +23,11 @@ requirements:
         statement: "AC4: a registry host that lists no lane runs the census with every lane not applicable, a lane running on a host that does not list it is lane_on_undeclared_host, and a host listing the lanes it had gets the byte-identical plan -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_host_scope_omn19088.py -q -k 'no_lane or undeclared or byte_identical'"
       - id: AC5
         statement: "AC5: the desired-state render reads the registry, not the manifest's hosts block: it takes registry rows as an input and refuses a host or lane the registry does not list -- falsifier: uv run pytest tests/unit/scripts/test_render_desired_state.py -q"
+  - id: req-omn22152-callers-supply-registry
+    statement: The census driver finds the host registry in the lane census node's overlay when LANE_CENSUS_REGISTRY is unset, and the unit installer and CI overlay fetch supply it, so the hourly census and the next dev-lane refresh do not exit 3.
+    acceptance:
+      - id: AC6
+        statement: "AC6: with LANE_CENSUS_REGISTRY unset, the census driver reads the lane census node's overlay under ONEX_SKILL_OVERLAY_ROOTS, the hourly unit installer renders the registry path into the unit, the CI overlay fetch action exports both variables when the overlay repository carries the node overlay, and with no registry anywhere each still stops loudly (driver exit 3, installer exit 2 installing nothing) -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_registry_callers_omn22152.py -q"
 evidence_requirements:
   - kind: tests
     description: "The lane census tests pass reading the registry"
@@ -67,3 +72,10 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/scripts/test_render_desired_state.py -q --no-cov -p no:randomly"
+  - id: dod-omn22152-ac6-callers-supply-registry
+    binds_ac: [AC6]
+    description: The census driver and the dev-lane refresh read the node overlay with LANE_CENSUS_REGISTRY unset, the unit installer renders the registry path, the overlay fetch action exports it, and each fails loudly with no registry anywhere.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/scripts/test_lane_census_registry_callers_omn22152.py -q --no-cov -p no:randomly"

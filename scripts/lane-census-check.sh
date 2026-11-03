@@ -68,9 +68,11 @@
 # node's overlay.yaml (`python -m omnimarket.nodes.node_lane_census_effect
 # registry path` prints it) and the planner reads that file's `registry:` key.
 # The manifest's own `hosts:` block and per-lane `hosts:` lists are not read.
-# Unset, or naming a file that does not exist, the census stops here with exit 3
-# before it reads the container engine; a file that is unreadable or invalid
-# stops the planner with exit 3 the same way.
+# Unset, the planner reads the node's own overlay lookup, the first
+# <root>/node_lane_census_effect/overlay.yaml under ONEX_SKILL_OVERLAY_ROOTS. With
+# no file from either, or the variable naming a file that does not exist, the
+# census stops here with exit 3 before it reads the container engine; a file
+# that is unreadable or invalid stops it with exit 3 the same way.
 #
 # Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps
 #             or configuration (an interpreter without PyYAML, no lane manifest
@@ -226,10 +228,13 @@ fi
 command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found" >&2; exit 3; }
 
 # OMN-22152: the planner reads the host registry from the file LANE_CENSUS_REGISTRY
-# names. Stop here, before the inventory collector touches the container engine,
-# when it is unset or names no file (nothing above reads the engine): a census
-# that cannot say which host it describes describes none.
-[[ -f "${LANE_CENSUS_REGISTRY:-}" ]] || { echo "ERROR: the lane census host registry is not configured: LANE_CENSUS_REGISTRY is '${LANE_CENSUS_REGISTRY:-unset}', not a file; set it to the absolute path of the lane census node's overlay.yaml (the node's \`registry path\` verb prints it)" >&2; exit 3; }
+# names or, unset, from the lane census node's overlay under ONEX_SKILL_OVERLAY_ROOTS
+# (registry_path in the registry model), so a caller that carries either needs no
+# edit. The planner's own --check-config loads the manifest and that registry and
+# prints why it cannot; stop here, before the inventory collector touches the
+# container engine, when it cannot: a census that cannot say which host it
+# describes describes none.
+"$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_plan.py" --check-config || exit 3
 
 HOST="${LANE_CENSUS_HOST:-$(hostname)}"
 log "Starting (lane=${LANE:-ALL}, host=$HOST, $( [[ "$DRY_RUN" == true ]] && echo DRY-RUN || echo LIVE ))"

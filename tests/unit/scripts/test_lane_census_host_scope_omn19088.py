@@ -507,6 +507,7 @@ def _run_driver(
     env.pop("KAFKA_BOOTSTRAP_SERVERS", None)
     env.pop("LANE_CENSUS_HOST", None)
     env.pop("LANE_CENSUS_REGISTRY", None)
+    env.pop("ONEX_SKILL_OVERLAY_ROOTS", None)
     if registry is not None:
         env["LANE_CENSUS_REGISTRY"] = str(registry)
     return subprocess.run(
@@ -589,6 +590,7 @@ def _run_planner(
     env.pop("LANE_MANIFEST", None)
     env.pop("OMNI_HOME", None)
     env.pop("LANE_CENSUS_REGISTRY", None)
+    env.pop("ONEX_SKILL_OVERLAY_ROOTS", None)
     if registry is not None:
         env["LANE_CENSUS_REGISTRY"] = str(registry)
     if config_root is None:

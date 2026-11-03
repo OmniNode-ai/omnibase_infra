@@ -324,7 +324,8 @@ MANIFEST_NAME = "lane-manifest.yaml"
 SNAPSHOT_NAME = "census-snapshot.json"
 
 #: OMN-22152: the absolute path of the lane census node's overlay.yaml, whose
-#: ``registry:`` key is the host registry (not the manifest's).
+#: ``registry:`` key is the host registry (not the manifest's). Unset, the node's
+#: overlay under ``ONEX_SKILL_OVERLAY_ROOTS`` is read (``registry_path``).
 ENV_REGISTRY = "LANE_CENSUS_REGISTRY"
 
 
@@ -390,12 +391,10 @@ def _registry_model() -> Any:
 
 
 def load_registry(path: Path | None = None) -> Any:
-    """The host registry, from the file ``$LANE_CENSUS_REGISTRY`` names (OMN-22152)."""
-    registry_file = path or os.environ.get(ENV_REGISTRY, "").strip()
+    """The host registry, from ``$LANE_CENSUS_REGISTRY`` or the node's overlay (OMN-22152)."""
     try:
-        if not registry_file:
-            raise ValueError(f"{ENV_REGISTRY} is unset")
-        data = yaml.safe_load(Path(registry_file).read_text(encoding="utf-8"))
+        found = path or _registry_model().registry_path(os.environ)
+        data = yaml.safe_load(Path(found).read_text(encoding="utf-8"))
         return _registry_model().ModelLaneCensusRegistry.from_overlay(data)
     except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
         raise LaneCensusConfigError(
@@ -1398,6 +1397,8 @@ def main() -> int:
     except (LaneCensusConfigError, HostDeclarationError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_NOT_CONFIGURED
+    if sys.argv[1:] == ["--check-config"]:
+        return 0
     envelope = json.load(sys.stdin)
     # OMN-19088: the same host resolution as the driver — LANE_CENSUS_HOST, else
     # this machine's hostname. An envelope that already carries a host (a
