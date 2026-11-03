@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-22359"
+title: "omnibase_infra pins omnibase-spi 0.23.12, the newest release, in the dependency, the override, the lock and the fallback matrix"
+summary: "omnibase_infra pinned omnibase-spi==0.23.7 exactly while the ticket measured 0.23.11 as newest; PyPI now carries 0.23.12, so the pin moves there through the normal route: pyproject (dependency and override), uv.lock, the fallback version matrix and the pin followers. No release is cut."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn22359-spi-pin"
+    statement: "omnibase_infra declares and locks the newest omnibase-spi release exactly, and every follower of that pin agrees."
+    acceptance:
+      - id: "AC1"
+        statement: "pyproject.toml carries omnibase-spi==0.23.12 in [project.dependencies] and override-dependencies, uv.lock resolves it, the version matrix is current and the pin tests pass."
+      - id: "AC2"
+        statement: "The unit-test suite passes at the PR head with the new spi and nothing outside the pin files, the lock and the matrix changes."
+evidence_requirements:
+  - kind: "tests"
+    description: "The spi pin followers agree at the head and fail at the merge base."
+    command: "uv run --frozen pytest tests/integration/test_omnibase_spi_runtime_protocol_floor.py tests/integration/infra/test_omn_12765_release_backmerge_identity.py -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn22359-ac1-spi-pin-followers"
+    description: "AC1. The spi pin, the lock, the fallback floor and the pin followers agree on 0.23.12; the followers fail at the merge base, which pins 0.23.7."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/test_omnibase_spi_runtime_protocol_floor.py tests/integration/infra/test_omn_12765_release_backmerge_identity.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "uv run --frozen python scripts/update_version_matrix.py --check"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn22359-ac2-unit-suite"
+    description: "AC2. The pin and matrix unit tests pass at the head; the full unit suite runs on the lab at the pushed head."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/test_version_compatibility.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn22359-deploy-probe-spi-pin"
+    description: "Deploy probe for the pin change: read pyproject.toml from GitHub at the evaluated checkout's commit and require the omnibase-spi==0.23.12 pin. This does not deploy a service or claim that a runtime has been promoted. The probe fails on the merge-base pyproject.toml, which pins 0.23.7."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/pyproject.toml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F '\"omnibase-spi==0.23.12\",'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
