@@ -277,7 +277,9 @@ databases:
               - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
+              - local_alerts
               - local_environment
+              - local_identity
               - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
@@ -381,6 +383,7 @@ databases:
           - object_type: TABLE
             objects:
               - delegation_workflow_state
+              - infra_routing_decisions
               - pr_landing_workflow_state
               - session_phase_state
             privileges:
@@ -447,5 +450,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 16cecbc9a8c44a27dcaa28455d86861988f67a0d40fa3a851e1d4f08f0048567
+  sha256: ecdb2173f4a45b015243e238062c9cb9df66fa311bc300c83b893cd105f7af9f
 topology_instance: onex-prod

@@ -108,6 +108,7 @@ from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_event_bus_type import EnumEventBusType
+from omnibase_core.errors import OnexError
 from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
@@ -145,6 +146,11 @@ from omnibase_infra.event_bus.event_bus_kafka import (
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.handlers import boot_readiness_checks
+from omnibase_infra.handlers.handler_package_announcer import (
+    build_registered_events,
+    run_boot_step0,
+)
 from omnibase_infra.handlers.handler_workspace_config_root_resolve import (
     DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH,
     ENV_WORKSPACE_CONFIG_ROOT,
@@ -155,6 +161,12 @@ from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
 from omnibase_infra.models.network_binding import load_network_binding_settings
+from omnibase_infra.models.node_announce.model_node_announcement_topic import (
+    ModelNodeAnnouncementTopic,
+)
+from omnibase_infra.models.node_announce.model_package_announce_result import (
+    ModelPackageAnnounceResult,
+)
 from omnibase_infra.models.runtime import ModelRuntimeNodeSelection
 from omnibase_infra.models.runtime_kernel_defaults import load_runtime_kernel_defaults
 from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
@@ -392,96 +404,6 @@ def make_plugin_secret_resolver(
     return _resolve
 
 
-async def publish_contract_registrations(
-    *,
-    event_bus: ProtocolEventBusLike,
-    topic: str,
-    contracts: tuple[ModelDiscoveredContract, ...],
-    correlation_id: UUID,
-) -> int:
-    """Announce the contracts this runtime discovered to the contract registry.
-
-    The contract registry reducer consumes ``contract-registered`` and the
-    persistence effect writes ``public.contracts``; before OMN-21031 nothing in
-    the runtime published that event, so the registry stayed empty. Each event
-    is wrapped in the ``ModelEventEnvelope`` the kernel's contract router
-    parses (a bare event is rejected there) and published.
-
-    A contract whose file cannot be read, or whose publish fails, is logged and
-    skipped; boot continues and the next start re-announces every contract.
-
-    Returns:
-        The number of events published.
-    """
-    from omnibase_core.models.events import ModelContractRegisteredEvent
-    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-    from omnibase_core.models.primitives.model_semver import ModelSemVer
-    from omnibase_infra.errors.error_contract_content_hash import (
-        ContractContentHashError,
-    )
-    from omnibase_infra.runtime.util_contract_content_hash import contract_content_hash
-
-    published = 0
-    skipped = 0
-    for contract in contracts:
-        try:
-            contract_yaml = contract.contract_path.read_text(encoding="utf-8")
-            content_hash = contract.contract_content_hash or contract_content_hash(
-                contract.contract_path, correlation_id=correlation_id
-            )
-        except (OSError, UnicodeDecodeError, ContractContentHashError) as exc:
-            logger.warning(
-                "Contract registration skipped for %s: %s (correlation_id=%s)",
-                contract.name,
-                type(exc).__name__,
-                correlation_id,
-            )
-            skipped += 1
-            continue
-        version = contract.contract_version
-        event = ModelContractRegisteredEvent(
-            node_name=contract.name,
-            node_version=ModelSemVer(
-                major=version.major, minor=version.minor, patch=version.patch
-            ),
-            contract_hash=content_hash,
-            contract_yaml=contract_yaml,
-            correlation_id=correlation_id,
-        )
-        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
-            payload=event.model_dump(mode="json"),
-            correlation_id=correlation_id,
-            event_type=event.event_type,
-            source_tool="onex-kernel-contract-registration",
-            tenant_id=None,
-        )
-        try:
-            await event_bus.publish_envelope(
-                envelope,
-                topic=topic,
-                key=event.node_name.encode("utf-8"),
-            )
-        except (InfraConnectionError, InfraTimeoutError, InfraUnavailableError):
-            logger.warning(
-                "Contract registration publish failed for %s (correlation_id=%s)",
-                event.node_name,
-                correlation_id,
-                exc_info=True,
-            )
-            skipped += 1
-            continue
-        published += 1
-    logger.info(
-        "Contract registrations published: %d of %d contracts, %d skipped "
-        "(correlation_id=%s)",
-        published,
-        len(contracts),
-        skipped,
-        correlation_id,
-    )
-    return published
-
-
 async def publish_triage_escalations(
     *,
     event_bus: ProtocolEventBusLike,
@@ -712,45 +634,35 @@ def resolve_topic_readiness_config() -> ModelTopicReadinessConfig:
         ModelTopicReadinessConfig,
     )
 
-    def _float_env(name: str, default: float) -> float:
-        raw = os.environ.get(name)
-        if raw is None or raw.strip() == "":
-            return default
+    def _env_number[T: (int, float)](name: str, default: T, cast: type[T]) -> T:
         try:
-            value = float(raw)
+            value = cast(os.environ.get(name) or default)
         except ValueError:
             return default
-        if value <= 0.0 or math.isnan(value) or math.isinf(value):
-            return default
-        return value
-
-    def _int_env(name: str, default: int) -> int:
-        raw = os.environ.get(name)
-        if raw is None or raw.strip() == "":
-            return default
-        try:
-            value = int(raw)
-        except ValueError:
-            return default
-        return value if value >= 1 else default
+        return value if value > 0 and math.isfinite(value) else default
 
     return ModelTopicReadinessConfig(
-        readiness_timeout_seconds=_float_env(
+        readiness_timeout_seconds=_env_number(
             "ONEX_TOPIC_READINESS_TIMEOUT_SECONDS",
             DEFAULT_READINESS_TIMEOUT_SECONDS,
+            float,
         ),
-        readiness_poll_interval_ms=_int_env(
+        readiness_poll_interval_ms=_env_number(
             "ONEX_TOPIC_READINESS_POLL_INTERVAL_MS",
             DEFAULT_READINESS_POLL_INTERVAL_MS,
+            int,
         ),
-        max_attempts=_int_env(
+        max_attempts=_env_number(
             "ONEX_TOPIC_READINESS_MAX_ATTEMPTS",
             DEFAULT_READINESS_MAX_ATTEMPTS,
+            int,
         ),
-        max_concurrent_contract_attach=_int_env(
+        max_concurrent_contract_attach=_env_number(
             "ONEX_MAX_CONCURRENT_CONTRACT_ATTACH",
             DEFAULT_MAX_CONCURRENT_CONTRACT_ATTACH,
+            int,
         ),
+        priority_contracts=boot_readiness_checks.parse_priority_contracts(os.environ),
     )
 
 
@@ -2878,6 +2790,32 @@ async def bootstrap() -> int:
                 )
                 runtime_health_monitor = None
 
+        # 3.9. Boot step 0 (OMN-21590): announce every installed package's
+        # contracts on an in-memory bus and build the node catalog BEFORE the
+        # container exists. Nothing here imports a handler or constructs a node,
+        # and the container below receives the catalog as an injected service;
+        # the runtime reads it instead of scanning entry points and pushing
+        # contracts to the registry. A failure degrades to the same catalog
+        # folded without a bus inside discover_contracts().
+        node_catalog_result: ModelPackageAnnounceResult | None = None
+        try:
+            node_catalog_result = await run_boot_step0(
+                workload=resolve_runtime_profile_name()
+            )
+            logger.info(
+                "Boot step 0: %d contracts announced, %d admitted (correlation_id=%s)",
+                len(node_catalog_result.announcements),
+                sum(1 for o in node_catalog_result.outcomes if o.accepted),
+                correlation_id,
+            )
+        except (TimeoutError, OSError, ValueError, RuntimeError, LookupError):
+            logger.warning(
+                "Boot step 0 failed; discovery will fold the catalog without a "
+                "bus (correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
+
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
         container = ModelONEXContainer()
@@ -2943,6 +2881,21 @@ async def bootstrap() -> int:
                 "services": wire_summary["services"],
             },
         )
+
+        # 4.0. The container receives the node catalog step 0 built (OMN-21590).
+        if container.service_registry is not None and node_catalog_result is not None:
+            try:
+                await container.service_registry.register_instance(
+                    ModelPackageAnnounceResult,
+                    node_catalog_result,
+                )
+            except (OnexError, RuntimeError, ValueError, TypeError):
+                logger.warning(
+                    "Failed to register the node catalog in the container "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
 
         # 4.1. Register event bus in service registry under publisher and subscriber protocols.
         #
@@ -3594,9 +3547,72 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
-        # Prefetch configuration without constructing the runtime before health
-        # bind (OMN-9741/13768). Preserve its outcome for runtime startup.
+        # Prefetch configuration without constructing the runtime (OMN-9741/13768).
+        # Preserve its outcome for runtime startup.
         config_prefetch_status = "pending"
+
+        # Start HTTP health server before auto-wiring and before long Kafka
+        # subscription work (OMN-21288): a contract-declared HTTP mount is served
+        # from this port while wiring is still running. At this
+        # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
+        # startup liveness with runtime_attached=false. The runtime is
+        # constructed and attached immediately below (OMN-13768), still before the
+        # long-running Kafka subscription work further down.
+        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
+        try:
+            http_port = int(http_port_str)
+            port_bounds = load_network_binding_settings()
+            if not port_bounds.tcp_port_min <= http_port <= port_bounds.tcp_port_max:
+                logger.warning(
+                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
+                    http_port,
+                    port_bounds.tcp_port_min,
+                    port_bounds.tcp_port_max,
+                    DEFAULT_HTTP_PORT,
+                    correlation_id,
+                )
+                http_port = DEFAULT_HTTP_PORT
+        except ValueError:
+            logger.warning(
+                "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",
+                http_port_str,
+                DEFAULT_HTTP_PORT,
+                correlation_id,
+            )
+            http_port = DEFAULT_HTTP_PORT
+
+        health_server = ServiceHealth(
+            container=container,
+            port=http_port,
+            version=KERNEL_VERSION,
+        )
+        # OMN-15217: publish the runtime health monitor's verdict on /health.
+        # The monitor is started above (step 3) and owns the semantic view of
+        # runtime health — contract discovery errors, consumer-group coverage,
+        # topic coverage. Without this line that verdict never leaves the
+        # container logs and /health reports a DEGRADED runtime as healthy.
+        # When the monitor did not start (non-Kafka profiles, startup failure)
+        # the provider is left unset and the payload carries a null verdict.
+        if runtime_health_monitor is not None:
+            health_server.set_runtime_health_provider(
+                lambda: (
+                    runtime_health_monitor.latest_event
+                    if runtime_health_monitor is not None
+                    else None
+                )
+            )
+        health_start_time = time.time()
+        await health_server.start()
+        health_start_duration = time.time() - health_start_time
+        logger.debug(
+            "Health server started in %.3fs before auto-wiring (correlation_id=%s)",
+            health_start_duration,
+            correlation_id,
+            extra={
+                "duration_seconds": health_start_duration,
+                "port": http_port,
+            },
+        )
 
         # --- Auto-wiring: Contract discovery + handler wiring (OMN-7656) ---
         #
@@ -3636,7 +3652,7 @@ async def bootstrap() -> int:
 
             # 1. Discover all contracts from installed packages
             auto_wiring_start = time.time()
-            manifest = discover_contracts()
+            manifest = discover_contracts(node_catalog_result)
             auto_wiring_manifest_discovered = (
                 manifest  # OMN-11198: captured for introspection
             )
@@ -3723,6 +3739,10 @@ async def bootstrap() -> int:
                         os.environ,
                     ),
                 )
+                # OMN-21288: serve the contracts' declared HTTP mounts now, ahead
+                # of lifecycle hooks and handler wiring, so a mount answers while
+                # they run. A mount that cannot be built fails boot here.
+                health_server.attach_manifest(manifest)
                 # auto_wiring_manifest_discovered keeps the full discovery
                 # result: the cross-profile effect lookup below (OMN-14517)
                 # raises RuntimeHostError on cold boot when it is narrowed.
@@ -4141,68 +4161,6 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
-        # Start HTTP health server before long Kafka subscription work. At this
-        # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
-        # startup liveness with runtime_attached=false. The runtime is
-        # constructed and attached immediately below (OMN-13768), still before the
-        # long-running Kafka subscription work further down.
-        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
-        try:
-            http_port = int(http_port_str)
-            port_bounds = load_network_binding_settings()
-            if not port_bounds.tcp_port_min <= http_port <= port_bounds.tcp_port_max:
-                logger.warning(
-                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
-                    http_port,
-                    port_bounds.tcp_port_min,
-                    port_bounds.tcp_port_max,
-                    DEFAULT_HTTP_PORT,
-                    correlation_id,
-                )
-                http_port = DEFAULT_HTTP_PORT
-        except ValueError:
-            logger.warning(
-                "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",
-                http_port_str,
-                DEFAULT_HTTP_PORT,
-                correlation_id,
-            )
-            http_port = DEFAULT_HTTP_PORT
-
-        health_server = ServiceHealth(
-            container=container,
-            port=http_port,
-            version=KERNEL_VERSION,
-        )
-        # OMN-15217: publish the runtime health monitor's verdict on /health.
-        # The monitor is started above (step 3) and owns the semantic view of
-        # runtime health — contract discovery errors, consumer-group coverage,
-        # topic coverage. Without this line that verdict never leaves the
-        # container logs and /health reports a DEGRADED runtime as healthy.
-        # When the monitor did not start (non-Kafka profiles, startup failure)
-        # the provider is left unset and the payload carries a null verdict.
-        if runtime_health_monitor is not None:
-            health_server.set_runtime_health_provider(
-                lambda: (
-                    runtime_health_monitor.latest_event
-                    if runtime_health_monitor is not None
-                    else None
-                )
-            )
-        health_start_time = time.time()
-        await health_server.start()
-        health_start_duration = time.time() - health_start_time
-        logger.debug(
-            "Health server started in %.3fs before Kafka subscriptions (correlation_id=%s)",
-            health_start_duration,
-            correlation_id,
-            extra={
-                "duration_seconds": health_start_duration,
-                "port": http_port,
-                "runtime_attached": False,
-            },
-        )
-
         # 5. Resolve RegistryProtocolBinding from container or create new instance
         # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
         # The handler registry is optional for basic runtime operation - core event
@@ -4589,6 +4547,9 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+            boot_readiness_checks.start_ready_bound_watch(
+                runtime.readiness_check, os.environ, plugin_unsubscribe_callbacks
+            )
             _attach_results: list[ModelContractAttachResult] = []
             # OMN-17372: the interleave reports the contracts it will NEVER
             # attempt, so the gate requires only what can actually report.
@@ -4634,6 +4595,9 @@ async def bootstrap() -> int:
                 demand_watch_stops_out=_demand_watch_stops,
             )
             plugin_unsubscribe_callbacks.extend(_demand_watch_stops)
+            boot_readiness_checks.report_roster_partition(
+                auto_wiring_report.results, _attach_results, _attach_exclusions
+            )
             _contract_attach_gate.exclude(tuple(_attach_exclusions))
             _contract_attach_gate.record(tuple(_attach_results))
             _gate_status = _contract_attach_gate.status()
@@ -5165,17 +5129,21 @@ async def bootstrap() -> int:
                     },
                 )
 
-                # OMN-21031: nothing published contract-registered, so these
-                # consumers (attached above, before this publish) idled and
-                # public.contracts stayed empty. Announce every contract the
-                # discovery pass found.
+                # OMN-21031 filled public.contracts by publishing one
+                # contract-registered record per contract. OMN-21590: the node
+                # catalog is the source now, so the router is fed the same events
+                # in process and a boot publishes nothing on that topic.
                 if auto_wiring_manifest_discovered is not None:
-                    await publish_contract_registrations(
-                        event_bus=event_bus,
-                        topic=contract_registered_topic,
-                        contracts=auto_wiring_manifest_discovered.contracts,
-                        correlation_id=correlation_id,
-                    )
+                    for registered_event in build_registered_events(
+                        auto_wiring_manifest_discovered.contracts, correlation_id
+                    ):
+                        await contract_router.register_announced(
+                            registered_event,
+                            correlation_id,
+                            topic=ModelNodeAnnouncementTopic.suffix_for(
+                                runtime_profile
+                            ),
+                        )
 
         # 9.6b. Start the lane's runtime tick producer (OMN-20590).
         # RuntimeScheduler (OMN-953) was never started by any runtime, so

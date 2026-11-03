@@ -15,7 +15,7 @@ from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 
 pytestmark = pytest.mark.integration
 
-_EP_MODULE = "omnibase_infra.runtime.auto_wiring.discovery.entry_points"
+_EP_MODULE = "omnibase_infra.handlers.handler_package_announcer.entry_points"
 
 
 @dataclass(frozen=True)

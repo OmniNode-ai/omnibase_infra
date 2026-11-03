@@ -18,7 +18,7 @@
 #   * `*` (every resource) may carry describe only;
 #   * a prefixed group grant with read must be at least 16 characters long.
 #   * `{principal}` is the only placeholder, exactly once in a literal topic;
-#   * a templated topic the principal may write is created for it.
+#   * a templated topic the principal may write or read is created for it.
 schema: developer-principal-grants.v1
 lane: dev
 # Principals are named <principal_prefix><login>-<device>, lower-case, [a-z0-9-].

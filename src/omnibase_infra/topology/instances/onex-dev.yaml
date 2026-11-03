@@ -256,7 +256,9 @@ databases:
               - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
+              - local_alerts
               - local_environment
+              - local_identity
               - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
@@ -342,6 +344,7 @@ databases:
           - object_type: TABLE
             objects:
               - delegation_workflow_state
+              - infra_routing_decisions
               - pr_landing_workflow_state
               - session_phase_state
             privileges: [INSERT, SELECT, UPDATE]
