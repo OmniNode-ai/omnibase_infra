@@ -68,6 +68,11 @@ requirements:
         statement: "AC21288102: the receipt-mode publish-and-await handler subscribes with subscribe_ungrouped and mints no receipt-mode-client group -- falsifier: the 14 tests that fail at the base in tests/unit/handlers/test_handler_receipt_mode_publish_await.py do not pass on the branch"
       - id: AC21288105
         statement: "AC21288105: the focused handler tests and integration exchange pass, the handler and integration test pass ruff, and the handler passes mypy -- falsifier: any of the focused test, lint, format or type checks exits nonzero"
+  - id: req-omn21288-fold-forward-deploy
+    statement: "A pre-fold boot-good snapshot never blocks the forward deploy across the fold, and is never restored under the fold overlay."
+    acceptance:
+      - id: AC21288110
+        statement: "AC21288110: with an unhealthy live family and a pre-fold snapshot (including one without folded_profiles), the dev boot guard's prepare holds the snapshot and the deploy proceeds, while the restore refuses the cross-fold pairing and starts or tags nothing -- falsifier: tests/integration/handlers/test_handler_dev_boot_guard_fold_forward_omn21288.py and the fold tests in scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py fail at the merge base and pass on the branch"
   - id: req-omn21288-ac8-handover-model
     statement: "One-runtime plan T8: a checked TLA+ model of the consumer-group offset handover across a fold, a rollback and a second fold, with a mutant for each invariant."
     acceptance:
@@ -262,7 +267,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: []
+    binds_ac:
+      - AC21288110
   - id: dod-omn21288-t5-ac3-rollback-by-revision
     description: >-
       Rollback across the fold moves the image and policy together by revision. The auto-rollback and boot-guard tests exercise service selection and recovery refusal across fold generations. The live fold, publish, rollback and row-count proof is pending post-merge through the deploy agent.
