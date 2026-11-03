@@ -493,7 +493,11 @@ class HandlerDevBootGuard:
         point = ModelDevBootPoint.model_validate_json(self.snapshot_path.read_text())
         if point.project != self.config.compose_project:
             raise DevBootFailedError("last healthy snapshot belongs to another project")
-        _refuse_cross_fold_pairing(point, self.execution)
+        # A snapshot of another fold generation is held, not refused here: the
+        # fold change itself moves the config hash, so refusing left every
+        # forward deploy across a fold with no path at all. _restore still
+        # refuses the pairing, so a failed deploy records the incident and
+        # names the rollback by revision instead of restoring the old image.
         self.point.hold(point)
 
     def _restore(self) -> None:
