@@ -18,8 +18,6 @@ follows the data.
 
 from __future__ import annotations
 
-import logging
-import re
 from pathlib import Path
 
 import pytest
@@ -41,42 +39,29 @@ PLANTED_TOPIC = (
 )
 
 
-def _boot_spec_count(
-    caplog: pytest.LogCaptureFixture, extra_manifest_root: Path | None = None
-) -> int:
-    """Build the boot list and read its count from the provisioner's boot log."""
+def _boot_spec_count(extra_manifest_root: Path | None = None) -> int:
+    """Build the boot list and return its length.
+
+    The count is read from the provisioner's built spec list, not from its boot
+    log line, so a change to the log wording cannot break the check.
+    """
     roots = [INFRA_SRC / "cli", INFRA_SRC / "services"]
     if extra_manifest_root is not None:
         roots.append(extra_manifest_root)
-    first_record = len(caplog.records)
-    with caplog.at_level(logging.INFO, logger=TopicProvisioner.__module__):
-        TopicProvisioner(
-            bootstrap_servers="localhost:9092",
-            contracts_root=INFRA_SRC / "nodes",
-            skill_manifests_roots=roots,
-        )
-    counts = [
-        match[1]
-        for record in caplog.records[first_record:]
-        if (
-            match := re.search(
-                r"topic provisioning \(contract-first\).*total: (\d+),",
-                record.getMessage(),
-            )
-        )
-    ]
-    assert len(counts) == 1, "expected one provisioning count from this boot"
-    return int(counts[0])
+    provisioner = TopicProvisioner(
+        bootstrap_servers="localhost:9092",
+        contracts_root=INFRA_SRC / "nodes",
+        skill_manifests_roots=roots,
+    )
+    return len(provisioner._topic_specs)
 
 
-def _boot_spec_count_with_planted_spec(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> int:
+def _boot_spec_count_with_planted_spec(tmp_path: Path) -> int:
     """Discover an extra spec through the real manifest extraction path."""
     (tmp_path / "topics.yaml").write_text(
         yaml.safe_dump({"topics": [PLANTED_TOPIC]}), encoding="utf-8"
     )
-    return _boot_spec_count(caplog, tmp_path)
+    return _boot_spec_count(tmp_path)
 
 
 def _baseline_file_with(tmp_path: Path, repo_specs: int) -> Path:
@@ -93,8 +78,8 @@ def baseline() -> ModelTopicBootBaseline:
 
 
 @pytest.fixture
-def boot_spec_count(caplog: pytest.LogCaptureFixture) -> int:
-    return _boot_spec_count(caplog)
+def boot_spec_count() -> int:
+    return _boot_spec_count()
 
 
 def test_boot_list_is_within_the_recorded_baseline(
@@ -119,12 +104,11 @@ def test_committed_baseline_equals_the_boot_list(
 
 def test_planted_extra_spec_at_boot_fails_the_committed_baseline(
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
     baseline: ModelTopicBootBaseline,
     boot_spec_count: int,
 ) -> None:
     """AC-T29-2: one extra spec on the boot path exceeds the committed record."""
-    planted_count = _boot_spec_count_with_planted_spec(tmp_path, caplog)
+    planted_count = _boot_spec_count_with_planted_spec(tmp_path)
 
     assert planted_count == boot_spec_count + 1
     assert baseline.repo_specs_over(boot_spec_count) == 0
@@ -134,13 +118,13 @@ def test_planted_extra_spec_at_boot_fails_the_committed_baseline(
 
 
 def test_duplicate_manifest_topic_does_not_grow_the_boot_list(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, boot_spec_count: int
+    tmp_path: Path, boot_spec_count: int
 ) -> None:
     document = yaml.safe_load((INFRA_SRC / "cli" / "topics.yaml").read_text())
     (tmp_path / "topics.yaml").write_text(
         yaml.safe_dump({"topics": [document["topics"][0]]}), encoding="utf-8"
     )
-    assert _boot_spec_count(caplog, tmp_path) == boot_spec_count
+    assert _boot_spec_count(tmp_path) == boot_spec_count
 
 
 def test_changing_the_declared_value_changes_the_verdict_without_a_code_edit(
