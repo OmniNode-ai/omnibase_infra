@@ -70,6 +70,10 @@ class Home:
 LINT = ("ci.yml", "lint")
 VALIDATORS = ("ci.yml", "onex-validation")
 
+# Commit-stage hooks that take no filenames and always run. The ceiling is
+# today's count; lower it when one is scoped or moved, never raise it.
+UNSCOPED_COMMIT_STAGE_CEILING = 21
+
 MOVED: Mapping[str, Home] = {
     "topic-naming-lint": Home(
         "ci.yml",
@@ -176,14 +180,10 @@ VALIDATE_MODES_BEHIND_ALL: Mapping[str, str] = {
 }
 
 
-def _hooks() -> dict[str, dict[str, Any]]:
+def _hook_entries() -> list[dict[str, Any]]:
+    """Every hook entry in the config; an id may be declared more than once."""
     config = yaml.safe_load(PRECOMMIT.read_text(encoding="utf-8"))
-    hooks: dict[str, dict[str, Any]] = {}
-    for repo in config["repos"]:
-        for hook in repo.get("hooks", []):
-            assert hook["id"] not in hooks, f"hook {hook['id']} is declared twice"
-            hooks[hook["id"]] = hook
-    return hooks
+    return [hook for repo in config["repos"] for hook in repo.get("hooks", [])]
 
 
 def _job(workflow: str, job_id: str) -> dict[str, Any]:
@@ -202,9 +202,7 @@ def _run_text(job: Mapping[str, Any]) -> str:
 
 def test_every_manual_hook_is_registered_with_a_ci_home() -> None:
     manual = {
-        hook_id
-        for hook_id, hook in _hooks().items()
-        if "manual" in (hook.get("stages") or [])
+        hook["id"] for hook in _hook_entries() if "manual" in (hook.get("stages") or [])
     }
     assert manual == set(MOVED) | PREEXISTING_MANUAL, (
         "a hook left the commit stage without a registered CI home, "
@@ -214,7 +212,11 @@ def test_every_manual_hook_is_registered_with_a_ci_home() -> None:
 
 @pytest.mark.parametrize("hook_id", sorted(MOVED))
 def test_moved_hook_is_manual_only(hook_id: str) -> None:
-    assert _hooks()[hook_id]["stages"] == ["manual"]
+    entries = [hook for hook in _hook_entries() if hook["id"] == hook_id]
+    assert entries, f"{hook_id} is not declared"
+    assert all(hook.get("stages") == ["manual"] for hook in entries), (
+        f"every declaration of {hook_id} must be manual-only"
+    )
 
 
 @pytest.mark.parametrize("hook_id", sorted(MOVED))
@@ -246,23 +248,12 @@ def test_validate_all_runs_the_mode_a_moved_hook_ran(hook_id: str) -> None:
 
 
 def test_commit_stage_keeps_a_ceiling_on_unscoped_whole_repo_hooks() -> None:
-    """A new whole-repo hook that fires on every commit needs a CI home first.
-
-    Counts commit-stage hooks that take no filenames and have neither a
-    ``files`` pattern nor ``types``: they run on every commit regardless of
-    what it touches. The ceiling is today's count; lower it when one is scoped
-    or moved, never raise it.
-    """
+    """A new whole-repo hook that fires on every commit needs a CI home first."""
     unscoped = sorted(
-        hook_id
-        for hook_id, hook in _hooks().items()
-        if "manual" not in (hook.get("stages") or [])
-        and "pre-push" not in (hook.get("stages") or [])
-        and "commit-msg" not in (hook.get("stages") or [])
+        hook["id"]
+        for hook in _hook_entries()
+        if (hook.get("stages") or ["pre-commit"]) == ["pre-commit"]
         and hook.get("pass_filenames") is False
         and hook.get("always_run")
     )
     assert len(unscoped) <= UNSCOPED_COMMIT_STAGE_CEILING, unscoped
-
-
-UNSCOPED_COMMIT_STAGE_CEILING = 21
