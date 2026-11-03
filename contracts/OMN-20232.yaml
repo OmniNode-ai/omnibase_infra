@@ -11,6 +11,13 @@ requirements:
     acceptance:
       - id: "AC1"
         statement: "AC1: docker/Dockerfile.principal-issuer's serve command passes --overlay /overlay/developer-principal-overlay.yaml and docker/docker-compose.principal-issuer.yml bind-mounts a host file named by the required variable PRINCIPAL_ISSUER_OVERLAY_FILE read-only at that path without creating a missing host path -- falsifier: uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_serves_with_the_developer_principal_overlay_mounted fails at the merge base and passes at the head"
+  - id: "req-issuer-deployed-on-lab-host"
+    statement: "The principal issuer is deployed on the lab host, answers on the tailnet, and has issued a bus login to a developer machine that had none."
+    acceptance:
+      - id: "AC2"
+        statement: "Ticket AC1: the issuer answers {\"status\": \"ok\"} on the lab host's tailnet name at port 8443 and its container is healthy -- falsifier: uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_publishes_no_port_and_serves_a_unix_socket fails, or the lab healthz read in the PR's Lab line does not return {\"status\": \"ok\"}"
+      - id: "AC3"
+        statement: "Ticket AC2: a developer machine with no lab login is issued one by the deployed issuer -- falsifier: the lab issuance ledger holds no created row for a machine, read in the PR's Lab line"
 evidence_requirements:
   - kind: "tests"
     description: "The deploy-definition tests pin the serve command's --overlay path, the read-only bind mount, the required variable and create_host_path false."
@@ -39,3 +46,19 @@ dod_evidence:
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.principal-issuer.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F 'PRINCIPAL_ISSUER_OVERLAY_FILE' > /dev/null"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
+  - id: "dod-omn20232-ac2-issuer-socket-and-healthcheck"
+    description: "The issuer's deploy definition publishes no port, serves a Unix socket for tailscale serve, and carries a container healthcheck. The live tailnet healthz and container health readback is recorded in the PR's Lab line."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_publishes_no_port_and_serves_a_unix_socket -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn20232-ac3-issuer-ledger-created-row"
+    description: "The deployed issuer's ledger holds a created row for a developer machine, issued after the 2026-11-01 container start. Read on the lab host in the PR's Lab line; the ledger never holds the password."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]
