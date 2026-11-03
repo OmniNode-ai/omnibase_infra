@@ -704,11 +704,21 @@ jobs:
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Canonical handler-shape ratchet (OMN-14355 fan-out, OMN-14587)
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
+          set -euo pipefail
+          # Compare this change with its ancestor, as the file-shape gate does.
+          # A later dev retirement is not baseline growth in an older PR.
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-origin/dev}}}"
+          shape_base="$(git merge-base "$base" HEAD)"
           uv run python .ci/omnibase_core/scripts/ci/canonical_handler_shape.py \
             --package omnibase_infra --src-root src \
             --baseline scripts/ci/canonical_handler_shape_baseline.py \
             --receipts-dir scripts/ci/adequacy_receipts \
+            --base-ref "$shape_base" \
             --full
 
       # Fail-closed flip-bundle SEAM gate fan-out (OMN-14809 / OMN-15340 / OMN-15344).

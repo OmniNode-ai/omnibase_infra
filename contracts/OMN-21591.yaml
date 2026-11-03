@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21591
+title: Handler shape gate compares a change with its ancestor
+summary: A dev baseline retirement after a feature branch diverges must not be attributed to that feature branch as baseline growth.
+is_seam_ticket: false
+requirements:
+  - id: req-handler-shape-ancestor
+    statement: The canonical handler shape check receives the change ancestor rather than a moving base tip, retaining the full classifier and receipt checks.
+    acceptance:
+      - id: AC21591001
+        statement: Pull request, merge group and push comparisons select the common ancestor when the base branch retires a baseline entry after divergence.
+      - id: AC21591002
+        statement: An unresolved base stops before validation, and the full scan, baseline and receipts arguments remain present.
+dod_evidence:
+  - id: dod-handler-shape-ancestor
+    description: Execute the workflow shell in divergent temporary Git histories and inspect the validator arguments and frozen baseline at the selected revision.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC21591001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_handler_shape_base_omn21591.py -k later_base_retirement -q --no-cov -o addopts=''
+  - id: dod-handler-shape-fail-closed
+    description: An invalid revision refuses before the validator and valid comparisons retain full scan and receipt arguments.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC21591002]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_handler_shape_base_omn21591.py -q --no-cov -o addopts=''
