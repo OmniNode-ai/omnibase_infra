@@ -64,4 +64,6 @@ class EnumPlatformTopic(str, Enum):
     EVT_VALIDATION_LIFECYCLE_UPDATED_V1 = contract_topic_value('nodes/node_validation_orchestrator/contract.yaml', 'platform', 'EVT_VALIDATION_LIFECYCLE_UPDATED_V1')  # onex.evt.platform.validation-lifecycle-updated.v1
     EVT_VALIDATION_PLAN_CREATED_V1 = contract_topic_value('nodes/node_validation_orchestrator/contract.yaml', 'platform', 'EVT_VALIDATION_PLAN_CREATED_V1')  # onex.evt.platform.validation-plan-created.v1
     EVT_VALIDATION_RESULT_PUBLISHED_V1 = contract_topic_value('nodes/node_validation_ledger_projection_compute/contract.yaml', 'platform', 'EVT_VALIDATION_RESULT_PUBLISHED_V1')  # onex.evt.platform.validation-result-published.v1
+    EVT_VALIDATOR_RUN_V1 = contract_topic_value('nodes/node_validation_ledger_projection_compute/contract.yaml', 'platform', 'EVT_VALIDATOR_RUN_V1')  # onex.evt.platform.validator-run.v1
+    EVT_VALIDATOR_TRIGGERED_V1 = contract_topic_value('nodes/node_validation_ledger_projection_compute/contract.yaml', 'platform', 'EVT_VALIDATOR_TRIGGERED_V1')  # onex.evt.platform.validator-triggered.v1
     INTENT_RUNTIME_TICK_V1 = contract_topic_value('nodes/node_contract_registry_reducer/contract.yaml', 'platform', 'INTENT_RUNTIME_TICK_V1')  # onex.intent.platform.runtime-tick.v1

@@ -4,6 +4,7 @@
 
 from .model_gateway_canary_config import ModelGatewayCanaryConfig
 from .model_gateway_cloud_bus_config import ModelGatewayCloudBusConfig
+from .model_gateway_container_source_bus import ModelGatewayContainerSourceBus
 from .model_gateway_egress_health import ModelGatewayEgressHealth
 from .model_gateway_egress_metadata_scrub import ModelGatewayEgressMetadataScrub
 from .model_gateway_egress_redaction import ModelGatewayEgressRedaction
@@ -21,6 +22,7 @@ from .model_gateway_tenant_identity import ModelGatewayTenantIdentity
 __all__ = [
     "ModelGatewayCanaryConfig",
     "ModelGatewayCloudBusConfig",
+    "ModelGatewayContainerSourceBus",
     "ModelGatewayEgressHealth",
     "ModelGatewayEgressMetadataScrub",
     "ModelGatewayEgressRedaction",
