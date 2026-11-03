@@ -48,7 +48,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv sync --frozen && .venv/bin/onex node node_lane_entry_point_census_effect --contract src/omnibase_infra/nodes/node_lane_entry_point_census_effect/contract.yaml --input tests/unit/nodes/node_lane_entry_point_census_effect/fixtures/fixture_request.json --state-root .onex_state/OMN-21923-node-probe --output receipt
+        check_value: env PATH="$(uv run --frozen python -c 'import sys; print(sys.prefix)')/bin:$PATH" PYTHONPATH=src onex node node_lane_entry_point_census_effect --contract src/omnibase_infra/nodes/node_lane_entry_point_census_effect/contract.yaml --input tests/unit/nodes/node_lane_entry_point_census_effect/fixtures/fixture_request.json --state-root .onex_state/OMN-21923-node-probe --output receipt
         cwd: .
     binds_ac:
       - AC1
