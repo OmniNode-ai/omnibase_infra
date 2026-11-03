@@ -53,6 +53,9 @@ dod_evidence:
       - check_type: "test_passes"
         check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_publishes_no_port_and_serves_a_unix_socket -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_serves_with_the_developer_principal_overlay_mounted -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2"]
   - id: "dod-omn20232-ac3-issuer-ledger-created-row"
     description: "Hosted issuer regressions exercise creation of a developer principal, application of its grants, a created ledger row without its password, and refusal of a login or device outside the overlay. The repository-owned network and deploy definitions are checked without reading the private lab census. These hermetic checks do not assert a live deployment: the deployed issuer's created row after the 2026-11-01 container start is recorded in the PR's Lab line."
@@ -63,5 +66,8 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
       - check_type: "test_passes"
         check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_external_network_matches_dev_broker tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_publishes_no_port_and_serves_a_unix_socket tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_serves_with_the_developer_principal_overlay_mounted -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_serves_with_the_developer_principal_overlay_mounted -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
