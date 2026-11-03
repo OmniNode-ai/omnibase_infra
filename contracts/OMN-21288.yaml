@@ -74,6 +74,11 @@ requirements:
       - id: AC8
         statement: |-
           AC8: formal/consumer_group_handover models the fenced cutover (fence both sides, copy from the side that last ran), the reverse handover of a rollback and a second fold, with a crash between any two steps; the base model holds NoEventLost, NoDoubleEffect, NoDoubleProjection, FencedNoCommit and SecondFoldFresh, and each of the mutants reports the invariant it is named for -- falsifier: uv run --frozen pytest tests/formal/test_consumer_group_handover_model.py -q
+  - id: req-omn21288-boot-guard-fold-pairing
+    statement: "One-runtime plan T5: the dev boot guard never restores a retained image under the overlay of another fold generation."
+    acceptance:
+      - id: AC21288110
+        statement: "AC21288110: a retained healthy dev snapshot records the folded profiles of the overlay it ran under, prepare() and the restore both refuse to pair its image with a dev overlay that folds a different set (naming a rollback by revision), and a snapshot of the same fold still restores -- falsifier: the two refusal tests in scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py fail at the merge base and pass on the branch"
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -290,6 +295,18 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/formal/test_consumer_group_handover_model.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC8]
+  - id: dod-omn21288-boot-guard-fold-pairing
+    description: >-
+      The dev boot guard stores the folded profiles of the overlay each healthy snapshot ran under. A boot-good snapshot planted from before a fold makes prepare() refuse before any container is replaced, and a failed fold deploy refuses to restore the pre-fold image under the fold overlay (the incident records recovery_verified false and names a rollback by revision); a snapshot of the same fold generation still restores, and the pre-fold overlay starts the folded service again. Two of the four tests in the new file fail at the merge base, where the guard records no fold generation. Hosted-runner check only: no dev lane was redeployed and no host install is claimed.
+    source: manual
+    binds_ac: [AC21288110]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
 context:
   remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
