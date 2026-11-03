@@ -216,6 +216,57 @@ async def test_a_contract_without_a_mount_changes_nothing(tmp_path: Path) -> Non
         await server.stop()
 
 
+async def _echo_status(server: ServiceHealth) -> int:
+    base = f"http://127.0.0.1:{_bound_port(server)}"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(f"{base}/api/v1/echo", json={"a": "b"}) as response:
+            return response.status
+
+
+async def test_a_second_attach_starts_no_second_application(tmp_path: Path) -> None:
+    """The kernel attaches before wiring and again for introspection (OMN-21288).
+
+    The second attach of the same manifest must not build or start the mounted
+    application again: the application's own lifespan log records exactly one
+    startup, and the mount keeps answering from the first application.
+    """
+    manifest = _manifest(tmp_path, _mount_block("/api/v1", "create_app"))
+    server = await _server()
+    startups_before = asgi_fixtures.LIFESPAN_LOG.count("startup")
+    try:
+        await _mounted(server, manifest)
+        assert asgi_fixtures.LIFESPAN_LOG.count("startup") == startups_before + 1
+        await _mounted(server, manifest)
+        assert asgi_fixtures.LIFESPAN_LOG.count("startup") == startups_before + 1
+        assert await _echo_status(server) == 200
+    finally:
+        await server.stop()
+    # One application was started, so exactly one is shut down.
+    assert asgi_fixtures.LIFESPAN_LOG[-1] == "shutdown"
+    assert asgi_fixtures.LIFESPAN_LOG.count("shutdown") == (
+        asgi_fixtures.LIFESPAN_LOG.count("startup")
+    )
+
+
+async def test_a_restarted_server_mounts_again(tmp_path: Path) -> None:
+    """After stop() the server builds a fresh router, so attaching again serves."""
+    manifest = _manifest(tmp_path, _mount_block("/api/v1", "create_app"))
+    server = await _server()
+    try:
+        await _mounted(server, manifest)
+        assert await _echo_status(server) == 200
+    finally:
+        await server.stop()
+    startups_before = asgi_fixtures.LIFESPAN_LOG.count("startup")
+    await server.start()
+    try:
+        await _mounted(server, manifest)
+        assert asgi_fixtures.LIFESPAN_LOG.count("startup") == startups_before + 1
+        assert await _echo_status(server) == 200
+    finally:
+        await server.stop()
+
+
 @pytest.mark.parametrize(
     "block",
     [
