@@ -5,61 +5,83 @@
 (* the FIRST install of the front, the one declared window in which          *)
 (* /ready on the host ports may read non-200.                                *)
 (*                                                                            *)
-(* Two runtime instances exist, "o" (the old, serving) and "n" (the          *)
-(* replacement). Each consumes through its OWN consumer group (the slot is   *)
-(* part of KAFKA_INSTANCE_ID), so exclusivity of a partition is not given by *)
-(* the broker's group protocol: it is the standby's pause plus the agent's   *)
-(* fence-then-resume order that makes it. An instance is in one state:       *)
+(* Two runtime instances exist, "o" (the old) and "n" (the replacement).     *)
+(* Each consumes through its OWN consumer group (the slot is part of         *)
+(* KAFKA_INSTANCE_ID), so exclusivity of a partition is not given by the    *)
+(* broker's group protocol: it is the standby's pause plus the order of      *)
+(* the deploy agent's steps. An instance is in one state:                    *)
 (*   none     not created                                                    *)
 (*   boot     container started, nothing joined, /ready 503                  *)
-(*   standby  booted, joined its own group, consumers PAUSED, /ready 200     *)
-(*            with role passive                                              *)
-(*   serving  consuming, /ready 200 with role active                         *)
-(*   fenced   consumers paused after its last commit, /ready 200, passive    *)
+(*   standby  booted, joined its own group, consumers PAUSED before any     *)
+(*            fetch, /ready 200 role passive                                 *)
+(*   serving  consuming, /ready 200 role active                              *)
+(*   fenced   dispatch stopped, in-flight work drained and committed,       *)
+(*            consumers paused, /ready 200 role passive                      *)
 (*   stopping stop signalled, /ready 503, host port still held              *)
 (*   dead     removed or crashed                                             *)
-(* Processing an event and committing it is one step (the T8 model in        *)
-(* formal/consumer_group_handover holds the idempotency-key caveat).         *)
-(* A resume seeks the new instance to the committed position of the side    *)
-(* that LAST RAN, the T8 cutover rule, here by a seek on the paused member   *)
-(* instead of an admin offset write (a group with a live member refuses the  *)
-(* latter).                                                                   *)
+(* Readiness can also drop without a crash (assignment loss, a failed       *)
+(* probe): unready[i]. Processing an event and committing it is one step     *)
+(* here; a crash between the effect and the commit is the at-least-once     *)
+(* case every runtime has today and needs the handlers' idempotency key     *)
+(* (the T8 model, formal/consumer_group_handover, holds the same caveat).    *)
+(* pos[i] is the DURABLE committed position of i's group. A resume commits  *)
+(* the position of the side that LAST RAN to the destination group before   *)
+(* it unpauses (the T8 cutover rule), by a seek plus a commit on a paused   *)
+(* member, or by an offset write onto an empty group while the destination  *)
+(* is stopped.                                                                *)
 (*                                                                            *)
 (* The front probes each instance and routes to a believed-ready one,        *)
-(* preferring an active role. A request that finds its target gone is tried *)
-(* on the other believed-ready instance (the retry). The deploy agent drives *)
-(*   redeploy: create n, wait standby, fence o, resume n (seek), wait until *)
-(*             the front routes to n, stop o. A timeout or a dead n aborts: *)
-(*             fence n, unfence o with a seek back, remove n.                *)
-(*   install:  the same until n serves; then the window opens (stop the old *)
-(*             publisher of the host ports, create the front, wait until   *)
-(*             the front answers 200 through n). At the bound the window    *)
-(*             rolls back (remove the front, fence n, restart o with a      *)
-(*             reverse seek, remove n).                                      *)
-(* The agent may crash and is restarted with its job record; time is a tick *)
-(* counter, not a clock.                                                     *)
+(* preferring an active role. A request whose target is gone or answers 503 *)
+(* is tried on the other believed-ready instance before anything is sent to *)
+(* the client (the retry). The deploy agent drives                           *)
+(*   redeploy: create n, wait standby, fence o (still ready), resume n,     *)
+(*             wait until the front routes to n, re-verify n, stop o. A      *)
+(*             timeout or a dead n BEFORE the stop aborts: fence n, resume o *)
+(*             from n's position, remove n. After the stop there is no abort.*)
+(*   install:  the legacy old runtime cannot be fenced (it runs the code     *)
+(*             that has no control). n is created beside it and waits in     *)
+(*             standby. The window opens when the old publishers of the host *)
+(*             ports are stopped; after they are dead n resumes from their   *)
+(*             committed offsets and the front is created on the freed port. *)
+(*             At the bound the window rolls back: remove the front, fence n,*)
+(*             write n's offsets onto the stopped legacy groups, THEN start  *)
+(*             the legacy containers, then remove n.                         *)
+(* Each agent step changes the world and then records the phase; the agent   *)
+(* may crash between the two and is restarted with its job record, and it   *)
+(* reconciles by reading the world (a command is idempotent per handover).   *)
+(* The agent may crash and is restarted; time is a tick counter.            *)
 (*                                                                            *)
 (* Property (config that must break it)                                       *)
-(* AtMostOneServing       mut_no_fence, mut_rollback_no_fence                *)
+(* AtMostOneServing       mut_no_fence, mut_rollback_no_fence,               *)
+(*                        mut_stand_unpaused, mut_install_resume_early       *)
 (* Contiguous             mut_no_seek (resume at the group default, latest)  *)
-(* NoDoubleEffect         mut_abort_no_seek, mut_rollback_no_copy            *)
+(* NoDoubleEffect         mut_abort_no_seek, mut_rollback_no_copy,           *)
+(*                        mut_resume_replay                                  *)
 (* GaplessWhileOldHealthy mut_no_retry                                        *)
 (* GaplessThroughStop     mut_stop_early                                      *)
+(* StopOnlyWhenLit        mut_stop_unverified                                 *)
 (* FailedLeavesOldServing mut_abort_stops_old                                 *)
-(* WindowStartsWithNewServed mut_open_early                                   *)
+(* WindowStartsWithNewStandby mut_open_early                                  *)
 (* WindowBounded          mut_no_bound                                        *)
 (* RolledBackIsOld        mut_rollback_keeps_front                            *)
 (* window ends in one arrangement mut_no_rollback (TLC reports a deadlock)   *)
 (* Witness cfgs wit_*.cfg each violate their invariant: the path completes.  *)
+(* WindowResolves and RedeployResolves are temporal properties checked under *)
+(* weak fairness of the agent, the world and the ticks (FairSpec).           *)
 (*                                                                            *)
 (* Not modelled: partitions beyond one consumer position (the handover is    *)
 (* per group and partition and the argument is per partition); the broker's  *)
 (* rebalance inside one slot group; the front or the host crashing; two      *)
-(* agents; the effects runtime as a second pool (it is the same protocol    *)
-(* on its own pool, and its first install shares the one window); a first   *)
-(* install whose old container is already dead; image and overlay rolling   *)
-(* back together; HTTP requests that were mid-flight when an instance      *)
-(* stopped (the agent waits the settle bound after the switch).             *)
+(* agents; a crash between a handler's effect and its commit; the pair of   *)
+(* pools: main and effects are one unit here (their old publishers stop     *)
+(* together, the front is created when both ports are free, and a rollback  *)
+(* restarts both), so a partial failure of one pool's restart is the crash   *)
+(* of "o"; a first install whose old container is already dead; image and   *)
+(* overlay rolling back together; HTTP requests that were mid-flight when an *)
+(* instance stopped (the agent waits the settle bound before the stop); the *)
+(* crash of the only remaining runtime after the old was retired (the model *)
+(* ends in "lost": an ordinary single-runtime failure, outside the gapless  *)
+(* claim).                                                                    *)
 EXTENDS Naturals, Integers, FiniteSets, TLC
 
 CONSTANTS Mode,           \* "install" or "redeploy"
@@ -70,6 +92,7 @@ CONSTANTS Mode,           \* "install" or "redeploy"
           Bound,          \* ticks a replacement may take before the agent aborts
           MaxCrash,       \* runtime crashes
           MaxAgentCrash,  \* agent crashes
+          MaxDegrade,     \* readiness losses without a crash
           MUT
 
 ASSUME Mode \in {"install", "redeploy"}
@@ -77,7 +100,7 @@ ASSUME Mode \in {"install", "redeploy"}
 Insts == {"o", "n"}
 ReadySt == {"standby", "serving", "fenced"}
 WinPh == {"window", "rolling_back"}
-TermPh == {"done", "rolled_back", "failed"}
+TermPh == {"done", "rolled_back", "failed", "lost"}
 PrePh == {"created", "fenced", "promoted", "switched"}
 MaxAge == WMax + G + RB + 1
 
@@ -95,12 +118,19 @@ VARIABLES st,        \* instance state
           agentUp,
           crashed,   \* ghost: the instance crashed
           nCrashes, aCrashes,
-          nServed    \* ghost: n has served
+          nServed,   \* ghost: n has served
+          unready,   \* alive but reading not ready (assignment loss, failed probe)
+          degraded,  \* ghost: the instance lost readiness without a crash
+          nDeg,
+          copied,    \* rollback: n's offsets were written onto the stopped legacy groups
+          litAtStop, \* ghost: n was ready and the front routed to it when the old was stopped
+          nStandby   \* ghost: n has been in standby
 
 vars == <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage,
-          agentUp, crashed, nCrashes, aCrashes, nServed>>
+          agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg,
+          copied, litAtStop, nStandby>>
 
-Ready(i) == st[i] \in ReadySt
+Ready(i) == st[i] \in ReadySt /\ ~unready[i]
 PV(i) == IF st[i] = "serving" THEN "active" ELSE IF Ready(i) THEN "passive" ELSE "down"
 Target == IF fv["n"] = "active" THEN "n"
           ELSE IF fv["o"] = "active" THEN "o"
@@ -121,12 +151,15 @@ TypeOK ==
   /\ lastRan \in Insts
   /\ fv \in [Insts -> {"down", "passive", "active"}]
   /\ frontUp \in BOOLEAN /\ installed \in BOOLEAN
-  /\ ph \in {"idle", "aborting"} \cup PrePh \cup WinPh \cup TermPh \cup {"stopping"}
+  /\ ph \in {"idle", "aborting", "stopping"} \cup PrePh \cup WinPh \cup TermPh
   /\ age \in 0..MaxAge /\ dage \in 0..G
   /\ agentUp \in BOOLEAN
   /\ crashed \in [Insts -> BOOLEAN]
   /\ nCrashes \in 0..MaxCrash /\ aCrashes \in 0..MaxAgentCrash
   /\ nServed \in BOOLEAN
+  /\ unready \in [Insts -> BOOLEAN] /\ degraded \in [Insts -> BOOLEAN]
+  /\ nDeg \in 0..MaxDegrade
+  /\ copied \in BOOLEAN /\ litAtStop \in BOOLEAN /\ nStandby \in BOOLEAN
 
 Init ==
   /\ st = [i \in Insts |-> IF i = "o" THEN "serving" ELSE "none"]
@@ -140,36 +173,37 @@ Init ==
   /\ ph = "idle" /\ age = 0 /\ dage = 0 /\ agentUp = TRUE
   /\ crashed = [i \in Insts |-> FALSE]
   /\ nCrashes = 0 /\ aCrashes = 0 /\ nServed = FALSE
+  /\ unready = [i \in Insts |-> FALSE] /\ degraded = [i \in Insts |-> FALSE]
+  /\ nDeg = 0 /\ copied = FALSE /\ litAtStop = TRUE /\ nStandby = FALSE
 
 Goto(p) == ph' = p /\ age' = 0
 
-(* ---- the world ---- *)
+(* ---- the world, the deploy agent ---- *)
 
 Publish ==
-  /\ pub < N /\ pub' = pub + 1
-  /\ UNCHANGED <<st, pos, eff, lastRan, fv, frontUp, installed, ph, age, dage,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ pub < N
+  /\ pub' = pub + 1
+  /\ UNCHANGED <<st, pos, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Consume(i) ==
-  /\ st[i] = "serving" /\ pos[i] < pub
+  /\ st[i] = "serving"
+  /\ pos[i] < pub
   /\ eff' = [eff EXCEPT ![pos[i] + 1] = IF @ < 2 THEN @ + 1 ELSE 2]
   /\ pos' = [pos EXCEPT ![i] = @ + 1]
   /\ lastRan' = i
-  /\ UNCHANGED <<st, pub, fv, frontUp, installed, ph, age, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ UNCHANGED <<st, pub, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 BootN ==
   /\ st["n"] = "boot"
   /\ st' = [st EXCEPT !["n"] = "standby"]
   /\ pos' = [pos EXCEPT !["n"] = IF MUT = "no_seek" THEN pub ELSE -1]
-  /\ UNCHANGED <<pub, eff, lastRan, fv, frontUp, installed, ph, age, dage,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ nStandby' = TRUE
+  /\ UNCHANGED <<pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop>>
 
 OldDies ==
   /\ st["o"] = "stopping"
   /\ st' = [st EXCEPT !["o"] = "dead"]
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Crash(i) ==
   /\ nCrashes < MaxCrash
@@ -177,14 +211,26 @@ Crash(i) ==
   /\ st' = [st EXCEPT ![i] = "dead"]
   /\ crashed' = [crashed EXCEPT ![i] = TRUE]
   /\ nCrashes' = nCrashes + 1
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage,
-                 agentUp, aCrashes, nServed>>
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
+
+Degrade(i) ==
+  /\ nDeg < MaxDegrade
+  /\ Ready(i)
+  /\ unready' = [unready EXCEPT ![i] = TRUE]
+  /\ degraded' = [degraded EXCEPT ![i] = TRUE]
+  /\ nDeg' = nDeg + 1
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, copied, litAtStop, nStandby>>
+
+Recover(i) ==
+  /\ unready[i]
+  /\ unready' = [unready EXCEPT ![i] = FALSE]
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Probe(i) ==
-  /\ frontUp /\ fv[i] # PV(i)
+  /\ frontUp
+  /\ fv[i] # PV(i)
   /\ fv' = [fv EXCEPT ![i] = PV(i)]
-  /\ UNCHANGED <<st, pos, pub, eff, lastRan, frontUp, installed, ph, age, dage,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Tick ==
   /\ age < MaxAge
@@ -193,159 +239,263 @@ Tick ==
   /\ (MUT = "no_bound" \/ ~(ph = "window" /\ agentUp /\ age >= WMax))
   /\ age' = age + 1
   /\ dage' = IF agentUp THEN dage ELSE dage + 1
-  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 AgentCrash ==
-  /\ agentUp /\ aCrashes < MaxAgentCrash /\ ph \notin TermPh /\ ph # "idle"
-  /\ agentUp' = FALSE /\ dage' = 0 /\ aCrashes' = aCrashes + 1
-  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph, age,
-                 crashed, nCrashes, nServed>>
+  /\ agentUp
+  /\ aCrashes < MaxAgentCrash
+  /\ ph \notin TermPh
+  /\ ph # "idle"
+  /\ agentUp' = FALSE
+  /\ dage' = 0
+  /\ aCrashes' = aCrashes + 1
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, crashed, nCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 AgentRestart ==
-  /\ ~agentUp /\ agentUp' = TRUE
-  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph, age,
-                 dage, crashed, nCrashes, aCrashes, nServed>>
+  /\ ~agentUp
+  /\ agentUp' = TRUE
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 TerminalStutter == ph \in TermPh /\ UNCHANGED vars
 
-(* ---- the deploy agent: handover ---- *)
-
 StartN ==
-  /\ agentUp /\ ph = "idle" /\ st["n"] = "none"
+  /\ agentUp
+  /\ ph = "idle"
+  /\ st["n"] = "none"
   /\ st' = [st EXCEPT !["n"] = IF MUT = "stand_unpaused" THEN "serving" ELSE "boot"]
-  /\ Goto("created")
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ ph' = "created"
+  /\ age' = 0
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Fence ==
-  /\ agentUp /\ ph = "created" /\ st["n"] = "standby"
-  /\ st' = IF st["o"] = "serving" /\ MUT # "no_fence"
-             THEN [st EXCEPT !["o"] = "fenced"] ELSE st
-  /\ Goto("fenced")
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph = "created"
+  /\ st["n"] = "standby"
+  /\ st["o"] = "serving"
+  /\ MUT # "no_fence"
+  /\ st' = [st EXCEPT !["o"] = "fenced"]
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
+
+RecordFence ==
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph = "created"
+  /\ st["n"] = "standby"
+  /\ (st["o"] \in {"fenced", "dead"} \/ MUT = "no_fence")
+  /\ ph' = "fenced"
+  /\ age' = 0
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Resume ==
-  /\ agentUp /\ ph = "fenced" /\ st["n"] = "standby"
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph = "fenced"
+  /\ st["n"] = "standby"
   /\ (MUT = "no_fence" \/ st["o"] # "serving")
   /\ st' = [st EXCEPT !["n"] = "serving"]
   /\ pos' = [pos EXCEPT !["n"] = IF MUT = "no_seek" THEN @ ELSE pos[lastRan]]
   /\ nServed' = TRUE
-  /\ Goto("promoted")
-  /\ UNCHANGED <<pub, eff, lastRan, fv, frontUp, installed, dage, agentUp,
-                 crashed, nCrashes, aCrashes>>
+  /\ UNCHANGED <<pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, unready, degraded, nDeg, copied, litAtStop, nStandby>>
+
+ResumeReplay ==
+  /\ MUT = "resume_replay"
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph = "fenced"
+  /\ st["n"] = "serving"
+  /\ pos' = [pos EXCEPT !["n"] = pos["o"]]
+  /\ UNCHANGED <<st, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
+
+RecordResume ==
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph = "fenced"
+  /\ st["n"] = "serving"
+  /\ ph' = "promoted"
+  /\ age' = 0
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 AbortStart ==
-  /\ agentUp /\ ph \in PrePh
+  /\ agentUp
+  /\ ph \in PrePh
   /\ \/ st["n"] = "dead"
      \/ (age >= Bound /\ ph # "switched")
      \/ (age >= Bound /\ ph = "switched" /\ fv["n"] # "active")
   /\ st' = IF st["n"] = "serving" THEN [st EXCEPT !["n"] = "fenced"] ELSE st
-  /\ Goto("aborting")
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ ph' = "aborting"
+  /\ age' = 0
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 AbortUnfence ==
-  /\ agentUp /\ ph = "aborting" /\ st["o"] = "fenced" /\ st["n"] # "serving"
+  /\ agentUp
+  /\ ph = "aborting"
+  /\ st["o"] = "fenced"
+  /\ st["n"] # "serving"
   /\ st' = [st EXCEPT !["o"] = "serving"]
   /\ pos' = [pos EXCEPT !["o"] = IF MUT = "abort_no_seek" THEN @ ELSE pos[lastRan]]
-  /\ UNCHANGED <<pub, eff, lastRan, fv, frontUp, installed, ph, age, dage,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ UNCHANGED <<pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 AbortFinish ==
-  /\ agentUp /\ ph = "aborting" /\ st["o"] \in {"serving", "dead"}
+  /\ agentUp
+  /\ ph = "aborting"
+  /\ st["o"] \in {"serving", "dead"}
   /\ st' = IF MUT = "abort_stops_old" THEN [st EXCEPT !["o"] = "dead"]
            ELSE IF st["n"] \in {"none", "dead"} THEN st
            ELSE [st EXCEPT !["n"] = "dead"]
-  /\ Goto("failed")
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
-
-(* ---- redeploy: switch, stop the old ---- *)
+  /\ ph' = "failed"
+  /\ age' = 0
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Switch ==
-  /\ Mode = "redeploy" /\ agentUp /\ ph = "promoted"
-  /\ st["n"] = "serving" /\ fv["n"] = "active"
-  /\ Goto("switched")
-  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, dage,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph = "promoted"
+  /\ st["n"] = "serving"
+  /\ fv["n"] = "active"
+  /\ ph' = "switched"
+  /\ age' = 0
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 StopOld ==
-  /\ Mode = "redeploy" /\ agentUp
-  /\ \/ (ph = "switched" /\ st["n"] = "serving" /\ fv["n"] = "active")
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ \/ (ph = "switched" /\ fv["n"] = "active" /\ (MUT = "stop_unverified" \/ Ready("n")))
      \/ (MUT = "stop_early" /\ ph = "promoted" /\ st["n"] = "serving")
   /\ st["o"] \in {"fenced", "dead"}
   /\ st' = IF st["o"] = "fenced" THEN [st EXCEPT !["o"] = "stopping"] ELSE st
-  /\ Goto("stopping")
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ litAtStop' = Ready("n")
+  /\ ph' = "stopping"
+  /\ age' = 0
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, nStandby>>
 
 DoneRedeploy ==
-  /\ Mode = "redeploy" /\ agentUp /\ ph = "stopping" /\ st["o"] = "dead"
-  /\ Goto("done")
-  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, dage,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph = "stopping"
+  /\ st["o"] = "dead"
+  /\ Ready("n")
+  /\ ph' = "done"
+  /\ age' = 0
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
-(* ---- install: the one declared window ---- *)
+LostAfterStop ==
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph = "stopping"
+  /\ st["o"] = "dead"
+  /\ ~Ready("n")
+  /\ ph' = "lost"
+  /\ age' = 0
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 OpenWindow ==
-  /\ Mode = "install" /\ agentUp
-  /\ \/ (ph = "promoted" /\ st["n"] = "serving")
-     \/ (MUT = "open_early" /\ ph = "created" /\ st["n"] = "standby")
-  /\ st["o"] \in {"serving", "fenced", "dead"}
-  /\ st' = IF st["o"] \in {"serving", "fenced"} THEN [st EXCEPT !["o"] = "stopping"] ELSE st
-  /\ Goto("window")
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ Mode = "install"
+  /\ agentUp
+  /\ ph = "created"
+  /\ (st["n"] = "standby" \/ MUT = "open_early")
+  /\ st["o"] \in {"serving", "dead"}
+  /\ st' = IF st["o"] = "serving" THEN [st EXCEPT !["o"] = "stopping"] ELSE st
+  /\ ph' = "window"
+  /\ age' = 0
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
+
+ResumeInstall ==
+  /\ Mode = "install"
+  /\ agentUp
+  /\ \/ (ph = "window" /\ st["n"] = "standby" /\ st["o"] = "dead")
+     \/ (MUT = "install_resume_early" /\ ph = "created" /\ st["n"] = "standby" /\ st["o"] = "serving")
+  /\ st' = [st EXCEPT !["n"] = "serving"]
+  /\ pos' = [pos EXCEPT !["n"] = IF MUT = "no_seek" THEN @ ELSE pos[lastRan]]
+  /\ nServed' = TRUE
+  /\ UNCHANGED <<pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 CreateFront ==
-  /\ Mode = "install" /\ agentUp /\ ph = "window" /\ st["o"] = "dead" /\ ~frontUp
+  /\ Mode = "install"
+  /\ agentUp
+  /\ ph = "window"
+  /\ st["o"] = "dead"
+  /\ ~frontUp
   /\ frontUp' = TRUE
   /\ fv' = [i \in Insts |-> "down"]
-  /\ UNCHANGED <<st, pos, pub, eff, lastRan, installed, ph, age, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Complete ==
-  /\ Mode = "install" /\ agentUp /\ ph = "window" /\ frontUp
-  /\ fv["n"] = "active" /\ Answer = 200
-  /\ Goto("done") /\ installed' = TRUE
-  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ Mode = "install"
+  /\ agentUp
+  /\ ph = "window"
+  /\ frontUp
+  /\ fv["n"] = "active"
+  /\ Answer = 200
+  /\ installed' = TRUE
+  /\ ph' = "done"
+  /\ age' = 0
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 RollbackStart ==
-  /\ Mode = "install" /\ agentUp /\ ph = "window" /\ age >= WMax /\ MUT # "no_rollback"
+  /\ Mode = "install"
+  /\ agentUp
+  /\ ph = "window"
+  /\ age >= WMax
+  /\ MUT # "no_rollback"
   /\ frontUp' = (MUT = "rollback_keeps_front")
   /\ fv' = [i \in Insts |-> "down"]
-  /\ st' = IF st["n"] = "serving" /\ MUT # "rollback_no_fence"
-             THEN [st EXCEPT !["n"] = "fenced"] ELSE st
+  /\ st' = IF st["n"] = "serving" /\ MUT # "rollback_no_fence" THEN [st EXCEPT !["n"] = "fenced"] ELSE st
   /\ ph' = "rolling_back"
-  /\ UNCHANGED <<pos, pub, eff, lastRan, installed, age, dage, agentUp, crashed,
-                 nCrashes, aCrashes, nServed>>
+  /\ UNCHANGED <<pos, pub, eff, lastRan, installed, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
+
+CopyBack ==
+  /\ Mode = "install"
+  /\ agentUp
+  /\ ph = "rolling_back"
+  /\ st["o"] = "dead"
+  /\ ~copied
+  /\ (MUT = "rollback_no_fence" \/ st["n"] # "serving")
+  /\ MUT # "rollback_no_copy"
+  /\ pos' = [pos EXCEPT !["o"] = pos[lastRan]]
+  /\ copied' = TRUE
+  /\ UNCHANGED <<st, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, litAtStop, nStandby>>
 
 RestartOld ==
-  /\ Mode = "install" /\ agentUp /\ ph = "rolling_back" /\ st["o"] = "dead"
+  /\ Mode = "install"
+  /\ agentUp
+  /\ ph = "rolling_back"
+  /\ st["o"] = "dead"
+  /\ (copied \/ MUT = "rollback_no_copy")
   /\ (MUT = "rollback_no_fence" \/ st["n"] # "serving")
   /\ st' = [st EXCEPT !["o"] = "serving"]
-  /\ pos' = [pos EXCEPT !["o"] = IF MUT = "rollback_no_copy" THEN @ ELSE pos[lastRan]]
-  /\ UNCHANGED <<pub, eff, lastRan, fv, frontUp, installed, ph, age, dage,
-                 agentUp, crashed, nCrashes, aCrashes, nServed>>
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 RolledBack ==
-  /\ Mode = "install" /\ agentUp /\ ph = "rolling_back" /\ st["o"] = "serving"
+  /\ Mode = "install"
+  /\ agentUp
+  /\ ph = "rolling_back"
+  /\ st["o"] = "serving"
   /\ st' = IF st["n"] \in {"none", "dead"} THEN st ELSE [st EXCEPT !["n"] = "dead"]
-  /\ Goto("rolled_back")
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp,
-                 crashed, nCrashes, aCrashes, nServed>>
+  /\ ph' = "rolled_back"
+  /\ age' = 0
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 Next ==
   \/ Publish \/ BootN \/ OldDies \/ Tick \/ AgentCrash \/ AgentRestart \/ TerminalStutter
-  \/ \E i \in Insts : Consume(i) \/ Crash(i) \/ Probe(i)
-  \/ StartN \/ Fence \/ Resume \/ AbortStart \/ AbortUnfence \/ AbortFinish
-  \/ Switch \/ StopOld \/ DoneRedeploy
-  \/ OpenWindow \/ CreateFront \/ Complete \/ RollbackStart \/ RestartOld \/ RolledBack
+  \/ \E i \in Insts : Consume(i) \/ Crash(i) \/ Probe(i) \/ Degrade(i) \/ Recover(i)
+  \/ StartN \/ Fence \/ RecordFence \/ Resume \/ ResumeReplay \/ RecordResume
+  \/ AbortStart \/ AbortUnfence \/ AbortFinish \/ Switch \/ StopOld \/ DoneRedeploy \/ LostAfterStop
+  \/ OpenWindow \/ ResumeInstall \/ CreateFront \/ Complete \/ RollbackStart \/ CopyBack
+  \/ RestartOld \/ RolledBack
+
+AgentStep ==
+  \/ StartN \/ Fence \/ RecordFence \/ Resume \/ RecordResume \/ AbortStart \/ AbortUnfence
+  \/ AbortFinish \/ Switch \/ StopOld \/ DoneRedeploy \/ LostAfterStop \/ OpenWindow
+  \/ ResumeInstall \/ CreateFront \/ Complete \/ RollbackStart \/ CopyBack \/ RestartOld
+  \/ RolledBack
 
 Spec == Init /\ [][Next]_vars
+
+Fair == /\ WF_vars(AgentStep) /\ WF_vars(AgentRestart) /\ WF_vars(OldDies) /\ WF_vars(BootN)
+        /\ WF_vars(Tick) /\ (\A i \in Insts : WF_vars(Probe(i)) /\ WF_vars(Recover(i)))
+
+FairSpec == Spec /\ Fair
 
 (* ---- properties ---- *)
 
@@ -356,15 +506,17 @@ Contiguous == \A i \in Insts : st[i] = "serving" => \A e \in 1..pos[i] : eff[e] 
 NoDoubleEffect == \A e \in 1..N : eff[e] <= 1
 
 GaplessWhileOldHealthy ==
-  (installed /\ frontUp /\ Ready("o")) => FrontAnswer = 200
+  (installed /\ frontUp /\ st["o"] \in ReadySt /\ ~degraded["o"]) => FrontAnswer = 200
 
 GaplessThroughStop ==
   (installed /\ frontUp /\ ph \in {"stopping", "done"}
-     /\ ~crashed["o"] /\ ~crashed["n"]) => FrontAnswer = 200
+     /\ ~crashed["o"] /\ ~crashed["n"] /\ ~degraded["o"] /\ ~degraded["n"]) => FrontAnswer = 200
+
+StopOnlyWhenLit == ph \in {"stopping", "done", "lost"} => litAtStop
 
 FailedLeavesOldServing == ph = "failed" => (st["o"] = "serving" \/ crashed["o"])
 
-WindowStartsWithNewServed == ph \in WinPh => nServed
+WindowStartsWithNewStandby == ph \in WinPh => nStandby
 
 WindowBounded == ph \in WinPh => age <= WMax + G + RB
 
@@ -372,6 +524,10 @@ RolledBackIsOld ==
   ph = "rolled_back" => (~frontUp /\ (st["o"] = "serving" \/ crashed["o"]))
 
 DoneIsNew == (Mode = "install" /\ ph = "done") => (frontUp /\ installed /\ nServed)
+
+WindowResolves == (ph = "window") ~> (ph \in {"done", "rolled_back"})
+
+Resolves == (ph # "idle") ~> (ph \in TermPh)
 
 (* ---- witnesses: each is violated, which shows its path completes ---- *)
 

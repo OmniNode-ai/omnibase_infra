@@ -28,4 +28,4 @@ requirements:
     statement: The start-first handover and the first-install window are modelled before they are built.
     acceptance:
       - id: AC22151901
-        statement: formal/runtime_start_first holds AtMostOneServing, Contiguous, NoDoubleEffect, the gapless properties, FailedLeavesOldServing and the window properties in both modes, and each named mutant fails its property.
+        statement: formal/runtime_start_first holds AtMostOneServing, Contiguous, NoDoubleEffect, the gapless properties, StopOnlyWhenLit, FailedLeavesOldServing, the window properties and the Resolves liveness properties in both modes, and each named mutant fails its property.

@@ -44,13 +44,16 @@ EXPECTED_VIOLATIONS = {
     "mut_no_fence": "Invariant AtMostOneServing is violated.",
     "mut_rollback_no_fence": "Invariant AtMostOneServing is violated.",
     "mut_stand_unpaused": "Invariant AtMostOneServing is violated.",
+    "mut_install_resume_early": "Invariant AtMostOneServing is violated.",
     "mut_no_seek": "Invariant Contiguous is violated.",
     "mut_abort_no_seek": "Invariant NoDoubleEffect is violated.",
     "mut_rollback_no_copy": "Invariant NoDoubleEffect is violated.",
+    "mut_resume_replay": "Invariant NoDoubleEffect is violated.",
     "mut_no_retry": "Invariant GaplessWhileOldHealthy is violated.",
     "mut_stop_early": "Invariant GaplessThroughStop is violated.",
+    "mut_stop_unverified": "Invariant StopOnlyWhenLit is violated.",
     "mut_abort_stops_old": "Invariant FailedLeavesOldServing is violated.",
-    "mut_open_early": "Invariant WindowStartsWithNewServed is violated.",
+    "mut_open_early": "Invariant WindowStartsWithNewStandby is violated.",
     "mut_no_bound": "Invariant WindowBounded is violated.",
     "mut_rollback_keeps_front": "Invariant RolledBackIsOld is violated.",
     "mut_no_rollback": "Deadlock reached.",
@@ -62,15 +65,18 @@ EXPECTED_VIOLATIONS = {
 }
 
 #: Each invariant the cfgs state, with a mutant that must break it. DoneIsNew is
-#: a postcondition the agent's Complete step establishes; it has no mutant.
+#: a postcondition the agent's Complete step establishes; it has no mutant. The
+#: temporal properties Resolves and WindowResolves are checked under FairSpec in
+#: the two passing configs and have no mutant.
 INVARIANT_MUTANTS = {
     "AtMostOneServing": "mut_no_fence",
     "Contiguous": "mut_no_seek",
     "NoDoubleEffect": "mut_abort_no_seek",
     "GaplessWhileOldHealthy": "mut_no_retry",
     "GaplessThroughStop": "mut_stop_early",
+    "StopOnlyWhenLit": "mut_stop_unverified",
     "FailedLeavesOldServing": "mut_abort_stops_old",
-    "WindowStartsWithNewServed": "mut_open_early",
+    "WindowStartsWithNewStandby": "mut_open_early",
     "WindowBounded": "mut_no_bound",
     "RolledBackIsOld": "mut_rollback_keeps_front",
 }
