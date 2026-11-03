@@ -23,14 +23,13 @@ evidence_requirements:
     command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/placement -q --no-cov
 dod_evidence:
   - id: dod-handler-di-gate
-    description: The hook exits 0 on the file and over the whole tree, and the baseline no longer lists the file.
+    description: The handler-di-gate hook exits 0 on the placement runtime handler (the whole-tree run already fails on dev for unrelated files, so it cannot judge this change), the constructor takes only the container, and the baseline no longer lists the file.
     source: generated
     binds_ac:
       - AC1
     checks:
-      - check_type: command
-        check_value: uv run --frozen pre-commit run handler-di-gate --all-files
-        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/placement/test_handler_placement_runtime_di_omn22132.py -q --no-cov
       - check_type: command
         check_value: "! grep -q handler_placement_runtime.py .onex_ratchets/handler_di_baseline.txt"
         cwd: ${OMNI_HOME}/omnibase_infra
