@@ -397,6 +397,24 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     )
     assert memory_window_live == memory_window_declared
     assert "DELETE" not in memory_window_live
+    # OMN-22260: transcript_mirror_runs, one row per mirror attempt, written only
+    # by the node_projection_transcript_mirror_run reducer through the runtime
+    # role. The reducer inserts the start row and updates it with the terminal
+    # state and never deletes an attempt, so the runtime role holds exactly
+    # SELECT/INSERT/UPDATE and no DELETE.
+    transcript_mirror_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "transcript_mirror_runs"
+    }
+    assert transcript_mirror_declared == {"SELECT", "INSERT", "UPDATE"}
+    transcript_mirror_live = _live_privileges(
+        fresh_build, "transcript_mirror_runs", _RUNTIME
+    )
+    assert transcript_mirror_live == transcript_mirror_declared
+    assert "DELETE" not in transcript_mirror_live
     # OMN-19513: 0001 from omnimarket#3050 explicitly grants the runtime
     # SELECT/INSERT/UPDATE on both work-ledger tables, with no DELETE.
     for work_ledger_table in ("work_ledger_rows", "work_ledger_state"):

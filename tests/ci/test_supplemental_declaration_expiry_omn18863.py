@@ -118,6 +118,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "local_alerts": "omnimarket OMN-19991 (node_projection_local_alerts)",
     "local_identity": "omnimarket OMN-19986 (node_projection_local_identity)",
     "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
+    "transcript_mirror_runs": "omnimarket OMN-22260 (node_projection_transcript_mirror_run)",
 }
 
 _SKIP_REASON = (
