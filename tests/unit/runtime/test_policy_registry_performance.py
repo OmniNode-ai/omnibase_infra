@@ -638,9 +638,16 @@ class TestPolicyRegistryPerformanceRegression:
         results: list[bool] = []
         errors: list[Exception] = []
         thread_times: list[float] = []
+        ready = threading.Barrier(11, timeout=10)
+        start_gate = threading.Event()
 
         def concurrent_get(thread_id: int) -> None:
             try:
+                ready.wait()
+                if not start_gate.wait(timeout=10):
+                    raise TimeoutError(
+                        "Registry throughput start gate was not released"
+                    )
                 thread_start = time.perf_counter()
                 for i in range(100):
                     policy_id = f"policy_{(thread_id * 10 + i) % 100}"
@@ -650,13 +657,16 @@ class TestPolicyRegistryPerformanceRegression:
             except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
                 errors.append(e)
 
-        # Launch 10 threads concurrently
-        start = time.perf_counter()
+        # Start the workers before timing registry work: thread bootstrap is
+        # controlled by the host scheduler, not RegistryPolicy.get().
         threads = [
             threading.Thread(target=concurrent_get, args=(i,)) for i in range(10)
         ]
         for t in threads:
             t.start()
+        ready.wait()
+        start = time.perf_counter()
+        start_gate.set()
         for t in threads:
             t.join()
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -673,6 +683,35 @@ class TestPolicyRegistryPerformanceRegression:
             f"max={max(thread_times) * 1000:.1f}ms. "
             f"This indicates lock contention regression."
         )
+
+    def test_concurrent_get_excludes_thread_startup(
+        self, large_registry: RegistryPolicy, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Slow thread startup must not consume the registry lookup budget."""
+        import threading
+
+        original_start = threading.Thread.start
+
+        def delayed_start(thread: threading.Thread) -> None:
+            time.sleep(0.12)
+            original_start(thread)
+
+        monkeypatch.setattr(threading.Thread, "start", delayed_start)
+        self.test_concurrent_get_throughput_regression(large_registry)
+
+    def test_concurrent_get_still_refuses_slow_lookup(
+        self, large_registry: RegistryPolicy, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The one-second budget still rejects slow work after startup."""
+        original_get = large_registry.get
+
+        def slow_get(policy_id: str) -> object:
+            time.sleep(0.012)
+            return original_get(policy_id)
+
+        monkeypatch.setattr(large_registry, "get", slow_get)
+        with pytest.raises(AssertionError, match="threshold: 1000ms"):
+            self.test_concurrent_get_throughput_regression(large_registry)
 
     @pytest.mark.performance
     def test_secondary_index_speedup(self) -> None:

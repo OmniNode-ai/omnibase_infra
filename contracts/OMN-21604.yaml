@@ -60,3 +60,11 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/cli/test_delegate_overlay_budget_omn21604.py tests/unit/runtime/test_delegation_budget_deadline_check_omn21604.py -q -n 0 -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn21604-policy-throughput-check-measurement
+    description: >-
+      The concurrent registry check waits for all ten workers before timing 1000 lookups against its unchanged 1000 ms threshold. Injecting 120 ms into each thread start must not fail fast registry lookups; injecting 12 ms into each lookup must still fail the throughput check. The delayed-start case fails with the original check because it charges worker bootstrap to registry work.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_policy_registry_performance.py -k concurrent_get -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
