@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21226
+title: "Contract hot loading H1 (omnibase_infra piece): the per-workload topic declarations, the chain fixtures and the strict xfail end-to-end test"
+summary: >-
+  The runtime declarations of the per-workload hot-loading topics (the applied topic and the compacted state topic, whose expansions for every lane workload pass core's topic validator), the golden and error chain fixtures G1 to G8 and E1 to E17, and the end-to-end test, marked xfail with strict set, whose first assertion fails because no accepted record exists. The record models are in omnibase_core and are not importable here before a core release, so the fixtures are checked for shape here and parsed against the models in the follow-up that moves the pin.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - topics
+requirements:
+  - id: req-omn21226-infra-seams
+    statement: The per-workload state topic is created compacted from its declaration, every fixture is a conforming chain, and the end-to-end test fails at its first assertion.
+    acceptance:
+      - id: AC1
+        statement: "AC1: each model refuses an unknown field and a missing field of its category's required set -- falsifier: `uv run pytest tests/unit/models/events/test_contract_hotload_models.py -q` in core passes with one required field made optional. The accepted and state topics are created compacted from their declarations -- falsifier: a provisioner unit test finds another `cleanup.policy`. Every fixture parses -- falsifier: a fixture with an undeclared field passes. The E2E test fails at its first assertion at the pinned head -- falsifier: the quoted run fails elsewhere or passes."
+evidence_requirements:
+  - kind: tests
+    description: The state topic is created compacted, every fixture conforms, and the end-to-end test is an expected failure.
+    command: "uv run pytest tests/unit/event_bus/test_topic_provisioner_hotload_state_compacted_omn21226.py tests/unit/models/contract_hotload tests/integration/runtime/test_contract_hotload_on_demand_e2e.py -q --no-cov -n 0"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21226-ac1-state-topic-compacted
+    description: The provisioner creates each workload's state topic with cleanup.policy compact from the declared spec, and the applied topic is the control that is not compacted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_topic_provisioner_hotload_state_compacted_omn21226.py tests/unit/models/contract_hotload/test_workload_topic.py -q --no-cov -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21226-ac1-fixtures-and-e2e
+    description: All 25 chain fixtures conform to the shape and refuse an undeclared field, and the end-to-end test is an expected failure that fails at its first assertion.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/models/contract_hotload/test_chain_fixtures.py tests/integration/runtime/test_contract_hotload_on_demand_e2e.py -q --no-cov -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

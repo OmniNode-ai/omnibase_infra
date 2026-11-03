@@ -1,0 +1,91 @@
+{
+  "chain": "E8",
+  "kind": "error",
+  "title": "not ready",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 1,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "register",
+        "owner": "lab-deploy",
+        "registration_request_id": "5730252d-18a3-586d-b7b2-baa61d1e2ad6",
+        "contract_yaml": "name: node_x\nnode_version: 1.0.0\n"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 1,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "register",
+        "status": "not_ready",
+        "reason": null,
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_x",
+      "note": "a topic never converges; dispatchers kept; retried"
+    },
+    {
+      "step": 3,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 1,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "register",
+        "status": "materialized",
+        "reason": null,
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_x",
+      "note": "materialized on recovery"
+    },
+    {
+      "step": 4,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_y",
+        "registry_version": 1,
+        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "operation": "register",
+        "status": "failed",
+        "reason": null,
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_y",
+      "note": "the budget is spent for another name: failed"
+    }
+  ],
+  "ends_in": "not_ready, then materialized on recovery or failed when the budget is spent"
+}
