@@ -27,10 +27,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration import ModelNodeCapabilities
 from omnibase_infra.models.registration.events import (
@@ -80,14 +82,13 @@ def create_envelope(
     tick: ModelRuntimeTick,
     now: datetime | None = None,
     correlation_id: UUID | None = None,
-) -> ModelEventEnvelope[ModelRuntimeTick]:
+) -> ModelInjectedRequest[ModelRuntimeTick]:
     """Create a test envelope wrapping a runtime tick."""
-    return ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=tick,
-        envelope_timestamp=now or datetime.now(UTC),
+    return ModelInjectedRequest(
+        event=tick,
+        now=now or datetime.now(UTC),
+        input_id=uuid4(),
         correlation_id=correlation_id or uuid4(),
-        source_tool="test",
     )
 
 
