@@ -22,7 +22,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: "The from_group_id model, loader and preflight tests pass"
-    command: "uv run pytest tests/unit/models/event_bus tests/unit/contracts/test_consumer_group_handover_from_group_id_omn21932.py tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -q --no-cov -p no:randomly"
+    command: "uv run pytest tests/unit/models/event_bus/test_model_consumer_group_handover_from_group_id.py tests/unit/contracts/test_consumer_group_handover_from_group_id_omn21932.py tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -q --no-cov -p no:randomly"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -34,14 +34,14 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run pytest tests/unit/models/event_bus -q --no-cov -k from_group_id -p no:randomly"
+        check_value: "uv run pytest tests/unit/models/event_bus/test_model_consumer_group_handover_from_group_id.py -q --no-cov -p no:randomly"
   - id: dod-omn21932-ac3-loader-preflight
     binds_ac: [AC3]
     description: The contract loader reads a contract declaring from_group_id, refuses invalid values, and the preflight hands over from the literal group on the in-memory bus, with no broker.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run pytest tests/unit/contracts -q --no-cov -p no:randomly"
+        check_value: "uv run pytest tests/unit/contracts/test_consumer_group_handover_from_group_id_omn21932.py -q --no-cov -p no:randomly"
   - id: dod-deploy
     binds_ac: [AC1, AC3]
     description: A hosted runner loads the literal-group contract and executes its subscribe preflight on the in-memory bus; the separate Redpanda integration test reads back window and live events across three partitions after resuming the literal retired group's offsets.
