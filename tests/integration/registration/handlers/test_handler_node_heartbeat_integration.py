@@ -66,6 +66,10 @@ from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
 
+# Offset between the event timestamp and the injected clock reading, so a handler
+# reading the event time instead of the injected clock is detected.
+INJECTED_CLOCK_OFFSET = timedelta(minutes=1)
+
 if TYPE_CHECKING:
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
@@ -158,7 +162,9 @@ def create_envelope(
 
     Args:
         event: The heartbeat event payload.
-        now: Optional timestamp for the envelope (defaults to event.timestamp).
+        now: Optional injected clock reading (defaults to one minute after
+            event.timestamp, so a handler that reads the event time instead of
+            the injected clock produces a different value).
         correlation_id: Optional correlation ID (defaults to new UUID).
 
     Returns:
@@ -166,7 +172,7 @@ def create_envelope(
     """
     return ModelInjectedRequest(
         event=event,
-        now=now or event.timestamp,
+        now=now or event.timestamp + INJECTED_CLOCK_OFFSET,
         input_id=uuid4(),
         correlation_id=correlation_id or event.correlation_id or uuid4(),
     )
@@ -1062,8 +1068,11 @@ class TestModelHandlerOutputStructure:
         envelope = create_envelope(event)
         output = await heartbeat_handler.handle(envelope)
 
-        # Verify envelope linkage
+        # Verify envelope linkage and that the output is stamped by the
+        # injected clock, not the event timestamp
         assert output.input_envelope_id == envelope.input_id
+        assert envelope.now != event.timestamp
+        assert output.timestamp == envelope.now
         assert output.result is None  # ONEX contract
 
 

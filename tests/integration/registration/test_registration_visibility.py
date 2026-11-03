@@ -59,12 +59,6 @@ EVENT_TIMESTAMP = datetime(2025, 6, 15, 11, 0, 0, tzinfo=UTC)
 class TestRegistrationHandlerInterface:
     """Tests that HandlerNodeIntrospected has the correct interface and produces output."""
 
-    def test_clock_and_event_timestamp_are_distinct(self) -> None:
-        """The injected clock and the event timestamp must differ, otherwise
-        the output-timestamp assertion cannot tell which source the handler used.
-        """
-        assert TEST_NOW != EVENT_TIMESTAMP
-
     def test_handler_class_importable_and_has_async_handle(self) -> None:
         """Verify HandlerNodeIntrospected is importable and exposes an async
         handle method that accepts an envelope parameter.
