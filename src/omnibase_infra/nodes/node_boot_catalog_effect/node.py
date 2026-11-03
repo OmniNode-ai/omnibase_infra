@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Declarative effect node for boot step 0, the package announcer (OMN-21590)."""
+"""Declarative effect node for boot step 0, the boot catalog (OMN-21590)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
 
-class NodePackageAnnounceEffect(NodeEffect):
+class NodeBootCatalogEffect(NodeEffect):
     """Announce installed packages' contracts through the contract-bound handler."""
 
     def __init__(self, container: ModelONEXContainer) -> None:
-        """Initialize the package announcer effect node."""
+        """Initialize the boot catalog effect node."""
         super().__init__(container)
 
 
-__all__: list[str] = ["NodePackageAnnounceEffect"]
+__all__: list[str] = ["NodeBootCatalogEffect"]

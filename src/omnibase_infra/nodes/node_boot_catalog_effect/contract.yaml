@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-name: node_package_announce_effect
-contract_name: node_package_announce_effect
-node_name: node_package_announce_effect
+name: node_boot_catalog_effect
+contract_name: node_boot_catalog_effect
+node_name: node_boot_catalog_effect
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: EFFECT_GENERIC

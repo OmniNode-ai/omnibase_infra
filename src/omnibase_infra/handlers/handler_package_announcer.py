@@ -197,7 +197,7 @@ def load_boot_runtime_config(
         contract_path = Path(
             str(
                 importlib.resources.files("omnibase_infra").joinpath(
-                    "nodes", "node_package_announce_effect", "contract.yaml"
+                    "nodes", "node_boot_catalog_effect", "contract.yaml"
                 )
             )
         )

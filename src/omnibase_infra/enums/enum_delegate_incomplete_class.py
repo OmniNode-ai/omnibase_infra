@@ -3,7 +3,7 @@
 """How a delegation that left no terminal ended, as its receipt reports it (OMN-17427).
 
 ``onex delegate`` writes ``receipt.json`` for every way a run can end. Most
-write a terminal; these four are the ones that end without one, and the
+write a terminal; these five are the ones that end without one, and the
 receipt's ``terminal_class`` says which.
 
 .. versionadded:: OMN-17427
@@ -29,6 +29,16 @@ class EnumDelegateIncompleteClass(str, Enum):
     TIMEOUT = "timeout"
     """The wait for the terminal ended at this CLI's own bound, or the runtime
     recorded ``timeout`` and no terminal payload."""
+
+    QUEUED_NOT_STARTED = "queued_not_started"
+    """The wait ended while the command was still queued behind records the
+    consumer group had yet to commit (OMN-22211).
+
+    A timeout whose observed queue depth shows records ahead of this command.
+    The receipt's ``queue_depth`` names the depth. Not a lost command and not a
+    slow run: the consumer had not reached it. A timeout whose depth is zero or
+    could not be observed stays ``timeout``.
+    """
 
     INTERRUPTED = "interrupted"
     """The caller ended the process with a signal it can be answered on
