@@ -130,3 +130,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn21700-onboarding-policy-routing
+    description: >-
+      Named onboarding policies require the interactive adapter, while policy_name=None selects the DAG path. The model and node contract document the existing routing without promising a fallback for non-interactive named policies.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 COMPOSE_PROJECT_NAME=landing-l24196-lab uv run pytest tests/unit/nodes/node_onboarding_orchestrator/test_handle_typed_request_omn21536.py tests/unit/nodes/node_onboarding_orchestrator/test_handler_onboarding_interactive.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

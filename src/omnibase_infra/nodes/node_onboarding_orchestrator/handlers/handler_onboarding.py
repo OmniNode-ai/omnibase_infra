@@ -457,12 +457,14 @@ async def handle_onboarding(
 ) -> ModelOnboardingOutput:
     """Execute the onboarding orchestration.
 
-    Routes to the interactive or DAG path based on ``policy_name``.
+    Only ``policy_name=None`` selects the DAG path. A non-None name requires
+    an input adapter and an interactive policy; invalid names or policy types
+    raise ``OnboardingHandlerError`` rather than falling back to the DAG path.
 
     Args:
         input_model: Input with policy name and/or target capabilities.
         input_adapter: Adapter for interactive input collection.
-            Required when ``policy_name`` is set and the policy is interactive.
+            Required for every non-None ``policy_name``.
             Injected via function parameter, NOT in the Pydantic model.
 
     Returns:
@@ -512,6 +514,11 @@ class HandlerOnboarding:
 
         Args:
             request: Onboarding policy, capabilities and output settings.
+
+        A non-None policy name always selects interactive execution, so its
+        adapter is resolved before invoking ``handle_onboarding``. An absent
+        adapter raises ``OnboardingHandlerError`` from ``ServiceResolutionError``;
+        other container failures propagate. The DAG path needs no adapter.
         """
         input_adapter: ProtocolInputAdapter | None = None
         if request.policy_name is not None:
