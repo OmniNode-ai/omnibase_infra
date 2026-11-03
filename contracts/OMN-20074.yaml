@@ -336,3 +336,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17
+  - id: dod-occ-cli-retired-infra-deploy-gate-probe
+    description: >-
+      Deploy probe: the pinned Python image lists the committed cli package and finds no cli_occ module. A tree that restores the module fails this check at the mount.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          docker run --rm -v "$PWD/src/omnibase_infra/cli:/m:ro" python:3.12-slim@sha256:dd29372629eeba2dd003fd9e9d35a5b8236c44727875a0364254b5127af88e65 python -c "import os; assert not os.path.exists('/m/cli_occ.py'), os.listdir('/m')"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC16
