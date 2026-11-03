@@ -17,6 +17,9 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
     ConsumerFlowLane,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 from scripts.ci import c28_consumer_flow_probe as script
 from tests.integration.migrations.conftest import EphemeralPostgres
 
@@ -55,7 +58,10 @@ def test_recorded_live_groups_reaches_both_collectors(
 
     monkeypatch.setattr(script.subprocess, "run", runner)
     node_lane = ConsumerFlowLane(
-        docker="recorded-docker", base_url="http://projection.test", runner=runner
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        docker="recorded-docker",
+        base_url="http://projection.test",
+        runner=runner,
     )
     script_lane = script.Lane(docker="recorded-docker")
     expected = sorted(set(recording["whole_table"]["stdout_lines"]))

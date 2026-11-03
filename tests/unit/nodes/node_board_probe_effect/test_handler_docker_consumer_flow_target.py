@@ -20,6 +20,9 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_consumer_flow
 from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_docker_consumer_flow_target import (
     HandlerDockerConsumerFlowTarget,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_request import (
     ModelConsumerFlowRequest,
 )
@@ -140,6 +143,7 @@ def test_marker_count_uses_seam_dlq_when_generic_dlq_also_advances(
         return proc
 
     lane = ConsumerFlowLane(
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
         docker="fake-docker",
         base_url="http://projection.test",
         runner=run,
@@ -183,6 +187,7 @@ def test_full_collection_uses_bounded_io_and_restores_mutations(tmp_path: Path) 
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         base_url="http://projection.test",
         samples=2,
@@ -225,7 +230,11 @@ def test_unreadable_io_never_raises(failure: str) -> None:
     )
     observation = asyncio.run(
         adapter.observe(
-            ModelConsumerFlowRequest(subject_lane="dev", docker_bin="fake-docker")
+            ModelConsumerFlowRequest(
+                subject_lane="dev",
+                compose_project="omnibase-infra",
+                docker_bin="fake-docker",
+            )
         )
     )
     assert not observation.read_ok
@@ -256,7 +265,10 @@ def test_cursor_walk_uses_since_and_stops_on_repeated_cursor() -> None:
         )
 
     lane = ConsumerFlowLane(
-        docker="unused", base_url="http://projection.test", urlopen=http
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        docker="unused",
+        base_url="http://projection.test",
+        urlopen=http,
     )
     observed = walk(lane)
     assert not observed["terminated"]
@@ -311,7 +323,10 @@ def test_cursor_walk_measures_the_full_final_page_end(
 
     observed = walk(
         ConsumerFlowLane(
-            docker="unused", base_url="http://projection.test", urlopen=http
+            containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+            docker="unused",
+            base_url="http://projection.test",
+            urlopen=http,
         )
     )
     assert observed["terminated"]
@@ -367,6 +382,7 @@ def test_boot_change_retries_the_whole_observation(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         samples=2,
         sample_interval=0,
@@ -433,6 +449,7 @@ def test_mid_run_redeploy_retries_after_connection_refused(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         samples=2,
         sample_interval=0,
@@ -468,6 +485,7 @@ def test_connection_refused_with_unchanged_running_identity_stays_unreadable(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         settle_seconds=0,
         pytest_cmd="fake-pytest",
@@ -513,6 +531,7 @@ def test_repeated_mid_run_redeploy_exhausts_attempts(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         settle_seconds=0,
         attempts=attempts,
@@ -599,6 +618,7 @@ def test_unhealthy_lane_waits_for_convergence_and_retries_once(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         samples=2,
         sample_interval=0,
@@ -665,6 +685,7 @@ def test_booting_lane_gets_a_bounded_boot_grace(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         samples=2,
         sample_interval=0,

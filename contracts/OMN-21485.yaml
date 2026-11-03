@@ -1,0 +1,37 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21485"
+title: "The C15, C16 and C28 proofs grade the stability lane, so a dev-lane redeploy or outage no longer turns them red"
+summary: "chain-canary.yml (C15), chain-canary-c16-receipt-identity.yml (C16) and chain-canary-c28-consumer-flow.yml (C28) graded the dev lane: they walked the lab overlay vars.LAB_LANES_JSON, read the dev lane of the CI bus lane table, and C28 read the base compose project's containers. On 2026-10-27 the dev broker crashed on every deploy and all three went red with no defect in what they measure; the operator ruling that day put the proofs on the stability lane. Each workflow now walks the stability overlay vars.LAB_PROOF_LANES_JSON, accepts only an entry carrying lane_role=stability, reads the broker that lane declares (bus_lane) and injects the STABILITY_* secrets. C28 derives the containers it reads from the resolved lane's compose project, matches consumer groups after the lane's environment segment, grades the runtime logs by role, and its rpk call sets SASL only where the broker container carries a login."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21485-proofs-stability-lane
+    statement: "The C15, C16 and C28 proof workflows, and the contract C28 runs, target the stability lane's endpoints, broker and containers and name no dev-lane host, port, compose project or container."
+    acceptance:
+      - id: AC1
+        statement: "AC1: each of the three proof workflows targets the stability lane's endpoints and broker, and none names the dev lane -- falsifier: uv run pytest tests -k proofs_target_stability_lane in omnibase_infra, which parses the three workflows and their contracts for any dev-lane host, port or compose project"
+      - id: AC2
+        statement: "AC2: with the dev lane stopped, a scheduled run of each proof grades its checks on the stability lane rather than ending on a dev-lane health error -- falsifier: a run log of any of the three that names the dev lane or ends INDETERMINATE on a dev-lane container"
+evidence_requirements:
+  - kind: tests
+    description: "The three proof workflows and the board probe and chain canary contracts are parsed for the stability overlay, the lane's own broker and any dev-lane host, port, compose project or container."
+    command: "uv run --frozen pytest tests/ci/test_proofs_target_stability_lane_omn21485.py -q -p no:cacheprovider -k proofs_target_stability_lane"
+dod_evidence:
+  - id: dod-omn21485-ac1-proofs-target-stability
+    description: "The AC1 falsifier. Fails at the merge base, where every proof walks vars.LAB_LANES_JSON and reads the dev bus lane; passes on the branch."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ci/test_proofs_target_stability_lane_omn21485.py -q -p no:cacheprovider -k proofs_target_stability_lane"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21485-ac2-scheduled-stability-run
+    description: "AC2 is a lab observation: with the dev lane stopped, the newest scheduled C28 run grades on the stability lane. Hosted CI has no lab lane, so only the local Done gate runs it, after the stability overlay and secrets are set."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: "gh run list --repo OmniNode-ai/omnibase_infra --workflow chain-canary-c28-consumer-flow.yml --event schedule --limit 1 --json conclusion --jq '.[0].conclusion' | grep -qx success"
+        cwd: ${OMNI_HOME}/omnibase_infra

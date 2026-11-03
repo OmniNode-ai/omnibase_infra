@@ -57,7 +57,9 @@ def test_handler_table(case: str, expected: str) -> None:
         read_error="connection refused" if case == "unreadable" else "",
         **obs,
     )
-    request = ModelConsumerFlowRequest(subject_lane="dev")
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev", compose_project="omnibase-infra"
+    )
 
     class Target:
         async def observe(
@@ -94,7 +96,7 @@ def test_recorded_fixture_is_the_scripts_own_green_shape() -> None:
 )
 def test_models_forbid_unknown_fields_and_are_frozen(model: type) -> None:
     kwargs = (
-        {"subject_lane": "dev"}
+        {"subject_lane": "dev", "compose_project": "omnibase-infra"}
         if model is ModelConsumerFlowRequest
         else {"read_ok": True}
     )
@@ -110,7 +112,9 @@ def test_handler_writes_self_contained_record_even_when_unreadable(
     tmp_path: Path, read_ok: bool
 ) -> None:
     record = tmp_path / "c28.json"
-    request = ModelConsumerFlowRequest(subject_lane="dev", record=record)
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev", compose_project="omnibase-infra", record=record
+    )
     observation = ModelConsumerFlowObservation(
         read_ok=read_ok,
         read_error="" if read_ok else "unreachable",
@@ -163,7 +167,7 @@ def test_handler_writes_self_contained_record_even_when_unreadable(
         (("negative", "mutations", "event_bus", "outcomes"), {}),
         (("boot", "applied_hwm_after"), 0),
         (("boot", "natural"), {}),
-        (("boot", "natural", "omninode-runtime", "natural"), 1),
+        (("boot", "natural", script.RUNTIME_CONTAINERS[0], "natural"), 1),
         (("boot", "injection", "offset"), None),
         (("boot", "injection", "validation_errors_after"), 0),
         (("boot", "injection", "boundary_lines"), 0),
@@ -179,7 +183,7 @@ def test_each_clause_preserves_script_failure_reasons(
         target = target[key]
     target[path[-1]] = value
     result = grade_consumer_flow(
-        ModelConsumerFlowRequest(subject_lane="dev"),
+        ModelConsumerFlowRequest(subject_lane="dev", compose_project="omnibase-infra"),
         ModelConsumerFlowObservation(read_ok=True, **obs),
     )
     assert result.outcome == "FAIL"
@@ -206,7 +210,8 @@ def test_full_final_page_requires_measured_end_proof(proven: bool) -> None:
     observation = ModelConsumerFlowObservation(read_ok=True, **obs)
     assert observation.cursor["pages"][-1]["end_proof"] == proof
     result = grade_consumer_flow(
-        ModelConsumerFlowRequest(subject_lane="dev"), observation
+        ModelConsumerFlowRequest(subject_lane="dev", compose_project="omnibase-infra"),
+        observation,
     )
     recorded = script.grade(obs)
     check = next(

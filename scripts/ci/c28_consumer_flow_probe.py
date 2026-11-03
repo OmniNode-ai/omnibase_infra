@@ -163,17 +163,20 @@ LIVE_WINDOW_SQL: Final[str] = (
     "and w.window_start > now() - interval '10 minutes')"
 )
 
-#: (kind, consumer-group prefix, subscribed topic, the counter that must move)
+#: (kind, consumer-group prefix after the environment segment, subscribed
+#: topic, the counter that must move). A group is ``{env}.{service}.{node}.
+#: {purpose}.{version}`` and the environment is the graded lane's own, so the
+#: prefix is matched after it (OMN-21485).
 KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
     (
         "audit_projection_consumer",
-        "local.omnibase_infra.node_ledger_projection_compute.consume.",
+        "omnibase_infra.node_ledger_projection_compute.consume.",
         "onex.evt.platform.node-heartbeat.v1",
         "messages_in",
     ),
     (
         "publishing_reducer",
-        "local.omnimarket.projection_consumer_flow.consume.",
+        "omnimarket.projection_consumer_flow.consume.",
         "onex.evt.platform.node-heartbeat.v1",
         "messages_out",
     ),
@@ -303,7 +306,7 @@ def kind_rows(
         r
         for r in rows
         if isinstance(r, dict)
-        and str(r.get("consumer_group", "")).startswith(prefix)
+        and str(r.get("consumer_group", "")).partition(".")[2].startswith(prefix)
         and r.get("topic") == topic
     ]
 
@@ -323,7 +326,7 @@ def grade_kinds(rec: Record, samples: Sequence[Sequence[dict[str, Any]]]) -> Non
             "kinds",
             f"{kind}_present_in_every_sample",
             bool(per_sample) and all(present),
-            f"{prefix}* on {topic}: present per sample {present}",
+            f"<env>.{prefix}* on {topic}: present per sample {present}",
         )
         flat = [r for rows in per_sample for r in rows]
         bad = [
@@ -545,7 +548,8 @@ def grade_boot(rec: Record, boot: dict[str, Any]) -> None:
     rec.add(
         "boot",
         "runtime_logs_read",
-        set(logs) == set(RUNTIME_CONTAINERS)
+        # OMN-21485: by runtime role, so any lane's container names grade.
+        sorted(c.rsplit("-runtime", 1)[-1] for c in logs) == ["", "-effects"]
         and all(_is_int(v.get("lines")) and v["lines"] > 0 for v in logs.values()),
         "log lines read per container: "
         + ", ".join(f"{c}={v.get('lines')}" for c, v in sorted(logs.items())),

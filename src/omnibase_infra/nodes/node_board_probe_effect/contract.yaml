@@ -74,8 +74,12 @@ consumer_flow_topics:
   seam_dlq: "onex.dlq.omnimarket.consumer-flow-stall-alert-malformed.v1"
 # The projection API the consumer-flow check reads, as seen from the lab lane's
 # runtime container; a request names another base_url to override it (OMN-21688).
+# OMN-21485 (operator ruling 2026-10-27): C28 grades the stability lane, so the
+# default is that lane's projection-api port; the C28 workflow passes the resolved
+# lane's projection_url and compose project, and the containers it reads are
+# derived from that project (models/model_consumer_flow_lane.py).
 consumer_flow_endpoints:
-  projection_api_base_url: "http://host.docker.internal:3002"
+  projection_api_base_url: "http://host.docker.internal:13002"
 capabilities:
   - name: "board_probe.consumer_flow"
     description: "Observe and grade C28 consumer-flow observability on the lab lane"

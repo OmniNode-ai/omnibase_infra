@@ -41,6 +41,9 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 from scripts.ci import c28_consumer_flow_probe as probe
 
 pytestmark = pytest.mark.unit
@@ -422,7 +425,7 @@ def test_red_when_no_applied_event_arrived() -> None:
 
 def test_red_on_a_natural_validation_error() -> None:
     def mutate(obs: dict[str, Any]) -> None:
-        obs["boot"]["natural"]["omninode-runtime"].update(total=2, natural=2)
+        obs["boot"]["natural"][probe.RUNTIME_CONTAINERS[0]].update(total=2, natural=2)
 
     assert _mutate(mutate) == {"zero_natural_stall_alert_validation_errors"}
 
@@ -444,7 +447,7 @@ def test_red_when_the_seam_did_not_observe_the_injection() -> None:
 
 def test_red_when_the_logs_were_not_read() -> None:
     def mutate(obs: dict[str, Any]) -> None:
-        del obs["boot"]["natural"]["omninode-runtime-effects"]
+        del obs["boot"]["natural"][probe.RUNTIME_CONTAINERS[1]]
 
     assert "runtime_logs_read" in _mutate(mutate)
 
@@ -741,7 +744,7 @@ def test_the_workflow_runs_the_probe_beside_the_resolved_lane() -> None:
         wf["jobs"]["resolve-lane"]["runs-on"]
         == "${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}"
     )
-    assert job["name"] == "C28 consumer flow (dev lane)"
+    assert job["name"] == "C28 consumer flow (stability lane)"
     triggers = wf[True] if True in wf else wf["on"]
     assert "schedule" in triggers and "workflow_dispatch" in triggers
     assert "pull_request" not in triggers
@@ -760,6 +763,9 @@ def test_the_workflow_runs_the_probe_beside_the_resolved_lane() -> None:
 class _RecordedSeamDlqLane:
     def __init__(self, recorded_response: dict[str, Any]) -> None:
         self.recorded_response = recorded_response
+        # Recorded on the base compose project (OMN-17427); OMN-21485 derives
+        # the containers from the graded lane's project.
+        self.containers = ModelConsumerFlowLane.from_compose_project("omnibase-infra")
 
     def logs(self, container: str, *, since: str) -> list[str]:
         return self.recorded_response["runtime_log_lines"][container]
