@@ -41,3 +41,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov --tb=line -k "missing_overlay or without_event_bus or does_not_bind or no_overlay"
         cwd: .
+  - id: dod-omn22362-deploy-probe
+    description: 'Deploy probe: the omnibase_infra source GitHub serves at the checked-out commit carries the node broker resolver handler, which the merge base does not.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_node_broker_resolve.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerNodeBrokerResolve" > /dev/null'
+        cwd: .
