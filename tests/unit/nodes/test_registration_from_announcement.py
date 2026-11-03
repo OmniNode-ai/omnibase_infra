@@ -39,6 +39,9 @@ from omnibase_infra.handlers.handler_registration_from_announcement import (
 from omnibase_infra.handlers.handler_runtime_introspection_startup import (
     HandlerRuntimeIntrospectionStartup,
 )
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.model_registration_from_announcement_request import (
     ModelRegistrationFromAnnouncementRequest,
 )
@@ -182,15 +185,14 @@ class TestRegistrationOrchestratorConsumesAnnouncement:
         event = adapt(make_announcement(), make_identity())
         assert event is not None
         correlation_id = uuid4()
-        envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent] = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=event,
-            envelope_timestamp=TEST_NOW,
+        request = ModelInjectedRequest(
+            event=event,
+            now=TEST_NOW,
+            input_id=uuid4(),
             correlation_id=correlation_id,
-            source_tool="test",
         )
 
-        output = await handler.handle(envelope)
+        output = await handler.handle(request)
 
         assert isinstance(output, ModelHandlerOutput)
         assert output.handler_id == "handler-node-introspected"

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import typing
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -26,8 +27,10 @@ from uuid import uuid4
 import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
@@ -39,6 +42,13 @@ from omnibase_infra.nodes.node_registration_orchestrator.services import (
 )
 
 pytestmark = pytest.mark.integration
+
+# One fixed reading for the injected clock and the event timestamp, so the
+# handler's time-dependent output is asserted against a known value.
+TEST_NOW = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
+# Distinct from TEST_NOW so a handler reading the event time instead of the
+# injected clock is detected.
+EVENT_TIMESTAMP = datetime(2025, 6, 15, 11, 0, 0, tzinfo=UTC)
 
 
 # =============================================================================
@@ -68,12 +78,27 @@ class TestRegistrationHandlerInterface:
             "HandlerNodeIntrospected.handle must be async"
         )
 
-        # Verify handle method signature accepts 'envelope' parameter
+        # The dispatcher calls handle(request) positionally, so the signature
+        # is exactly (self, request): no envelope, no extra parameters.
         sig = inspect.signature(handle_method)
         param_names = list(sig.parameters.keys())
-        # First param is 'self', second should be 'envelope'
-        assert "envelope" in param_names, (
-            f"handle() must accept 'envelope' parameter, got: {param_names}"
+        assert param_names == ["self", "request"], (
+            f"handle() must take exactly (self, request), got: {param_names}"
+        )
+
+        # The parameter is annotated with a typed request model over the
+        # introspection event. Compare the event field's annotation rather than
+        # the identity of the parametrized generic class.
+        hints = typing.get_type_hints(handle_method)
+        request_model = ModelInjectedRequest.narrow(hints["request"])
+        assert request_model is not None, (
+            f"handle() 'request' must be a ModelInjectedRequest model, "
+            f"got: {hints['request']}"
+        )
+        event_annotation = request_model.model_fields["event"].annotation
+        assert event_annotation is ModelNodeIntrospectionEvent, (
+            f"handle() request event must be ModelNodeIntrospectionEvent, "
+            f"got: {event_annotation}"
         )
 
     @pytest.mark.asyncio
@@ -101,16 +126,20 @@ class TestRegistrationHandlerInterface:
             node_type=EnumNodeKind.EFFECT,
             node_version=ModelSemVer(major=1, minor=0, patch=0),
             correlation_id=correlation_id,
-            timestamp=datetime.now(UTC),
+            timestamp=EVENT_TIMESTAMP,
         )
 
-        envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent] = ModelEventEnvelope(
-            correlation_id=correlation_id,
-            event_type="ModelNodeIntrospectionEvent",
-            payload=event,
+        input_id = uuid4()
+        request: ModelInjectedRequest[ModelNodeIntrospectionEvent] = (
+            ModelInjectedRequest(
+                event=event,
+                now=TEST_NOW,
+                input_id=input_id,
+                correlation_id=correlation_id,
+            )
         )
 
-        output = await handler.handle(envelope)
+        output = await handler.handle(request)
 
         # Verify output structure - handler should emit registration initiated event
         assert output is not None
@@ -125,6 +154,9 @@ class TestRegistrationHandlerInterface:
         )
         # Verify correlation_id propagation
         assert output.correlation_id == correlation_id
+        # Verify the injected clock reading and input id reach the output
+        assert output.timestamp == TEST_NOW
+        assert output.input_envelope_id == input_id
 
 
 class TestRegistrationHandlerProperties:
