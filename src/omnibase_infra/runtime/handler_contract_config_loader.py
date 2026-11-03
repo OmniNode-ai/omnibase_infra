@@ -49,7 +49,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
-from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_contract_transport_key import (
     EnumContractTransportKey,
@@ -388,34 +387,6 @@ def _validate_required_contract_fields(
         )
 
 
-def _checked_transport_value(
-    key: EnumContractTransportKey,
-    transport: dict[str, JsonType],
-    handler_type: str,
-) -> JsonType:
-    """Return ``transport[key.value]``, refusing a malformed ``server_timeouts`` block.
-
-    A non-mapping, an unknown key or a non-positive number raises here, naming
-    the handler, instead of surfacing later as a pydantic error in
-    ``initialize``. The other keys are copied as declared.
-    """
-    value = transport[key.value]
-    if key is not EnumContractTransportKey.SERVER_TIMEOUTS:
-        return value
-    try:
-        ModelMcpServerTimeouts.model_validate(value)
-    except ValidationError as e:
-        raise ProtocolConfigurationError(
-            f"Invalid metadata.transport.server_timeouts in handler contract "
-            f"for '{handler_type}': {e.error_count()} validation error(s)",
-            context=ModelInfraErrorContext.with_correlation(
-                operation="extract_handler_config",
-                target_name=handler_type,
-            ),
-        ) from e
-    return value
-
-
 def extract_handler_config(
     contract: dict[str, JsonType],
     handler_type: str,
@@ -598,9 +569,12 @@ def extract_handler_config(
         if isinstance(transport, dict):
             for key in EnumContractTransportKey:
                 if key.value in transport:
-                    config[key.config_key] = _checked_transport_value(
-                        key, transport, handler_type
-                    )
+                    value = transport[key.value]
+                    if key is EnumContractTransportKey.SERVER_TIMEOUTS:
+                        ModelMcpServerTimeouts.validate_contract_block(
+                            value, handler_type
+                        )
+                    config[key.config_key] = value
 
         # Security configuration (rich contracts - in metadata.security)
         metadata_security = metadata.get("security", {})

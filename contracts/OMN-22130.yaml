@@ -67,7 +67,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/handler_contract_config_loader.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q "] = _checked_transport_value("'
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/handler_contract_config_loader.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q "ModelMcpServerTimeouts.validate_contract_block("'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4

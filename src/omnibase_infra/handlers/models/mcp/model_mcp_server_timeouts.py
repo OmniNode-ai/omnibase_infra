@@ -2,9 +2,18 @@
 # SPDX-License-Identifier: MIT
 """MCP server lifecycle timeouts (OMN-22130)."""
 
-from typing import Any
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 
 class ModelMcpServerTimeouts(BaseModel):
@@ -29,11 +38,30 @@ class ModelMcpServerTimeouts(BaseModel):
         "shutdown_seconds", "cancel_seconds", "startup_seconds", mode="before"
     )
     @classmethod
-    def _refuse_bool(cls, value: Any) -> Any:
+    def _refuse_bool(cls, value: object) -> object:
         """Refuse ``true``/``false``: pydantic would read them as 1.0/0.0 seconds."""
         if isinstance(value, bool):
             raise ValueError("a timeout is a number of seconds, not a boolean")
         return value
+
+    @classmethod
+    def validate_contract_block(cls, value: object, handler_type: str) -> None:
+        """Refuse a malformed ``server_timeouts`` block, naming the handler.
+
+        A non-mapping, an unknown key or a non-positive number raises here
+        instead of surfacing later as a pydantic error in ``initialize``.
+        """
+        try:
+            cls.model_validate(value)
+        except ValidationError as e:
+            raise ProtocolConfigurationError(
+                f"Invalid metadata.transport.server_timeouts in handler contract "
+                f"for '{handler_type}': {e.error_count()} validation error(s)",
+                context=ModelInfraErrorContext.with_correlation(
+                    operation="extract_handler_config",
+                    target_name=handler_type,
+                ),
+            ) from e
 
 
 __all__ = ["ModelMcpServerTimeouts"]
