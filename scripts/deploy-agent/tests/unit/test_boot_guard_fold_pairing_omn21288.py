@@ -59,21 +59,47 @@ def _committed_fold() -> str:
     raise AssertionError("committed policy declares no dev folded profiles")
 
 
-def test_planted_pre_fold_boot_good_image_is_refused_before_anything_is_replaced(
+def test_a_forward_deploy_across_the_fold_is_not_refused_by_a_pre_fold_snapshot(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     docker: dict,
 ) -> None:
+    """The deadlock measured on dev 2026-11-03: every fold deploy refused at prepare.
+
+    The deploy root is at the fold and the live family is not healthy, so the
+    stored pre-fold boot-good snapshot is the only candidate. Refusing here left
+    no forward deploy and no rollback able to repair the lane; the snapshot is
+    held, the deploy proceeds, and nothing is replaced by prepare itself.
+    """
     _policy(monkeypatch, PRE_FOLD)
     executor_mod.DevBootGuard(
         DeployExecutor(), tmp_path
     ).prepare()  # boot-good, pre-fold
-    # The deploy root is now at the fold and the live family is not healthy,
-    # so the stored boot-good snapshot is the only candidate.
     _policy(monkeypatch, _committed_fold())
     docker["containers"] = boot_tests._containers(healthy=False)
-    with pytest.raises(guard_mod.DevBootFailedError, match="pair its image"):
-        executor_mod.DevBootGuard(DeployExecutor(), tmp_path).prepare()
+    guard = executor_mod.DevBootGuard(DeployExecutor(), tmp_path)
+    guard.prepare()
+    assert guard.point.current is not None
+    assert guard.point.current.folded_profiles == (PRE_FOLD,)
+    assert not any("up" in argv for argv in docker["commands"])
+
+
+def test_a_legacy_snapshot_without_the_fold_field_does_not_block_the_deploy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    docker: dict,
+) -> None:
+    """The live snapshot on dev predates folded_profiles and reads as zero folds."""
+    _policy(monkeypatch, PRE_FOLD)
+    guard = executor_mod.DevBootGuard(DeployExecutor(), tmp_path)
+    guard.prepare()
+    legacy = json.loads(guard.snapshot_path.read_text())
+    del legacy["folded_profiles"]
+    guard.snapshot_path.chmod(0o600)
+    guard.snapshot_path.write_text(json.dumps(legacy))
+    _policy(monkeypatch, _committed_fold())
+    docker["containers"] = boot_tests._containers(healthy=False)
+    executor_mod.DevBootGuard(DeployExecutor(), tmp_path).prepare()
     assert not any("up" in argv for argv in docker["commands"])
 
 

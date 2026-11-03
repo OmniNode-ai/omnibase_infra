@@ -534,9 +534,11 @@ def test_capture_folded_effects_resolves_the_main_service(
     monkeypatch.setattr(
         executor_mod,
         "lane_folded_profiles",
-        lambda lane: frozenset({"effects"})
-        if lane is EnumRuntimeLane.STABILITY_TEST
-        else frozenset(),
+        lambda lane: (
+            frozenset({"effects"})
+            if lane is EnumRuntimeLane.STABILITY_TEST
+            else frozenset()
+        ),
     )
     executor = DeployExecutor()
     monkeypatch.setattr(
@@ -618,17 +620,18 @@ def _plant_boot_good_snapshot(
 
 
 @pytest.mark.parametrize("planted_generation", ["pre-fold", "same-fold"])
-def test_agent_refuses_planted_pre_fold_boot_good_image_before_replacing_anything(
+def test_agent_never_restores_a_planted_pre_fold_boot_good_image_under_the_fold(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, planted_generation: str
 ) -> None:
     """OMN-22294 AC4: an image older than the fold is never run under the fold overlay.
 
     The live family is down, so the only candidate the boot guard has is the
-    planted boot-good snapshot, and it predates the five-writer fold. The agent
-    must refuse before it pulls, builds or recreates anything; the way back is a
-    rollback by revision (the image and the overlay together). The same-fold
-    parameter is the positive control: a snapshot of the overlay's own fold
-    generation is held and the deploy goes ahead.
+    planted boot-good snapshot, and it predates the five-writer fold. The
+    forward deploy goes ahead; when it fails, the agent refuses to restore the
+    pre-fold image under the fold overlay and names the rollback by revision
+    (the image and the overlay together). The same-fold parameter is the
+    positive control: a snapshot of the overlay's own fold generation is held
+    and restored.
     """
     repo_policy = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
     policy = executor_mod._load_dotenv_file(repo_policy)
@@ -668,16 +671,23 @@ def test_agent_refuses_planted_pre_fold_boot_good_image_before_replacing_anythin
     agent._run_deploy(cmd)
     job = agent.job_store.load(cmd.correlation_id)
     assert job is not None
+    # Both generations let the forward deploy proceed: refusing a pre-fold
+    # snapshot before the pull left the dev lane with no forward deploy and no
+    # rollback that could repair it (measured 2026-11-03, 56 refused jobs).
+    executor.git_pull.assert_called_once()
+    executor.rebuild_scope.assert_called_once()
     if not pre_fold:
         # The bare command double starts no containers, so the deploy itself
-        # still fails; what matters is that the snapshot was accepted and the
-        # deploy proceeded past the pairing check.
+        # still fails; the same-generation snapshot is restored.
         assert "pair its image" not in " ".join(job.errors)
-        executor.git_pull.assert_called_once()
-        executor.rebuild_scope.assert_called_once()
         return
+    # The deploy failed, and the pre-fold image is never restored under the
+    # fold overlay: the restore refuses the pairing and the incident names the
+    # revision path.
     assert job.status == "failed"
-    assert "pair its image" in " ".join(job.errors)
-    executor.git_pull.assert_not_called()
-    executor.rebuild_scope.assert_not_called()
+    incident = json.loads(
+        next((tmp_path / "agent-state").rglob("incident-*.json")).read_text()
+    )
+    assert incident["recovery_verified"] is False
+    assert "pair its image" in incident["recovery_error"]
     assert not any("up" in argv or argv[:2] == ["docker", "tag"] for argv in commands)
