@@ -1,0 +1,37 @@
+# OMN-22144 contract file for omnibase_infra: the deploy agent's digest checks accept a derived image id (AC3 of T18a).
+# This repository holds AC3 of the ticket; AC1 and AC2 are carried by a separate document change.
+schema_version: "1.0.0"
+ticket_id: "OMN-22144"
+title: "T18a onex-api inventory and derived-image delivery proof, read-only (one-runtime plan)"
+summary: "A unit test beside the deploy agent's other digest tests feeds its digest checks a base image id and a derived image id (the base plus one wheel layer) and asserts accept or refuse. No source file changes."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22144-derived-image-digest
+    statement: "The deploy agent's running-image digest check and its prod boundary guard are shown, by a test, to accept a derived image id that is the one requested and refuse a different id."
+    acceptance:
+      - id: AC3
+        statement: "AC3: the report states whether the deploy agent and the prod gate accept a derived image digest, quoting the code that compares the digest, and whether the cloud clusters run onex-api from manifests only -- falsifier: a unit test in scripts/deploy-agent/tests/unit that feeds the digest check a derived-image digest and asserts accept or refuse as the report states, run on a lab host through lab-run"
+evidence_requirements:
+  - kind: tests
+    description: "The derived-image digest tests pass."
+    command: "uv run --project scripts/deploy-agent --extra dev python -m pytest scripts/deploy-agent/tests/unit/test_executor_derived_image_digest_omn22144.py -q -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-001
+    description: "The derived image id requested and running is accepted; the base id requested while the derived image runs, and the derived id requested while the base runs, are refused with DigestMismatchError; the prod boundary guard accepts a derived id equal to the READY digest and refuses a base or absent one."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev python -m pytest scripts/deploy-agent/tests/unit/test_executor_derived_image_digest_omn22144.py -q -p no:cacheprovider
+  - id: dod-deploy
+    description: "Test-only change: nothing is deployed. The test file exists on the branch and pytest collects its tests (collection only, no lab host and no lab-run involved)."
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run --project scripts/deploy-agent --extra dev python -m pytest scripts/deploy-agent/tests/unit/test_executor_derived_image_digest_omn22144.py --collect-only -q -p no:cacheprovider'

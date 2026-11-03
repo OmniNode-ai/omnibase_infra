@@ -32,6 +32,7 @@ from omnibase_core.models.event_bus.model_bus_binding import ModelBusBinding
 from omnibase_core.models.event_bus.model_resolved_bus_bindings import (
     ModelResolvedBusBindings,
 )
+from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
 from omnibase_core.protocols.runtime.protocol_transport_producer import (
     ProtocolTransportProducer,
 )
@@ -1178,11 +1179,18 @@ def build_gateway_transports(
 
     mirror = forwarder.lane_mirror
     if mirror is not None:
-        assert config.lane_mirror_source_bus is not None
-        source = f"lane.{mirror.source_lane}.kafka.broker"
-        source_group = f"tenant-{slug}-gateway-lane-mirror-source"
-        legs["lane_source"] = (source, config.lane_mirror_source_bus, source_group)
-        add(source, mirror.topics, EnumBusBindingDirection.CONSUME, source_group)
+        source_bus = config.lane_mirror_source_bus
+        # OMN-21950: a container-selected source is the hosting runtime's own
+        # ProtocolEventBus, handed in by the runtime -- no broker leg, no
+        # transport and no binding are built for it here.
+        if isinstance(source_bus, ModelKafkaEventBusConfig):
+            source = f"lane.{mirror.source_lane}.kafka.broker"
+            source_group = f"tenant-{slug}-gateway-lane-mirror-source"
+            legs["lane_source"] = (source, source_bus, source_group)
+            add(source, mirror.topics, EnumBusBindingDirection.CONSUME, source_group)
+        # OMN-21950: tenant_topics are produced under the tenant physical topic.
+        plain = [t for t in mirror.topics if t not in mirror.tenant_topics]
+        produce = EnumBusBindingDirection.PRODUCE
         for lane in mirror.mirror_lanes:
             broker = f"lane.{lane}.kafka.broker"
             legs[f"lane:{lane}"] = (
@@ -1190,7 +1198,8 @@ def build_gateway_transports(
                 config.lane_mirror_buses[lane],
                 f"tenant-{slug}-gateway-lane-mirror-{lane}",
             )
-            add(broker, mirror.topics, EnumBusBindingDirection.PRODUCE)
+            add(broker, plain, EnumBusBindingDirection.PRODUCE)
+            add(broker, mirror.tenant_topics, produce, tenant=True)
 
     resolved = ModelResolvedBusBindings(
         principal=forwarder.tenant_identity.principal_id,
@@ -1308,6 +1317,10 @@ async def run_gateway_forwarder(
     ready_path: Path | None = None,
     egress_health_path: Path | None = None,
     lane_mirror_health_path: Path | None = None,
+    # OMN-21950: the hosting runtime's own bus, resolved from its container
+    # (resolve_lane_mirror_source_bus). Required exactly when the overlay
+    # selects lane_mirror_source_bus {source: container}, refused otherwise.
+    source_bus: ProtocolEventBus | None = None,
 ) -> None:
     """Run the bridge until ``shutdown_event`` is set, then close both legs.
 
@@ -1327,6 +1340,7 @@ async def run_gateway_forwarder(
             shutdown_event=shutdown_event,
             ready_path=ready_path,
             lane_mirror_health_path=lane_mirror_health_path,
+            source_bus=source_bus,
         )
         return
     assert config.local_bus is not None
@@ -1351,7 +1365,6 @@ async def run_gateway_forwarder(
     local_transport = transports["local"]
     cloud_transport = transports["cloud"]
     lane_mirror_config = config.forwarder.lane_mirror
-    lane_mirror_source = transports.get("lane_source")
     lane_mirror_producers = {
         name.removeprefix("lane:"): transport
         for name, transport in transports.items()
@@ -1392,7 +1405,7 @@ async def run_gateway_forwarder(
         ready_path.unlink(missing_ok=True)
 
     store_started = False
-    started_transports: list[KafkaTransport] = []
+    started_transports = contextlib.AsyncExitStack()
     delivery_started = False
     heartbeat_task: asyncio.Task[None] | None = None
     lane_mirror_task: asyncio.Task[None] | None = None
@@ -1401,25 +1414,25 @@ async def run_gateway_forwarder(
         await idempotency_store.start()
         store_started = True
         await local_transport.start()
-        started_transports.append(local_transport)
+        started_transports.push_async_callback(local_transport.close)
         await cloud_transport.start()
-        started_transports.append(cloud_transport)
-        if lane_mirror_source is not None:
-            await lane_mirror_source.start()
-            started_transports.append(lane_mirror_source)
+        started_transports.push_async_callback(cloud_transport.close)
+        if lane_mirror_config is not None:
             for lane_producer in lane_mirror_producers.values():
                 await lane_producer.start()
-                started_transports.append(lane_producer)
+                started_transports.push_async_callback(lane_producer.close)
         await delivery.start()
         delivery_started = True
         heartbeat_task = asyncio.create_task(
             _run_heartbeat_loop(forwarder, config, shutdown_event),
             name="gateway-forwarder-heartbeat",
         )
-        if lane_mirror_config is not None and lane_mirror_source is not None:
-            lane_mirror_task, lane_mirror_guard_task = _launch_lane_mirror(
+        if lane_mirror_config is not None:
+            lane_mirror_task, lane_mirror_guard_task = await _launch_lane_mirror(
                 config=config,
-                source=lane_mirror_source,
+                transports=transports,
+                source_bus=source_bus,
+                started=started_transports,
                 producers=lane_mirror_producers,
                 idempotency_store=idempotency_store,
                 shutdown_event=shutdown_event,
@@ -1458,27 +1471,31 @@ async def run_gateway_forwarder(
             await asyncio.gather(heartbeat_task, return_exceptions=True)
         if delivery_started:
             await delivery.stop()
-        for transport in reversed(started_transports):
-            await transport.close()
+        await started_transports.aclose()
         if ingest_client is not None:
             await ingest_client.aclose()
         if store_started:
             await idempotency_store.close()
 
 
-def _launch_lane_mirror(
+async def _launch_lane_mirror(
     *,
     config: ModelGatewayForwarderRuntimeConfig,
-    source: KafkaTransport,
+    transports: Mapping[str, KafkaTransport],
+    source_bus: ProtocolEventBus | None,
+    started: contextlib.AsyncExitStack,
     producers: Mapping[str, KafkaTransport],
     idempotency_store: StoreIdempotencySqlite,
     shutdown_event: asyncio.Event,
     health_path: Path | None,
 ) -> tuple[asyncio.Task[None], asyncio.Task[None]]:
-    """Start the mirror loop and its guard; return both tasks."""
+    """Open and start the source, then start the mirror loop and its guard."""
     lane_mirror_config = config.forwarder.lane_mirror
     if lane_mirror_config is None:
         raise ValueError("a lane mirror launch requires a declared lane_mirror")
+    source = NodeLaneMirror.open_source(config, transports, source_bus)
+    await source.start()
+    started.push_async_callback(source.close)
     identity = config.forwarder.tenant_identity
     lane_mirror = NodeLaneMirror(
         config=lane_mirror_config,
@@ -1488,6 +1505,7 @@ def _launch_lane_mirror(
             for lane, transport in producers.items()
         },
         idempotency_store=idempotency_store,
+        tenant_slug=identity.tenant_slug,
     )
     mirror_task = asyncio.create_task(
         lane_mirror.run(shutdown_event),
@@ -1499,8 +1517,7 @@ def _launch_lane_mirror(
     # the only in-process repair is to drop the connection and
     # re-bootstrap at the CONFIGURED address.
     guard_task = asyncio.create_task(
-        _run_lane_mirror_guard(
-            mirror=lane_mirror,
+        lane_mirror.guard(
             producers=producers,
             shutdown_event=shutdown_event,
             interval_seconds=config.forwarder.heartbeat_interval_seconds,
@@ -1517,6 +1534,7 @@ async def _run_mirror_only_forwarder(
     shutdown_event: asyncio.Event,
     ready_path: Path | None,
     lane_mirror_health_path: Path | None,
+    source_bus: ProtocolEventBus | None = None,
 ) -> None:
     """Run the source and mirror-lane legs of a forwarder with no cloud leg.
 
@@ -1533,7 +1551,6 @@ async def _run_mirror_only_forwarder(
             "declares neither a cloud leg nor a mirror leg"
         )
     _bindings, transports = build_gateway_transports(config)
-    source = transports["lane_source"]
     producers = {
         name.removeprefix("lane:"): transport
         for name, transport in transports.items()
@@ -1545,19 +1562,21 @@ async def _run_mirror_only_forwarder(
         ready_path.unlink(missing_ok=True)
 
     store_started = False
-    started_transports: list[KafkaTransport] = []
+    started_transports = contextlib.AsyncExitStack()
     mirror_task: asyncio.Task[None] | None = None
     guard_task: asyncio.Task[None] | None = None
     shutdown_wait_task: asyncio.Task[bool] | None = None
     try:
         await idempotency_store.start()
         store_started = True
-        for transport in (source, *producers.values()):
+        for transport in producers.values():
             await transport.start()
-            started_transports.append(transport)
-        mirror_task, guard_task = _launch_lane_mirror(
+            started_transports.push_async_callback(transport.close)
+        mirror_task, guard_task = await _launch_lane_mirror(
             config=config,
-            source=source,
+            transports=transports,
+            source_bus=source_bus,
+            started=started_transports,
             producers=producers,
             idempotency_store=idempotency_store,
             shutdown_event=shutdown_event,
@@ -1600,8 +1619,7 @@ async def _run_mirror_only_forwarder(
             if not leftover.done():
                 leftover.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        for transport in reversed(started_transports):
-            await transport.close()
+        await started_transports.aclose()
         if store_started:
             await idempotency_store.close()
 
@@ -1877,71 +1895,6 @@ class TransportGatewayBus:
             raise InfraUnavailableError(
                 f"gateway destination broker unavailable for topic {topic}"
             ) from exc
-
-
-async def _run_lane_mirror_guard(
-    *,
-    mirror: NodeLaneMirror,
-    producers: Mapping[str, KafkaTransport],
-    shutdown_event: asyncio.Event,
-    interval_seconds: int,
-    health_path: Path | None,
-) -> None:
-    """Publish the mirror's counters and repair a lane it refused (OMN-17201).
-
-    Two jobs on one cadence because they are one contract: the counters are how
-    a refused lane becomes visible outside the process, and the recreate is the
-    only thing that can end the refusal.
-
-    The repair is deliberately a producer RECREATE, not a retry. A mirror lane
-    is refused when a record this process published to it was read back off the
-    SOURCE lane at the coordinate it was written to -- proof that the lane's
-    producer is connected to the source broker. A Kafka client bootstraps at
-    the configured address once and thereafter follows the ADVERTISED address
-    it is handed, and on .201 both lane brokers advertise the bare name
-    ``redpanda`` while this forwarder is joined to both lane networks.
-    Retrying the same connection reaches the same broker; only dropping it and
-    bootstrapping again at the configured address can land elsewhere.
-
-    A recreate that lands on the wrong broker again re-refuses on the next echo,
-    so this cannot paper over a genuinely mis-addressed lane:
-    ``loop_detected_total`` keeps climbing and the healthcheck's verdict for a
-    process that has ever detected a loop is sticky.
-    """
-    while not shutdown_event.is_set():
-        publish_lane_mirror_health(mirror.health, health_path)
-        for lane, reason in sorted(mirror.refused_lanes.items()):
-            transport = producers.get(lane)
-            if transport is None:  # pragma: no cover - construction guarantees it
-                continue
-            logger.error(
-                "Lane mirror guard recreating lane=%s producer -- lane refused "
-                "(%s). No source offset was committed while the lane was "
-                "refused, so the retry loses nothing.",
-                lane,
-                reason,
-            )
-            try:
-                await transport.close()
-                await transport.start()
-            except Exception:
-                logger.exception(
-                    "Lane mirror guard could not recreate lane=%s producer; the "
-                    "lane stays refused and the source stays uncommitted",
-                    lane,
-                )
-                continue
-            mirror.clear_lane_refusal(lane)
-            logger.warning(
-                "Lane mirror guard recreated lane=%s producer and cleared the "
-                "refusal; the held records redeliver from the source",
-                lane,
-            )
-        publish_lane_mirror_health(mirror.health, health_path)
-        try:
-            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
-        except TimeoutError:
-            continue
 
 
 async def _run_heartbeat_loop(

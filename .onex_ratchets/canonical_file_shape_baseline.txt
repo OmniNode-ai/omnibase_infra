@@ -100,7 +100,6 @@ scripts/check_placeholder_topics.sh
 scripts/check_prod_promotion_lineage.py
 scripts/check_reconciler_movement_proof.py
 scripts/check_reconciler_privilege.py
-scripts/check_release_identity.py
 scripts/check_required_env_vars.py
 scripts/check_runtime_image_identity.py
 scripts/check_schema_fingerprint.py
@@ -461,10 +460,8 @@ scripts/validate_handler_contracts.py
 scripts/validate_no_direct_env.py
 scripts/validate_pr_contracts.py
 scripts/validation/__init__.py
-scripts/validation/check_ai_slop.py
 scripts/validation/check_claudemd_references.py
 scripts/validation/check_cli_registry_vocabulary.py
-scripts/validation/check_exposed_identifiers.py
 scripts/validation/check_kafka_no_hardcoded_fallback.sh
 scripts/validation/check_migration_class.py
 scripts/validation/check_migration_conflicts.py
@@ -490,7 +487,6 @@ scripts/validation/validate_markdown_links.py
 scripts/validation/validate_model_dump_json_mode.py
 scripts/validation/validate_naming.py
 scripts/validation/validate_precommit_fail_loud.py
-scripts/validation/validate_precommit_interpreter.py
 scripts/validation/validate_precommit_pin_parity.py
 scripts/validation/validate_test_removal_gate.py
 scripts/validation/validate_test_root_collection.py

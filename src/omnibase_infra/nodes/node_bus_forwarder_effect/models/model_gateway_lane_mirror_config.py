@@ -30,6 +30,13 @@ class ModelGatewayLaneMirrorConfig(BaseModel):
     mirror_lanes: tuple[str, ...] = Field(..., min_length=1)
     declared_lanes: tuple[str, ...] = Field(..., min_length=1)
     topics: tuple[str, ...] = Field(..., min_length=1)
+    # OMN-21950: the declared topics this leg publishes under the runtime
+    # tenant's physical topic (``resolve_physical_topic``) instead of
+    # byte-for-byte under the canonical name. Two runtimes mirroring one
+    # command topic onto a shared parent bus would otherwise write one topic
+    # and the reader could not tell their records apart; the tenant topic name
+    # is what says whose record it is. Empty keeps every topic canonical.
+    tenant_topics: tuple[str, ...] = ()
     max_messages_per_poll: int = Field(default=50, ge=1, le=500)
     poll_timeout_ms: int = Field(default=1_000, ge=1)
 
@@ -78,6 +85,14 @@ class ModelGatewayLaneMirrorConfig(BaseModel):
             raise ValueError("mirror_lanes must not repeat a lane")
         if len(set(self.topics)) != len(self.topics):
             raise ValueError("lane_mirror topics must not repeat a topic")
+        if len(set(self.tenant_topics)) != len(self.tenant_topics):
+            raise ValueError("lane_mirror tenant_topics must not repeat a topic")
+        undeclared_tenant_topics = sorted(set(self.tenant_topics) - set(self.topics))
+        if undeclared_tenant_topics:
+            raise ValueError(
+                "lane_mirror tenant_topics must be declared lane_mirror topics; "
+                f"undeclared: {undeclared_tenant_topics!r}"
+            )
         return self
 
 

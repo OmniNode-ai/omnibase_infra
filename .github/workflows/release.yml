@@ -495,7 +495,7 @@ jobs:
   # (OMN-13912 / OMN-13412)
   # ---------------------------------------------------------------------------
   # Publishing X.Y.Z from dev HEAD leaves dev's [project].version EQUAL to the
-  # highest published tag. check_release_identity.py then fails every dev PR
+  # highest published tag. the check-release-identity gate then fails every dev PR
   # that touches src/** until somebody unrelated notices and bumps. Measured
   # twice in this series: v0.38.10 (tagged 2026-08-26T01:38:23Z, disarmed
   # 2026-08-26T03:44:31Z by OMN-16536) and v0.38.11 (tagged
@@ -624,7 +624,7 @@ jobs:
             --body "$(printf '%s\n' \
               "## Summary" \
               "" \
-              "Automated post-release disarm step (OMN-13912). Publishing \`${RELEASED_VERSION}\` left dev's \`[project].version\` equal to the highest published tag, which ARMS the OMN-13412 release-identity gate (\`scripts/check_release_identity.py\`) against every subsequent dev PR that touches \`src/**\`." \
+              "Automated post-release disarm step (OMN-13912). Publishing \`${RELEASED_VERSION}\` left dev's \`[project].version\` equal to the highest published tag, which ARMS the OMN-13412 release-identity gate (\`the check-release-identity gate\`) against every subsequent dev PR that touches \`src/**\`." \
               "" \
               "This PR bumps \`[project].version\` to \`${TARGET}\`, re-locks \`uv.lock\` and regenerates \`docker/runners/runner-image.lock.json\`, so the gate is disarmed by the same flow that armed it rather than by whichever unrelated PR trips it first." \
               "" \
