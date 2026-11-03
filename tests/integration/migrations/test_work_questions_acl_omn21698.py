@@ -8,7 +8,7 @@ import pytest
 
 from tests.integration.migrations.conftest import EphemeralPostgres
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.ephemeral_pg]
 
 _MIGRATIONS = (
     Path(__file__).resolve().parents[3]
