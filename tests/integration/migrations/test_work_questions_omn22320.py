@@ -49,7 +49,7 @@ PREVIOUS_HEAD = (
 
 _SNAPSHOT_QUERIES = {
     "relations": """
-        SELECT n.nspname || '.' || c.relname || ':' || c.relkind,
+        SELECT n.nspname || '.' || c.relname || ':' || c.relkind::text,
                coalesce(c.relacl::text, '')
         FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -57,7 +57,7 @@ _SNAPSHOT_QUERIES = {
     """,
     "columns": """
         SELECT n.nspname || '.' || c.relname || '.' || a.attname,
-               format_type(a.atttypid, a.atttypmod) || ' notnull=' || a.attnotnull
+               format_type(a.atttypid, a.atttypmod) || ' notnull=' || a.attnotnull::text
                || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '')
         FROM pg_catalog.pg_attribute a
         JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
@@ -65,7 +65,7 @@ _SNAPSHOT_QUERIES = {
         LEFT JOIN pg_catalog.pg_attrdef d
                ON d.adrelid = a.attrelid AND d.adnum = a.attnum
         WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-          AND a.attnum > 0 AND NOT a.attisdropped
+          AND c.relkind <> 'i' AND a.attnum > 0 AND NOT a.attisdropped
     """,
     "constraints": """
         SELECT n.nspname || '.' || c.relname || '.' || k.conname,
