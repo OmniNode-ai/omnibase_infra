@@ -341,8 +341,8 @@
             {
               "name": "timeout_seconds",
               "kind": "POSITIONAL_OR_KEYWORD",
-              "annotation": "<class 'float'>",
-              "default": "30.0"
+              "annotation": "float | None",
+              "default": "None"
             }
           ],
           "return_annotation": "None"
