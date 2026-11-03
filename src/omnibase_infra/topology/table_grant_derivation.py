@@ -207,16 +207,16 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
 
 def _vendored_read_write(
     table: str,
-    node_dir: str,
-    create_file: str,
+    node_dir: str | None = None,
+    create_file: str | None = None,
     *,
     node: str | None = None,
     schema: str = "omninode_internal",
     access: Literal["read", "write", "read_write"] = "read_write",
     role: str | None = None,
 ) -> ContractTableDeclaration:
-    """A vendored relation whose role is named for the table."""
-    migration = f"docker/migrations/forward/nodes/{node_dir}/{create_file}"
+    """A vendored relation whose role, node dir and create file follow the table."""
+    migration = f"docker/migrations/forward/nodes/{node_dir or f'node_projection_{table}'}/{create_file or f'0000_create_{table}.sql'}"
     return ContractTableDeclaration(
         node=node or f"legacy_migration:{table}",
         contract_path=Path(migration),
@@ -403,45 +403,36 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
-    # OMN-21115: activation ingestion precedes the omnimarket contract pin.
-    # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
-    # when node_context_install_confirm_trigger_effect reaches the pin.
-    _vendored_read_write(
-        "compaction_activations",
-        "node_context_install_confirm_trigger_effect",
-        "0000_create_compaction_activations.sql",
-    ),
-    # OMN-17427: the delegation budget readings precede the omnimarket contract
-    # pin. The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
-    # when node_projection_delegation_budget_readings reaches the pin.
-    _vendored_read_write(
-        "delegation_budget_readings",
-        "node_projection_delegation_budget_readings",
-        "0000_create_delegation_budget_readings.sql",
-    ),
-    # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
-    # omnimarket node contract, as compaction_receipts below. 0001 grants
-    # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
-    # USAGE. The ownership declaration names access read_write, role
-    # compaction_current_context. Retired when the
-    # node_projection_compaction_current_context contract merges and the
-    # omnimarket pin advances past it; the OMN-18863 expiry module names this
-    # bridge.
-    _vendored_read_write(
-        "compaction_current_context",
-        "node_projection_compaction_current_context",
-        "0000_create_compaction_current_context.sql",
-    ),
-    # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
-    # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
-    # UPDATE plus schema and cursor sequence USAGE. The ownership declaration
-    # names access read_write, role compaction_receipts. Retired when the
-    # node_projection_compaction_receipts contract merges and the omnimarket
-    # pin advances past it; the OMN-18863 expiry module names this bridge.
-    _vendored_read_write(
-        "compaction_receipts",
-        "node_projection_compaction_receipts",
-        "0000_create_compaction_receipts.sql",
+    # The four bridges below share one shape: 0000_create_<table>.sql under the
+    # node directory named beside it, or under node_projection_<table>.
+    *(
+        _vendored_read_write(t, d)
+        for t, d in (
+            # OMN-21115: activation ingestion precedes the omnimarket contract pin.
+            # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
+            # when node_context_install_confirm_trigger_effect reaches the pin.
+            ("compaction_activations", "node_context_install_confirm_trigger_effect"),
+            # OMN-17427: the delegation budget readings precede the omnimarket contract
+            # pin. The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
+            # when node_projection_delegation_budget_readings reaches the pin.
+            ("delegation_budget_readings", None),
+            # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
+            # omnimarket node contract, as compaction_receipts below. 0001 grants
+            # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
+            # USAGE. The ownership declaration names access read_write, role
+            # compaction_current_context. Retired when the
+            # node_projection_compaction_current_context contract merges and the
+            # omnimarket pin advances past it; the OMN-18863 expiry module names this
+            # bridge.
+            ("compaction_current_context", None),
+            # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
+            # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
+            # UPDATE plus schema and cursor sequence USAGE. The ownership declaration
+            # names access read_write, role compaction_receipts. Retired when the
+            # node_projection_compaction_receipts contract merges and the omnimarket
+            # pin advances past it; the OMN-18863 expiry module names this bridge.
+            ("compaction_receipts", None),
+        )
     ),
     # OMN-21920: infra vendors node_projection_agent_actions/0000-0001 ahead of the
     # omnimarket node contract that declares the six agent_* relations the retired
@@ -496,10 +487,25 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # node_projection_local_identity contract merges and the pin advances past
     # it; the expiry module names it.
     *(
-        _vendored_read_write(
-            t, f"node_projection_{t}", f"0000_create_{t}.sql", schema="public"
-        )
+        _vendored_read_write(t, schema="public")
         for t in ("local_environment", "local_alerts", "local_identity")
+    ),
+    # OMN-22320: node_projection_work_questions/0000 creates five
+    # omninode_internal tables ahead of the omnimarket writer's contract and
+    # 0001 grants omninode_runtime SELECT, INSERT, UPDATE on each. Retired
+    # when the omnimarket work-question writer contract merges and the pin
+    # advances past it; the OMN-18863 expiry module names this bridge.
+    *(
+        _vendored_read_write(
+            t, "node_projection_work_questions", "0000_create_work_questions.sql"
+        )
+        for t in (
+            "work_outcome_units",
+            "orchestration_style_outcomes",
+            "lane_drift_and_stalls",
+            "brief_quality_vs_outcome",
+            "subagent_waste",
+        )
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
