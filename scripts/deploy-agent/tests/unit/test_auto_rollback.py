@@ -682,7 +682,12 @@ def test_agent_never_restores_a_planted_pre_fold_boot_good_image_under_the_fold(
         assert "pair its image" not in " ".join(job.errors)
         return
     # The deploy failed, and the pre-fold image is never restored under the
-    # fold overlay: the restore refuses the pairing and names the revision path.
+    # fold overlay: the restore refuses the pairing and the incident names the
+    # revision path.
     assert job.status == "failed"
-    assert "pair its image" in " ".join(job.errors)
+    incident = json.loads(
+        next((tmp_path / "agent-state").rglob("incident-*.json")).read_text()
+    )
+    assert incident["recovery_verified"] is False
+    assert "pair its image" in incident["recovery_error"]
     assert not any("up" in argv or argv[:2] == ["docker", "tag"] for argv in commands)
