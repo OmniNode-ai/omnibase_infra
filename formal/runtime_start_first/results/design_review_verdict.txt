@@ -1,0 +1,113 @@
+# Design-review verdict: shared-listener start-first runtime handover (OMN-22376)
+
+Verdict: **PASS under the stated bounds.** TLC found no counterexample to
+AcceptedIsReady, NoRefusalWithoutFault, AtMostOneConsuming, NoSkip, ReplayOnlyX2
+or WindowBounded on the unmutated model of design revision 4 (OMN-22151 stage 2).
+No property was weakened and no bound was loosened to obtain the pass; the one
+bound that had to be restated is a refinement of the design's formula, below.
+
+Two verdicts stand behind this file, and they are different kinds of evidence:
+
+- Design review (Codex): READY with zero blockers and zero majors, rounds r12
+  (HTTP and bus slices) and r14 (install slice), posted as Linear comment
+  831a0f81 on OMN-22151. That is a review of the prose design.
+- Model check (this task, T0): TLC over `RuntimeStartFirst.tla`, run on lab host
+  h051 (TLC2 Version 2026.10.30.154139, `-workers 4`, Temurin 17), the output of
+  every cfg committed in this directory and bound to `model.sha256`, the sha256 of
+  the spec then each cfg in sorted order. A model check says nothing about
+  behaviour the spec leaves out; the list below says what it leaves out.
+
+## Results
+
+| Config | Holds | TLC result | Distinct states |
+| --- | --- | --- | --- |
+| Http.cfg | AcceptedIsReady, NoRefusalWithoutFault | No error, 0 left on queue | 21272 |
+| Bus.cfg | AtMostOneConsuming, NoSkip, ReplayOnlyX2 | No error, 0 left on queue | 21559 |
+| Install.cfg | WindowBounded, AtMostOneConsuming, NoSkip, ReplayOnlyX2 | No error, 0 left on queue | 55930 |
+| Install1.cfg | the same, one agent fault, the design's own bound | No error, 0 left on queue | 26769 |
+
+Each property has a mutant (one deliberate break of one rule) that makes TLC
+report a violation of exactly that property; `tests/unit/formal/test_runtime_start_first_model.py`
+fails if one stops failing.
+
+| Property | Mutant | The rule it breaks |
+| --- | --- | --- |
+| AcceptedIsReady | mut_teardown_first | A5: readiness teardown starts at SIGTERM, before A3 has detached |
+| NoRefusalWithoutFault | mut_shutdown_socket | A3: the detach shutdown()s the shared socket instead of closing the duplicate |
+| AtMostOneConsuming | mut_no_standby | S2: the passive runtime is not paused |
+| NoSkip | mut_autocommit | S3: the commit follows the fetch position, not the processed one |
+| ReplayOnlyX2 | mut_seed_own_group | S4: the seed is the runtime's own group's commit, not the highest epoch |
+| WindowBounded | mut_no_watchdog | section 7: no systemd watchdog, so a hung agent holds the window |
+
+Further mutants, each failing exactly the property shown: mut_no_grants (A6 grants,
+NoRefusalWithoutFault), mut_no_verify_exit (section 6 exit verification,
+AtMostOneConsuming), mut_first_sight_latest (S3a first start, NoSkip).
+Eleven witnesses (`wit_*.cfg`) are violated on purpose: a redeploy, two redeploys,
+a revocation hold, a detach grant, an X2 replay, an install, a rollback, a
+roll-forward, `install_failed`, two agent faults all complete, so the passing runs
+are not vacuous.
+
+## Bounds
+
+Stated in each cfg and in the cfg's first lines: Http 3 runtimes (two redeploys),
+1 record, MaxCrash 2, MaxRevoke 2; Bus 3 runtimes (MaxRedeploy 2), 3 records,
+MaxCrash 2; Install the legacy and N, 2 records, MaxCrash 1, **MaxAgentCrash 2**,
+WMax 2, RB 1, RF 1, W 1, G 1, WBound 8. Time is in ticks of one window clock that
+starts at the legacy stop.
+
+## Finding on the design (A2, cumulative agent downtime)
+
+The design claims the window bound `WMax + RB + RF + W + G` for one agent fault.
+With MaxAgentCrash 2 that formula is breached (`wit_single_fault_bound.cfg`, a hang
+and a crash in a row); the bound that holds is `WMax + RB + RF + MaxAgentCrash *
+(W + G)`, checked as Install.cfg, and the one-fault formula holds for one fault
+(Install1.cfg). The deadlines are absolute from the recorded window start, so
+outages do not stack beyond the last ones; the T6 text should state the bound per
+number of faults. This is a refinement of a stated formula, not a flaw in the
+mechanism.
+
+## Residuals the model treats as faults or leaves out, not as properties
+
+- R1 (a fault of an attached runtime): modelled as the flag `faulted`, set by a
+  crash of a runtime that accepts on L, by a hold timeout, and by a successor that
+  never attaches. AcceptedIsReady and NoRefusalWithoutFault are claimed only for
+  runs without it, as the design argues. A non-revocation readiness loss is not
+  modelled at all: it is a fault by definition and no property constrains it.
+- R2 (one-way bus handover after retirement): not a property. The model has the
+  paused replacement keep its place; it never checks that activation succeeds.
+- R3 (a double fault inside the install window): modelled as `ip = "failed"`;
+  WindowBounded excludes it, as the design does.
+- R4 (total outage, polls hang): NoRefusalWithoutFault counts a poll with no
+  acceptor as a non-answer, so R4 is the fault case it excludes; it is not
+  claimed gapless.
+- R5 (broker offset retention): not modelled. The source's commit is read from
+  the snapshot, so the model cannot lose it; the retention precondition and the
+  final file belong to T4.
+- X1 (the legacy's auto-commit past a polled batch at the install stop): not
+  modelled; the legacy commits only processed positions here, so NoSkip says
+  nothing about X1.
+- X2 (the effect-to-commit gap): the one allowed replay, counted per record in
+  `x2` by a crash or kill with a commit outstanding; ReplayOnlyX2 allows no other.
+
+Also left out, each for a later task: an aborted redeploy and the agent's crash
+recovery inside a redeploy (T4), L across the agent's restarts and re-exec and an
+unreachable broker (T3), the token mapping of the legacy group ids and the start
+journal (T2). One partition stands for the per-partition step of S4, and the
+commit and seek of an activation are one step.
+
+## Conditions on the build
+
+- A runtime must attach only after both latches and readiness are checked twice
+  (A5); the model's AcceptedIsReady needs both checks.
+- B must serialize grants and grant only against another confirmed session
+  (A6); mut_no_grants shows the last acceptor leaves otherwise.
+- The agent must verify the old runtime's exit from the container state before it
+  writes the owner record (mut_no_verify_exit).
+- The seed must be the commit of the highest epoch over the three groups, the
+  source's read from the snapshot (mut_seed_own_group).
+- Commits must be the processed position only, synchronous, stamped with the epoch
+  (mut_autocommit).
+- The install must run under the watchdog, with deadlines absolute from the
+  recorded window start (mut_no_watchdog).
+- The first-start rule is `earliest` for a partition new to a topic the pool
+  already consumes (mut_first_sight_latest).
