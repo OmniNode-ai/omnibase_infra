@@ -49,10 +49,6 @@ PRECOMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 VALIDATE_PY = REPO_ROOT / "scripts" / "validate.py"
 
-# Manual hooks that predate this registry. They are not CI-backed commit-stage
-# moves; each has its own reason in .pre-commit-config.yaml.
-PREEXISTING_MANUAL: frozenset[str] = frozenset({"normalization-symmetry"})
-
 GATED_CONTEXTS: frozenset[str] = frozenset(
     (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS, *EXPECTED_EXTERNAL_CONTEXTS)
 )
@@ -204,9 +200,9 @@ def test_every_manual_hook_is_registered_with_a_ci_home() -> None:
     manual = {
         hook["id"] for hook in _hook_entries() if "manual" in (hook.get("stages") or [])
     }
-    assert manual == set(MOVED) | PREEXISTING_MANUAL, (
+    assert manual == set(MOVED), (
         "a hook left the commit stage without a registered CI home, "
-        f"or a registered hook is back at commit: {sorted(manual ^ (set(MOVED) | PREEXISTING_MANUAL))}"
+        f"or a registered hook is back at commit: {sorted(manual ^ (set(MOVED)))}"
     )
 
 
