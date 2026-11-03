@@ -1,0 +1,54 @@
+# OMN-22233 contract file for omnibase_infra: one installed package declares each onex.nodes entry point name.
+schema_version: "1.0.0"
+ticket_id: "OMN-22233"
+title: "Dev runtime reports DEGRADED because two packages both ship the node node_package_announce_effect and discovery rejects the second"
+summary: "omnimarket keeps the entry point node_package_announce_effect; omnibase_infra renames its boot step 0 node to node_boot_catalog_effect and its node_baseline_capture entry point label to node_baseline_capture_effect, so no onex.nodes entry point name is declared by two packages. A regression built from the recorded DUPLICATE_REGISTRATION log line holds the pair."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22233-one-owner
+    statement: "Exactly one installed package declares each onex.nodes entry point name, and the dev runtime loads every contract with discovery_errors empty."
+    acceptance:
+      - id: AC1
+        statement: "AC1: after the fix, exactly one installed package declares the entry point node_package_announce_effect in the dev runtime image -- falsifier: uv run pytest tests/unit/runtime/auto_wiring -k duplicate_entry_point_names -q in the repository that owns the test, asserting no onex.nodes entry point name is declared by two installed packages"
+      - id: AC2
+        statement: "AC2: a regression test built from the recorded duplicate log line of this incident (fixture path in the PR) fails on the current dev pair of pyproject files and passes on the fix -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_duplicate_entry_point_omn21590_omn21597.py -q"
+      - id: AC3
+        statement: "AC3: after a redeploy through the deploy agent, the dev runtime /ready lists every contract loaded with discovery_errors empty and the three dev runtime containers report healthy -- falsifier: curl -s http://<dev lane runtime host>/ready on the lab dev host returns HTTP 200 with no failed contract, and docker inspect health of the three containers reads healthy"
+evidence_requirements:
+  - kind: tests
+    description: "The entry point name checks and the boot step 0 catalog tests pass."
+    command: "uv run pytest tests/unit/runtime/auto_wiring/test_duplicate_entry_point_names.py tests/unit/runtime/auto_wiring/test_duplicate_entry_point_omn21590_omn21597.py tests/unit/runtime/test_boot_step0_catalog.py -n 0 -q --no-cov -o addopts=''"
+dod_evidence:
+  - id: dod-omn22233-ac1-one-owner
+    description: "No onex.nodes entry point name is declared by two installed distributions; a planted pair of fixture distributions is detected."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring -k duplicate_entry_point_names -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn22233-ac2-recorded-incident
+    description: "The recorded DUPLICATE_REGISTRATION log line names an entry point that exactly one of the omnibase_infra pyproject and the recorded omnimarket entry point names declares."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_duplicate_entry_point_omn21590_omn21597.py -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn22233-hosted-deploy-boot
+    description: "Hosted deploy check: the renamed boot step 0 node contract still loads its catalog lifecycle and the boot bounds, and the entry point names of the two packages are disjoint."
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_boot_step0_catalog.py tests/unit/runtime/test_boot_runtime_config_omn21590.py tests/unit/runtime/auto_wiring/test_duplicate_entry_point_omn21590_omn21597.py -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn22233-ac3-dev-healthy
+    description: "Deploy-scope readback for AC3: after the deploy agent rolls the dev lane, the three dev runtime containers report healthy. It reads the dev lab host's docker, which a hosted runner does not have, so only the local Done gate runs it."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: "test \"$(docker inspect --format '{{.State.Health.Status}}' omninode-runtime omninode-runtime-effects omnibase-infra-runtime-worker-1 | sort -u)\" = healthy"
