@@ -49,8 +49,21 @@ def _write_dist(root: Path, name: str, entry_points: tuple[str, ...]) -> None:
 
 
 @pytest.mark.unit
-def test_duplicate_entry_point_names_none_among_installed_packages() -> None:
-    assert duplicated(entry_point_owners(distributions())) == {}
+def test_duplicate_entry_point_names_announcer_has_at_most_one_installed_owner() -> (
+    None
+):
+    """The incident's entry point is declared by at most one installed package.
+
+    Only this name is held here: a label two packages share is harmless when their
+    contract names differ (``node_baseline_capture``), and discovery's own
+    duplicate check, exercised in
+    tests/integration/runtime/test_announce_contract_one_owner_omn22233.py, is what
+    holds contract names.
+    """
+    owners = entry_point_owners(distributions()).get(
+        "node_package_announce_effect", set()
+    )
+    assert len(owners) <= 1, owners
 
 
 @pytest.mark.unit

@@ -75,7 +75,41 @@ def test_duplicate_entry_point_names_incident_name_has_one_owner() -> None:
 
 
 @pytest.mark.unit
-def test_duplicate_entry_point_names_pair_shares_no_name() -> None:
+def test_duplicate_entry_point_names_shared_label_loads_distinct_contract_names() -> (
+    None
+):
+    """A label both packages declare is harmless only when the contract names differ.
+
+    Discovery rejects a second contract with the same ``name``, not a second entry
+    point label. ``node_baseline_capture`` is declared by both packages since
+    2026-04 and never failed to load, because omnimarket's contract is named
+    ``baseline_capture``. Every label both declare must keep that property, so this
+    package's contract behind a shared label never carries the label's own name
+    when omnimarket's does.
+    """
     declared = _declared_by_package()
     shared = declared["omnibase_infra"] & declared["omnimarket"]
-    assert shared == frozenset()
+    clashing = sorted(
+        label
+        for label in shared
+        if _infra_contract_name(label)
+        in _MARKET_CONTRACT_NAMES_OF_SHARED_LABELS.get(label, {label})
+    )
+    assert clashing == []
+
+
+# The contract name omnimarket ships behind each label both packages declare, read
+# from omnimarket origin/dev 7b42a4c63 (src/omnimarket/nodes/<label>/contract.yaml).
+_MARKET_CONTRACT_NAMES_OF_SHARED_LABELS: dict[str, set[str]] = {
+    "node_baseline_capture": {"baseline_capture"},
+}
+
+
+def _infra_contract_name(label: str) -> str:
+    infra = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+    module = infra["project"]["entry-points"]["onex.nodes"][label]
+    contract = _REPO_ROOT / "src" / Path(*module.split(".")) / "contract.yaml"
+    text = contract.read_text()
+    match = re.search(r"^name:\s*\"?([A-Za-z0-9_]+)\"?\s*$", text, re.MULTILINE)
+    assert match is not None, f"{contract} has no top-level name"
+    return match.group(1)
