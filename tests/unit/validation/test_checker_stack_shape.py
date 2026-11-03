@@ -521,6 +521,34 @@ def test_real_run_reads_the_stack_it_judges() -> None:
     assert f"service {victim['service']} in docker/" in refused
 
 
+# -- OMN-22162: the cost estimator page on the report host is not a lane's stack ----------------
+
+_REPORT_HOST_COMPOSE = "docker/docker-compose.cost-estimator-web.yml"
+_REPORT_HOST_ENTRY = f"  - {_REPORT_HOST_COMPOSE}\n"
+
+
+def test_report_host_page_file_is_declared_not_a_stack_and_is_not_judged() -> None:
+    """The report host's compose file is named under not_a_stack; the dev lane's copy stays judged."""
+    data = _data(_real_text())
+    assert _REPORT_HOST_COMPOSE in _strings(data, "not_a_stack")
+    judged = _judged(_REPO, data)
+    assert _REPORT_HOST_COMPOSE not in judged
+    assert "docker/docker-compose.dev-lane.yml" in judged
+    assert (_REPO / _REPORT_HOST_COMPOSE).is_file()
+    # the dev lane's cost-estimator-web keeps its one baseline file until it leaves that file
+    assert _budgets(_real_text())["cost-estimator-web"] == 1
+
+
+def test_report_host_page_file_judged_as_a_stack_is_refused() -> None:
+    """RED control: without the not_a_stack entry the same tree is refused for a second declaration."""
+    text = _real_text()
+    assert _REPORT_HOST_ENTRY in text
+    refused = _text(_judge(_REPO, text=text.replace(_REPORT_HOST_ENTRY, "", 1)))
+    assert "service cost-estimator-web is declared in 2 compose files" in refused
+    assert _REPORT_HOST_COMPOSE in refused
+    assert _judge(_REPO, text=text) == ()
+
+
 # -- the wiring: the hook and the unconditional CI job -------------------------------------------
 
 _JOB = "stack-shape"
