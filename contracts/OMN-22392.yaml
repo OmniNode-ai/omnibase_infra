@@ -1,0 +1,46 @@
+# OMN-22392 contract file for omnibase_infra: the zero-consumer groups on the dev and CI buses are traced to their producers, and the infra-owned naming is pinned boot-stable.
+schema_version: "1.0.0"
+ticket_id: "OMN-22392"
+title: "T30 The groups with no consumer on the dev and CI buses are traced to the runtime setting that mints a new group id per boot, and fixed in the overlay (one-runtime plan)"
+summary: "Read live on 2026-11-03 through each broker's admin metrics: the dev bus held 413 groups, 29 with no consumer, and the CI bus 16009 groups, 15994 with no consumer. No omnibase_infra setting mints a group id per boot: every instance-discriminated group on the dev bus carries one of the three declared literal instance ids, and none of the zero-consumer groups carries one. 15991 of the CI bus's groups are local.omnimarket.lab_work_client.consume.v1.<hex12>.(t|cap) groups, a per-call name minted by omnimarket and fixed there (omnimarket#4687); the broker still holds them because its live group_offset_retention_sec reads 604800 where the CI compose file declares 86400 (#5517) and the broker has not been recreated since. This change records the scrubbed census and pins the infra-owned naming."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22392-group-census
+    statement: "The zero-consumer groups on the dev and CI buses are listed by prefix with counts, and the infra-owned group naming is pinned boot-stable against the recorded listing."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the cause is named with the group names that show it, listed by prefix with counts in the PR -- falsifier: re-running the same group listing on the dev lane broker through the admin endpoint reproduces the prefix counts"
+      - id: AC2
+        statement: "AC2: after the fix, a redeploy adds no new zero-consumer group -- falsifier: group count with zero members read before and after one redeploy on a proving lane, both numbers and read times in the PR"
+      - id: AC3
+        statement: "AC3: a regression test built from the recorded group listing (fixture path in the PR) fails on the current group naming and passes on the fix -- falsifier: uv run pytest on that test in omnibase_infra"
+evidence_requirements:
+  - kind: tests
+    description: "The recorded census reconciles, names the per-call producer, and shows no omnibase_infra instance discriminator among the zero-consumer groups."
+    command: "uv run pytest tests/unit/runtime/test_omn22392_consumer_group_census.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The recorded census (tests/fixtures/omn22392/consumer_group_census_2026-11-03.json) reconciles by prefix, names lab_work_client as the CI bus's per-call producer and shows no zero-consumer group under an infra instance discriminator."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/test_omn22392_consumer_group_census.py -q -p no:cacheprovider
+  - id: dod-002
+    description: "Proving-lane readback, open until a lane redeploys: the count of zero-member groups on the dev broker read before and after one redeploy stays within 60 (29 to 30 were read on 2026-11-03; a per-boot id would add one per consumer, about 400). It reads the dev broker's admin metrics, which a hosted runner cannot reach, so only the local Done gate runs it."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          ssh -o BatchMode=yes ${LAB_DEV_DOCKER_HOST} "docker exec omnibase-infra-redpanda curl -s http://localhost:9644/public_metrics" | python3 -c 'import sys; n=sum(1 for l in sys.stdin if l.startswith("redpanda_kafka_consumer_group_consumers{") and l.rstrip().endswith(" 0.000000")); print(n); assert n <= 60, n'
+  - id: dod-003
+    description: "The census test runs in omnibase_infra and passes. Its red-on-current half is not built: the producer of the pile is in omnimarket, so no infra naming fails against the recorded listing."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/test_omn22392_consumer_group_census.py -q -p no:cacheprovider
