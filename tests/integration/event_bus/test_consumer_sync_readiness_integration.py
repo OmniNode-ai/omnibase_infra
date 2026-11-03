@@ -109,6 +109,9 @@ class _WedgedForeverConsumer:
     def assignment(self) -> set[TopicPartition]:
         return {PARTITION}
 
+    def pause(self, *partitions: TopicPartition) -> None:
+        self.paused = set(partitions)
+
     async def position(self, partition: TopicPartition) -> int:
         return WEDGED_POSITION
 
