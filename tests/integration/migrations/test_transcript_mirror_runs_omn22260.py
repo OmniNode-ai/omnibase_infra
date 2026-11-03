@@ -297,8 +297,12 @@ def test_schema_diff_is_one_table_and_dropping_it_leaves_nothing_behind(
                 key.split(".")[1] for key in after[kind] if key not in before[kind]
             }
             assert owners <= {"transcript_mirror_runs"}, (kind, owners)
+        # The only other additions are the table's own row type and its array type
+        # (and, at most, the schema ACL line); no role, function, trigger or policy.
         assert {k for k in after["other"] if k not in before["other"]} <= {
-            k for k in after["other"] if k.startswith("schema:omninode_internal")
+            "type:transcript_mirror_runs",
+            "type:_transcript_mirror_runs",
+            *(k for k in after["other"] if k.startswith("schema:omninode_internal")),
         }
         # The rollback of an expand-only table: dropping it restores the catalog.
         with conn.cursor() as cur:
