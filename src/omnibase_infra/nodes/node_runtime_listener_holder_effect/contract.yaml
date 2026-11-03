@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_runtime_listener_holder_effect
+contract_name: node_runtime_listener_holder_effect
+node_name: node_runtime_listener_holder_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Deploy-agent holder of the runtime host listeners (design rev 4 section 3): binds [::]:8085 and [::]:8086 at the install, keeps them in the systemd fd store, recovers them by name from LISTEN_FDS and LISTEN_FDNAMES and remaps them onto descriptors 3 and 4 before a self-update re-exec. Inert until an install binds.
+input_model:
+  name: ModelRuntimeListenerHolderRequest
+  module: omnibase_infra.models.model_runtime_listener_holder_request
+  description: One holder operation.
+output_model:
+  name: ModelRuntimeListenerHolderResult
+  module: omnibase_infra.models.model_runtime_listener_holder_result
+  description: The outcome and the listeners now held.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: install_bind
+      handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
+    - operation: recover
+      handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
+    - operation: reboot_rebind
+      handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
+    - operation: prepare_reexec
+      handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
+    - operation: drop
+      handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
+capabilities:
+  - name: runtime_listener.hold
+    description: Hold the runtime host listeners across the deploy agent's restarts.
+metadata:
+  ticket: OMN-22379
+  author: OmniNode Team
+  description: Host-local effect run inside the deploy agent process. No runtime bus dependency.
+  tags: [effect, deployment, dev]
