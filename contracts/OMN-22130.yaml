@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22130
+title: HandlerMCP takes only its container, and its server timeouts come from the handler contract, not from literals
+summary: The handler-di-gate check reported 6 findings in src/omnibase_infra/handlers/handler_mcp.py, all admitted by .onex_ratchets/handler_di_baseline.txt. This change makes the constructor (self, container) with the container required, removes the unused registry and executor parameters (the server lifecycle sets both during initialize), and moves the shutdown, cancel and startup timeouts into metadata.transport of the MCP handler contract, which reaches the handler through extract_handler_config and initialize(config). The baseline line for the file is deleted and the check reports zero findings for it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22130-handler-mcp-di
+    statement: HandlerMCP is built from the injected container alone and reads its server timeouts from the handler contract through initialize(config); handler_mcp.py has no entry in the handler DI baseline.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: handler_mcp.py has no entry in the handler DI baseline and handler-di-gate reports zero findings for it -- falsifier: ! grep -q handler_mcp.py .onex_ratchets/handler_di_baseline.txt'
+      - id: AC2
+        statement: 'AC2: the constructor takes exactly a required container, the timeouts come from the contract, and the server start and stop path passes with the in-memory and the Redpanda-overlay binding -- falsifier: uv run --frozen pytest tests/unit/handlers/test_handler_mcp_di_omn22130.py -q'
+      - id: AC4
+        statement: 'AC4: a malformed metadata.transport.server_timeouts block is refused at contract load and the shipped contract block reaches the handler config -- falsifier: uv run --frozen pytest tests/integration/handlers/test_handler_mcp_contract_timeouts_omn22130.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The DI test fails at the merge base and passes at the head; the existing MCP tests pass at the head.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_mcp_di_omn22130.py tests/unit/handlers/test_handler_mcp.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22130-ac1-gate-clean
+    description: The handler DI baseline carries no handler_mcp.py line. Fails at the merge base, where the baseline admits 6 findings for the file.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "bash -c '! grep -q handler_mcp.py .onex_ratchets/handler_di_baseline.txt'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22130-ac2-di-two-profile
+    description: The constructor signature, the contract-declared timeouts, and the server start and stop with kafka_enabled off and on against a fake lifecycle (it binds no real Kafka or overlay service). Fails at the merge base, where the constructor takes three optional parameters and the timeouts are module literals.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/handlers/test_handler_mcp_di_omn22130.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn22130-ac4-contract-load
+    description: The shipped MCP handler contract's server_timeouts reach the handler config, and a malformed block is refused at contract load. Fails at the merge base, where the loader copies the block unvalidated.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/integration/handlers/test_handler_mcp_contract_timeouts_omn22130.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn22130-deploy-source
+    description: The merged source carries the server_timeouts validation that the runtime loads (hermetic readback of the changed loader at the evaluated commit).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/handler_contract_config_loader.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q "ModelMcpServerTimeouts.validate_contract_block("'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
