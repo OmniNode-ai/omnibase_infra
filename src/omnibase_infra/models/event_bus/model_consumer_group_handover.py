@@ -26,16 +26,14 @@ Shape, as a TOP-LEVEL key in the node's ``contract.yaml``::
       from_version: v1
       from_auto_offset_reset: earliest
 
-A retired consumer whose group is a bare name, not built from service, node and
-version, declares the name itself in place of the three segments::
+A retired group whose id is not ``{env}.<service>.<node>.consume.<version>`` (a
+consumer that set its own ``KAFKA_CONSUMER_GROUP``) is named by its literal id
+through ``from_group_id`` (OMN-21932), which may stand alone in place of the
+three segments (OMN-21920)::
 
     consumer_group_handover:
       from_group_id: agent-observability-postgres
       from_auto_offset_reset: earliest
-
-``from_group_id`` is the group as it is, with no environment prefix and no
-derivation, so it serves every lane that retired consumer ran in. A declaration
-carries either the three segments or ``from_group_id``, never both.
 
 The source group is derived with the same ``compute_consumer_group_id`` and the
 runtime's own environment, so one declaration serves every lane whose retired
@@ -79,16 +77,6 @@ class ModelConsumerGroupHandover(BaseModel):
     from_version: str | None = Field(
         default=None, min_length=1, description="Version segment of the retired group."
     )
-    from_group_id: str | None = Field(
-        default=None,
-        min_length=1,
-        # At least one character that is not a dot, so "." and ".." are refused.
-        pattern=r"^\.*[A-Za-z0-9_-][A-Za-z0-9._-]*$",
-        description=(
-            "The retired consumer group by name, for a group that is not built "
-            "from service, node and version. Used as it is in every environment."
-        ),
-    )
     from_auto_offset_reset: Literal["earliest", "latest"] = Field(
         ...,
         description=(
@@ -98,25 +86,40 @@ class ModelConsumerGroupHandover(BaseModel):
         ),
     )
 
+    from_group_id: str | None = Field(
+        default=None,
+        min_length=1,
+        strict=True,
+        # At least one character that is not a dot, so "." and ".." are refused.
+        pattern=r"^\.*[A-Za-z0-9_-][A-Za-z0-9._-]*$",
+        description=(
+            "The retired consumer group's literal id, for a group the derived "
+            "name cannot express. Returned verbatim by ``source_group`` in every "
+            "environment; when unset the group is derived from the three "
+            "segments above."
+        ),
+    )
+
     @model_validator(mode="after")
-    def _one_form(self) -> Self:
-        """Either ``from_group_id`` or all of service, node and version."""
+    def _segments_complete_or_group_id(self) -> Self:
+        """Service, node and version are all declared, or ``from_group_id`` is."""
         segments = (self.from_service, self.from_node, self.from_version)
-        if self.from_group_id is not None:
-            if any(segment is not None for segment in segments):
-                raise ValueError(
-                    "from_group_id names the retired group by itself; it cannot "
-                    "be combined with from_service, from_node or from_version"
-                )
-        elif any(segment is None for segment in segments):
+        if any(segment is None for segment in segments) and (
+            self.from_group_id is None
+            or any(segment is not None for segment in segments)
+        ):
             raise ValueError(
-                "a handover declares either from_group_id or all of "
-                "from_service, from_node and from_version"
+                "a handover declares all of from_service, from_node and "
+                "from_version, or from_group_id on its own"
             )
         return self
 
     def source_group(self, environment: str) -> str:
-        """The retired consumer group in ``environment``."""
+        """The retired consumer group in ``environment``.
+
+        ``from_group_id`` verbatim when declared, otherwise the group derived
+        from the service, node and version segments.
+        """
         if self.from_group_id is not None:
             return self.from_group_id
         if (
@@ -125,8 +128,8 @@ class ModelConsumerGroupHandover(BaseModel):
             or self.from_version is None
         ):
             raise ValueError(
-                "a handover declares either from_group_id or all of "
-                "from_service, from_node and from_version"
+                "a handover declares all of from_service, from_node and "
+                "from_version, or from_group_id"
             )
         return compute_consumer_group_id(
             ModelNodeIdentity(

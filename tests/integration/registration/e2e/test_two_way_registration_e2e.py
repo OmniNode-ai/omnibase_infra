@@ -46,13 +46,15 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumIntrospectionReason, EnumRegistrationState
 from omnibase_infra.models.discovery import (
     DEFAULT_HEARTBEAT_TOPIC,
     DEFAULT_INTROSPECTION_TOPIC,
     DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+)
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
 )
 from omnibase_infra.models.registration import (
     ModelNodeHeartbeatEvent,
@@ -437,12 +439,8 @@ class TestSuite2RegistryDualRegistration:
 
         # Process the event through the handler using envelope API
         now = datetime.now(UTC)
-        envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=event,
-            envelope_timestamp=now,
-            correlation_id=unique_correlation_id,
-            source_tool="e2e-test",
+        envelope = ModelInjectedRequest(
+            event=event, now=now, input_id=uuid4(), correlation_id=unique_correlation_id
         )
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
@@ -624,12 +622,8 @@ class TestSuite2RegistryDualRegistration:
         )
 
         # Process the event through the handler using envelope API
-        envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=event,
-            envelope_timestamp=now,
-            correlation_id=unique_correlation_id,
-            source_tool="e2e-test",
+        envelope = ModelInjectedRequest(
+            event=event, now=now, input_id=uuid4(), correlation_id=unique_correlation_id
         )
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
@@ -715,12 +709,8 @@ class TestSuite2RegistryDualRegistration:
         )
 
         # Process the event through the handler using envelope API
-        envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=event,
-            envelope_timestamp=now,
-            correlation_id=unique_correlation_id,
-            source_tool="e2e-test",
+        envelope = ModelInjectedRequest(
+            event=event, now=now, input_id=uuid4(), correlation_id=unique_correlation_id
         )
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
@@ -1362,12 +1352,11 @@ class TestSuite4HeartbeatPublishing:
         # Process heartbeat through the handler directly using envelope API
         # OMN-1102: Orchestrator is declarative - test handler directly
         # (In full E2E with runtime, this would come from Kafka consumer)
-        heartbeat_envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=heartbeat_event,
-            envelope_timestamp=heartbeat_timestamp,
+        heartbeat_envelope = ModelInjectedRequest(
+            event=heartbeat_event,
+            now=heartbeat_timestamp,
+            input_id=uuid4(),
             correlation_id=correlation_id,
-            source_tool="e2e-test",
         )
         handler_output = await heartbeat_handler.handle(heartbeat_envelope)
 
@@ -1682,12 +1671,8 @@ class TestSuite5RegistryRecovery:
 
         # Process the event through the handler using envelope API
         now = datetime.now(UTC)
-        envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=event,
-            envelope_timestamp=now,
-            correlation_id=unique_correlation_id,
-            source_tool="e2e-test",
+        envelope = ModelInjectedRequest(
+            event=event, now=now, input_id=uuid4(), correlation_id=unique_correlation_id
         )
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events

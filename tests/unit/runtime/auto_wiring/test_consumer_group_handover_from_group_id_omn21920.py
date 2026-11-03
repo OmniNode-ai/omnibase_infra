@@ -68,15 +68,9 @@ def test_the_contract_loader_reads_the_group_id_form(tmp_path: Path) -> None:
     "fields",
     [
         {"from_group_id": _OLD_GROUP, "from_service": "svc"},
-        {
-            "from_group_id": _OLD_GROUP,
-            "from_service": "svc",
-            "from_node": "node",
-            "from_version": "v1",
-        },
     ],
 )
-def test_a_group_id_beside_derivation_fields_is_refused(
+def test_a_group_id_beside_partial_derivation_fields_is_refused(
     fields: dict[str, str],
 ) -> None:
     with pytest.raises(ValidationError, match="from_group_id"):
@@ -123,5 +117,5 @@ def test_unvalidated_incomplete_model_raises_an_explicit_error() -> None:
     handover = ModelConsumerGroupHandover.model_construct(
         from_auto_offset_reset="earliest"
     )
-    with pytest.raises(ValueError, match="a handover declares either"):
+    with pytest.raises(ValueError, match="a handover declares all of"):
         handover.source_group("dev")

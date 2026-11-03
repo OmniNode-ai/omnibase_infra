@@ -525,22 +525,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # What guards them instead is the pairing: both views are granted by the
     # same statement block in one migration, so declaring one and not the other
     # is the defect, and a test asserts they are declared together.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_savings",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_savings",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_savings/"
-                "089_savings_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_delegation_savings",
-        ),
+    _vendored_read_write(
+        "projection_delegation_savings",
+        "node_projection_savings",
+        "089_savings_aggregate_views_per_tenant.sql",
+        schema="public",
+        access="read",
+        role="aggregate_delegation_savings",
     ),
     # OMN-17426: the savings overview READ VIEW follows the same temporary
     # supplemental-declaration path as OMN-18159 above. Infra vendors migration
@@ -548,22 +539,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # merge until this infra PR gives the tenant projection reader an explicit
     # grant. The source contract declaration makes this redundant once the pin
     # advances; until then, the vendored migration is the local authority.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_cost_savings_overview",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_cost_savings_overview",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_savings/"
-                "089_savings_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_savings_overview",
-        ),
+    _vendored_read_write(
+        "projection_cost_savings_overview",
+        "node_projection_savings",
+        "089_savings_aggregate_views_per_tenant.sql",
+        schema="public",
+        access="read",
+        role="aggregate_savings_overview",
     ),
     # OMN-17886 AC2 step 1: three omninode_internal relations whose owner is an
     # omnibase_infra node that writes with direct SQL rather than through the
