@@ -164,9 +164,10 @@ retry_delay_seconds="${UV_RETRY_DELAY_SECONDS:-10}"
 while true; do
   if uv "$@"; then
     exit 0
+  else
+    status=$?
   fi
 
-  status=$?
   if [ "${attempt}" -ge "${max_attempts}" ]; then
     echo "uv $* failed after ${attempt} attempt(s)" >&2
     exit "${status}"

@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: docker/Dockerfile.runtime pins omninode-intelligence as omninode-intelligence>=0.25.3,<1.0.0 and every plugin at or above its recorded floor -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
+  - id: req-runtime-install-status
+    statement: Runtime dependency installation preserves uv failures through its retry budget.
+    acceptance:
+      - id: AC2
+        statement: The runtime install wrapper returns uv's nonzero status when all attempts fail, reports that status on retries, and succeeds when a later attempt succeeds.
 evidence_requirements:
   - kind: tests
     description: The unit test reads the plugin pins in docker/Dockerfile.runtime and asserts each floor is at least the one this cascade recorded for omninode-intelligence v0.25.3.
@@ -28,6 +33,14 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-runtime-install-deploy-probe
+    description: Deploy probe. Execute the shipped runtime installer wrapper with a simulated failing package installer. Exhausting the retry budget must return the installer's nonzero status, while a recovered install succeeds. This hosted-runner probe requires no Docker daemon or lab services and fails against the previous wrapper.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_runtime_uv_retry_omn18596.py -q --no-cov"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
   - id: dod-plugin-pin-cascade-deploy-probe
     description: Deploy probe. The runtime Dockerfile at the checked-out commit carries omninode-intelligence>=0.25.3,<1.0.0; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
     source: manual
