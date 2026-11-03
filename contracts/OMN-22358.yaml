@@ -1,0 +1,42 @@
+schema_version: 1.0.0
+ticket_id: OMN-22358
+title: omnibase_infra consumes the omnibase_core normalization-symmetry hook id at pre-commit
+summary: The local normalization-symmetry hook named a core module that does not exist, ran at the manual stage and was listed in the pre-commit.ci skip list, so it never ran and never failed. The hook now comes from the omnibase_core hook repository by id, at the pre-commit stage, with no local entry and no skip.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The pre-commit config declares the core hook id at pre-commit and the core check refuses a canary asymmetry.
+    command: uv run --frozen pytest tests/ci/test_normalization_symmetry_hook_omn22358.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-norm-sym-hook-config
+    description: The hook is the omnibase_core hook id with no local entry, is not manual-only and is not in the pre-commit.ci skip list.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_normalization_symmetry_hook_omn22358.py -q --no-cov -k "names_no_hyphenated or core_hook_id or not_manual_only or not_skipped"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-norm-sym-hook-canary
+    description: The core check refuses a producer and consumer that normalize a topic differently and passes the symmetric tree.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests -k normalization_symmetry_hook -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-norm-sym-hook
+    statement: The normalization-symmetry hook is consumed from omnibase_core by hook id and runs at pre-commit.
+    acceptance:
+      - id: AC1
+        statement: omnibase_infra consumes the omnibase_core hook id normalization-symmetry from the shared core hook repo at the repository's current core pin, with no local entry, stage pre-commit and not skipped in pre-commit.ci.
+      - id: AC2
+        statement: A canary commit with a producer and consumer that normalize a topic differently is refused by the hook, and the clean tree passes.
