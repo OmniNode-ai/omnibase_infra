@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-22054
 title: 'omnibase_infra#5578 (contract resolver served from a contract-declared mount) is current with dev and every required check on its head passes'
-summary: Brings the T16 contract-resolver mount branch current with dev and answers its hostile-review threads. Adds a test that a second attach of the same manifest mounts nothing and that a restarted server mounts again, and closes the response in the kernel test's port-closed assertion.
+summary: Brings the T16 contract-resolver mount branch current with dev and answers its hostile-review threads. Adds tests that a second attach of the same manifest starts no second application (read from the mounted application's own lifespan log) and that a restarted server mounts again, and closes the response in the kernel test's port-closed assertion.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -19,7 +19,7 @@ evidence_requirements:
     command: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py tests/unit/runtime/test_service_kernel_early_http_mount_omn21288.py -q --no-cov
 dod_evidence:
   - id: dod-omn22054-attach-lifecycle
-    description: A second attach_manifest keeps the first start task and mounts no route twice, and a restarted server mounts again. At dev's asgi_mounts.py and health_checker.py the second attach starts a new task, so the test fails there.
+    description: A second attach_manifest of the same manifest starts no second application (the fixture application's lifespan log records one startup), and a restarted server mounts again. Without the attach-once guard in asgi_mounts.py the second attach starts a second application, so the test fails there.
     source: manual
     binds_ac: [AC2]
     checks:
