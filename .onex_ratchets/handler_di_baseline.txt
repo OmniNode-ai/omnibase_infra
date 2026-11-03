@@ -22,7 +22,6 @@ src/omnibase_infra/handlers/handler_http.py 1
 src/omnibase_infra/handlers/handler_infisical.py 1
 src/omnibase_infra/handlers/handler_intent.py 2
 src/omnibase_infra/handlers/handler_linear_db_error_reporter.py 2
-src/omnibase_infra/handlers/handler_mcp.py 6
 src/omnibase_infra/handlers/handler_projection_write_cursor.py 1
 src/omnibase_infra/handlers/handler_qdrant.py 1
 src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py 1

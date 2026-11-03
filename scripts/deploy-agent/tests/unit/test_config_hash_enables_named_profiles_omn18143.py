@@ -31,6 +31,7 @@ start) keeps exactly the requested profile.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -89,12 +90,17 @@ def _render(
 def _profile_gated_named_services() -> dict[str, list[str]]:
     """Agent-named dev-lane services whose compose profile excludes ``runtime``."""
     declared = _read_compose_services([str(DEV_LANE_OVERLAY)])
+
+    def effective(profiles: list[str]) -> list[str]:
+        # A folded writer's profile is ``${VAR:-runtime}``: compose renders the default.
+        return [re.sub(r"^\$\{[^:}]+:-([^}]*)\}$", r"\1", item) for item in profiles]
+
     return {
-        name: declared[name]["profiles"]
+        name: effective(declared[name]["profiles"])
         for name in DEV_LANE_ONLY_RUNTIME_SERVICES
         if name in declared
         and declared[name].get("profiles")
-        and "runtime" not in declared[name]["profiles"]
+        and "runtime" not in effective(declared[name]["profiles"])
     }
 
 
