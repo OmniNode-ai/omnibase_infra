@@ -33,6 +33,8 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/cli/test_delegate_backlog_receipt.py -q --no-cov -k queued_not_started -p no:randomly"
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/cli/test_delegate_queued_not_started_cli_omn22211.py -q --no-cov -p no:randomly"
   - id: dod-omn22211-ac2-receipt-91fda261
     binds_ac: [AC2]
     description: The scrubbed receipt of run 91fda261 (records_ahead 50, backlog_records 51) in tests/fixtures/omn22211 yields queued_not_started on both paths; the same tests fail on the code before the change with a bare timeout.
