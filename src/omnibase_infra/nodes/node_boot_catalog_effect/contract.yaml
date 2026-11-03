@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_boot_catalog_effect
+contract_name: node_boot_catalog_effect
+node_name: node_boot_catalog_effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+description: Boot step 0. Announce every installed package's contracts on the bound bus and build the node catalog the runtime reads.
+runtime_profiles: [local-dev]
+input_model:
+  name: ModelPackageAnnounceRequest
+  module: omnibase_infra.models.node_announce.model_package_announce_request
+  description: Announcement topic, announcer identity, generation and the lane's admission policy.
+output_model:
+  name: ModelPackageAnnounceResult
+  module: omnibase_infra.models.node_announce.model_package_announce_result
+  description: The package inventory, the announcements and the catalog built from them.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: package_announce.run
+      handler:
+        name: HandlerPackageAnnouncer
+        module: omnibase_infra.handlers.handler_package_announcer
+      description: Read each installed package's metadata, publish one announcement per contract, fold them into the catalog.
+      supported_operations: [package_announce.run]
+      input_model:
+        name: ModelPackageAnnounceRequest
+        module: omnibase_infra.models.node_announce.model_package_announce_request
+        description: Typed step 0 request.
+      output_fields: [inventory, announcements, catalog, outcomes]
+    - operation: registration_from_announcement.adapt
+      handler:
+        name: HandlerRegistrationFromAnnouncement
+        module: omnibase_infra.handlers.handler_registration_from_announcement
+      description: Build the introspection event the registration orchestrator reads from an announcement and the runtime's own identity.
+      supported_operations: [registration_from_announcement.adapt]
+      input_model:
+        name: ModelRegistrationFromAnnouncementRequest
+        module: omnibase_infra.models.model_registration_from_announcement_request
+        description: One announcement and the runtime identity.
+      output_fields: [event, skipped_reason]
+    - operation: runtime_introspection.startup
+      handler:
+        name: HandlerRuntimeIntrospectionStartup
+        module: omnibase_infra.handlers.handler_runtime_introspection_startup
+      description: Publish the runtime's startup presence (announcement-built events when announcements are injected) and start the heartbeat.
+      supported_operations: [runtime_introspection.startup]
+      input_model:
+        name: ModelRuntimeIntrospectionStartupRequest
+        module: omnibase_infra.models.model_runtime_introspection_startup_request
+        description: Correlation id, injected announcements and the last introspection time.
+      output_fields: [published, last_introspection_time]
+io_operations:
+  - operation: package_announce.run
+    description: Run boot step 0.
+    input_fields: [topic, announcer_id, generation, announced_at, active_packages, policy]
+    output_fields: [inventory, announcements, catalog, outcomes]
+capabilities:
+  - name: registration_from_announcement.adapt
+    description: Adapt an announcement to the introspection event the registration orchestrator consumes.
+  - name: runtime_introspection.startup
+    description: Publish startup presence and start the heartbeat.
+  - name: package_announce.run
+    description: Announce installed contracts and build the node catalog before the container exists.
+runtime_config:
+  catalog_settle_timeout_seconds: 60.0
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+# The catalog entry lifecycle of the contract hot-loading plan, section 3.11.9. The
+# runtime reads the catalog and never writes it; the catalog's pure apply() in
+# omnibase_core is what moves an entry between these states.
+state_transitions:
+  version: &v {major: 1, minor: 0, patch: 0}
+  state_machine_name: catalog_entry_fsm
+  state_machine_version: *v
+  description: One contract name in the registry's catalog, keyed by content hash plus package reference, which the runtime reads and never writes
+  initial_state: absent
+  error_states: [refused]
+  states:
+    - {version: *v, state_name: absent, state_type: operational, description: "no announcement for this name has been received"}
+    - {version: *v, state_name: announced, state_type: operational, description: "an announcement is held, its hash pinned, not yet admitted"}
+    - {version: *v, state_name: admitted, state_type: operational, description: "the lane's overlay lets this name start; nothing is built and no topic exists"}
+    - {version: *v, state_name: refused, state_type: error, description: "admission failed with a typed reason: hash conflict, handler outside the trusted prefixes, profile or lane not owned"}
+    - {version: *v, state_name: withdrawn, state_type: operational, description: "withdrawn by its package; its topics are flagged, not deleted"}
+  transitions:
+    - {version: *v, transition_name: receive_announcement, from_state: absent, to_state: announced, trigger: announcement_received}
+    - {version: *v, transition_name: admit, from_state: announced, to_state: admitted, trigger: admission_passed}
+    - {version: *v, transition_name: refuse, from_state: announced, to_state: refused, trigger: admission_failed}
+    - {version: *v, transition_name: replace_hash, from_state: admitted, to_state: announced, trigger: new_identity_announced}
+    - {version: *v, transition_name: withdraw, from_state: admitted, to_state: withdrawn, trigger: withdrawal_received}
+    - {version: *v, transition_name: withdraw_unknown, from_state: absent, to_state: withdrawn, trigger: withdrawal_received}
+    - {version: *v, transition_name: withdraw_announced, from_state: announced, to_state: withdrawn, trigger: withdrawal_received}
+    - {version: *v, transition_name: withdraw_refused, from_state: refused, to_state: withdrawn, trigger: withdrawal_received}
+    - {version: *v, transition_name: withdraw_again, from_state: withdrawn, to_state: withdrawn, trigger: withdrawal_received}
+    - {version: *v, transition_name: re_announce, from_state: withdrawn, to_state: announced, trigger: announcement_received}
+    - {version: *v, transition_name: retry_after_fix, from_state: refused, to_state: announced, trigger: new_identity_announced}
+metadata:
+  description: Runs once at boot, before the container; the handler is called directly by the kernel's step 0 and attached to no runtime.
+  author: OmniNode Team
+  license: MIT
+  tags: [effect, announce, catalog]
+  related_tickets: [OMN-21590]

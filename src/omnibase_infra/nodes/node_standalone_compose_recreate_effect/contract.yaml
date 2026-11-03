@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_standalone_compose_recreate_effect
+contract_name: node_standalone_compose_recreate_effect
+node_name: node_standalone_compose_recreate_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >
+  Recreates ONE service of ONE standalone compose file on the host that serves it, run by the deploy agent on a signed bus command. The compose files and services the route may touch are declared under standalone_targets and the lanes under allowed_lanes; anything else is refused before docker is called, and prod is not an allowed lane. The host's containers are read before and after, and any container id other than the service's that changed is a scope violation.
+
+input_model:
+  name: ModelStandaloneComposeRecreateRequest
+  module: omnibase_infra.models.model_standalone_compose_recreate_request
+  description: Correlation id, requester, lane, compose file, service and git ref.
+output_model:
+  name: ModelStandaloneComposeRecreateResult
+  module: omnibase_infra.models.model_standalone_compose_recreate_result
+  description: Recreated, refused, failed or scope-violation, with the container ids before and after.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: recreate
+      handler: {name: HandlerStandaloneComposeRecreate, module: omnibase_infra.handlers.handler_standalone_compose_recreate}
+docker_timeout_seconds: 120
+allowed_lanes:
+  - dev
+standalone_targets:
+  - compose_file: docker/docker-compose.factory-floor-web.yml
+    service: factory-floor-web
+    container_key: omninode-factory-floor-web
+    env_file_variable: DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE
+    carried_files:
+      - docker/factory-floor-web/nginx.conf
+capabilities:
+  - name: standalone_service.recreate
+    description: Recreate one declared service of one declared standalone compose file, leaving every other container unchanged.
+metadata:
+  ticket: OMN-22172
+  author: OmniNode Team
+  description: Host-local effect run by the deploy agent. Dev lane only; no prod admission.
+  tags: [effect, deployment, dev]

@@ -12,7 +12,7 @@ it. It declares ``version = "0.38.11"``.
 
 That single fact is the whole incident: at the instant ``v0.38.11`` was
 published, dev's ``[project].version`` was **equal to** the newly published
-version, which is exactly the state ``scripts/check_release_identity.py``
+version, which is exactly the state the ``check-release-identity`` gate
 (OMN-13412) rejects for any diff touching ``src/**``. The release train's
 verdict on that tree was "done" — it published, tagged, and exited — so the
 gate stayed armed against dev for ~1h38m until an unrelated feature PR
@@ -79,7 +79,7 @@ def test_the_real_v0_38_11_dev_tree_is_flagged_as_armed() -> None:
 
 def test_the_replayed_remedy_actually_disarms_the_release_identity_gate() -> None:
     # Not merely "different from published" — strictly greater, which is the
-    # invariant check_release_identity.py enforces.
+    # invariant the check-release-identity gate enforces.
     decision = decide(
         dev_version=read_project_version(FIXTURE), released_version=RELEASED_TAG
     )

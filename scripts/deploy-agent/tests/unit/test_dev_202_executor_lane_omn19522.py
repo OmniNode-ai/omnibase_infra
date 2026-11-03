@@ -530,10 +530,11 @@ class TestDev201Unchanged:
 
     def test_dev_201_unchanged_compose_argv(self) -> None:
         select_dev_instance("dev-201")
-        up = _capture_compose_up(DeployExecutor())[0]
+        ups = _capture_compose_up(DeployExecutor())
+        up = ups[0]
         assert _project_of(up) == "omnibase-infra"
         assert len(_files_of(up)) == 3
-        assert "onex-api" in up
+        assert "onex-api" in [c[-1] for c in ups]
 
         builds = _capture_build(DeployExecutor())
         assert {_project_of(c) for c in builds} == {"omnibase-infra"}

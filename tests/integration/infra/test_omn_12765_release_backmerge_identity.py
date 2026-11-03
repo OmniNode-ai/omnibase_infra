@@ -96,6 +96,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     omnimarket dev declares; spi stays 0.23.5.
     OMN-21110 refresh: spi 0.23.5 -> 0.23.7, the floor omnimarket needs for
     ProtocolContextSource; core stays 0.47.46.
+    OMN-22359 refresh: spi 0.23.7 -> 0.23.12, the newest published release.
     """
 
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
@@ -110,7 +111,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     assert violations(tomllib.loads(pyproject), "omnibase-core") == []
     assert tuple(int(part) for part in core["version"].split(".")) >= (0, 47, 44)
     assert "git" in core["source"]
-    assert pins["omnibase-spi"] == "0.23.7"
+    assert pins["omnibase-spi"] == "0.23.12"
 
     # The retired git-rev overrides must be gone from both manifest and lock:
     # the OMN-13762 core rev and the OMN-12549 seam core/spi revs.

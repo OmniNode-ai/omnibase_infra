@@ -14,7 +14,9 @@ NOT part of ``NodeGatewayDelivery``. That service owns the two *trust-boundary*
 directions (local->cloud outbound, cloud->local inbound) whose defining work is
 the tenant prefix transform and the tenant stamp. A lane mirror crosses no trust
 boundary: both endpoints are lane brokers on one operator-controlled host, and
-the record is republished byte-for-byte under its own canonical topic name. It
+the record is republished byte-for-byte under its own canonical topic name, or,
+for a contract-declared ``tenant_topics`` member, under the runtime tenant's
+physical topic resolved by ``resolve_physical_topic`` (OMN-21950). It
 carries the same durable-marker ordering guarantee as the trust-boundary legs
 and reuses the same store, but folding it into ``NodeGatewayDelivery`` would
 have meant adding a third member to ``_DIRECTIONS`` and then branching every
@@ -115,6 +117,8 @@ import logging
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
@@ -141,7 +145,17 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_lan
     record_mirrored,
     record_refusal,
 )
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
+    resolve_physical_topic,
+)
 from omnibase_infra.utils import sanitize_error_message
+
+if TYPE_CHECKING:
+    from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
+    from omnibase_infra.event_bus.kafka_transport import KafkaTransport
+    from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forwarder_runtime_config import (
+        ModelGatewayForwarderRuntimeConfig,
+    )
 
 _MESSAGE_ID_HEADER = "message_id"
 _CORRELATION_ID_HEADER = "correlation_id"
@@ -160,6 +174,15 @@ this closes.
 logger = logging.getLogger(__name__)
 
 
+def _remember_destination(
+    ring: OrderedDict[tuple[str, int, int], None], coordinate: tuple[str, int, int]
+) -> None:
+    """Record a destination coordinate, evicting the oldest past the window."""
+    ring[coordinate] = None
+    while len(ring) > DESTINATION_COORDINATE_WINDOW:
+        ring.popitem(last=False)
+
+
 class NodeLaneMirror:
     """Mirror the contract-declared topic set from one lane broker to others."""
 
@@ -170,7 +193,13 @@ class NodeLaneMirror:
         source_consumer: ProtocolGatewayConsumer,
         mirror_producers: Mapping[str, ProtocolGatewayPublisher],
         idempotency_store: ProtocolIdempotencyStore,
+        tenant_slug: str | None = None,
     ) -> None:
+        if config.tenant_topics and tenant_slug is None:
+            raise ValueError(
+                "lane_mirror tenant_topics publish under the runtime tenant's "
+                "physical topic, so the mirror requires the tenant slug"
+            )
         missing = set(config.mirror_lanes) - set(mirror_producers)
         if missing:
             raise ValueError(
@@ -182,6 +211,8 @@ class NodeLaneMirror:
         self._producers = dict(mirror_producers)
         self._store = idempotency_store
         self._allowed_topics = frozenset(config.topics)
+        self._tenant_topics = config.tenant_topics
+        self._tenant_slug = tenant_slug
         # OMN-17919: a record the mirror cannot identify is refused, and the
         # refusal is COUNTED. Silence is the failure mode this leg already had
         # once -- a mirror that commits past everything it cannot read looks
@@ -257,13 +288,60 @@ class NodeLaneMirror:
         self._refused_lanes.pop(lane, None)
         self._destination_coordinates[lane] = OrderedDict()
 
-    def _remember_destination(
-        self, lane: str, coordinate: tuple[str, int, int]
+    @staticmethod
+    def open_source(
+        config: ModelGatewayForwarderRuntimeConfig,
+        transports: Mapping[str, KafkaTransport],
+        source_bus: ProtocolEventBus | None,
+    ) -> ProtocolGatewayConsumer:
+        """The unstarted source leg the overlay selected (OMN-21950).
+
+        Lives on the mirror so the runtime entry point reaches the source and
+        guard through the one node class it already imports.
+        """
+        # Local import: the source module imports the runtime config model,
+        # which imports this module's config model.
+        from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror_bus_source import (
+            build_lane_mirror_source,
+        )
+
+        source = build_lane_mirror_source(config, transports, source_bus)
+        if source is None:
+            raise ValueError("a lane mirror requires a declared lane_mirror source")
+        return source
+
+    async def guard(
+        self,
+        *,
+        producers: Mapping[str, KafkaTransport],
+        shutdown_event: asyncio.Event,
+        interval_seconds: int,
+        health_path: Path | None,
     ) -> None:
-        ring = self._destination_coordinates[lane]
-        ring[coordinate] = None
-        while len(ring) > DESTINATION_COORDINATE_WINDOW:
-            ring.popitem(last=False)
+        """Run this mirror's guard loop (OMN-17201) until shutdown."""
+        # Local import: the guard module imports this one.
+        from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_lane_mirror_guard import (
+            run_lane_mirror_guard,
+        )
+
+        await run_lane_mirror_guard(
+            mirror=self,
+            producers=producers,
+            shutdown_event=shutdown_event,
+            interval_seconds=interval_seconds,
+            health_path=health_path,
+        )
+
+    def destination_topic(self, source_topic: str) -> str:
+        """The physical topic a declared source topic is republished under.
+
+        OMN-21950: resolved through the single runtime topic resolver, the call
+        the tenant-edge outbound handler already makes. A ``tenant_topics``
+        member lands under ``tenant-<slug>.<topic>``; every other declared
+        topic keeps its canonical name, byte-for-byte as before.
+        """
+        tenant = self._tenant_slug if source_topic in self._tenant_topics else None
+        return resolve_physical_topic(source_topic, tenant_slug=tenant)
 
     def _lane_that_echoed(self, message: ModelTransportMessage) -> str | None:
         """Return the lane whose destination coordinate this source record IS.
@@ -474,9 +552,10 @@ class NodeLaneMirror:
                 await self._source.commit(message)
                 return
 
+            destination_topic = self.destination_topic(message.topic)
             for lane in self._config.mirror_lanes:
                 receipt = await self._producers[lane].publish(
-                    message.topic,
+                    destination_topic,
                     message.key,
                     message.value,
                     dict(message.headers),
@@ -495,7 +574,9 @@ class NodeLaneMirror:
                     now=datetime.now(UTC),
                 )
                 if receipt is not None:
-                    self._remember_destination(lane, receipt.coordinate)
+                    _remember_destination(
+                        self._destination_coordinates[lane], receipt.coordinate
+                    )
 
             await self._store.mark_processed(
                 envelope_id,
@@ -505,10 +586,12 @@ class NodeLaneMirror:
             await self._source.commit(message)
             self._health = record_mirrored(self._health, now=datetime.now(UTC))
             logger.info(
-                "Lane mirror delivered envelope_id=%s topic=%s source_lane=%s "
-                "mirror_lanes=%s source_partition=%s source_offset=%s",
+                "Lane mirror delivered envelope_id=%s topic=%s destination_topic=%s "
+                "source_lane=%s mirror_lanes=%s source_partition=%s "
+                "source_offset=%s",
                 envelope_id,
                 message.topic,
+                destination_topic,
                 self._config.source_lane,
                 ",".join(self._config.mirror_lanes),
                 message.partition,

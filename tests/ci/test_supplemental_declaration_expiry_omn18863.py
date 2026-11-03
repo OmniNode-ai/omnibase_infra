@@ -115,6 +115,19 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_receipts": "omnimarket OMN-21336 (node_projection_compaction_receipts)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "local_environment": "omnimarket OMN-19988 (node_projection_local_environment)",
+    "local_alerts": "omnimarket OMN-19991 (node_projection_local_alerts)",
+    "local_identity": "omnimarket OMN-19986 (node_projection_local_identity)",
+    "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
+    **dict.fromkeys(
+        (
+            "work_outcome_units",
+            "orchestration_style_outcomes",
+            "lane_drift_and_stalls",
+            "brief_quality_vs_outcome",
+            "subagent_waste",
+        ),
+        "omnimarket OMN-22320 writer half (node_projection_work_questions)",
+    ),
 }
 
 _SKIP_REASON = (

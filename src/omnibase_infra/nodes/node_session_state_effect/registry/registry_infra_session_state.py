@@ -30,7 +30,6 @@ class RegistryInfraSessionState:
         >>> from omnibase_core.models.container import ModelONEXContainer
         >>> container = ModelONEXContainer()
         >>> registry = RegistryInfraSessionState(container)
-        >>> node = registry.create_node()
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:
@@ -40,18 +39,6 @@ class RegistryInfraSessionState:
             container: ONEX dependency injection container.
         """
         self._container = container
-
-    def create_node(self) -> NodeSessionStateEffect:
-        """Create a NodeSessionStateEffect instance.
-
-        Returns:
-            Configured NodeSessionStateEffect instance.
-        """
-        from omnibase_infra.nodes.node_session_state_effect.node import (
-            NodeSessionStateEffect,
-        )
-
-        return NodeSessionStateEffect(self._container)
 
     @staticmethod
     def default_state_dir() -> Path:

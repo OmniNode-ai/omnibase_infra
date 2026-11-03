@@ -114,11 +114,15 @@ def _git(cwd: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _make_repo(path: Path, message: str) -> str:
+def _make_repo(path: Path, message: str, *, dev_tag: bool = False) -> str:
     path.mkdir(parents=True)
     _git(path, "init", "-q")
     _git(path, "commit", "-q", "--allow-empty", "-m", message)
-    return _git(path, "rev-parse", "HEAD")
+    commit = _git(path, "rev-parse", "HEAD")
+    if dev_tag:
+        # A slot stages every sibling at its newest dev-merge tag (OMN-21928).
+        _git(path, "tag", f"dev-20261030100000-{commit[:12]}")
+    return commit
 
 
 class _Fixture:
@@ -127,7 +131,7 @@ class _Fixture:
     def __init__(self, tmp_path: Path) -> None:
         self.home = tmp_path / "home"
         self.home.mkdir()
-        self.omni_home = tmp_path / "omni_home"
+        self.registry = tmp_path / "registry_root"
         self.lock_dir = tmp_path / "locks"
         # The worktree sits alone in its directory so no sibling worktree
         # "beside the target" shadows the fake canonical clones.
@@ -135,7 +139,9 @@ class _Fixture:
         self.staging_root = tmp_path / "stage"
         self.target_commit = _make_repo(self.worktree, "target commit")
         self.sibling_commits = {
-            repo: _make_repo(self.omni_home / repo, f"sibling {repo} commit")
+            repo: _make_repo(
+                self.registry / repo, f"sibling {repo} commit", dev_tag=True
+            )
             for repo in _vendored_siblings()
         }
 
@@ -147,7 +153,7 @@ class _Fixture:
             # The attribution preflight writes its record under ~/.omnibase;
             # point it at the fixture so a test never touches the real one.
             "HOME": str(self.home),
-            "OMNI_HOME": str(self.omni_home),
+            "OMNI_HOME": str(self.registry),
             "ONEX_LANE_LOCK_DIR": str(self.lock_dir),
         }
         args = [
@@ -233,14 +239,29 @@ def test_a_dirty_target_worktree_is_refused_with_the_named_exit_code(
     assert fixture.run().returncode == EXIT["EXIT_OK"]
 
 
-def test_a_dirty_sibling_is_refused_and_named(fixture: _Fixture) -> None:
+def test_a_dirty_sibling_working_tree_is_not_read_and_does_not_block(
+    fixture: _Fixture,
+) -> None:
+    """A sibling is staged at its dev-merge tag from the object store (OMN-21928)."""
     sibling = sorted(fixture.sibling_commits)[0]
-    (fixture.omni_home / sibling / "scratch.txt").write_text(
+    (fixture.registry / sibling / "scratch.txt").write_text(
         "uncommitted\n", encoding="utf-8"
     )
     result = fixture.run()
-    assert result.returncode == EXIT["EXIT_REFUSED_DIRTY_WORKTREE"], result.stderr
-    assert f"sibling {sibling}" in result.stderr
+    assert result.returncode == EXIT["EXIT_OK"], result.stderr
+    assert (
+        _plan(result.stdout)["siblings"][sibling]["commit"]
+        == (fixture.sibling_commits[sibling])
+    )
+
+
+def test_a_sibling_without_a_dev_merge_tag_is_refused(fixture: _Fixture) -> None:
+    sibling = sorted(fixture.sibling_commits)[0]
+    tag = _git(fixture.registry / sibling, "tag", "--list", "dev-*")
+    _git(fixture.registry / sibling, "tag", "-d", tag)
+    result = fixture.run()
+    assert result.returncode == EXIT["EXIT_PROVENANCE_MISMATCH"], result.stderr
+    assert "no dev-merge tag" in result.stderr
     assert not fixture.staging_root.exists()
 
 

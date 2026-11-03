@@ -10,7 +10,7 @@ bundle and clones it there. It built that bundle with::
 
 which packs only the commits reachable from ``HEAD`` and **no ref under
 ``refs/tags/``**. Every remote clone, on every host, on every push, therefore had
-zero tags -- and ``scripts/check_release_identity.py`` derives "the latest
+zero tags -- and the ``check-release-identity`` gate derives "the latest
 published version" from ``git tag --list``. With no tags it took its "no published
 tag yet" branch and printed a message the suite does not expect, so three tests
 went red remotely while passing locally at the identical SHA (first observed on
@@ -49,6 +49,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LIB = REPO_ROOT / "scripts" / "hooks" / "prepush_dispatch.sh"
 
@@ -63,6 +65,7 @@ def _git(repo: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
+        env=scrub_git_location_env(os.environ),
     ).stdout
 
 
@@ -72,6 +75,7 @@ def _git_rc(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=scrub_git_location_env(os.environ),
     )
 
 
@@ -99,6 +103,7 @@ def _clone(src: Path, dst: Path, *extra: str) -> Path:
         capture_output=True,
         text=True,
         check=True,
+        env=scrub_git_location_env(os.environ),
     )
     return dst
 
@@ -194,6 +199,7 @@ def test_naive_tags_bundle_from_a_shallow_source_writes_an_unclonable_bundle(
         capture_output=True,
         text=True,
         check=False,
+        env=scrub_git_location_env(os.environ),
     )
     assert cloned.returncode != 0, (
         "a --tags bundle built from a shallow source must be shown to be unclonable"

@@ -332,6 +332,10 @@ jobs:
       - name: Review voter model comes from the overlay (OMN-20910)
         run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -n 0 --no-cov -p no:randomly
 
+      # OMN-22275: paired with the hostile-review-agent-accept pre-commit hook.
+      - name: Hostile Review accepts an agent receipt (OMN-22275)
+        run: uv run --frozen pytest tests/ci/test_hostile_review_agent_accept_omn22275.py tests/ci/test_hostile_review_agent_accept_step_shape_omn22275.py tests/ci/test_ci_summary_external_sweep_agent_accept_omn22275.py -q -n 0 --no-cov -p no:randomly
+
       # OMN-17678: same focused suite as the pre-commit transport gate.
       - name: Linear transport consolidation regression (OMN-17678)
         run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
@@ -613,6 +617,49 @@ jobs:
         # checked here, with the root project's mypy, because that is where
         # this repository declares type scope.
         run: uv run mypy src/omnibase_infra scripts/deploy-agent/deploy_agent
+
+      # The jobs here install from uv.lock, so a dependency range that admits a
+      # newer major than the lock pins is never exercised by them. These steps
+      # build the pull request's own wheel, install it into a clean virtual
+      # environment WITHOUT the lock (mcp resolves to the highest version the
+      # declared range admits, as it does for a PyPI install) and build the
+      # streamable HTTP MCP application with one registered tool, so the tool
+      # registration path runs against the resolved SDK. On a commit that
+      # imports a module the resolved SDK no longer ships, the last step fails
+      # with ImportError.
+      - name: Build wheel for MCP resolution check
+        run: uv build --wheel --out-dir "$RUNNER_TEMP/dist"
+
+      - name: Install wheel into a clean environment without the lock
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/clean-venv"
+          uv pip install --python "$RUNNER_TEMP/clean-venv/bin/python" "$RUNNER_TEMP"/dist/*.whl
+          "$RUNNER_TEMP/clean-venv/bin/python" -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
+
+      - name: Create the MCP application from the installed wheel
+        # Run from outside the checkout so the installed wheel, not ./src, is imported.
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/clean-venv/bin/python" - <<'PY'
+          from omnibase_infra.handlers.mcp.transport_streamable_http import (
+              TransportMCPStreamableHttp,
+          )
+
+
+          class _SmokeTool:
+              """Minimal tool definition so registration runs against the resolved SDK."""
+
+              name = "mcp_resolution_smoke"
+              description = "Registers one tool through the installed MCP SDK."
+              parameters: list[object] = []
+
+
+          app = TransportMCPStreamableHttp().create_app(
+              tools=[_SmokeTool()], tool_executor=lambda name, arguments: None
+          )
+          assert app is not None
+          print("create_app returned", type(app).__name__)
+          PY
 
   # ===========================================================================
   # Shape-gate detectors that run on every PR (OMN-20298). Each job below has
@@ -1327,22 +1374,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+
       # Full tree, not the diff: a denylisted identifier reaching dev by ANY route
       # (a rebase carrying it in, as happened on omnimarket#2241) must red the PR,
-      # not just one that edits the offending line. Stdlib-only, so no uv setup.
+      # not just one that edits the offending line. The scanner is omnibase_core's
+      # (OMN-21939), at the same rev as the exposed-identifier-gate pre-commit hook;
+      # this repo supplies only the denylist.
       - name: Scan the working tree for denylisted identifiers
         run: |
           echo "================================================================"
           echo "Exposed Identifier Gate (OMN-17320)"
           echo "================================================================"
-          python3 scripts/validation/check_exposed_identifiers.py \
-            --mode blocking --scope all
-
-      - name: Report the cross-repo parity fingerprint
-        if: always()
-        run: |
-          echo "omnibase_infra copy:"
-          python3 scripts/validation/check_exposed_identifiers.py --print-fingerprint
+          uvx pre-commit@4.5.1 run exposed-identifier-gate --all-files
 
   # Pin reachability -- every cross-repo pin (workflow `uses:`/`with:` refs,
   # pyproject [tool.uv.sources] revs, uv.lock git revs) must name a commit
@@ -3639,6 +3686,50 @@ jobs:
             --check-stale \
             --allowlist .onex_ratchets/noncanonical_class_allowlist.yaml \
             src/omnibase_infra
+
+  # OMN-21891 (one-runtime plan task T1): every service of every lane's compose files is the
+  # runtime, a declared dependency, a one-shot or a baselined entry, and the runtime runs one
+  # replica (config/validation/stack_shape.yaml, judged by omnibase_core's stack-shape
+  # validator). Unconditional: no path filter, no needs, no if. A PR that only adds a
+  # baseline entry is judged too, against the merge base, where the baseline may not grow.
+  # A red job fails CI Summary through its default-deny sweep. DO NOT rename this job: the
+  # display name is the check-run context a branch-protection change would name.
+  stack-shape:
+    name: Stack Shape (OMN-21891)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      - name: Judge every lane's compose files against the allowlist
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            STACK_SHAPE_BASE_REF="$(git merge-base "$base" HEAD)"
+          else
+            echo "no base revision on this event; the baseline is judged against HEAD"
+            STACK_SHAPE_BASE_REF=HEAD
+          fi
+          export STACK_SHAPE_BASE_REF
+          uv sync --frozen
+          uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -n 0 -p no:cacheprovider
 
   # OMN-15378 AC3: scripts/deploy-agent's own pytest root (201 tests) ran in a
   # SEPARATELY-TRIGGERED workflow, so the CI Summary poller — which reads
@@ -6321,9 +6412,9 @@ jobs:
         run: |
           if [ -n "$GITHUB_BASE_REF" ]; then
             git fetch origin "$GITHUB_BASE_REF" --no-tags --depth=1
-            FILES=$(git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD -- '*.py' '*.md' | tr '\n' ' ')
+            FILES=$(git diff --name-only --diff-filter=d "origin/$GITHUB_BASE_REF"...HEAD -- '*.py' '*.md' | tr '\n' ' ')
           else
-            FILES=$(git diff --name-only HEAD~1 -- '*.py' '*.md' 2>/dev/null | tr '\n' ' ')
+            FILES=$(git diff --name-only --diff-filter=d HEAD~1 -- '*.py' '*.md' 2>/dev/null | tr '\n' ' ')
           fi
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
         env:
@@ -6333,4 +6424,5 @@ jobs:
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
           if [ -z "$CHANGED_FILES" ]; then exit 0; fi
-          echo "$CHANGED_FILES" | tr ' ' '\n' | xargs python scripts/validation/check_ai_slop.py --strict
+          # The check-ai-slop hook carries --strict in omnibase_core's manifest.
+          echo "$CHANGED_FILES" | tr ' ' '\n' | xargs uvx pre-commit@4.5.1 run check-ai-slop --files

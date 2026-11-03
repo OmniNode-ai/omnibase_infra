@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+  # Copies of the two services the old deny-list check let through (OMN-21891).
+  projection-claude-hook-events-writer:
+    image: example/runtime:tag
+    restart: unless-stopped
+    command: ["python", "-m", "example.node_projection_claude_hook_events"]
+    environment:
+      RUNTIME_PROFILE: main
+  cost-estimator-web:
+    image: example/cost-estimator-web:tag
+    restart: unless-stopped
+    profiles: [cost-estimator]

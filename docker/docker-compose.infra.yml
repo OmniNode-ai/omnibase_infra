@@ -1243,8 +1243,23 @@ services:
       # do NOT set this flag, so they process intelligence events without
       # starting duplicate heartbeat loops for the same deterministic node IDs.
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set DEV_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
+      # OMN-18087: boot bound, join limit and join priority come from the
+      # runtime policy contract (profiles.dev.services.main.boot).
+      ONEX_BOOT_READY_BOUND_SECONDS: ${DEV_RUNTIME_MAIN_READY_BOUND_SECONDS:?runtime policy contract must set DEV_RUNTIME_MAIN_READY_BOUND_SECONDS}
+      ONEX_MAX_CONCURRENT_CONTRACT_ATTACH: ${DEV_RUNTIME_MAIN_MAX_CONCURRENT_CONTRACT_ATTACH:?runtime policy contract must set DEV_RUNTIME_MAIN_MAX_CONCURRENT_CONTRACT_ATTACH}
+      ONEX_BOOT_PRIORITY_CONTRACTS: ${DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS:?runtime policy contract must set DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS}
     ports:
       - "${DEV_RUNTIME_MAIN_PORT:?runtime policy contract must set DEV_RUNTIME_MAIN_PORT}:8085"
+    # OMN-18087: main's memory limit is declared in the runtime policy contract
+    # (profiles.dev.services.main.memory_limit), not as a literal here.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: ${DEV_RUNTIME_MAIN_MEMORY:?runtime policy contract must set DEV_RUNTIME_MAIN_MEMORY}
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     stop_grace_period: 90s
     volumes:
       - runtime_logs:/app/logs
@@ -1344,8 +1359,8 @@ services:
       #   - ONEX_CODING_AGENT_WORKSPACE_ROOT: the orchestrator resolves its
       #     contract descriptor.allowed_workspace_roots from ${env.…} and FAILS
       #     CLOSED if unset (no unscoped workspace is ever permitted).
-      CODING_AGENT_CRED_HOME: /home/omniinfra
-      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/omniinfra/agent-workspaces
+      CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}
+      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/${RUNTIME_USER_NAME:-omniinfra}/agent-workspaces
       # OMN-7569: Savings estimation consumer config (env_prefix=OMNIBASE_INFRA_SAVINGS_)
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # OMN-7569: HandlerRegistrationStoragePostgres reads POSTGRES_HOST directly from env
@@ -1376,12 +1391,12 @@ services:
       #
       # DEV credential source (Phase 0, OMN-13246 / omni_home PR #182): a fresh
       # Linux login INSIDE the .201 container produced portable on-disk creds —
-      # /home/omniinfra/.codex (auth.json, ChatGPT OAuth + refresh token) and
-      # /home/omniinfra/.claude (.credentials.json, claude.ai OAuth + refresh
+      # $CODING_AGENT_CRED_HOME/.codex (auth.json, ChatGPT OAuth + refresh token) and
+      # $CODING_AGENT_CRED_HOME/.claude (.credentials.json, claude.ai OAuth + refresh
       # token). Claude Code 2.x on macOS stores its credential in the Keychain,
       # so there is NO ~/.claude/auth.json on the Mac to copy — the Linux login
       # is the source. The operator copies both dirs to a stable host path on
-      # .201 (e.g. /home/jonah/.onex-agent-creds/{.codex,.claude}) and sets
+      # the host (e.g. ~/.onex-agent-creds/{.codex,.claude}) and sets
       # CODING_AGENT_{CODEX,CLAUDE}_CREDS_HOST_DIR.
       #
       # Default /dev/null keeps lanes without creds configured startable (the
@@ -1394,11 +1409,11 @@ services:
       # valid (verified in-container 2026-06-18). Binding only auth.json :ro keeps
       # the credential VALUE read-only (cannot be overwritten/exfiltrated) while
       # leaving the rest of ~/.codex on the container's writable layer.
-      - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
+      - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.codex/auth.json:ro
       # claude: the whole ~/.claude dir read-only works (claude reads
       # .credentials.json for ambient OAuth and does not require write access to
       # that dir for `claude -p`; verified in-container 2026-06-18).
-      - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/omniinfra/.claude:ro
+      - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.claude:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s

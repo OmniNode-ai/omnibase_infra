@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+services:
+  omninode-runtime:
+    image: example/runtime:tag
+  postgres:
+    image: example/postgres:tag
+  redpanda:
+    image: example/redpanda:tag
+  forward-migration:
+    image: example/migrate:tag
+    restart: "no"
+  create-topics:
+    image: example/redpanda:tag
+    restart: "no"
+  legacy-consumer:
+    image: example/runtime:tag
+    command: ["python", "-m", "example.legacy_consumer"]
+  build-image:
+    image: example/runtime:tag

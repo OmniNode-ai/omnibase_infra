@@ -56,15 +56,15 @@ COMPRESSION IS EXPLICIT, AND THAT IS NOT COSMETIC
 -------------------------------------------------
 
 ``rpk topic produce`` defaults to snappy. The agent's ``kafka-python`` client
-has no snappy codec installed, so one snappy record on
-``onex.cmd.deploy.rebuild-requested.v1`` killed the agent on every poll --
-twelve crashes in sixty seconds, then systemd's start limit. This producer
-declares ``compression_type=None`` so the wire format is a property of the
-publisher's own configuration rather than of whichever CLI happened to be
-installed. The consumer-side quarantine (``deploy_agent.consumer``) is the
-other half: this half stops us minting the pill, that half stops one from
-stalling the control plane.
 """
+# has no snappy codec installed, so one snappy record on
+# ``onex.cmd.deploy.rebuild-requested.v1`` killed the agent on every poll --
+# twelve crashes in sixty seconds, then systemd's start limit. This producer
+# declares ``compression_type=None`` so the wire format is a property of the
+# publisher's own configuration rather than of whichever CLI happened to be
+# installed. The consumer-side quarantine (``deploy_agent.consumer``) is the
+# other half: this half stops us minting the pill, that half stops one from
+# stalling the control plane.
 
 from __future__ import annotations
 
@@ -121,6 +121,7 @@ def build_rebuild_command(
     image_ref: str | None = None,
     image_digest: str | None = None,
     rollback: ModelRollbackDeclaration | None = None,
+    open_pr: str = "",
     requested_at: datetime | None = None,
 ) -> ModelRebuildRequested:
     """Build the command as the contract model, resolving declared defaults.
@@ -142,6 +143,7 @@ def build_rebuild_command(
         image_ref=image_ref,
         image_digest=image_digest,
         rollback=rollback,
+        open_pr=open_pr,
         requested_at=requested_at,
     )
 
@@ -287,6 +289,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--rollback-reason",
         default=None,
         help="Why the lane is being rolled back. Signed into the command.",
+    )
+    parser.add_argument(
+        "--open-pr",
+        default="",
+        help="Build an open PR's head (OMN-21928): <repo>#<number>@<head sha>.",
     )
     parser.add_argument("--requested-by", default="operator-manual")
     parser.add_argument("--correlation-id", default=None)
@@ -455,6 +462,7 @@ def main(argv: list[str] | None = None) -> int:
             image_ref=args.image_ref,
             image_digest=args.image_digest,
             rollback=_resolve_rollback(args.rollback_actor, args.rollback_reason),
+            open_pr=args.open_pr,
             # OMN-19270: the moment this command was requested, signed. A
             # deliberate request is never superseded, so this is the record's
             # honest publish time rather than a lever.

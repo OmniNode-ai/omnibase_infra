@@ -50,7 +50,13 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from omnibase_infra.enums.enum_contract_transport_key import (
+    EnumContractTransportKey,
+)
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.handlers.models.mcp.model_mcp_server_timeouts import (
+    ModelMcpServerTimeouts,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -546,14 +552,9 @@ def extract_handler_config(
     # Extract security configuration (basic contracts - top level)
     security = contract.get("security", {})
     if isinstance(security, dict):
-        if "trusted_namespace" in security:
-            config["trusted_namespace"] = security["trusted_namespace"]
-
-        if "audit_logging" in security:
-            config["audit_logging"] = security["audit_logging"]
-
-        if "requires_authentication" in security:
-            config["requires_authentication"] = security["requires_authentication"]
+        for name in ("trusted_namespace", "audit_logging", "requires_authentication"):
+            if name in security:
+                config[name] = security[name]
 
     # Extract metadata configuration (rich contracts)
     metadata = contract.get("metadata", {})
@@ -561,29 +562,22 @@ def extract_handler_config(
         # Transport configuration
         transport = metadata.get("transport", {})
         if isinstance(transport, dict):
-            if "default_host" in transport:
-                config["host"] = transport["default_host"]
-
-            if "default_port" in transport:
-                config["port"] = transport["default_port"]
-
-            if "default_path" in transport:
-                config["path"] = transport["default_path"]
-
-            if "stateless" in transport:
-                config["stateless"] = transport["stateless"]
-
-            if "json_response" in transport:
-                config["json_response"] = transport["json_response"]
+            for key in EnumContractTransportKey:
+                if key.value in transport:
+                    value = transport[key.value]
+                    if key is EnumContractTransportKey.SERVER_TIMEOUTS:
+                        ModelMcpServerTimeouts.validate_contract_block(
+                            value, handler_type
+                        )
+                    config[key.config_key] = value
 
         # Security configuration (rich contracts - in metadata.security)
         metadata_security = metadata.get("security", {})
         if isinstance(metadata_security, dict):
             # Tool access configuration (for MCP)
             tool_access = metadata_security.get("tool_access", {})
-            if isinstance(tool_access, dict):
-                if "max_tools" in tool_access:
-                    config["max_tools"] = tool_access["max_tools"]
+            if isinstance(tool_access, dict) and "max_tools" in tool_access:
+                config["max_tools"] = tool_access["max_tools"]
 
     logger.debug(
         "Extracted handler config from contract",

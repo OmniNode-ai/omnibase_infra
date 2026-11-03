@@ -238,6 +238,7 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
+from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
 from omnibase_infra.topics import (
     SUFFIX_NODE_REGISTRATION_ACKED,
     TopicResolver,
@@ -246,9 +247,7 @@ from omnibase_infra.topics import (
 
 if TYPE_CHECKING:
     from omnibase_core.models.contracts import ModelContractBase
-    from omnibase_infra.event_bus.models.model_event_message import (
-        ModelEventMessage,
-    )
+    from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
     from omnibase_infra.protocols.protocol_introspection_event_bus import (
         ProtocolIntrospectionEventBus,
     )
@@ -2079,7 +2078,7 @@ class MixinNodeIntrospection:
     async def _ack_listener_loop(
         self,
         max_retries: int = 3,
-        base_backoff_seconds: float = 1.0,
+        base_backoff_seconds: float = RUNTIME_TIMEOUTS.introspection_base_backoff_seconds,
     ) -> None:
         """Background loop listening for registration-accepted events.
 
@@ -2591,7 +2590,7 @@ class MixinNodeIntrospection:
     async def _registry_listener_loop(
         self,
         max_retries: int = 3,
-        base_backoff_seconds: float = 1.0,
+        base_backoff_seconds: float = RUNTIME_TIMEOUTS.introspection_base_backoff_seconds,
     ) -> None:
         """Background loop listening for REQUEST_INTROSPECTION events.
 
@@ -2760,7 +2759,7 @@ class MixinNodeIntrospection:
     async def start_introspection_tasks(
         self,
         enable_heartbeat: bool = True,
-        heartbeat_interval_seconds: float = 30.0,
+        heartbeat_interval_seconds: float = RUNTIME_TIMEOUTS.introspection_heartbeat_interval_seconds,
         enable_registry_listener: bool = True,
         enable_ack_listener: bool = True,
     ) -> None:

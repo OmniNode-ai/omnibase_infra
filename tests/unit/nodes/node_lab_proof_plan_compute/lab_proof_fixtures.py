@@ -41,7 +41,7 @@ CONTRACT = (
 HEAD = "bc32773871ae066939d69116271361710cb2e6d0"
 BASE = "0123456789abcdef0123456789abcdef01234567"
 INFRA = "c7150a15a94d5c4cc929de5f07bab2e7b622b497"
-LANE = "/home/prover/prove-lab-proof-build-1"
+LANE = "/srv/prover/prove-lab-proof-build-1"
 RUN = "core-1766-r1"
 CHANGED = (
     "src/omnibase_core/topics.py",

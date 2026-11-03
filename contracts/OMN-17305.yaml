@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17305
+title: pull-all.sh restores the proven omnimarket commit after a pull, so a clone advance no longer leaves the installed build off the floor
+summary: pull-all.sh ran the workspace venv reconciler in its default mode, which installs the omnimarket clone HEAD. The pull has just advanced that clone past the floor, nothing on that path restamps the floor, and the onex wrapper then refuses every evidence-minting command. pull-all.sh now runs the reconciler with --proven, which installs the floor's own commit and stamps nothing. The wrapper floor gate is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn17305-pull-all-proven
+    statement: The reconcile that pull-all.sh runs after a successful pull installs the floor's omnimarket commit and never the advanced clone HEAD, and the wrapper floor gate still refuses an installed commit that differs from the floor.
+    acceptance:
+      - id: AC17305001
+        statement: "AC17305001: pull-all.sh invokes reconcile-workspace-venvs.sh with --workspace <root> --proven after a successful pull -- falsifier: uv run --frozen pytest tests/unit/scripts/test_pull_all.py -q --no-cov -k repairs_omnimarket_venv_drift_after_successful_pull"
+evidence_requirements:
+  - kind: tests
+    description: The pull-all wiring test, the clone-advance reconcile tests that run the real wrapper against the installed commit, and the existing wrapper floor tests.
+    command: uv run --frozen pytest tests/unit/scripts/test_pull_all.py tests/scripts/test_reconcile_workspace_venvs.py tests/scripts/test_onex_wrapper_floor_omn17309.py -q --no-cov -k "after_a_clone_advance or repairs_omnimarket_venv_drift_after_successful_pull or commit_mismatch"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn17305-ac1-pull-all-runs-proven
+    description: After a successful pull, pull-all.sh passes --proven to the reconciler along with the workspace root; at the merge base it passes the root alone.
+    source: manual
+    binds_ac:
+      - AC17305001
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_pull_all.py -q --no-cov -k repairs_omnimarket_venv_drift_after_successful_pull
+        cwd: ${OMNI_HOME}/omnibase_infra

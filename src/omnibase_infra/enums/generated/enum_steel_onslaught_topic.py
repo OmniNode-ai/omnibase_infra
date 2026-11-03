@@ -11,6 +11,8 @@
 #
 from enum import Enum
 
+from omnibase_infra.enums.contract_topic_value import contract_topic_value
+
 
 class EnumSteelOnslaughtTopic(str, Enum):
     """Kafka topic enum for producer: steel-onslaught.
@@ -18,4 +20,4 @@ class EnumSteelOnslaughtTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
-    EVT_MATCH_TERMINAL_V1 = "onex.evt.steel-onslaught.match-terminal.v1"  # onex.evt.steel-onslaught.match-terminal.v1
+    EVT_MATCH_TERMINAL_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'steel-onslaught', 'EVT_MATCH_TERMINAL_V1')  # onex.evt.steel-onslaught.match-terminal.v1

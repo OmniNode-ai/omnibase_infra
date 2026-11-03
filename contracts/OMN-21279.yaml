@@ -186,7 +186,7 @@ dod_evidence:
     source: generated
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q -n 0 --no-cov -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py tests/unit/validation/test_checker_stack_shape.py -q -n 0 --no-cov -p no:randomly
     binds_ac:
       - "AC2"
   - id: dod-omn-21279-ac2-dev-build-names-composed

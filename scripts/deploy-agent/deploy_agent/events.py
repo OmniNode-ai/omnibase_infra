@@ -817,10 +817,11 @@ class ModelLineageDecision(BaseModel):
 
     Durable on the job record (``JobState.lineage``) as well as in the journal,
     because the question it answers is asked afterwards: which commit did this
-    job build, and why that one. ``resolved_ref`` is set when the command named
-    a symbolic ref, which is resolved at accept time and built at that exact
-    sha, so the record and the build cannot disagree.
     """
+
+    # job build, and why that one. ``resolved_ref`` is set when the command named
+    # a symbolic ref, which is resolved at accept time and built at that exact
+    # sha, so the record and the build cannot disagree.
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -841,21 +842,20 @@ class ModelLineageDecision(BaseModel):
 
 
 class ModelRollbackDeclaration(BaseModel):
-    """A signed declaration that a command deliberately moves a lane off its lineage.
+    """A signed declaration that a command deliberately moves a lane off its lineage."""
 
-    OMN-19270. The agent refuses a command whose ``git_ref`` is a strict
-    ancestor of the build the lane already runs, or has diverged from it, so a
-    stale or replayed command can no longer roll the lane backwards. That
-    fence must not also remove the way to recover from a bad build: a command
-    carrying this declaration is exempt from it and built as asked.
-
-    Both fields are required and must say something. A rollback nobody can
-    attribute is indistinguishable from the replay the fence exists to refuse,
-    so ``actor`` names the person or lane that asked, and ``reason`` is what a
-    later reader of the journal needs in order to know why the lane went
-    backwards. The declaration travels inside the signed command body, so it
-    cannot be added to a command in transit.
-    """
+    # OMN-19270. The agent refuses a command whose ``git_ref`` is a strict
+    # ancestor of the build the lane already runs, or has diverged from it, so a
+    # stale or replayed command can no longer roll the lane backwards. That
+    # fence must not also remove the way to recover from a bad build: a command
+    # carrying this declaration is exempt from it and built as asked.
+    #
+    # Both fields are required and must say something. A rollback nobody can
+    # attribute is indistinguishable from the replay the fence exists to refuse,
+    # so ``actor`` names the person or lane that asked, and ``reason`` is what a
+    # later reader of the journal needs in order to know why the lane went
+    # backwards. The declaration travels inside the signed command body, so it
+    # cannot be added to a command in transit.
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -950,6 +950,13 @@ class ModelRebuildRequested(BaseModel):
     # OMN-19270: present only on a deliberate rollback. Without it the lineage
     # fence never builds a ref behind the running build, and refuses one off it.
     rollback: ModelRollbackDeclaration | None = None
+    # OMN-21928: <repo>#<number>@<head sha> of the open pull request whose branch
+    # head the dev lane builds. It rides with the rollback declaration that a
+    # deliberate off-lineage deploy already needs; the first-party source audit
+    # accepts the infra build context only at exactly this head.
+    open_pr: str = Field(
+        default="", pattern=r"^([a-z][a-z0-9_]*#[1-9][0-9]*@[0-9a-f]{40})?$"
+    )
     # OMN-19270: when the command was first requested -- the moment its
     # trigger published it, carried through every hop that forwards it. The
     # lineage fence supersedes a sibling-triggered command only when the
@@ -968,6 +975,17 @@ class ModelRebuildRequested(BaseModel):
                 f"requested_at={self.requested_at.isoformat()} carries no UTC "
                 "offset; a publish time compared across hosts must be aware"
             )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def validate_open_pr(self) -> ModelRebuildRequested:
+        if self.open_pr and (
+            self.runtime_lane != EnumRuntimeLane.DEV
+            or self.rollback is None
+            or not self.open_pr.endswith(f"@{self.git_ref}")
+        ):
+            msg = "open_pr needs runtime_lane dev, a rollback declaration, git_ref = its head"
             raise ValueError(msg)
         return self
 

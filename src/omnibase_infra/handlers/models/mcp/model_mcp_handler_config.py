@@ -1,10 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# ruff: noqa: S104
 # S104 disabled: Binding to 0.0.0.0 is intentional for container networking
 """MCP handler configuration model."""
 
 from pydantic import BaseModel, Field, model_validator
+
+from omnibase_infra.handlers.models.mcp.model_mcp_server_timeouts import (
+    ModelMcpServerTimeouts,
+)
+from omnibase_infra.models.network_binding import load_network_binding_settings
 
 
 class ModelMcpHandlerConfig(BaseModel):
@@ -25,9 +29,15 @@ class ModelMcpHandlerConfig(BaseModel):
             or service (OMN-1419). Loaded from Infisical or env (typically
             comma-separated and split by the caller). At least one non-empty
             key is required when ``auth_enabled`` is True.
+        server_timeouts: Server shutdown, cancel and startup waits, declared in
+            the handler contract (``metadata.transport.server_timeouts``) and
+            passed in by ``extract_handler_config`` (OMN-22130).
     """
 
-    host: str = Field(default="0.0.0.0", description="Host to bind MCP server to")
+    host: str = Field(
+        default_factory=lambda: load_network_binding_settings().bind_all_address,
+        description="Host to bind MCP server to",
+    )
     port: int = Field(default=8090, description="Port for MCP streamable HTTP endpoint")
     path: str = Field(default="/mcp", description="URL path for MCP endpoint")
     stateless: bool = Field(
@@ -54,6 +64,11 @@ class ModelMcpHandlerConfig(BaseModel):
             "Supports multiple clients/services holding distinct credentials. "
             "At least one non-empty key is required when auth_enabled=True."
         ),
+    )
+
+    server_timeouts: ModelMcpServerTimeouts = Field(
+        default_factory=ModelMcpServerTimeouts,
+        description="Server shutdown, cancel and startup waits (contract-declared)",
     )
 
     model_config = {"frozen": True}

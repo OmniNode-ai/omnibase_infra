@@ -317,7 +317,7 @@ def _derived_grants(
     ``grants_from`` names a ``ModelBrokerGrantDerivation`` JSON document beside the
     policy file. Its rows are one per operation; they are folded into one grant per
     resource, which ``_grant`` then holds to the same rules as any other. A principal
-    owns a templated topic it may write, so the issuer creates that topic for it.
+    owns a templated topic it may read or write, so the issuer creates that topic.
     """
     if not isinstance(grants_from, str) or not grants_from:
         raise DeclarationError(f"{path}: grants_from must be a file name")
@@ -365,7 +365,7 @@ def _derived_grants(
             "operations": sorted(operations),
         }
         if "{principal}" in name:
-            grant["create_topic"] = "write" in operations
+            grant["create_topic"] = bool({"read", "write"} & operations)
         grants.append(grant)
     return grants, raw
 
@@ -523,21 +523,21 @@ def load_overlay(path: Path, declaration: Declaration) -> Overlay:
     rows: list[OverlayRow] = []
     for index, raw in enumerate(raw_rows):
         where = f"{path}: principals[{index}]"
-        if not isinstance(raw, dict) or set(raw) - {"role"} != {
+        if not isinstance(raw, dict) or set(raw) - {"role", "grant_roles"} != {
             "principal",
             "login",
             "device",
         }:
             raise DeclarationError(
-                f"{where} holds exactly principal, login, device and an optional role; "
-                "a grant cannot be typed here"
+                f"{where} holds principal, login, device, role, grant_roles: a grant cannot be typed here"
             )
         if (
             not isinstance(role := raw.get("role", "developer"), str)
             or role not in OVERLAY_ROLES
+            or ("grant_roles" in raw and role != "machine")
         ):
             raise DeclarationError(
-                f"{where}: role must be one of {sorted(OVERLAY_ROLES)}"
+                f"{where}: role must be one of {sorted(OVERLAY_ROLES)}; only a machine binds grant_roles"
             )
         principal, login, device = raw["principal"], raw["login"], raw["device"]
         if not all(isinstance(v, str) for v in (principal, login, device)):
