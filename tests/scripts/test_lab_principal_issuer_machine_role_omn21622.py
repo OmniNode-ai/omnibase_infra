@@ -228,7 +228,8 @@ def test_a_machine_row_may_bind_grant_roles_the_issuer_does_not_grant(
             lpi.load_overlay(_overlay(_sub(tmp_path, n), row), declaration),
         ).issue("ops@example.invalid", {"lane": "dev", "device": "lab-host"})
         granted.append(sorted(broker.granted))
-    assert granted[0], "the machine profile must actually be granted"
+    assert {name for name, _ in granted[0]} >= set(MACHINE_TOPICS)
+    assert len(MACHINE_TOPICS) == 13
     assert granted[0] == granted[1]
 
 
@@ -243,6 +244,9 @@ def test_a_machine_row_may_bind_grant_roles_the_issuer_does_not_grant(
         pytest.param(
             {**DEVELOPER_ROW, "role": "admin", "grant_roles": ["x"]}, id="unknown-role"
         ),
+        pytest.param(
+            {**DEVELOPER_ROW, "role": 7, "grant_roles": ["x"]}, id="non-string-role"
+        ),
     ],
 )
 def test_only_a_machine_row_binds_grant_roles(
@@ -250,6 +254,14 @@ def test_only_a_machine_row_binds_grant_roles(
 ) -> None:
     with pytest.raises(lpi.DeclarationError, match="only a machine binds grant_roles"):
         lpi.load_overlay(_overlay(tmp_path, row), declaration)
+
+
+def test_a_machine_row_may_bind_an_empty_list_of_grant_roles(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    row = {**MACHINE_ROW, "grant_roles": []}
+    overlay = lpi.load_overlay(_overlay(tmp_path, row), declaration)
+    assert overlay.principals == {"dev-ops-lab-host"}
 
 
 # --- the drift check -----------------------------------------------------------
