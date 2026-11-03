@@ -18,6 +18,7 @@ _FORWARD = _ROOT / "docker" / "migrations" / "forward"
 _NODE = "node_projection_work_questions"
 _VENDOR = _FORWARD / "nodes" / _NODE
 _CREATE = "0000_create_work_questions.sql"
+_GRANT = "0001_grant_work_questions.sql"
 _SHA256 = "c821731806d2d088cb9755b38b68cafdf9127ce1902d96b9d77c5aa0317a71db"
 _TABLES = (
     "work_outcome_units",
@@ -35,8 +36,43 @@ def _sql() -> str:
     )
 
 
-def test_only_the_create_file_is_vendored() -> None:
-    assert sorted(path.name for path in _VENDOR.glob("*")) == [_CREATE]
+def test_lineage_contains_the_create_and_runtime_grant() -> None:
+    assert sorted(path.name for path in _VENDOR.glob("*")) == [_CREATE, _GRANT]
+
+
+def test_runtime_grant_is_scoped_classified_and_checksum_bound() -> None:
+    path = _VENDOR / _GRANT
+    executable = " ".join(
+        line.split("--", 1)[0].strip() for line in path.read_text().splitlines()
+    )
+    grants = re.findall(r"GRANT (.*?) TO (\w+);", executable)
+    assert grants == [
+        ("USAGE ON SCHEMA omninode_internal", "omninode_runtime"),
+        *[
+            (f"SELECT, INSERT, UPDATE ON omninode_internal.{table}", "omninode_runtime")
+            for table in _TABLES
+        ],
+    ]
+    artifact = f"nodes/{_NODE}/{_GRANT}"
+    rows = [
+        row.split("\t")
+        for row in (_FORWARD / "_ledger" / "application-migrations.tsv")
+        .read_text()
+        .splitlines()
+        if row.split("\t", 1)[0] == artifact
+    ]
+    assert rows == [
+        [
+            artifact,
+            f"node:{_NODE}",
+            f"node:{_NODE}",
+            "omninode_internal",
+            f"node:{_NODE}:{_GRANT}",
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        ]
+    ]
+    classes = yaml.safe_load((_ROOT / "config" / "migration_classes.yaml").read_text())
+    assert classes["migrations"][f"forward/{artifact}"] == "expand-only"
 
 
 def test_vendor_bytes_and_manifest_binding_are_exact() -> None:

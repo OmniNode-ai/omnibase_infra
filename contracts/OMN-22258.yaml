@@ -102,3 +102,10 @@ dod_evidence:
       - AC5
       - AC6
       - AC7
+  - id: dod-omn22258-work-questions-runtime-admission
+    description: The deployed topology admits the five vendored work-question projections through the runtime binding validator in every shipped profile, with exactly SELECT, INSERT and UPDATE for omninode_runtime and no other table principal. The explicit grant migration is scoped to those tables, classified expand-only and checksum-bound. This hosted-runner check needs no live service and fails on the fix parent where the grants are undeclared.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/topology/test_work_questions_runtime_grants.py tests/unit/migrations/test_omn22320_work_questions_vendor.py -q --no-cov -p no:cacheprovider
+        cwd: .

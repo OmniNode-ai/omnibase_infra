@@ -213,6 +213,7 @@ def _vendored_read_write(
     node: str | None = None,
     schema: str = "omninode_internal",
     access: Literal["read", "write", "read_write"] = "read_write",
+    role: str | None = None,
 ) -> ContractTableDeclaration:
     """A vendored relation whose role is named for the table."""
     migration = f"docker/migrations/forward/nodes/{node_dir}/{create_file}"
@@ -225,7 +226,7 @@ def _vendored_read_write(
             schema=schema,
             migration=migration,
             access=access,
-            role=table,
+            role=role or table,
         ),
     )
 
@@ -239,23 +240,13 @@ def _vendored_read_write(
 # generated YAML: ``--check`` continues to prove every shipped instance and
 # rendered catalog against one auditable derivation source.
 LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    ContractTableDeclaration(
-        node="legacy_migration:tenant_inference_credentials",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-            "0000_create_tenant_inference_credentials.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="tenant_inference_credentials",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-                "0000_create_tenant_inference_credentials.sql"
-            ),
-            access="write",
-            role="credentials",
-        ),
+    _vendored_read_write(
+        "tenant_inference_credentials",
+        "node_projection_tenant_credentials",
+        "0000_create_tenant_inference_credentials.sql",
+        schema="public",
+        access="write",
+        role="credentials",
     ),
     # OMN-18159: the four delegation aggregate READ VIEWS, in this manifest for
     # exactly the reason the docstring above gives -- the migration that
@@ -429,6 +420,23 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "node_llm_delegation_call_effect",
         "0000_delegation_lab_job_execution.sql",
     ),
+    # OMN-22258: the work-question tables were vendored under OMN-22320
+    # before their producing node reached the omnimarket contract pin.
+    # Migration 099's defaults deliver SELECT/INSERT/UPDATE on all five;
+    # declare the same runtime access for projection binding and ACL apply.
+    # Retire these bridges when the pin declares node_projection_work_questions.
+    *(
+        _vendored_read_write(
+            table, "node_projection_work_questions", "0000_create_work_questions.sql"
+        )
+        for table in (
+            "work_outcome_units",
+            "orchestration_style_outcomes",
+            "lane_drift_and_stalls",
+            "brief_quality_vs_outcome",
+            "subagent_waste",
+        )
+    ),
     #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
@@ -437,23 +445,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # INSERT, UPDATE. Retired by the omnimarket OMN-19861
     # node_projection_demo_readiness pull request merging and the pin advancing
     # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:demo_readiness_latest",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-            "0000_create_demo_readiness_latest.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="demo_readiness_latest",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-                "0000_create_demo_readiness_latest.sql"
-            ),
-            access="read_write",
-            role="demo_readiness",
-        ),
+    _vendored_read_write(
+        "demo_readiness_latest",
+        "node_projection_demo_readiness",
+        "0000_create_demo_readiness_latest.sql",
+        role="demo_readiness",
     ),
     # OMN-21115: activation ingestion precedes the omnimarket contract pin.
     # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
