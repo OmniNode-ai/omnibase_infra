@@ -50,6 +50,8 @@ _INSTALLER = _REPO / "deploy" / "lane-census" / "install-lane-census.sh"
 _REFRESH = _REPO / "scripts" / "runtime_build" / "refresh_dev_lane.sh"
 _OVERLAY_ACTION = _REPO / ".github" / "actions" / "fetch-census-overlay" / "action.yml"
 _NODE_OVERLAY = Path("node_lane_census_effect") / "overlay.yaml"
+#: Where the CI overlay repository keeps node overlays; the action's skill overlay root.
+_OVERLAYS_DIR = Path("config") / "onex" / "overlays"
 
 
 def _overlay_root(tmp_path: Path) -> Path:
@@ -321,7 +323,7 @@ def _run_place_step(tmp_path: Path, *, carries_registry: bool) -> dict[str, str]
     (census / "lane-manifest.yaml").write_text("lanes: {}\n")
     (census / "census-snapshot.json").write_text("{}\n")
     if carries_registry:
-        node = work / ".lane-census-overlay-checkout" / _NODE_OVERLAY
+        node = work / ".lane-census-overlay-checkout" / _OVERLAYS_DIR / _NODE_OVERLAY
         node.parent.mkdir(parents=True)
         shutil.copyfile(NEUTRAL_REGISTRY, node)
     checkout = work / ".lane-census-overlay-checkout"
@@ -376,8 +378,9 @@ def test_registry_callers_overlay_action_exports_the_registry_the_overlay_carrie
     """The parity job fetches the census through this action; it must place the registry."""
     exported = _run_place_step(tmp_path, carries_registry=True)
     root = exported["ONEX_WORKSPACE_CONFIG_ROOT"]
-    assert exported["ONEX_SKILL_OVERLAY_ROOTS"] == root
-    assert exported["LANE_CENSUS_REGISTRY"] == f"{root}/{_NODE_OVERLAY}"
+    overlays = f"{root}/{_OVERLAYS_DIR}"
+    assert exported["ONEX_SKILL_OVERLAY_ROOTS"] == overlays
+    assert exported["LANE_CENSUS_REGISTRY"] == f"{overlays}/{_NODE_OVERLAY}"
     assert Path(exported["LANE_CENSUS_REGISTRY"]).is_file()
 
 
@@ -394,4 +397,7 @@ def test_registry_callers_overlay_action_exports_no_registry_when_the_overlay_ha
 def test_registry_callers_overlay_action_fetches_the_node_overlay() -> None:
     steps = yaml.safe_load(_OVERLAY_ACTION.read_text())["runs"]["steps"]
     checkout = next(s for s in steps if "sparse-checkout" in s.get("with", {}))
-    assert str(_NODE_OVERLAY) in checkout["with"]["sparse-checkout"].split()
+    assert (
+        str(_OVERLAYS_DIR / _NODE_OVERLAY)
+        in checkout["with"]["sparse-checkout"].split()
+    )

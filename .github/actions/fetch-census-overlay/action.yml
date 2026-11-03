@@ -1,6 +1,6 @@
 name: 'Fetch the private lane census'
 description: >-
-  OMN-20934. The lane manifest and the committed lane census describe one lab's hosts, lanes and addresses, so they are private deployment config and this repository ships neither. This reads config/lab/lane-census from the CI overlay repository (the org Actions variable OMNI_CI_OVERLAY_REPO, a bare repository name under this owner) with a read-only App token, places it outside the workspace and exports ONEX_WORKSPACE_CONFIG_ROOT, which every census reader resolves its inputs from. It also fetches the lane census node's overlay (node_lane_census_effect/overlay.yaml, the census host registry, OMN-22152) and, when the overlay repository carries it, exports ONEX_SKILL_OVERLAY_ROOTS and LANE_CENSUS_REGISTRY. An unset variable, an unreadable repository or a missing file fails the step: there is no in-repo census to fall back to. The census is data, read unpinned from the overlay's default branch where the refresh leg commits it, and validated by each reader; nothing from it is executed.
+  OMN-20934. The lane manifest and the committed lane census describe one lab's hosts, lanes and addresses, so they are private deployment config and this repository ships neither. This reads config/lab/lane-census from the CI overlay repository (the org Actions variable OMNI_CI_OVERLAY_REPO, a bare repository name under this owner) with a read-only App token, places it outside the workspace and exports ONEX_WORKSPACE_CONFIG_ROOT, which every census reader resolves its inputs from. It also fetches the lane census node's overlay (config/onex/overlays/node_lane_census_effect/overlay.yaml, the census host registry, OMN-22152) and, when the overlay repository carries it, exports ONEX_SKILL_OVERLAY_ROOTS and LANE_CENSUS_REGISTRY. An unset variable, an unreadable repository or a missing file fails the step: there is no in-repo census to fall back to. The census is data, read unpinned from the overlay's default branch where the refresh leg commits it, and validated by each reader; nothing from it is executed.
 author: 'OmniNode'
 inputs:
   overlay-repo:
@@ -53,7 +53,7 @@ runs:
         persist-credentials: false
         sparse-checkout: |
           config/lab/lane-census
-          node_lane_census_effect/overlay.yaml
+          config/onex/overlays/node_lane_census_effect/overlay.yaml
         sparse-checkout-cone-mode: false
     - name: Place the CI overlay outside the workspace
       id: place
@@ -77,9 +77,10 @@ runs:
         # ONEX_SKILL_OVERLAY_ROOTS and LANE_CENSUS_REGISTRY. A repository that
         # does not carry it exports neither, and a reader that needs the registry
         # stops with its own not-configured error (the census driver exits 3).
-        if [ -s "$dest/node_lane_census_effect/overlay.yaml" ]; then
-          echo "ONEX_SKILL_OVERLAY_ROOTS=$dest" >> "$GITHUB_ENV"
-          echo "LANE_CENSUS_REGISTRY=$dest/node_lane_census_effect/overlay.yaml" >> "$GITHUB_ENV"
+        overlays="$dest/config/onex/overlays"
+        if [ -s "$overlays/node_lane_census_effect/overlay.yaml" ]; then
+          echo "ONEX_SKILL_OVERLAY_ROOTS=$overlays" >> "$GITHUB_ENV"
+          echo "LANE_CENSUS_REGISTRY=$overlays/node_lane_census_effect/overlay.yaml" >> "$GITHUB_ENV"
         fi
         echo "ONEX_WORKSPACE_CONFIG_ROOT=$dest" >> "$GITHUB_ENV"
         echo "root=$dest" >> "$GITHUB_OUTPUT"
