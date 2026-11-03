@@ -4233,6 +4233,11 @@ class EventBusKafka(
         # Dispatch to all subscribers
         offset_may_advance = True
         for _sub_group_id, subscription_id, callback in subscribers:
+            # OMN-21229: pause is per subscription. The group's consumer keeps
+            # fetching while any sibling is live, so a paused subscription is
+            # skipped here instead of being handed the record.
+            if subscription_id in self._paused_subscriptions:
+                continue
             dispatch_offset_safe = await self._dispatch_to_subscriber(
                 callback,
                 subscription_id,

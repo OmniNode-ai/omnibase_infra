@@ -39,6 +39,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/event_bus/test_omn21229_subscription_lifecycle.py -q -p no:cacheprovider -k "serial_path or no_consumer_is_built or shutdown_with_a_fetched_batch"
+  - id: dod-004
+    description: "Pause is per subscription: with two subscriptions on one topic in one consumer group, a paused-and-drained handle is handed no further record while its sibling still receives it, on the Kafka bus and the in-memory bus; and the integration fakes of the consumer expose the pause and commit the lifecycle calls."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_omn21229_subscription_lifecycle.py tests/integration/event_bus/test_consume_loop_survival_integration.py tests/integration/event_bus/test_consumer_rejoin_after_coordinator_loss_integration.py tests/integration/event_bus/test_consumer_sync_readiness_integration.py -q -p no:cacheprovider -k "paused_handle or survives or recovers or never_recreated or unhealthy or keeps_the_container"
   - id: dod-deploy
     description: "Deploy probe: the handle module GitHub serves at the PR branch defines the drain step. The live proof of the SIGTERM case against a real broker is the lab comment on the PR; this probe proves source identity only."
     source: generated

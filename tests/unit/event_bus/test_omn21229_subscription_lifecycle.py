@@ -79,6 +79,10 @@ class _FakeConsumer:
     def committed(self) -> list[int]:
         return [int(v) for c in self.commits for v in c.values()]
 
+    def feed(self, *messages: Any) -> None:
+        """Queue records for the next ``getmany``."""
+        self._messages.extend(messages)
+
 
 def _msg(offset: int) -> MagicMock:
     msg = MagicMock()
@@ -384,6 +388,87 @@ async def test_shutdown_with_a_fetched_batch_in_flight_commits_only_completed() 
         f"{consumer.committed()}"
     )
     assert (TopicPartition(TOPIC, PARTITION), BASE + 1) in consumer.seeks
+
+
+@pytest.mark.asyncio
+async def test_paused_handle_gets_no_record_while_its_group_sibling_runs() -> None:
+    """Pause is per subscription: a paused-and-drained handle is handed nothing.
+
+    Two subscriptions share one topic and one consumer group, so one consumer
+    serves both and dispatch fans every record out to both. Pausing one of them
+    must keep the next record away from it while the other still receives it.
+    """
+    consumer = _FakeConsumer([])
+    paused_got: list[int] = []
+    sibling_got: list[int] = []
+
+    async def _paused_callback(message: ModelEventMessage) -> None:
+        paused_got.append(int(message.offset))
+
+    async def _sibling_callback(message: ModelEventMessage) -> None:
+        sibling_got.append(int(message.offset))
+
+    with patch(
+        "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+        return_value=_producer(),
+    ):
+        bus = EventBusKafka(config=_config())
+        await bus.start()
+        with patch.object(
+            bus, "_start_consumer_for_topic_unlocked", _consumer_starter(bus, consumer)
+        ):
+            paused = await bus.subscribe(
+                TOPIC, group_id=GROUP, on_message=_paused_callback
+            )
+            sibling = await bus.subscribe(
+                TOPIC, group_id=GROUP, on_message=_sibling_callback
+            )
+        consumer.feed(_msg(BASE))
+        await asyncio.sleep(0.2)
+        assert paused_got == [BASE]
+        assert sibling_got == [BASE]
+
+        await paused.pause()
+        await paused.drain()
+        assert not consumer.paused, "the sibling is live: the consumer keeps fetching"
+
+        consumer.feed(_msg(BASE + 1))
+        await asyncio.sleep(0.2)
+        await sibling.stop()
+        await paused.stop()
+        await bus.close()
+
+    assert sibling_got == [BASE, BASE + 1], (
+        f"the live sibling lost a record: {sibling_got}"
+    )
+    assert paused_got == [BASE], f"the paused handle received a record: {paused_got}"
+
+
+@pytest.mark.asyncio
+async def test_inmemory_paused_handle_gets_no_record_while_its_sibling_runs() -> None:
+    bus = EventBusInmemory()
+    await bus.start()
+    paused_got: list[bytes] = []
+    sibling_got: list[bytes] = []
+
+    async def _paused_callback(message: ModelEventMessage) -> None:
+        paused_got.append(message.value)
+
+    async def _sibling_callback(message: ModelEventMessage) -> None:
+        sibling_got.append(message.value)
+
+    paused = await bus.subscribe(TOPIC, group_id=GROUP, on_message=_paused_callback)
+    sibling = await bus.subscribe(TOPIC, group_id=GROUP, on_message=_sibling_callback)
+    await bus.publish(TOPIC, None, b"one")
+    await paused.pause()
+    await paused.drain()
+    await bus.publish(TOPIC, None, b"two")
+    await sibling.stop()
+    await paused.stop()
+    await bus.close()
+
+    assert sibling_got == [b"one", b"two"]
+    assert paused_got == [b"one"]
 
 
 # --------------------------------------------------------------------------
