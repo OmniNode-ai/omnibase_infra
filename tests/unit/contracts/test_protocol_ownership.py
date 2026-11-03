@@ -49,6 +49,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # contracts for the infra runtime. They bridge SPI protocols to infra internals.
     "ProtocolCapabilityProjection": "protocols/protocol_capability_projection.py",
     "ProtocolCapabilityQuery": "protocols/protocol_capability_query.py",
+    "ProtocolClock": "protocols/protocol_clock.py",  # [DI] OMN-21698 the clock a non-EFFECT node package reads time through (wall now() and a monotonic() duration reading), injected by dispatcher constructor and on the typed handler request so the registration orchestrator never calls datetime.now or time.perf_counter itself. Infra-local, not spi: core's ProtocolTimeService (omnibase_core.protocols.replay) carries now()/utc_now() only and has no monotonic reading the handlers' processing_time_ms needs
     "ProtocolContainerAware": "protocols/protocol_container_aware.py",
     # ProtocolDispatchEngine relocated to omnibase_spi.protocols.runtime (OMN-12549).
     "ProtocolEventBusLike": "protocols/protocol_event_bus_like.py",
