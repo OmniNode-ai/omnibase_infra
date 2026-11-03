@@ -46,6 +46,11 @@ requirements:
     acceptance:
       - id: AC8
         statement: 'AC8: run in bash against a stub docker, the cross-build step passes after a QEMU crash followed by a clean build, fails after a QEMU crash on both attempts, fails after one attempt on a failure without the QEMU signature, and builds linux/amd64 and linux/arm64 on every attempt -- falsifier: uv run pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q'
+  - id: req-omn20413-dispatch-parity-oracle-regen
+    statement: The committed dispatch selection oracle matches the live engine on dev, so the path-filtered dispatch-parity-gate stops failing pull requests that did not change selection logic.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: regenerating selection-oracle-v2.json with the harness and diffing it against the committed file, ignoring the volatile header fields, shows no drift -- falsifier: the dispatch-parity-gate Verify committed fixture is not stale step, run as uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -q'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -145,3 +150,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
+  - id: dod-omn20413-ac9-dispatch-parity-oracle
+    description: AC9 test replays the committed selection oracle against the live engine corpus; the corpus counts in the committed header (162 contracts, 131 dispatchers) fail the counts check at the merge base, where the oracle held 154 and 129.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/integration/runtime/test_dispatch_selection_parity.py tests/ci/test_dispatch_parity_fixture_topic_free_omn22002.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9
