@@ -131,7 +131,7 @@ def _run_runtime_phase(lane: _Lane, **kwargs: Any) -> None:
         patch.object(executor_mod, "runtime_compose_up_budget", lambda *a: budget),
         patch.object(executor, "_ensure_runtime_migrations_ready"),
         patch.object(executor, "rerun_changed_oneshots", return_value=[]),
-        patch.object(executor, "_retire_folded_dev_tenant_projections"),
+        patch.object(executor, "_retire_folded_dev_services"),
     ):
         executor._compose_up(
             Phase.RUNTIME, Scope.RUNTIME, [], _noop, lane=EnumRuntimeLane.DEV, **kwargs

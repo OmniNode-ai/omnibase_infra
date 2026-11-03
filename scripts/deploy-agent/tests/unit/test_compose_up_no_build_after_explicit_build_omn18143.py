@@ -63,7 +63,7 @@ def _up_command(scope: Scope, **kwargs: Any) -> list[str]:
         patch.object(executor_mod, "runtime_compose_up_budget", lambda *a: budget),
         patch.object(executor, "_ensure_runtime_migrations_ready"),
         patch.object(executor, "rerun_changed_oneshots", return_value=[]),
-        patch.object(executor, "_retire_folded_dev_tenant_projections"),
+        patch.object(executor, "_retire_folded_dev_services"),
         patch.object(executor, "observe_deps_convergence"),
         patch.object(executor, "_record_compose_invocation"),
         pytest.raises(_UpSeenError),

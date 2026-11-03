@@ -1,0 +1,15 @@
+{
+  "run_id_prefix": "91fda261",
+  "task": "H4",
+  "terminal_class_recorded": "timeout",
+  "terminal_recorded": false,
+  "route_attributed": false,
+  "attempts": [],
+  "expected_terminal_class": "queued_not_started",
+  "queue_depth": {
+    "records_ahead": 50,
+    "backlog_records": 51,
+    "consumer_group": "local.omnimarket.node_delegate_skill_orchestrator.consume.1.3.0",
+    "unresolved_reason": ""
+  }
+}

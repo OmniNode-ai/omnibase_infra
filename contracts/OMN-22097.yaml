@@ -1,0 +1,71 @@
+# OMN-22097 contract file for omnibase_infra: dev runtime spans reach Phoenix.
+# AC5 (the floor row) is carried by the omnimarket pull request of the same ticket.
+schema_version: "1.0.0"
+ticket_id: "OMN-22097"
+title: "Dev runtime spans reach Phoenix: the exporter posts to the wrong path and the runtime has one span site"
+summary: "configure_tracing built OTLPSpanExporter(endpoint=<base url>), which the SDK uses verbatim, so every span was posted to the Phoenix root and answered 405. The exporter now targets <endpoint>/v1/traces, and MessageDispatchEngine.dispatch opens one span per call."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22097-spans-reach-phoenix
+    statement: "The exporter configure_tracing builds posts to <endpoint>/v1/traces, every dispatch emits one span, and no LAN address enters tracked source."
+    acceptance:
+      - id: AC1
+        statement: "AC1: after a deploy-agent deploy of the fix, the Phoenix traceCount on dev is higher at 15 minutes than at the deploy and never decreases between reads taken at 0, 5, 10 and 15 minutes -- falsifier: Phoenix GraphQL projects.traceCount read at those four times shows no rise or a drop"
+      - id: AC2
+        statement: "AC2: a regression test built from the recorded probe output (exporter URL http://phoenix:6006 against http://phoenix:6006/v1/traces) fails on the current configure_tracing and passes on the fix -- falsifier: uv run pytest tests/unit/runtime/test_tracing_exporter_path.py"
+      - id: AC3
+        statement: "AC3: one span per MessageDispatchEngine.dispatch with topic, category, success and duration_ms, tracer acquired inside dispatch, no spans with no TracerProvider set -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_engine_span.py"
+      - id: AC4
+        statement: "AC4: the Phoenix endpoint stays in the container environment or private overlay, with no LAN address in tracked public source -- falsifier: grep over the tracked files of omnibase_infra for the dev host address returns a hit"
+      - id: AC6
+        statement: "AC6: the false comment on tracing.py lines 74 and 75 is removed -- falsifier: grep for \"appends /v1/traces automatically\" in src/omnibase_infra/runtime/tracing.py returns a hit"
+evidence_requirements:
+  - kind: tests
+    description: "The exporter path, dispatch span and existing tracing and dispatch-engine tests pass."
+    command: "uv run pytest tests/unit/runtime/test_tracing_exporter_path.py tests/unit/runtime/test_dispatch_engine_span.py tests/unit/runtime/test_tracing.py tests/unit/runtime/test_message_dispatch_engine.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "AC1 code-side precondition: the exporter targets <endpoint>/v1/traces. The live reading (Phoenix traceCount at 0, 5, 10 and 15 minutes after the deploy-agent deploy) is taken by the orchestrator after the deploy and is not claimed by this check."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_tracing_exporter_path.py::TestConfigureTracingExporterUrl -q -p no:cacheprovider
+  - id: dod-002
+    description: "The exporter constructor receives <endpoint>/v1/traces for four endpoint forms; a real dispatch span reaches an HTTP receiver through the production batch exporter."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_tracing_exporter_path.py tests/integration/runtime/test_dispatch_tracing_http_omn22097.py -q -p no:cacheprovider
+  - id: dod-003
+    description: "One span per dispatch with topic, category, success and duration_ms; a raising dispatch records the error; no span with no TracerProvider."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_dispatch_engine_span.py -q -p no:cacheprovider
+  - id: dod-004
+    description: "The files this change adds or edits name no private LAN address (10.x, 172.16-31.x, 192.168.x)."
+    source: generated
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_tracing_exporter_path.py::TestNoLanAddressInChangedFiles -q -p no:cacheprovider
+  - id: dod-005
+    description: "The false comment is gone from tracing.py."
+    source: generated
+    binds_ac: [AC6]
+    checks:
+      - check_type: command
+        check_value: '! grep -q "appends /v1/traces automatically" src/omnibase_infra/runtime/tracing.py'
+  - id: dod-deploy
+    description: "Deploy probe: model_otlp_traces_endpoint.py on the PR branch (read from GitHub by branch name), the model tracing.py builds the exporter URL with, carries the /v1/traces suffix."
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/observability/model_otlp_traces_endpoint.py?ref=omn-22097-phoenix-dispatch-spans" | grep -Fq "/v1/traces"'
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_dispatch_tracing_http_omn22097.py -q -p no:cacheprovider

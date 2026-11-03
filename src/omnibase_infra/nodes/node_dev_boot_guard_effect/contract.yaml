@@ -4,10 +4,13 @@ name: node_dev_boot_guard_effect
 contract_name: node_dev_boot_guard_effect
 node_name: node_dev_boot_guard_effect
 node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
 runtime_profiles: [main]
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
-description: Dev-only host boot supervision; invoked locally by the deploy agent outside the runtime it recovers.
+description: >-
+  Dev-only host boot supervision outside the runtime it recovers. Fold retirement and compose activation use runtime policy values; a retained image is restored only under the same folded-profile generation. Cross-generation rollback is by revision.
 input_model:
   name: ModelDevBootRequest
   module: omnibase_infra.models.model_dev_boot_request

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -529,8 +530,13 @@ def test_capture_resolves_dev_effects_by_compose_labels(
 def test_capture_folded_effects_resolves_the_main_service(
     monkeypatch: pytest.MonkeyPatch, command_runner: Mock
 ) -> None:
+    # Only the lab proof lane folds effects; primary dev's fold is its own overlay's.
     monkeypatch.setattr(
-        executor_mod, "lane_folded_profiles", lambda lane: frozenset({"effects"})
+        executor_mod,
+        "lane_folded_profiles",
+        lambda lane: frozenset({"effects"})
+        if lane is EnumRuntimeLane.STABILITY_TEST
+        else frozenset(),
     )
     executor = DeployExecutor()
     monkeypatch.setattr(
@@ -588,3 +594,90 @@ def test_compose_restore_recovery_also_never_builds_or_pulls(
     argv = recovery.call_args.args[0]
     assert "--no-build" in argv
     assert argv[argv.index("--pull") + 1] == "never"
+
+
+def _plant_boot_good_snapshot(
+    state_dir: Path, *, folded_profiles: tuple[str, ...]
+) -> None:
+    """Store the last boot-good dev family as an earlier deploy captured it."""
+    project = executor_mod.lane_config_for(EnumRuntimeLane.DEV).compose_project
+    root = state_dir / "dev-boot-guard" / project
+    root.mkdir(parents=True)
+    (root / "last-healthy.json").write_text(
+        json.dumps(
+            {
+                "project": project,
+                "revision": "a" * 40,
+                "container_ids": ["c1"],
+                "images": {"runtime:latest": _IMAGE_ID},
+                "compose": {"name": project, "services": {}},
+                "folded_profiles": list(folded_profiles),
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize("planted_generation", ["pre-fold", "same-fold"])
+def test_agent_refuses_planted_pre_fold_boot_good_image_before_replacing_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, planted_generation: str
+) -> None:
+    """OMN-22294 AC4: an image older than the fold is never run under the fold overlay.
+
+    The live family is down, so the only candidate the boot guard has is the
+    planted boot-good snapshot, and it predates the five-writer fold. The agent
+    must refuse before it pulls, builds or recreates anything; the way back is a
+    rollback by revision (the image and the overlay together). The same-fold
+    parameter is the positive control: a snapshot of the overlay's own fold
+    generation is held and the deploy goes ahead.
+    """
+    repo_policy = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
+    policy = executor_mod._load_dotenv_file(repo_policy)
+    assert (
+        "projection-registration-writer" in policy["DEV_RUNTIME_MAIN_FOLDABLE_SERVICES"]
+    )
+    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", repo_policy)
+    monkeypatch.setattr(executor_mod, "_load_runtime_policy_env", lambda: policy)
+    cmd = ModelRebuildRequested(
+        correlation_id=uuid4(),
+        requested_by="test",
+        scope=Scope.RUNTIME,
+        runtime_lane=EnumRuntimeLane.DEV,
+    )
+    agent, executor = _agent(tmp_path, monkeypatch, cmd)
+    pre_fold = planted_generation == "pre-fold"
+    _plant_boot_good_snapshot(
+        tmp_path / "agent-state",
+        folded_profiles=()
+        if pre_fold
+        else tuple(sorted(executor_mod.lane_folded_profiles(EnumRuntimeLane.DEV))),
+    )
+    commands: list[list[str]] = []
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(executor_mod, "_run", run)
+    monkeypatch.setattr(
+        agent_mod,
+        "DevBootGuard",
+        lambda _executor, state_dir: executor_mod.DevBootGuard(
+            DeployExecutor(), state_dir
+        ),
+    )
+    agent._run_deploy(cmd)
+    job = agent.job_store.load(cmd.correlation_id)
+    assert job is not None
+    if not pre_fold:
+        # The bare command double starts no containers, so the deploy itself
+        # still fails; what matters is that the snapshot was accepted and the
+        # deploy proceeded past the pairing check.
+        assert "pair its image" not in " ".join(job.errors)
+        executor.git_pull.assert_called_once()
+        executor.rebuild_scope.assert_called_once()
+        return
+    assert job.status == "failed"
+    assert "pair its image" in " ".join(job.errors)
+    executor.git_pull.assert_not_called()
+    executor.rebuild_scope.assert_not_called()
+    assert not any("up" in argv or argv[:2] == ["docker", "tag"] for argv in commands)
