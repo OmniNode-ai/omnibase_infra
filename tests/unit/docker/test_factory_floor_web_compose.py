@@ -58,15 +58,25 @@ def _service() -> dict[str, Any]:
 
 
 def _compose_config(
-    env_values: dict[str, str], *extra: str
+    env_values: dict[str, str], *extra: str, compose: Path = COMPOSE
 ) -> subprocess.CompletedProcess[str]:
     # The ambient environment stays (the container tooling needs its own wiring to run at all); only the
-    # three deployment values are replaced, so one set in the caller's shell can never satisfy a refusal test.
+    # four deployment values are replaced, so one set in the caller's shell can never satisfy a refusal test.
+    # --env-file os.devnull stops Compose reading a .env beside the compose file, so a stray one cannot either.
     env = {k: v for k, v in os.environ.items() if k not in REQUIRED}
     env.update(env_values)
     try:
         return subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE), "config", *extra],
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                os.devnull,
+                "-f",
+                str(compose),
+                "config",
+                *extra,
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -224,7 +234,7 @@ def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
     ]
 
 
-def test_nginx_locations_declare_no_add_header_at_any_depth() -> None:
+def test_nginx_locations_declare_no_add_header_except_the_decision_map() -> None:
     server = _server()
     locations = _children(server, "location")
     assert [loc[0][1:] for loc in locations] == [
@@ -232,15 +242,61 @@ def test_nginx_locations_declare_no_add_header_at_any_depth() -> None:
         ["=", "/healthz"],
         ["~", "^/reports/decision-quality(?:/|$)"],
         ["/"],
+        ["/reports/decision-map/"],
     ]
-    for location in locations:
+    for location in locations[:3]:
         names = [s[0][0] for s in _walk(_body(location))]
         assert "add_header" not in names, location[0]
-    dotfiles, health, _, _ = locations
+    dotfiles, health, _, _, decision_map = locations
     assert [s[0] for s in _body(dotfiles)] == [["return", "404"]]
     health_names = [s[0][0] for s in _body(health)]
     assert ["return", "200", '"ok\\n"'] in [s[0] for s in _body(health)]
     assert "try_files" not in health_names
+    # A location that declares add_header drops every server-level header, so the decision map repeats all of
+    # them: a header added at server level without a copy here fails this test instead of vanishing silently.
+    repeated = [s[0][1] for s in _children(_body(decision_map), "add_header")]
+    assert repeated == [s[0][1] for s in _children(server, "add_header")]
+    assert repeated == [
+        "Cache-Control",
+        "X-Content-Type-Options",
+        "Content-Security-Policy",
+    ]
+
+
+def _location_block(conf: str, header: str) -> str:
+    start = conf.index(header)
+    depth = 0
+    for index in range(conf.index("{", start), len(conf)):
+        depth += {"{": 1, "}": -1}.get(conf[index], 0)
+        if depth == 0:
+            return conf[start : index + 1]
+    raise AssertionError(f"unterminated block {header}")
+
+
+def test_only_the_decision_map_directory_may_load_two_pinned_cdn_scripts() -> None:
+    conf = NGINX.read_text(encoding="utf-8")
+    cdn = "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"
+    elk = "https://cdn.jsdelivr.net/npm/elkjs@0.9.2/lib/elk.bundled.js"
+    policies = re.findall(r'Content-Security-Policy "([^"]+)"', conf)
+    assert len(policies) == 2
+    default, scoped = policies
+    assert "http" not in default
+    assert f"script-src 'self' 'unsafe-inline' {cdn} {elk};" in scoped
+    # Exactly the two pinned URLs appear as origins, however the policy is spaced or ordered.
+    assert re.findall(r"https?://\S+?(?=[;\s]|$)", scoped) == [cdn, elk]
+    assert "://" not in default
+    block = _location_block(conf, "location /reports/decision-map/ {")
+    assert scoped in block
+    assert "limit_except GET HEAD" in block
+    assert 'Cache-Control "no-store"' in block
+    assert 'X-Content-Type-Options "nosniff"' in block
+    # A regex location wins over a plain prefix only unless the prefix is `^~`, so the directory stays under
+    # the dot-file rule while its location has no modifier. Read from the parsed tree, not raw text.
+    locations = _children(_server(), "location")
+    (directory,) = [loc for loc in locations if loc[0][-1] == "/reports/decision-map/"]
+    assert directory[0] == ["location", "/reports/decision-map/"]
+    (dotfiles,) = [loc for loc in locations if loc[0][1:] == ["~", "/\\."]]
+    assert [s[0] for s in _body(dotfiles)] == [["return", "404"]]
 
 
 def test_nginx_parser_sees_a_header_hidden_after_a_nested_block() -> None:
@@ -263,6 +319,24 @@ def test_compose_refuses_to_render_when_a_required_value_is_missing(
     assert (
         f"required variable {missing} is missing a value: set {missing}" in done.stderr
     )
+
+
+def test_compose_refusal_ignores_a_dotenv_beside_the_compose_file(
+    tmp_path: Path,
+) -> None:
+    copy = tmp_path / COMPOSE.name
+    copy.write_text(COMPOSE.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "".join(f"{k}={v}\n" for k, v in RENDER_ENV.items()), encoding="utf-8"
+    )
+    done = _compose_config({}, compose=copy)
+    assert done.returncode != 0, done.stdout
+    # Compose reports whichever missing value it interpolates first, so any of the four proves the .env
+    # beside the compose file did not satisfy the refusal.
+    assert any(
+        f"required variable {name} is missing a value" in done.stderr
+        for name in REQUIRED
+    ), done.stderr
 
 
 def test_compose_renders_one_published_port_on_the_given_address() -> None:
