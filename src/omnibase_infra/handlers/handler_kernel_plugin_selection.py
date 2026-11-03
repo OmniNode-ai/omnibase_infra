@@ -37,6 +37,7 @@ from omnibase_infra.models.node_announce.model_kernel_plugin_selection_result im
 from omnibase_infra.models.node_announce.model_selected_kernel_plugin import (
     ModelSelectedKernelPlugin,
 )
+from omnibase_infra.runtime.protocol_domain_plugin import ProtocolDomainPlugin
 
 
 class KernelPluginNotAnnouncedError(RuntimeHostError):
@@ -69,15 +70,24 @@ class KernelPluginNotAnnouncedError(RuntimeHostError):
         )
 
 
-def load_kernel_plugin(selected: ModelSelectedKernelPlugin) -> object:
-    """Import and instantiate one selected plugin from its announced ``module:attribute``."""
+def load_kernel_plugin(selected: ModelSelectedKernelPlugin) -> ProtocolDomainPlugin:
+    """Import and instantiate one selected plugin from its announced ``module:attribute``.
+
+    The instance must satisfy ``ProtocolDomainPlugin``, as discovery's post-import check
+    requires of every plugin it accepts.
+    """
     module_name, _, attribute = selected.target.partition(":")
     target: object = import_module(module_name)
     for part in attribute.split("."):
         target = getattr(target, part)
     if not callable(target):
         raise TypeError(f"Kernel plugin target {selected.target!r} is not callable")
-    return target()
+    plugin = target()
+    if not isinstance(plugin, ProtocolDomainPlugin):
+        raise TypeError(
+            f"Kernel plugin {selected.name!r} does not satisfy ProtocolDomainPlugin"
+        )
+    return plugin
 
 
 class HandlerKernelPluginSelection:

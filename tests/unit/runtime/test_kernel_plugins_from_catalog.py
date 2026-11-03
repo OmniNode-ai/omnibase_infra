@@ -37,6 +37,7 @@ from omnibase_infra.models.runtime.model_runtime_kernel_plugins import (
     ENV_RUNTIME_KERNEL_PLUGINS,
     ModelRuntimeKernelPlugins,
 )
+from tests.unit.runtime.test_domain_plugin_discovery_seam import PluginSmoke
 
 pytestmark = pytest.mark.unit
 
@@ -47,11 +48,11 @@ _PLUGIN_NAMES = ("delegation", "intelligence")
 _DIST = {"delegation": "omnimarket", "intelligence": "omniintelligence"}
 
 
-class FixturePluginDelegation:
+class FixturePluginDelegation(PluginSmoke):
     """Stands in for the delegation plugin class."""
 
 
-class FixturePluginIntelligence:
+class FixturePluginIntelligence(PluginSmoke):
     """Stands in for the intelligence plugin class."""
 
 
