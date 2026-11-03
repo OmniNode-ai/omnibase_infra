@@ -23,6 +23,13 @@ requirements:
       - id: AC2
         statement: >-
           AC2: the PR's acceptance items live in contracts/OMN-21698.yaml and the PR does not edit contracts/OMN-21536.yaml -- falsifier: git diff --stat origin/dev...HEAD on the PR head lists contracts/OMN-21698.yaml and not contracts/OMN-21536.yaml
+  - id: req-omn21698-runtime-build-acl
+    statement: >-
+      The runtime migration corpus revokes undeclared omninode_runtime privileges inherited by the five work-question tables, with a checksum-bound successor and a fail-closed ACL readback.
+    acceptance:
+      - id: AC3
+        statement: >-
+          AC3: the successor revokes only the five work-question tables, asserts that direct runtime grants are absent, and carries the exact content hash and forward-only migration class; PostgreSQL readback verifies the revoke, its idempotency and non-grantor refusal.
 evidence_requirements:
   - kind: tests
     description: The registration orchestrator handlers and the dispatch callback use the typed request.
@@ -33,6 +40,27 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn21698-runtime-acl-successor
+    description: >-
+      Hosted-runner check of the deployed migration artifact: its revoke targets exactly the five tables and runtime role, includes a fail-closed catalog readback, and matches its manifest hash and migration class. Missing or incorrectly scoped SQL fails the check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/migrations/test_omn22320_work_questions_vendor.py -k acl_successor -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21698-runtime-acl-postgres-readback
+    description: >-
+      Lab PostgreSQL readback checks inherited grants, scope, repeated application and refusal when the migration runner cannot revoke. Requires native PostgreSQL tools or the disposable PostgreSQL test backend.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_work_questions_acl_omn21698.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
   - id: dod-omn21698-ac3-handlers-typed-request
     description: >-
       The six registration orchestrator handlers and their dispatchers use ModelInjectedRequest.
