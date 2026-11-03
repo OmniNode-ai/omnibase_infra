@@ -259,15 +259,30 @@ def _resolve_base_sha(repo_root: Path, base_ref: str) -> str:
     base ref; offline is tolerated only when it already resolves locally; an
     entirely unresolvable base HARD-ERRORS rather than diffing against nothing.
     """
-    git = ["git", "-C", str(repo_root)]
     subprocess.run(
-        [*git, "fetch", "--quiet", "origin", base_ref.removeprefix("origin/")],
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "fetch",
+            "--quiet",
+            "origin",
+            base_ref.removeprefix("origin/"),
+        ],
         check=False,
         capture_output=True,
         text=True,
     )
     verify = subprocess.run(
-        [*git, "rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}"],
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{base_ref}^{{commit}}",
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -451,8 +466,7 @@ _CITED_TICKET_RE = re.compile(r"OMN-[0-9]+")
 _VERIFIER_TAG_RE = re.compile(r"dev-[0-9]{14}-[0-9a-f]{12}")
 #: The repository the hosted reusable fetches the verifier source from.
 _VERIFIER_REPO = "OmniNode-ai/omnimarket"
-_HEAVY_LOCK = str(Path(__file__).resolve().parents[1] / "heavy_lock.py")
-_VERIFIER_INSTALL_SCRIPT = '''set -euo pipefail; [[ -f "$2/installed" ]] && exit 0; rm -rf "$2"; git init -q "$2/src"; git -C "$2/src" fetch -q --depth 1 --no-tags "https://github.com/$VERIFIER_REPO.git" "refs/tags/$1"; commit="$(git -C "$2/src" rev-parse --verify "FETCH_HEAD^{commit}")"; [[ "$commit" == "${1##*-}"* ]] || { echo "tag $1 names commit $commit, whose first 12 characters differ from the tag suffix; the tag was moved, refusing it" >&2; exit 1; }; git -C "$2/src" checkout -q --detach "$commit"; uv venv -q --clear --python 3.13 "$2/venv"; UV_PROJECT_ENVIRONMENT="$2/venv" uv sync -q --project "$2/src" --frozen --no-dev --no-editable --no-config --python 3.13; echo "tag=$1 commit=$commit" > "$2/installed"'''
+_VERIFIER_INSTALL_SCRIPT = '''set -euo pipefail; mkdir -p "$(dirname "$2")"; exec 9>"$2.lock"; flock 9; [[ -f "$2/installed" ]] && exit 0; rm -rf "$2"; git init -q "$2/src"; git -C "$2/src" fetch -q --depth 1 --no-tags "https://github.com/$VERIFIER_REPO.git" "refs/tags/$1"; commit="$(git -C "$2/src" rev-parse --verify "FETCH_HEAD^{commit}")"; [[ "$commit" == "${1##*-}"* ]] || { echo "tag $1 names commit $commit, whose first 12 characters differ from the tag suffix; the tag was moved, refusing it" >&2; exit 1; }; git -C "$2/src" checkout -q --detach "$commit"; uv venv -q --clear --python 3.13 "$2/venv"; UV_PROJECT_ENVIRONMENT="$2/venv" uv sync -q --project "$2/src" --frozen --no-dev --no-editable --no-config --python 3.13; echo "tag=$1 commit=$commit" > "$2/installed"'''
 #: Runs inside the released verifier's environment: reads a JSON map of
 #: ticket to contract text on stdin and writes ``contract_prerequisite``'s
 #: refusal (or null) for each, the call ``onex scm pr-create`` makes.
@@ -593,24 +607,26 @@ def read_verifier_tag(repo_root: Path) -> str:
 
 
 def install_verifier(tag: str) -> Path:
-    # The Python of a venv installed from omnimarket tag ``tag``'s own uv.lock, as the
-    # hosted reusable does (a plain git install cannot resolve the unreleased first-party
-    # tags it pins), once per tag under heavy_lock.py's fcntl.flock(2) lock: macOS has no
-    # flock(1) (OMN-21913). Imported here so the other legs run without omnibase_core.
+    # The Python of a venv installed from omnimarket tag ``tag``'s own uv.lock. The
+    # hosted reusable refuses a moved tag and syncs the tag's lock (a plain install of
+    # the git commit cannot resolve the unreleased first-party tags it pins); this
+    # does the same once per tag, under a file lock.
+    # Imported here, not at module load, so the deploy-scope leg and the other legs of
+    # this hook run without omnibase_core importable; only the tag install needs it.
     from omnibase_core.validators.no_unguarded_git_subprocess import (
         scrub_git_location_env,
     )
 
-    cache = Path(os.environ.get("XDG_CACHE_HOME") or "~/.cache").expanduser()
-    entry = cache / "onex-dod-verifier" / tag
+    cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    entry = Path(cache) / "onex-dod-verifier" / tag
     env = {**scrub_git_location_env(os.environ), "VERIFIER_REPO": _VERIFIER_REPO}
-    lock = [sys.executable, _HEAVY_LOCK, f"--lock={entry}.lock", "--max-hold=15m", "--"]
     done = subprocess.run(
-        [*lock, "bash", "-c", _VERIFIER_INSTALL_SCRIPT, "install", tag, str(entry)],
+        ["bash", "-c", _VERIFIER_INSTALL_SCRIPT, "install", tag, str(entry)],
         check=False,
         capture_output=True,
         text=True,
         env=env,
+        timeout=900,
     )
     if done.returncode != 0:
         raise DeployScopeHookError(
