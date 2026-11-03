@@ -60,3 +60,11 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/test_kernel_plugin_overlay_key_omn21591.py -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn21591-local-image-plugins
+    description: "The laptop and mirror bundles select no external kernel plugin from the infra-only image; local-market selects delegation from its composed image. A shared policy requirement leaking into the laptop render fails this hosted deploy check."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel_plugins_local_profile_omn21591.py -q --no-cov -o addopts=''"
