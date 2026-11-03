@@ -16,21 +16,21 @@ requirements:
         statement: "AC2: the unit-test suite of omnibase_infra passes on the lab at the PR head with the new spi, and nothing outside the pin files, the lock and the matrix changes -- falsifier: onex lab-run of uv run pytest tests/unit -m unit -q at the pushed head, exit 0"
 evidence_requirements:
   - kind: tests
-    description: "The lock, the version-matrix fallback and the pin tests agree on omnibase-spi 0.23.11."
+    description: "The lock, the version-matrix fallback and the pin tests agree on omnibase-spi 0.23.12."
     command: "uv lock --check && uv run python scripts/update_version_matrix.py --check && uv run pytest tests/unit/runtime/test_version_compatibility.py -q -p no:cacheprovider"
   - kind: manual
-    description: "Deploy check: the landing branch's version-matrix fallback requires omnibase-spi 0.23.11."
-    command: "deploy: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/version_compatibility.py?ref=dev' --jq .content | base64 -d | grep -q 'min_version=\"0.23.11\"'"
+    description: "Deploy check: the landing branch's version-matrix fallback requires omnibase-spi 0.23.12."
+    command: "deploy: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/version_compatibility.py?ref=dev' --jq .content | base64 -d | grep -q 'min_version=\"0.23.12\"'"
 dod_evidence:
   - id: dod-001
-    description: "pyproject.toml carries omnibase-spi==0.23.11 in both places, uv.lock resolves it, the version-matrix fallback is current, and the CI pin tests pass."
+    description: "pyproject.toml carries omnibase-spi in a range that admits 0.23.12 in both places, uv.lock resolves it, the version-matrix fallback is current, and the CI pin tests pass."
     source: generated
     binds_ac: [AC1]
     checks:
       - check_type: command
         check_value: 'uv lock --check && uv run python scripts/update_version_matrix.py --check && uv run pytest tests/ci -k pin -q -p no:cacheprovider'
       - check_type: command
-        check_value: 'uv run python -c "import importlib.metadata as m; v = m.version(\"omnibase-spi\"); assert v == \"0.23.11\", v"'
+        check_value: 'uv run python -c "import importlib.metadata as m; v = m.version(\"omnibase-spi\"); assert v == \"0.23.12\", v"'
   - id: dod-002
     description: "The unit suite passes at the PR head with the new omnibase-spi (run on the lab through onex lab-run; the PR body Lab line carries host, sha and exit code)."
     source: generated
@@ -39,9 +39,9 @@ dod_evidence:
       - check_type: command
         check_value: 'uv run pytest tests/unit -m unit -q -p no:cacheprovider'
   - id: dod-003
-    description: "Deploy-scope readback, bound to no criterion: the landing branch's runtime version-matrix fallback requires omnibase-spi 0.23.11; read through the GitHub contents API on dev, it exits non-zero until this change has merged. A hosted runner can run it."
+    description: "Deploy-scope readback, bound to no criterion: the landing branch's runtime version-matrix fallback requires omnibase-spi 0.23.12; read through the GitHub contents API on dev, it exits non-zero until this change has merged. A hosted runner can run it."
     source: manual
     checks:
       - check_type: command
         check_value: >-
-          gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/version_compatibility.py?ref=dev' --jq .content | base64 -d | grep -q 'min_version="0.23.11"'
+          gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/version_compatibility.py?ref=dev' --jq .content | base64 -d | grep -q 'min_version="0.23.12"'
