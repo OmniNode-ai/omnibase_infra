@@ -13,7 +13,7 @@ Architecture:
     Follows the same stateless, coroutine-safe pattern as
     ``handler_node_introspected.py``:
 
-    1. Extract payload from envelope
+    1. Extract payload from the request
     2. Delegate I/O to injected ``ServiceTopicCatalog``
     3. Return ``ModelHandlerOutput`` with a single ``ModelTopicCatalogResponse``
        event regardless of success or partial failure
@@ -49,7 +49,6 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -63,6 +62,9 @@ from omnibase_infra.models.catalog.model_topic_catalog_query import (
 )
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
+)
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
 )
 from omnibase_infra.services.protocol_topic_catalog_service import (
     ProtocolTopicCatalogService,
@@ -99,7 +101,7 @@ class HandlerTopicCatalogQuery:
     Example:
         >>> pg_handler = HandlerTopicCatalogPostgres(container=container, pool=pool)
         >>> handler = HandlerTopicCatalogQuery(catalog_service=pg_handler)
-        >>> output = await handler.handle(envelope)
+        >>> output = await handler.handle(request)
         >>> assert len(output.events) == 1
         >>> response = output.events[0]
         >>> isinstance(response, ModelTopicCatalogResponse)
@@ -163,7 +165,7 @@ class HandlerTopicCatalogQuery:
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[ModelTopicCatalogQuery],
+        request: ModelInjectedRequest[ModelTopicCatalogQuery],
     ) -> ModelHandlerOutput[object]:
         """Process a topic catalog query and return a catalog response.
 
@@ -173,19 +175,20 @@ class HandlerTopicCatalogQuery:
         ``warnings`` field.
 
         Args:
-            envelope: Event envelope containing ``ModelTopicCatalogQuery`` payload.
+            request: Injected request carrying the ``ModelTopicCatalogQuery``,
+                the runtime's clock reading, the input id and the correlation id.
 
         Returns:
             ``ModelHandlerOutput`` with exactly one event:
             ``ModelTopicCatalogResponse``. The response may contain warnings
             for partial-success scenarios (Consul unavailable, timeout, etc.).
         """
-        start_time = time.perf_counter()
-        now: datetime = envelope.envelope_timestamp
-        correlation_id: UUID = envelope.correlation_id or uuid4()
+        start_time = request.clock.monotonic()
+        now: datetime = request.now
+        correlation_id: UUID = request.correlation_id or uuid4()
 
         # Validate payload - always respond, never fail silently
-        payload = envelope.payload
+        payload = request.event
         if not isinstance(payload, ModelTopicCatalogQuery):
             logger.warning(
                 "HandlerTopicCatalogQuery received unexpected payload type: %s",
@@ -194,11 +197,12 @@ class HandlerTopicCatalogQuery:
             )
             empty_response = self._empty_response(
                 correlation_id=correlation_id,
+                generated_at=now,
                 warnings=(INVALID_QUERY_PAYLOAD,),
             )
-            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            processing_time_ms = (request.clock.monotonic() - start_time) * 1000
             return ModelHandlerOutput(
-                input_envelope_id=envelope.envelope_id,
+                input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
                 handler_id=self.handler_id,
                 node_kind=self.node_kind,
@@ -230,6 +234,7 @@ class HandlerTopicCatalogQuery:
             )
             catalog_response = self._empty_response(
                 correlation_id=correlation_id,
+                generated_at=now,
                 warnings=(INTERNAL_ERROR,),
             )
         else:
@@ -247,6 +252,7 @@ class HandlerTopicCatalogQuery:
                 )
                 catalog_response = self._empty_response(
                     correlation_id=correlation_id,
+                    generated_at=now,
                     warnings=(INTERNAL_ERROR,),
                 )
 
@@ -270,9 +276,9 @@ class HandlerTopicCatalogQuery:
                 },
             )
 
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        processing_time_ms = (request.clock.monotonic() - start_time) * 1000
         return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
+            input_envelope_id=request.input_id,
             correlation_id=correlation_id,
             handler_id=self.handler_id,
             node_kind=self.node_kind,
@@ -287,12 +293,14 @@ class HandlerTopicCatalogQuery:
     def _empty_response(
         self,
         correlation_id: UUID,
+        generated_at: datetime,
         warnings: tuple[str, ...],
     ) -> ModelTopicCatalogResponse:
         """Build an empty catalog response for error conditions.
 
         Args:
             correlation_id: Correlation ID to embed in the response.
+            generated_at: Generation timestamp, the injected request time.
             warnings: Warning tokens describing the error condition.
 
         Returns:
@@ -307,7 +315,7 @@ class HandlerTopicCatalogQuery:
             topics=(),
             catalog_version=0,
             node_count=0,
-            generated_at=datetime.now(UTC),
+            generated_at=generated_at,
             warnings=warnings,
         )
 

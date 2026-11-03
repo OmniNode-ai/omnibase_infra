@@ -262,69 +262,24 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # PR and the contract declares the same four relations; removing them
     # then is the follow-up, and leaving them is inert rather than wrong --
     # the derivation is idempotent per relation.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_model_routing",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_model_routing",
-            database_ref="application",
-            schema="public",
-            migration=(
+    *(
+        ContractTableDeclaration(
+            node=f"legacy_migration:projection_delegation_{aggregate}",
+            contract_path=Path(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
-            access="read",
-            role="aggregate_model_routing",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_quality_gate",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_quality_gate",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+            table=ModelDbTableDeclaration(
+                name=f"projection_delegation_{aggregate}",
+                database_ref="application",
+                schema="public",
+                migration=(
+                    "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
+                ),
+                access="read",
+                role=f"aggregate_{aggregate}",
             ),
-            access="read",
-            role="aggregate_quality_gate",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_summary",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_summary",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_summary",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_token_usage",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_token_usage",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_token_usage",
-        ),
+        )
+        for aggregate in ("model_routing", "quality_gate", "summary", "token_usage")
     ),
     # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
     # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
