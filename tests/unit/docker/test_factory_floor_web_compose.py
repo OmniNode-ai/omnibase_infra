@@ -220,7 +220,7 @@ def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
     assert directives["connect-src"] == ["'self'"]
     assert directives["form-action"] == ["'none'"]
     assert directives["base-uri"] == ["'none'"]
-    assert directives["frame-ancestors"] == ["'none'"]
+    assert directives["frame-ancestors"] == ["'self'"]
     assert directives["object-src"] == ["'none'"]
     top = _parse_nginx(NGINX.read_text(encoding="utf-8"))
     (http,) = _children(top, "http")
@@ -598,7 +598,7 @@ def test_running_nginx_sends_the_security_headers_on_every_response(
     assert headers["cache-control"] == "no-store"
     assert headers["x-content-type-options"] == "nosniff"
     assert "default-src 'self'" in headers["content-security-policy"]
-    assert "frame-ancestors 'none'" in headers["content-security-policy"]
+    assert "frame-ancestors 'self'" in headers["content-security-policy"]
 
 
 def test_running_nginx_serves_the_record_and_answers_health_without_a_page(
