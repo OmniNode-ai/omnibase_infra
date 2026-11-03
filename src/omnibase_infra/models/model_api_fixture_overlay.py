@@ -19,7 +19,9 @@ class ModelApiFixtureOverlay(BaseModel):
     target_kind: Literal["dev", "throwaway_slot"]
     sanctioned: bool = False
     targets: dict[str, str]
-    scope_prefix: str = Field(pattern=r"^fixture-[a-z0-9-]{8,64}$")
+    # Ticket-scoped throwaway name, the shape the target's throwaway-account
+    # reaper matches, so a resource left by a failed cleanup is still reaped.
+    scope_prefix: str = Field(pattern=r"^omn\d{4,6}-[a-z0-9][a-z0-9-]{7,63}$")
     private_output_directory: str = Field(min_length=1)
     routes: tuple[ModelApiFixtureRoute, ...]
     counts: tuple[ModelApiFixtureCountProbe, ...]

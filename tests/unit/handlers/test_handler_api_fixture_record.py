@@ -62,7 +62,7 @@ def recording(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "fail_seed": False,
         "tenant_id": str(uuid4()),
         "request_tenant_id": "",
-        "scope": "fixture-" + uuid4().hex,
+        "scope": "omn22158-fixture-" + uuid4().hex,
     }
 
     class Server(BaseHTTPRequestHandler):
@@ -643,3 +643,19 @@ def test_independent_acceptance_probes_and_their_failure_controls(
         probes["test_ac1_recorded_identities_equal_inventory"]()
     with pytest.raises(AssertionError, match="empty recorded set"):
         probes["test_ac2_named_masks_and_mutation_cleanup"]()
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["fixture-" + "a" * 12, "omn22158-", "OMN22158-fixture-abc", "tenant-omn22158-x"],
+)
+def test_scope_prefix_must_be_a_reaper_covered_throwaway_name(
+    recording, prefix: str
+) -> None:
+    """A scope the throwaway reaper would not match is refused before any call."""
+    recording["overlay"]["scope_prefix"] = prefix
+    before = len(recording["state"]["calls"])
+    result = run_capture(recording)
+    assert not result.success
+    assert result.error_code == "recording_precondition_failed"
+    assert len(recording["state"]["calls"]) == before
