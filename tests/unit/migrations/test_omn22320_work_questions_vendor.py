@@ -19,6 +19,8 @@ _NODE = "node_projection_work_questions"
 _VENDOR = _FORWARD / "nodes" / _NODE
 _CREATE = "0000_create_work_questions.sql"
 _SHA256 = "c821731806d2d088cb9755b38b68cafdf9127ce1902d96b9d77c5aa0317a71db"
+_GRANT = "0001_grant_omninode_runtime_work_questions.sql"
+_GRANT_SHA256 = "55126856fcfc18fde60f866a2c6e8baec08e994c97e4d8450abd6231d78f9644"
 _TABLES = (
     "work_outcome_units",
     "orchestration_style_outcomes",
@@ -35,14 +37,17 @@ def _sql() -> str:
     )
 
 
-def test_only_the_create_file_is_vendored() -> None:
-    assert sorted(path.name for path in _VENDOR.glob("*")) == [_CREATE]
+def test_only_the_create_and_grant_files_are_vendored() -> None:
+    assert sorted(path.name for path in _VENDOR.glob("*")) == [_CREATE, _GRANT]
 
 
-def test_vendor_bytes_and_manifest_binding_are_exact() -> None:
-    path = _VENDOR / _CREATE
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == _SHA256
-    artifact = f"nodes/{_NODE}/{_CREATE}"
+@pytest.mark.parametrize(
+    ("name", "sha256"), [(_CREATE, _SHA256), (_GRANT, _GRANT_SHA256)]
+)
+def test_vendor_bytes_and_manifest_binding_are_exact(name: str, sha256: str) -> None:
+    path = _VENDOR / name
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == sha256
+    artifact = f"nodes/{_NODE}/{name}"
     rows = [
         row.split("\t")
         for row in (_FORWARD / "_ledger" / "application-migrations.tsv")
@@ -56,8 +61,8 @@ def test_vendor_bytes_and_manifest_binding_are_exact() -> None:
             f"node:{_NODE}",
             f"node:{_NODE}",
             "omninode_internal",
-            f"node:{_NODE}:{_CREATE}",
-            _SHA256,
+            f"node:{_NODE}:{name}",
+            sha256,
         ]
     ]
 
@@ -67,6 +72,17 @@ def test_migration_class_is_forward_only() -> None:
         (_ROOT / "config" / "migration_classes.yaml").read_text(encoding="utf-8")
     )["migrations"]
     assert classes[f"forward/nodes/{_NODE}/{_CREATE}"] == "forward-only"
+    assert classes[f"forward/nodes/{_NODE}/{_GRANT}"] == "expand-only"
+
+
+def test_grant_confers_exactly_select_insert_update_on_the_five_tables() -> None:
+    text = (_VENDOR / _GRANT).read_text(encoding="utf-8")
+    grants = re.findall(
+        r"GRANT SELECT, INSERT, UPDATE\s+ON omninode_internal\.(\w+)\s+TO omninode_runtime;",
+        text,
+    )
+    assert grants == list(_TABLES)
+    assert not re.search(r"\b(DELETE|TRUNCATE|REVOKE|DROP)\b", text.split("\n\n", 1)[1])
 
 
 def test_creates_exactly_the_five_tables() -> None:
