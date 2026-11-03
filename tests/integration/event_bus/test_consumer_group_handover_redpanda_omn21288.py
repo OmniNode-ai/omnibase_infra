@@ -296,3 +296,50 @@ async def test_without_declaration_the_window_is_lost_on_redpanda(
 
     assert sorted(container) == ["before-0", "before-1", "before-2"]
     assert sorted(runtime) == ["after-0", "after-1"]
+
+
+@pytest.mark.asyncio
+async def test_literal_from_group_id_resumes_the_retired_offsets_on_redpanda(
+    tmp_path: Path, bootstrap: str, topic: str, bus: EventBusKafka
+) -> None:
+    """OMN-21932: the literal group, not the derived group, owns the backlog."""
+    _projected.clear()
+    environment = f"omn21932-{uuid.uuid4().hex[:8]}"
+    retired_group = f"agent-observability-postgres-{uuid.uuid4().hex[:8]}"
+    declaration = DECLARATION + f"  from_group_id: {retired_group}\n"
+
+    before = [(0, "before-0"), (0, "before-1"), (1, "before-2")]
+    await _publish(bootstrap, topic, before)
+    container = await _retired_container(bootstrap, topic, retired_group, len(before))
+    await _publish(
+        bootstrap, topic, [(0, "window-0"), (1, "window-1"), (2, "window-2")]
+    )
+
+    engine = MessageDispatchEngine()
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+        return_value=_ProjectionWriter,
+    ):
+        await wire_from_manifest(
+            ModelAutoWiringManifest(
+                contracts=(_contract(tmp_path, topic, declaration=declaration),)
+            ),
+            engine,
+            event_bus=bus,
+            environment=environment,
+        )
+    engine.freeze()
+
+    await _publish(bootstrap, topic, [(0, "after-0"), (2, "after-1")])
+    async with asyncio.timeout(60):
+        while "after-0" not in _projected or "after-1" not in _projected:
+            await asyncio.sleep(0.2)
+    await asyncio.sleep(3.0)
+
+    assert sorted(container) == ["before-0", "before-1", "before-2"]
+    assert sorted(_projected) == sorted(
+        ["window-0", "window-1", "window-2", "after-0", "after-1"]
+    )
+    every = Counter(container + _projected)
+    assert set(every.values()) == {1}, every
+    assert len(every) == 8

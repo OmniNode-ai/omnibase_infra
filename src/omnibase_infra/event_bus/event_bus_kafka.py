@@ -288,6 +288,11 @@ from omnibase_infra.handlers.kafka_permanent_failure import (
     classify_permanent_kafka_failure,
     kafka_failure_types,
 )
+from omnibase_infra.handlers.kafka_publish_headers import headers_for_unheadered_publish
+from omnibase_infra.handlers.kafka_transactional_producer import (
+    KafkaTransactionalProducer,
+    open_kafka_transactional_producer,
+)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus.model_kafka_ungrouped_reader import (
@@ -671,6 +676,7 @@ class EventBusKafka(
 
         # Producer lock for independent producer access (avoids deadlock with main lock)
         self._producer_lock = asyncio.Lock()
+        self._transactional_producers: list[KafkaTransactionalProducer] = []
         # OMN-18925: how many connect attempts the last successful start()
         # needed. A broker that answers first time and one that answers on
         # the third are different facts, and the second is the early
@@ -896,6 +902,17 @@ class EventBusKafka(
             return {}
         return {"api_version": self._config.api_version}
 
+    def _new_producer(self, **producer_kwargs: object) -> AIOKafkaProducer:
+        """The one construction of an aiokafka producer for this bus's cluster."""
+        return AIOKafkaProducer(
+            bootstrap_servers=self._bootstrap_servers,
+            max_request_size=self._config.max_request_size,
+            retry_backoff_ms=self._config.reconnect_backoff_ms,
+            **self._build_client_version_kwargs(AIOKafkaProducer),
+            **self._build_auth_kwargs(),
+            **producer_kwargs,
+        )
+
     async def start(self) -> None:
         """Start the event bus and connect to Kafka.
 
@@ -947,14 +964,9 @@ class EventBusKafka(
                 # every attempt: a producer whose start() failed is not
                 # documented as restartable, so reusing it would test a
                 # different path from the one a fresh connect takes.
-                self._producer = AIOKafkaProducer(
-                    bootstrap_servers=self._bootstrap_servers,
+                self._producer = self._new_producer(
                     acks=self._config.acks_aiokafka,
                     enable_idempotence=self._config.enable_idempotence,
-                    max_request_size=self._config.max_request_size,
-                    retry_backoff_ms=self._config.reconnect_backoff_ms,
-                    **self._build_client_version_kwargs(AIOKafkaProducer),
-                    **self._build_auth_kwargs(),
                 )
                 await self._producer.start()
 
@@ -1215,6 +1227,10 @@ class EventBusKafka(
             await reader.stop()
         self._ungrouped_readers.clear()
 
+        for transactional in self._transactional_producers:
+            await transactional.close()
+        self._transactional_producers.clear()
+
         # Close producer with proper locking
         async with self._producer_lock:
             if self._producer is not None:
@@ -1308,7 +1324,12 @@ class EventBusKafka(
         # Create headers if not provided, deriving identity from the body
         # rather than inventing it (OMN-18914).
         if headers is None:
-            headers = self._headers_for_unheadered_publish(topic, value)
+            headers = headers_for_unheadered_publish(
+                topic,
+                value,
+                environment=self._environment,
+                minted_identity_topics=self._minted_identity_topics,
+            )
 
         # Validate topic name (Kafka naming rules)
         self._validate_topic_name(topic, headers.correlation_id)
@@ -1327,6 +1348,24 @@ class EventBusKafka(
 
         # Publish with retry
         return await self._publish_with_retry(topic, key, value, kafka_headers, headers)
+
+    async def transactional_producer(
+        self, transactional_id: str
+    ) -> KafkaTransactionalProducer:
+        """Open a transactional producer under a caller-fixed id (OMN-21228).
+
+        Initializing the producer fences every older producer holding the same
+        ``transactional_id``: their next publish fails and nothing they sent is
+        visible to a ``read_committed`` reader. The producer is closed with the
+        bus. See ``omnibase_infra.handlers.kafka_transactional_producer``.
+
+        Raises:
+            InfraUnavailableError: If the bus has not been started.
+            InfraConnectionError: If the producer cannot initialize.
+        """
+        producer = await open_kafka_transactional_producer(self, transactional_id)
+        self._transactional_producers.append(producer)
+        return producer
 
     async def _ensure_producer(self, correlation_id: UUID) -> None:
         """Lazily recreate the Kafka producer if it was destroyed.
@@ -1370,14 +1409,9 @@ class EventBusKafka(
         )
 
         try:
-            self._producer = AIOKafkaProducer(
-                bootstrap_servers=self._bootstrap_servers,
+            self._producer = self._new_producer(
                 acks=self._config.acks_aiokafka,
                 enable_idempotence=self._config.enable_idempotence,
-                max_request_size=self._config.max_request_size,
-                retry_backoff_ms=self._config.reconnect_backoff_ms,
-                **self._build_client_version_kwargs(AIOKafkaProducer),
-                **self._build_auth_kwargs(),
             )
 
             await asyncio.wait_for(
@@ -5355,87 +5389,6 @@ class EventBusKafka(
         )
         if self._topic_violation_alerter is not None:
             await self._topic_violation_alerter.maybe_alert(topic, reason)
-
-    @staticmethod
-    def _uuid_or_none(value: object) -> UUID | None:
-        """Return ``value`` as a UUID, or None if it is not one.
-
-        A body is untrusted input. A field that is present but malformed must
-        neither reach a UUID column nor fail a publish that would otherwise
-        have succeeded, so this narrows rather than raises (OMN-18914 AC3).
-        """
-        if not isinstance(value, str):
-            return None
-        try:
-            return UUID(value)
-        except ValueError:
-            return None
-
-    def _headers_for_unheadered_publish(
-        self, topic: str, value: bytes
-    ) -> ModelEventHeaders:
-        """Build wire headers for a caller that supplied none (OMN-18914).
-
-        The identity on the wire is the identity in the BODY wherever the body
-        states one. This is not a convenience: ``handler_ledger_projection``
-        fills ``public.event_ledger``'s ``correlation_id`` and ``envelope_id``
-        columns from these headers and never from the body, so a minted header
-        files the record under a correlation no other hop shares. That is what
-        left the delegation chain's head hop unjoinable and the chain canary
-        reporting ``ledger_chain_incomplete`` -- measured on the .201 dev lane,
-        a delegation whose body said ``da706588-…`` reached the wire as
-        ``3564c149-…``.
-
-        Only IDENTITY is derived. ``event_type`` stays the topic and ``source``
-        stays this bus's environment, deliberately: both already match every
-        correctly-headered row in ``event_ledger``, no defect argues against
-        them, and a body's own ``event_type`` is a different vocabulary (the
-        gateway writes ``omnimarket.delegate-skill`` where the wire says
-        ``onex.cmd.omnimarket.delegate-skill.v1``). Changing established
-        columns with no defect behind the change is how a fix acquires a
-        blast radius it was never measured for. ``ModelEventHeaders`` has no
-        ``tenant_id`` field at all, so no tenant can be carried here; that half
-        belongs to the gateway publisher (OMN-18915).
-
-        Minting survives where there is nothing to derive, and says so once per
-        topic -- a producer publishing without identity is a standing finding
-        worth a line, and worth exactly one.
-        """
-        body: object = None
-        try:
-            body = json.loads(value)
-        except (UnicodeDecodeError, ValueError):
-            body = None
-
-        correlation_id: UUID | None = None
-        message_id: UUID | None = None
-        if isinstance(body, dict):
-            correlation_id = self._uuid_or_none(body.get("correlation_id"))
-            message_id = self._uuid_or_none(body.get("envelope_id"))
-
-        if correlation_id is None and topic not in self._minted_identity_topics:
-            self._minted_identity_topics.add(topic)
-            logger.warning(
-                "Publishing to '%s' with no caller headers and no derivable "
-                "identity in the body; minting a correlation id. Records from "
-                "this producer cannot be joined to a delegation chain "
-                "(OMN-18914).",
-                topic,
-                extra={"topic": topic, "environment": self._environment},
-            )
-
-        identity: dict[str, UUID] = {}
-        if correlation_id is not None:
-            identity["correlation_id"] = correlation_id
-        if message_id is not None:
-            identity["message_id"] = message_id
-
-        return ModelEventHeaders(
-            source=self._environment,
-            event_type=topic,
-            timestamp=datetime.now(UTC),
-            **identity,
-        )
 
     def _model_headers_to_kafka(
         self, headers: ModelEventHeaders

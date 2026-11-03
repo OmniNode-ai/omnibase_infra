@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
@@ -59,6 +59,12 @@ from omnibase_infra.event_bus.models import (
     ModelEventHeaders,
     ModelEventMessage,
     ModelPublishReceipt,
+)
+from omnibase_infra.handlers.inmemory_bus_publish import PublishEntry, publish_batch
+from omnibase_infra.handlers.inmemory_transactional_producer import (
+    InmemoryTransactionalEpochs,
+    InmemoryTransactionalProducer,
+    open_transactional_producer,
 )
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus.model_subscription_gate import (
@@ -114,6 +120,7 @@ class EventBusInmemory(_CoreEventBusInmemory):
             circuit_breaker_threshold=circuit_breaker_threshold,
         )
         self._consume_concurrency: dict[tuple[str, str], int] = {}
+        self._transactional = InmemoryTransactionalEpochs()
 
     def declare_consume_concurrency(
         self,
@@ -235,100 +242,32 @@ class EventBusInmemory(_CoreEventBusInmemory):
         subscriber's failure is a delivery problem, not a produce problem, and
         conflating them would make the in-memory proof diverge from Kafka.
         """
-        if not self._started:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.INMEMORY,
-                operation="publish",
-                target_name=f"event_bus.{self._environment}",
-                correlation_id=(
-                    headers.correlation_id if headers is not None else uuid4()
-                ),
-            )
-            raise InfraUnavailableError(
-                "Event bus not started. Call start() first.",
-                context=context,
-                topic=topic,
-            )
+        return (await self.publish_atomic([(topic, key, value, headers)]))[0]
 
-        if headers is None:
-            headers = ModelEventHeaders(
-                source=f"{self._environment}.{self._group}",
-                event_type=topic,
-                timestamp=datetime.now(UTC),
-            )
+    async def publish_atomic(
+        self,
+        entries: Sequence[PublishEntry],
+        *,
+        precondition: Callable[[], None] | None = None,
+    ) -> tuple[ModelPublishReceipt, ...]:
+        """Append every entry in one lock hold, then deliver (OMN-21228).
 
-        async with self._lock:
-            offset = self._topic_offsets[topic]
-            self._topic_offsets[topic] = offset + 1
+        ``precondition`` runs inside that lock hold and may raise to refuse the
+        whole batch; nothing is appended or delivered then. See
+        ``omnibase_infra.handlers.inmemory_bus_publish``.
+        """
+        return await publish_batch(self, entries, precondition)
 
-            message = ModelEventMessage(
-                topic=topic,
-                key=key,
-                value=value,
-                headers=headers,
-                offset=str(offset),
-                partition=0,
-            )
-            # OMN-13419: the inherited core deque is typed for the core
-            # ModelEventMessage; the adapter intentionally stores the infra-typed
-            # message (same structural shape, str schema_version) so consumers
-            # receive the infra model. Drops to a re-export once core aligns.
-            self._event_history.append(message)  # type: ignore[arg-type]
-            subscribers = list(self._subscribers.get(topic, []))
-            receipt = ModelPublishReceipt(
-                topic=topic,
-                partition=0,
-                offset=offset,
-                cluster=f"inmemory.{self._environment}",
-                produced_at=datetime.now(UTC),
-                transport=EnumInfraTransportType.INMEMORY,
-                idempotency_key=headers.idempotency_key,
-            )
-
-        # Deliver outside the lock; mirror the inherited circuit-breaker policy.
-        for group_id, callback in subscribers:
-            failure_key = (topic, group_id)
-
-            async with self._lock:
-                failure_count = self._subscriber_failures.get(failure_key, 0)
-
-            if failure_count >= self._max_consecutive_failures:
-                logger.warning(
-                    "Subscriber circuit breaker open - skipping callback",
-                    extra={
-                        "topic": topic,
-                        "group_id": group_id,
-                        "consecutive_failures": failure_count,
-                        "correlation_id": str(headers.correlation_id),
-                    },
-                )
-                continue
-
-            try:
-                # Callback typed for core ModelEventMessage; infra-typed
-                # message is structurally identical (OMN-13419).
-                await callback(message)  # type: ignore[arg-type]
-                async with self._lock:
-                    if failure_key in self._subscriber_failures:
-                        del self._subscriber_failures[failure_key]
-            except Exception as e:
-                async with self._lock:
-                    self._subscriber_failures[failure_key] = (
-                        self._subscriber_failures.get(failure_key, 0) + 1
-                    )
-                    current_failure_count = self._subscriber_failures[failure_key]
-                logger.exception(
-                    "Subscriber callback failed",
-                    extra={
-                        "topic": topic,
-                        "group_id": group_id,
-                        "error": str(e),
-                        "consecutive_failures": current_failure_count,
-                        "correlation_id": str(headers.correlation_id),
-                    },
-                )
-
-        return receipt
+    async def transactional_producer(
+        self, transactional_id: str
+    ) -> InmemoryTransactionalProducer:
+        """Open a producer under ``transactional_id``, fencing any older one (OMN-21228)."""
+        return open_transactional_producer(
+            self.publish_atomic,
+            self._transactional,
+            transactional_id,
+            started=self._started,
+        )
 
     async def publish_envelope(
         self,
