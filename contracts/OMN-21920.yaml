@@ -58,11 +58,25 @@ dod_evidence:
         check_value: uv run pytest tests/unit/migrations/test_omn21920_agent_actions_vendor.py tests/ci/test_flat_node_migration_shape_parity.py tests/unit/topology/test_application_database_table_grants.py tests/unit/topology/test_application_database_topology.py -q --no-cov
         cwd: .
   - id: dod-omn21920-red-control
-    description: The RED-control transformation removes only guarded column additions and preserves the statements that expose a missing column.
+    execution_scope: hosted_and_local
+    description: The RED-control transformation removes only guarded column additions and preserves the statements that expose a missing column. PostgreSQL execution proves the stripped agent-actions migration fails on the missing correlation_id column and the shipped migration restores the column and its indexes; the merge base lacks this migration.
     source: manual
     binds_ac:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/migrations/test_migration_red_control_omn21920.py -q --no-cov
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 OMN15376_REQUIRE_PG=1 uv run pytest tests/unit/migrations/test_migration_red_control_omn21920.py tests/integration/migrations/test_node_migration_shape_drift_omn15376.py::test_unfixed_migration_is_red_on_the_drifted_shape[OMN-21920-agent_status_events.correlation_id] tests/integration/migrations/test_node_migration_shape_drift_omn15376.py::test_fixed_migration_is_green_on_the_same_drifted_shape[OMN-21920-agent_status_events.correlation_id] -q --no-cov
+        cwd: .
+  - id: dod-omn21920-hosted-deploy-grants
+    description: >-
+      Deploy both vendored migrations inside a rolled-back transaction on the hosted verifier's PostgreSQL service. The grant migration asserts SELECT, INSERT and UPDATE on all six tables, then the writer role reads the reconciled correlation_id column. Connection coordinates must explicitly name the integration service; no ambient database is selected.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: >-
+          env PGHOST="${INTEGRATION_POSTGRES_HOST:?}" PGPORT="${INTEGRATION_POSTGRES_PORT:?}" PGUSER="${INTEGRATION_POSTGRES_USER:?}" PGPASSWORD="${INTEGRATION_POSTGRES_PASSWORD:?}" PGDATABASE="${INTEGRATION_POSTGRES_DB:?}" psql -X -v ON_ERROR_STOP=1 -c 'BEGIN' -c "DO \$role\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tenant_projection_writer') THEN CREATE ROLE tenant_projection_writer NOSUPERUSER NOBYPASSRLS; END IF; END \$role\$;" -f docker/migrations/forward/nodes/node_projection_agent_actions/0000_create_agent_observability_tables.sql -f docker/migrations/forward/nodes/node_projection_agent_actions/0001_grant_tenant_projection_writer_agent_observability_tables.sql -c 'SET LOCAL ROLE tenant_projection_writer' -c 'SELECT correlation_id FROM public.agent_status_events LIMIT 0' -c 'ROLLBACK'
         cwd: .
