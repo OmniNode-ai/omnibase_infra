@@ -16,13 +16,8 @@ orchestrator ran:
   bus as a full event envelope, so the same field holds the ENVELOPE and the
   delegation terminal sits one level down, under ``payload``.
 
-Before OMN-18569 the CLI looked for an ``attempts`` list directly on
-``terminal_payload`` and, finding none on the dispatched path, returned
-``None`` and wrote nothing -- silently. A real dispatched run (correlation
-``83aa8b6c-8189-49f0-953d-80c8f015ed0a``, 2026-09-17) exited 0 with a correct
-answer and produced no ``result.txt``, ``receipt.json`` or ``run.json``, which
-is the customer-facing half of the delegation product simply missing on the
-path the product is demonstrated from.
+Before OMN-18569 a dispatched run wrote no run files, silently. OMN-22216: a
+boundary failure terminal (no ``attempts``) resolves as a failed terminal.
 
 :func:`resolve_delegate_terminal` is the ONE accessor both carriers resolve
 through. Selection is made by validating two models with DISJOINT REQUIRED
@@ -56,6 +51,9 @@ from pydantic import ValidationError
 from omnibase_infra.cli.model_delegate_terminal import ModelDelegateTerminal
 from omnibase_infra.cli.model_delegate_terminal_envelope import (
     ModelDelegateTerminalEnvelope,
+)
+from omnibase_infra.models.delegation.model_delegate_boundary_failure_envelope import (
+    ModelDelegateBoundaryFailureEnvelope,
 )
 
 __all__ = [
@@ -164,6 +162,8 @@ def resolve_delegate_terminal(carrier: object) -> ModelDelegateTerminal:
     try:
         return ModelDelegateTerminal.model_validate(carrier)
     except ValidationError as terminal_error:
+        if (failure := ModelDelegateBoundaryFailureEnvelope.find(carrier)) is not None:
+            return failure.as_delegate_terminal()
         raise DelegateTerminalUnresolvedError(
             f"delegation terminal is neither a bare terminal nor an "
             f"envelope-carried one ({type(carrier).__name__}); "
