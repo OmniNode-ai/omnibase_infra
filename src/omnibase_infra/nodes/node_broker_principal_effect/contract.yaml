@@ -28,6 +28,8 @@ node_version:
   minor: 0
   patch: 0
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 description: >
   Create, grant and verify a developer principal on a broker: list its users, refuse ACL drift, create and read back the planned ACLs, then set the password from a named environment variable.
 

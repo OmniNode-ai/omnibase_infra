@@ -31,6 +31,8 @@ node_version:
   minor: 0
   patch: 0
 node_type: "ORCHESTRATOR_GENERIC"
+descriptor:
+  node_archetype: orchestrator
 description: >
   Mint or audit one developer machine's broker principal: converge lists the broker's principals, plans, applies and verifies, stopping at the first failure; audit lists, plans and reads the principal's ACLs, mutating nothing.
 
