@@ -188,10 +188,7 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
             env[f"{prefix}_SECRET_RESOLVER_CONFIG_JSON"] = secret_resolver_config_json
             if process.boot is not None:
                 env.update(process.boot.render_env(prefix))
-            if process.folded_profiles:
-                # OMN-17427: written only when declared, so a lane that folds
-                # nothing renders exactly what it rendered before.
-                env[f"{prefix}_FOLDED_PROFILES"] = ",".join(process.folded_profiles)
+            env.update(process.render_fold_env(prefix))
             if process.secret_resolver_namespaces:
                 # OMN-20533: the process's own store-backed rules on top of the
                 # profile's config, under a SEPARATE name. The profile-level

@@ -1,0 +1,79 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22294
+title: "T5 Land and deploy the five projection writers as nodes inside the runtime (omnibase_infra#5518, one-runtime plan)"
+summary: >-
+  Task T5 of the one-runtime plan. The five projection writers (tenant-registry, registration, tenant-credentials, live-events, savings) run as nodes inside the primary dev runtime and their containers are retired by the deploy agent. The boot guard never pairs a pre-fold image with the post-fold overlay, and a rollback across the fold is by revision. This contract binds the hosted-runnable tests; the live readings (container count, projections advancing, hook events projecting, row counts across a fold and a rollback) are taken on a pre-PR slot and recorded in the pull request's Lab comment, not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22294-ac1-writers-folded
+    statement: "The five writer containers are absent from the folded dev composition and their contracts are routed to in-process runtime writers."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: the five writer containers are absent and their projections advance, with readings 1, 3 and 4 of plan section 9 before and after in the PR -- falsifier: the PR body readings plus a docker ps on the proving lane that lists none of the five folded-projection-writer services
+  - id: req-omn22294-ac2-no-event-lost
+    statement: "No event is lost across the swap: events published while no consumer is joined are projected once."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: no event is lost across the swap: publish during the swap and count once -- falsifier: uv run pytest tests/integration/event_bus/test_consumer_group_handover_redpanda_omn21288.py -q in omnibase_infra, plus a live row count on one projection on the proving lane
+  - id: req-omn22294-ac3-rollback-by-revision
+    statement: "A rollback across the fold goes back by revision with the pre-fold image and overlay together."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: a rollback across the fold goes back by revision with the pre-fold image and overlay together, and events published since the fold are projected once -- falsifier: on the proving lane fold, publish, roll back, publish, then compare row counts per projection with the published counts, with uv run pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q for the unit half
+  - id: req-omn22294-ac4-boot-guard-pairing
+    statement: "The boot guard refuses to pair a pre-fold image with the post-fold overlay."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: the boot guard never pairs a pre-fold image with the post-fold overlay -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q including a new test where a planted boot-good image older than the fold makes the agent refuse or take the revision path
+evidence_requirements:
+  - kind: tests
+    description: "The deploy agent's rollback and boot-guard pairing tests."
+    command: |-
+      uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22294-ac1-fold-composition
+    description: >-
+      Hosted-runner check of the folded composition: the real primary dev compose files hold none of the five writer services outside the shrink-only list, the committed policy folds the five profiles, and the deploy handler retires the five containers by compose label before main is recreated. The live container count and the projections advancing are read on a pre-PR slot and recorded in the pull request's Lab comment; this check does not claim them.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn22294-ac2-handover-exactly-once
+    description: >-
+      The handover scenario on the in-process group-offset substrate: the retired container commits and leaves, events are published while nobody is joined, the writer contract is wired through the real wire_from_manifest, and every event is projected once; with no declaration the window is lost. The same scenario on a real Redpanda broker (tests/integration/event_bus/test_consumer_group_handover_redpanda_omn21288.py) and the live row count are run on the pre-PR slot and recorded in the pull request's Lab comment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn22294-ac3-rollback-by-revision
+    description: >-
+      The unit half of the rollback: deploying the pre-fold revision (its overlay and image together) starts the five writers again, and the rollback tests of the deploy agent pass. The fold, publish, roll back, publish row counts on the proving lane are recorded in the pull request's Lab comment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn22294-ac4-boot-guard-pairing
+    description: >-
+      The agent-level test plants a boot-good snapshot older than the fold with the live family down; the agent refuses before git pull, build or recreate, and a snapshot of the overlay's own fold generation is held and the deploy proceeds. The new test lives in test_auto_rollback.py, so the check fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -k planted_pre_fold -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]

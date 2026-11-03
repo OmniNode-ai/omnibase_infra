@@ -5,6 +5,9 @@
 
 from pydantic import BaseModel, Field, model_validator
 
+from omnibase_infra.handlers.models.mcp.model_mcp_server_timeouts import (
+    ModelMcpServerTimeouts,
+)
 from omnibase_infra.models.network_binding import load_network_binding_settings
 
 
@@ -26,6 +29,9 @@ class ModelMcpHandlerConfig(BaseModel):
             or service (OMN-1419). Loaded from Infisical or env (typically
             comma-separated and split by the caller). At least one non-empty
             key is required when ``auth_enabled`` is True.
+        server_timeouts: Server shutdown, cancel and startup waits, declared in
+            the handler contract (``metadata.transport.server_timeouts``) and
+            passed in by ``extract_handler_config`` (OMN-22130).
     """
 
     host: str = Field(
@@ -58,6 +64,11 @@ class ModelMcpHandlerConfig(BaseModel):
             "Supports multiple clients/services holding distinct credentials. "
             "At least one non-empty key is required when auth_enabled=True."
         ),
+    )
+
+    server_timeouts: ModelMcpServerTimeouts = Field(
+        default_factory=ModelMcpServerTimeouts,
+        description="Server shutdown, cancel and startup waits (contract-declared)",
     )
 
     model_config = {"frozen": True}

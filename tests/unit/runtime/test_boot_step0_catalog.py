@@ -435,7 +435,7 @@ def test_the_catalog_entry_lifecycle_is_a_loadable_fsm_with_every_state_reachabl
         (
             Path(omnibase_infra.__file__).parent
             / "nodes"
-            / "node_package_announce_effect"
+            / "node_boot_catalog_effect"
             / "contract.yaml"
         ).read_text()
     )
@@ -451,7 +451,7 @@ def test_planted_violation_a_catalog_state_with_no_inbound_edge_is_caught() -> N
         (
             Path(omnibase_infra.__file__).parent
             / "nodes"
-            / "node_package_announce_effect"
+            / "node_boot_catalog_effect"
             / "contract.yaml"
         ).read_text()
     )
