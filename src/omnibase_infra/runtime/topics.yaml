@@ -35,3 +35,8 @@ topics:
   # OMN-17427: the generic node CLI publishes the composition request on its
   # local runtime bus; the packaged-contract regression reads its terminal result.
   - onex.cmd.platform.ticket-contract-compose.v1
+  # OMN-22002: omnibase_core publishes the validator run and triggered events
+  # (node_validation_report_write_effect); the validation ledger projection node
+  # consumes them, so they are declared as published outside this corpus.
+  - onex.evt.platform.validator-run.v1
+  - onex.evt.platform.validator-triggered.v1

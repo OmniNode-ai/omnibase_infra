@@ -73,10 +73,9 @@ always reaches a terminal state.
    caller's deadline converts to FAILURE. This is the presence assertion
    OMN-14456 AC4 asked for.
 
-   *Why this was load-bearing:* PR #2555 merged 2026-07-30T04:25:09Z with
-   ``CI Summary`` = **success** (all 53 in-run jobs green) while
-   ``deploy-gate / deploy-gate`` = **failure** on the same head SHA. The
-   required context was green because the failing check was in another run.
+   *Why this was load-bearing:* PR #2555 merged with ``CI Summary`` = **success**
+   (all 53 in-run jobs green) while ``deploy-gate / deploy-gate`` = **failure**
+   on the same head SHA: the failing check was in another run.
 
 5. **Default-deny EXTERNAL sweep (OMN-18960).** Check 4 is a whitelist
    LOOKUP: it walks the expected tuple and asks the head for each name. It
@@ -351,6 +350,12 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # OMN-19998: public-repository runner placement; unconditional in ci.yml (no
     # needs/if). A skip or absence fails closed here instead of reading green.
     "Public Runner Placement (OMN-19998)",  # public-runner-placement
+    # OMN-21891: the stack-shape allowlist check over every lane's compose files.
+    # THIS LINE IS HALF THE MECHANISM: the default-deny sweep fails CI Summary when
+    # the job FAILS, but an unregistered job that is `skipped` or absent yields
+    # SUCCESS. The job is unconditional in ci.yml (no needs/if), so a skip or an
+    # absence is anomalous and fails closed here instead of reading green.
+    "Stack Shape (OMN-21891)",  # stack-shape
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
