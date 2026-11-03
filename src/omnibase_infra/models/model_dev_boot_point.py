@@ -14,3 +14,6 @@ class ModelDevBootPoint(BaseModel):
     container_ids: tuple[str, ...]
     images: dict[str, str]
     compose: dict[str, JsonValue]
+    # The roles the dev overlay folded into main when this family was captured
+    # (OMN-21288). A snapshot with none recorded predates the fold.
+    folded_profiles: tuple[str, ...] = ()
