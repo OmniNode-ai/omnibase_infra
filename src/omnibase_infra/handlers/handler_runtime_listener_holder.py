@@ -41,8 +41,8 @@ from omnibase_infra.models.model_runtime_listener_holder_request import (
 from omnibase_infra.models.model_runtime_listener_holder_result import (
     ModelRuntimeListenerHolderResult,
 )
-from omnibase_infra.protocols.protocol_runtime_listener_lookup import (
-    ProtocolRuntimeListenerLookup,
+from omnibase_infra.models.model_runtime_listener_registry import (
+    ModelRuntimeListenerRegistry,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ def _drop(
 class HandlerRuntimeListenerHolder:
     """Bind, store, recover and re-exec-remap the two runtime host listeners."""
 
-    def __init__(self, container: ProtocolRuntimeListenerLookup) -> None:
+    def __init__(self, container: ModelRuntimeListenerRegistry) -> None:
         self._container = container
 
     @property

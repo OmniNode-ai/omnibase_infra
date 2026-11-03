@@ -42,8 +42,8 @@ from omnibase_infra.models.model_runtime_listener_endpoint import (
 from omnibase_infra.models.model_runtime_listener_fd_store import (
     ModelRuntimeListenerFdStore,
 )
-from omnibase_infra.protocols.protocol_runtime_listener_lookup import (
-    ProtocolRuntimeListenerLookup,
+from omnibase_infra.models.model_runtime_listener_registry import (
+    ModelRuntimeListenerRegistry,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ def _answer(
 class HandlerRuntimeListenerBrokerServer:
     """Accept broker connections at ``socket_path`` and serve them."""
 
-    def __init__(self, container: ProtocolRuntimeListenerLookup) -> None:
+    def __init__(self, container: ModelRuntimeListenerRegistry) -> None:
         self._container = container
 
     @property

@@ -23,18 +23,18 @@ from omnibase_infra.models.model_runtime_listener_broker_response import (
 from omnibase_infra.models.model_runtime_listener_fd_store import (
     ModelRuntimeListenerFdStore,
 )
+from omnibase_infra.models.model_runtime_listener_registry import (
+    ModelRuntimeListenerRegistry,
+)
 from omnibase_infra.models.model_runtime_listener_session_table import (
     ModelRuntimeListenerSessionTable,
-)
-from omnibase_infra.protocols.protocol_runtime_listener_lookup import (
-    ProtocolRuntimeListenerLookup,
 )
 
 
 class HandlerRuntimeListenerBroker:
     """Serve one broker operation against the held listeners and the session table."""
 
-    def __init__(self, container: ProtocolRuntimeListenerLookup) -> None:
+    def __init__(self, container: ModelRuntimeListenerRegistry) -> None:
         self._container = container
 
     @property
