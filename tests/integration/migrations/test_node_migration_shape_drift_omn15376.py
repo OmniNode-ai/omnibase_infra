@@ -68,7 +68,6 @@ from tests.helpers.util_migration_shape import (
     guarded_create_tables,
     node_migration_files,
     shape_reconciliation_exempt_ids,
-    without_guarded_column_additions,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres, pytest.mark.serial]
@@ -97,13 +96,6 @@ LIVE_SIGNATURES = (
         "baselines_comparisons",
         "snapshot_id",
         id="OMN-15302-baselines_comparisons.snapshot_id",
-    ),
-    pytest.param(
-        "node_projection_agent_actions",
-        "0000_create_agent_observability_tables.sql",
-        "agent_status_events",
-        "correlation_id",
-        id="OMN-21920-agent_status_events.correlation_id",
     ),
 )
 
@@ -640,7 +632,7 @@ def _drift_scope() -> list[tuple[str, Path]]:
 
 
 def _strip_reconciliation(sql: str) -> str:
-    """Derive the pre-fix variant from marked regions or guarded column adds."""
+    """Delete every BEGIN/END reconciliation region -- the pre-fix variant."""
     pattern = re.compile(
         re.escape(RECONCILIATION_BEGIN)
         + r".*?"
@@ -649,8 +641,6 @@ def _strip_reconciliation(sql: str) -> str:
         re.S,
     )
     stripped, count = pattern.subn("", sql)
-    if count == 0:
-        stripped, count = without_guarded_column_additions(sql)
     assert count > 0, "no reconciliation region found — RED would be vacuous"
     return stripped
 
@@ -853,22 +843,6 @@ def test_fixed_migration_is_green_on_the_same_drifted_shape(
         assert _psql_stdout(present, f"{table}.{column} presence probe") == "1", (
             present.stdout
         )
-
-        # Indexes the migration declares on the drifted table must survive the
-        # reconciliation (OMN-21920: an index on the missing column failed it).
-        indexes = re.findall(
-            rf"CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(?:public\.)?{table}\b",
-            path.read_text("utf-8"),
-            re.I,
-        )
-        for index in indexes:
-            probe = _psql_script(
-                server,
-                database,
-                "SELECT count(*) FROM pg_indexes WHERE indexname = :'idx';",
-                idx=index,
-            )
-            assert _psql_stdout(probe, f"{index} index probe") == "1", probe.stdout
     finally:
         _drop_database(server, database)
 

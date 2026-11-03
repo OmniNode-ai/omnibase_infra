@@ -23,8 +23,11 @@ evidence_requirements:
     description: The handover accepts from_group_id, refuses it beside the derivation fields, and keeps the four-field form valid.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_from_group_id_omn21920.py -q --no-cov
   - kind: tests
-    description: The shape-drift proof derives a RED control from guarded column additions that carry no marker comments, and keeps indexes and other statements.
+    description: The RED control derives from guarded column additions that carry no marker comments, and keeps indexes and other statements.
     command: uv run pytest tests/unit/migrations/test_migration_red_control_omn21920.py -q --no-cov
+  - kind: tests
+    description: The agent_status_events drift proof is deselected from the sharded splits by marker, named by the Migration Integration Test job, and absent from the skipping OMN-15376 module and the skip baseline.
+    command: uv run pytest tests/ci/test_agent_status_events_drift_wiring_omn21920.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -58,15 +61,23 @@ dod_evidence:
         check_value: uv run pytest tests/unit/migrations/test_omn21920_agent_actions_vendor.py tests/ci/test_flat_node_migration_shape_parity.py tests/unit/topology/test_application_database_table_grants.py tests/unit/topology/test_application_database_topology.py -q --no-cov
         cwd: .
   - id: dod-omn21920-red-control
-    execution_scope: hosted_and_local
-    description: The RED-control transformation removes only guarded column additions and preserves the statements that expose a missing column. PostgreSQL execution proves the stripped agent-actions migration fails on the missing correlation_id column and the shipped migration restores the column and its indexes; the merge base lacks this migration.
+    description: The RED-control transformation removes only guarded column additions and preserves the statements that expose a missing column. The agent_status_events drift proof lives in an ephemeral_pg module, so the sharded splits deselect it instead of collecting and skipping it, and the Migration Integration Test job names it. Neither the skipping OMN-15376 module nor the skip baseline carries an OMN-21920 id. At the head before this change the OMN-21920 case sat in the skipping module and added two ids to the skipped set, which the Skip Count Ratchet refused.
     source: manual
     binds_ac:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: >-
-          env PYTHONDONTWRITEBYTECODE=1 OMN15376_REQUIRE_PG=1 uv run pytest tests/unit/migrations/test_migration_red_control_omn21920.py tests/integration/migrations/test_node_migration_shape_drift_omn15376.py::test_unfixed_migration_is_red_on_the_drifted_shape[OMN-21920-agent_status_events.correlation_id] tests/integration/migrations/test_node_migration_shape_drift_omn15376.py::test_fixed_migration_is_green_on_the_same_drifted_shape[OMN-21920-agent_status_events.correlation_id] -q --no-cov
+        check_value: uv run pytest tests/unit/migrations/test_migration_red_control_omn21920.py tests/ci/test_agent_status_events_drift_wiring_omn21920.py tests/ci/test_skip_count_ratchet_omn18776.py -q --no-cov
+        cwd: .
+  - id: dod-omn21920-drift-postgres
+    execution_scope: hosted_and_local
+    description: PostgreSQL execution proves the agent-actions migration with its guarded column additions stripped fails on the missing correlation_id column of a pre-existing agent_status_events table, and the shipped migration restores the column and its index on the same table.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_102_tenant_projection_writer_role_omn15425.py -m ephemeral_pg -k agent_status_events -q --no-cov -p no:randomly
         cwd: .
   - id: dod-omn21920-hosted-deploy-grants
     description: >-
