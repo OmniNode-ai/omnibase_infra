@@ -8,7 +8,7 @@ import asyncio
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -70,7 +70,7 @@ async def test_shutdown_applies_the_configured_waits_not_the_old_defaults() -> N
             shutdown_seconds=0.05, cancel_seconds=0.05, startup_seconds=0.05
         ),
     )
-    handler._server = SimpleNamespace(should_exit=False)  # type: ignore[assignment]
+    handler._server = cast("Any", SimpleNamespace(should_exit=False))
 
     async def _never_stops() -> None:
         await asyncio.Event().wait()
