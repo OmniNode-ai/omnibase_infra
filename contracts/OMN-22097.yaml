@@ -48,12 +48,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/test_dispatch_engine_span.py -q -p no:cacheprovider
   - id: dod-004
-    description: "The files this change adds or edits name no 192.168. address."
+    description: "The files this change adds or edits name no private LAN address (10.x, 172.16-31.x, 192.168.x)."
     source: generated
     binds_ac: [AC4]
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/runtime/test_tracing_exporter_path.py::TestNoLanAddressInTrackedSource -q -p no:cacheprovider
+        check_value: uv run pytest tests/unit/runtime/test_tracing_exporter_path.py::TestNoLanAddressInChangedFiles -q -p no:cacheprovider
   - id: dod-005
     description: "The false comment is gone from tracing.py."
     source: generated
