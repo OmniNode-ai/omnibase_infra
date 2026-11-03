@@ -44,7 +44,7 @@ dependencies = [
     # imports its public request and decision models. A resolve below this
     # floor lacks that contract-backed gate surface.
     "omnibase-core>=0.47.58,<0.48.0",
-    "omnibase-spi==0.23.7",
+    "omnibase-spi==0.23.12",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.7",
     # ============================================================================
@@ -263,7 +263,7 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-spi==0.23.7",
+    "omnibase-spi==0.23.12",
     "omnibase-compat==0.5.7",
 ]
 
