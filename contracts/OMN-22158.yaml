@@ -27,7 +27,6 @@ dod_evidence:
     source: manual
     status: pending
     execution_scope: local_done_gate
-    binds_ac: [AC1]
     description: >-
       The masked corpus is kept in a private repository, never in this public one. AC1 is that repository's corpus checker run at its own pull request head, wired to its existing inventory workflow and pre-commit hook. The acceptance probe below runs the same identity check against private input paths; an empty set fails.
     checks:
@@ -37,7 +36,6 @@ dod_evidence:
     source: manual
     status: pending
     execution_scope: local_done_gate
-    binds_ac: [AC2]
     description: >-
       Named masks and declared mutation cleanup over the same private corpus, checked by the AC2 half of that private corpus checker at its pull request head. The acceptance probe below repeats the check against private input paths.
     checks:
@@ -47,11 +45,37 @@ dod_evidence:
     source: manual
     status: pending
     execution_scope: local_done_gate
-    binds_ac: [AC3]
     description: Pending actual service recording with before/after counts for tenants, accounts and Keycloak users.
     checks:
       - check_type: test_passes
         check_value: uv run --frozen python -m pytest tests/acceptance/onex_api_recording_acceptance.py::test_ac3_count_receipt_has_no_resource_delta -q
+  - id: dod-ac1-falsifier-harness
+    source: generated
+    status: pending
+    binds_ac: [AC1]
+    description: >-
+      Harness falsifier for AC1: corrupt recorded sets (a route without a pair, an extra identity) are rejected by the identity check. Does not establish the private corpus.
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen python -m pytest tests/unit/handlers/test_handler_api_fixture_record.py -k test_ac1_ac2_reject_corrupt_recorded_sets -q
+  - id: dod-ac2-falsifier-harness
+    source: generated
+    status: pending
+    binds_ac: [AC2]
+    description: >-
+      Harness falsifier for AC2: a masked value with no rule and a mutating route with no cleanup are rejected, and request queries are masked by named rules. Does not establish the private corpus.
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen python -m pytest tests/unit/handlers/test_handler_api_fixture_record.py -k "test_ac1_ac2_reject_corrupt_recorded_sets or test_request_query_is_masked_with_named_rules" -q
+  - id: dod-ac3-falsifier-harness
+    source: generated
+    status: pending
+    binds_ac: [AC3]
+    description: >-
+      Harness falsifier for AC3: a leaked tenant, account or Keycloak user is detected by the before/after count check in each resource. Does not establish the private corpus.
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen python -m pytest tests/unit/handlers/test_handler_api_fixture_record.py -k test_ac3_detects_a_leak_in_each_resource -q
   - id: dod-recorder-harness
     source: generated
     status: pending
