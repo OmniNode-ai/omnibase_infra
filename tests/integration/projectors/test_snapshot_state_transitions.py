@@ -27,9 +27,11 @@ from uuid import uuid4
 import pytest
 
 from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelSnapshotTopicConfig,
@@ -142,12 +144,8 @@ class TestSnapshotStateTransitions:
             timestamp=TEST_NOW,
         )
 
-        envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=event,
-            envelope_timestamp=TEST_NOW,
-            correlation_id=correlation_id,
-            source_tool="test",
+        envelope = ModelInjectedRequest(
+            event=event, now=TEST_NOW, input_id=uuid4(), correlation_id=correlation_id
         )
 
         # Act
@@ -229,12 +227,11 @@ class TestSnapshotStateTransitions:
             timestamp=TEST_NOW,
         )
 
-        envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=ack_command,
-            envelope_timestamp=TEST_NOW,
+        envelope = ModelInjectedRequest(
+            event=ack_command,
+            now=TEST_NOW,
+            input_id=uuid4(),
             correlation_id=correlation_id,
-            source_tool="test",
         )
 
         # Act
@@ -330,12 +327,8 @@ class TestSnapshotStateTransitions:
             tick_interval_ms=1000,
         )
 
-        envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=tick,
-            envelope_timestamp=tick_time,
-            correlation_id=uuid4(),
-            source_tool="test",
+        envelope = ModelInjectedRequest(
+            event=tick, now=tick_time, input_id=uuid4(), correlation_id=uuid4()
         )
 
         # Act

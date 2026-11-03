@@ -127,6 +127,7 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
 from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
@@ -949,6 +950,11 @@ def _make_dispatch_callback(
 
         _effective_handle = _missing_handle
 
+    # Introspect once at wiring time, not per message.
+    _request_model = _resolve_def_b_input_model_type(_effective_handle)
+    _injected_request_model = ModelInjectedRequest.narrow(_request_model)
+    handler_takes_envelope = _handler_accepts_event_envelope(_effective_handle)
+
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
@@ -1004,7 +1010,7 @@ def _make_dispatch_callback(
                     envelope, raw_payload, fallback_event_type="unknown"
                 )
             else:
-                target_model = _resolve_def_b_input_model_type(handle_method)
+                target_model = _request_model
                 if target_model is not None:
                     # OMN-16050: pass the registered input model so the unwrap
                     # STOPS at it. ``ModelEmitRequest`` declares ``payload`` plus
@@ -1051,9 +1057,6 @@ def _make_dispatch_callback(
         # keeps its pre-OMN-16050 structural behaviour.
         payload_target_model = _safe_import_event_model_class(event_model)
         payload = _extract_dispatch_payload(envelope, payload_target_model)
-        handler_takes_envelope = _handler_accepts_event_envelope(
-            cast("Callable[..., object]", handle_method)
-        )
         try:
             model_cls = _import_event_model_class(event_model)
             typed_payload: object = (
@@ -1097,24 +1100,22 @@ def _make_dispatch_callback(
             raise
         if pre_dispatch_guard is not None:
             pre_dispatch_guard(typed_payload)
-        if handler_takes_envelope:
-            handler_envelope = _materialize_typed_event_envelope(
-                envelope,
+        # Metadata failures belong to the dispatch boundary: they are raised
+        # after the guard has had its say on the payload and outside the domain
+        # payload-validation fallback above.
+        handler_arg: object = typed_payload
+        if _injected_request_model is not None and not handler_takes_envelope:
+            # Engine materialization omits transport metadata; unwrap the
+            # original envelope retained for this dispatch.
+            handler_arg = _injected_request_model.from_dispatch(
+                current_dispatch_envelope() or envelope,
                 cast("BaseModel", typed_payload),
-                event_model.name,
             )
-            envelope_result = handle_method(handler_envelope)
-            if asyncio.iscoroutine(envelope_result):
-                envelope_result = await cast("Awaitable[object]", envelope_result)
-            return _normalize_handler_result(
-                envelope_result,
-                envelope,
-                event_model.name,
-                handler_node_kind,
-                published_event_names,
+        if handler_takes_envelope:
+            handler_arg = _materialize_typed_event_envelope(
+                envelope, cast("BaseModel", typed_payload), event_model.name
             )
-
-        typed_result = handle_method(typed_payload)
+        typed_result = handle_method(handler_arg)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)
         return _normalize_handler_result(
