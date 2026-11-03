@@ -10,7 +10,7 @@ requirements:
     statement: The dev image takes omniintelligence from its dev-merge tag, staged and installed like the other vendored first-party packages, while non-dev lanes keep the registry install.
     acceptance:
       - id: AC1
-        statement: "AC1: first_party_sources.yaml lists omniintelligence as a vendored package built from its dev-merge tag, and the sibling clone manifest and the dev image build stage it, with the registry install kept for non-dev lanes -- falsifier: uv run pytest tests/scripts/test_first_party_sources_contract_omn17427.py -q"
+        statement: "AC1: first_party_sources.yaml lists omniintelligence as a vendored package built from its dev-merge tag, and the sibling clone manifest and the dev image build stage it, with the registry install kept for non-dev lanes -- falsifier: uv run --frozen pytest tests/scripts/test_first_party_sources_omn17427.py -q -n 0 --no-cov"
   - id: req-omn22153-dev-deploy
     statement: A dev deploy through the deploy agent carries omniintelligence at a dev-merge tag that contains omniintelligence#1202.
     acceptance:
@@ -63,7 +63,7 @@ dod_evidence:
         check_value: |-
           set -eu;
           grep -q 'repo: omniintelligence' src/omnibase_infra/validation/first_party_sources.yaml;
-          tag="$(gh api repos/OmniNode-ai/omniintelligence/git/matching-refs/tags/dev- --jq '.[].ref' | sed 's#refs/tags/##' | sort | tail -n 1)";
+          tag="$(gh api --paginate repos/OmniNode-ai/omniintelligence/git/matching-refs/tags/dev- --jq '.[].ref' | sed 's#refs/tags/##' | sort | tail -n 1)";
           test -n "$tag";
           doc="$(gh api "repos/OmniNode-ai/omniintelligence/contents/src/omniintelligence/nodes/node_pattern_storage_effect/contract.yaml?ref=$tag" --jq .content | base64 -d)";
           grep -q '^http_mount:' <<<"$doc"

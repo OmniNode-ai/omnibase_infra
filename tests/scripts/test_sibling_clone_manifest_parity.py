@@ -24,6 +24,8 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
 CHECK_PINS = REPO_ROOT / "scripts" / "runtime_build" / "check_sibling_lock_pins.py"
@@ -31,12 +33,24 @@ CHECK_PINS = REPO_ROOT / "scripts" / "runtime_build" / "check_sibling_lock_pins.
 
 def _bash_array(source: str, name: str) -> list[str]:
     match = re.search(
-        rf"^{re.escape(name)}=\(\s*(.*?)\s*\)$",
+        # Only quoted words may sit between the parentheses, so the match cannot
+        # run on past the array's own closing parenthesis into a later array, and
+        # an array holding a comment or a bare word fails the lookup loudly
+        # instead of parsing short.
+        rf'^{re.escape(name)}=\(((?:\s*"[^"]*")*)\s*\)',
         source,
-        re.DOTALL | re.MULTILINE,
+        re.MULTILINE,
     )
     assert match, f"could not find bash array {name!r} in {MANIFEST}"
     return re.findall(r'"([^"]+)"', match.group(1))
+
+
+def test_bash_array_reader_stops_at_its_own_parenthesis_and_refuses_a_comment() -> None:
+    source = 'A=("a" "b")\nB=(\n    "c"\n    "d"\n)\nC=(\n    "e"  # note\n)\n'
+    assert _bash_array(source, "A") == ["a", "b"]
+    assert _bash_array(source, "B") == ["c", "d"]
+    with pytest.raises(AssertionError):
+        _bash_array(source, "C")
 
 
 def _python_default_package_repo_dirs() -> dict[str, str]:
