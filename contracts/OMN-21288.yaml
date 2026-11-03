@@ -244,11 +244,23 @@ dod_evidence:
     binds_ac: []
   - id: dod-omn21288-t5-boot-guard-fold-pairing
     description: >-
-      A retained boot-good image captured before the fold is refused under the post-fold policy before replacement or recovery starts. A snapshot of the same fold generation still restores. The revision rollback test restores the writer service scopes together with the pre-fold policy.
+      A retained boot-good image captured before the fold is never restored under the post-fold policy: the recovery refuses the pairing and records the incident. A snapshot of the same fold generation still restores. The revision rollback test restores the writer service scopes together with the pre-fold policy.
     source: manual
     checks:
       - check_type: test_passes
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn21288-fold-forward-deploy-not-refused
+    description: >-
+      A pre-fold boot-good snapshot, including one written before folded_profiles existed, no longer refuses the forward deploy at prepare; the restore still refuses the cross-fold pairing. On dev every deploy of 500a9d04a was refused at prepare (56 jobs, 2026-11-03T10:56Z to 11:01Z). The tests fail with dev's guard and pass on the branch.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/handlers/test_handler_dev_boot_guard_fold_forward_omn21288.py tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py scripts/deploy-agent/tests/unit/test_boot_guard_fold_pairing_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
   - id: dod-omn21288-t5-ac3-rollback-by-revision
