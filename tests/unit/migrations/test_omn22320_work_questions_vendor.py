@@ -35,11 +35,8 @@ def _sql() -> str:
     )
 
 
-def test_vendored_files_include_the_runtime_acl_repair() -> None:
-    assert sorted(path.name for path in _VENDOR.glob("*")) == [
-        _CREATE,
-        "0001_revoke_undeclared_runtime_grants.sql",
-    ]
+def test_only_the_create_file_is_vendored() -> None:
+    assert sorted(path.name for path in _VENDOR.glob("*")) == [_CREATE]
 
 
 def test_vendor_bytes_and_manifest_binding_are_exact() -> None:
