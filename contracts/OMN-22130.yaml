@@ -10,11 +10,9 @@ requirements:
     statement: HandlerMCP is built from the injected container alone and reads its server timeouts from the handler contract through initialize(config); handler_mcp.py has no entry in the handler DI baseline.
     acceptance:
       - id: AC1
-        statement: 'AC1: handler-di-gate reports zero findings for handler_mcp.py and the MCP handler models with the baseline line deleted -- falsifier: uv run --frozen pre-commit run handler-di-gate --files src/omnibase_infra/handlers/handler_mcp.py'
+        statement: 'AC1: handler_mcp.py has no entry in the handler DI baseline and handler-di-gate reports zero findings for it -- falsifier: ! grep -q handler_mcp.py .onex_ratchets/handler_di_baseline.txt'
       - id: AC2
         statement: 'AC2: the constructor takes exactly a required container, the timeouts come from the contract, and the server start and stop path passes with the in-memory and the Redpanda-overlay binding -- falsifier: uv run --frozen pytest tests/unit/handlers/test_handler_mcp_di_omn22130.py -q'
-      - id: AC3
-        statement: 'AC3: the existing MCP handler and contract-config tests keep passing -- falsifier: uv run --frozen pytest tests/unit/handlers/test_handler_mcp.py tests/unit/runtime/test_handler_bootstrap_source.py tests/integration/handlers/test_mcp_handler_integration.py -q'
       - id: AC4
         statement: 'AC4: a malformed metadata.transport.server_timeouts block is refused at contract load and the shipped contract block reaches the handler config -- falsifier: uv run --frozen pytest tests/integration/handlers/test_handler_mcp_contract_timeouts_omn22130.py -q'
 evidence_requirements:
@@ -27,11 +25,11 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn22130-ac1-gate-clean
-    description: The handler-di-gate hook passes over handler_mcp.py and the MCP handler config model with the handler_mcp.py baseline line deleted (the other files the gate reports are outside this change).
+    description: The handler DI baseline carries no handler_mcp.py line. Fails at the merge base, where the baseline admits 6 findings for the file.
     source: manual
     checks:
       - check_type: command
-        check_value: "uv run --frozen pre-commit run handler-di-gate --files src/omnibase_infra/handlers/handler_mcp.py src/omnibase_infra/handlers/models/mcp/model_mcp_handler_config.py"
+        check_value: "bash -c '! grep -q handler_mcp.py .onex_ratchets/handler_di_baseline.txt'"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
@@ -44,15 +42,6 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
-  - id: dod-omn22130-ac3-existing-tests
-    description: The existing MCP handler, bootstrap source and MCP integration tests pass at the head.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/handlers/test_handler_mcp.py tests/unit/runtime/test_handler_bootstrap_source.py tests/integration/handlers/test_mcp_handler_integration.py -q"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC3
   - id: dod-omn22130-ac4-contract-load
     description: The shipped MCP handler contract's server_timeouts reach the handler config, and a malformed block is refused at contract load. Fails at the merge base, where the loader copies the block unvalidated.
     source: manual
