@@ -1,0 +1,77 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22172
+title: "Scoped deploy-agent redeploy of one standalone compose service (the factory floor web server)"
+summary: >-
+  Adds the host-side half of the scoped redeploy route: the node node_standalone_compose_recreate_effect and its handler. The node contract declares the lanes (dev only), compose files and services the route may touch; the handler refuses anything else before docker is called, recreates only the declared service with no dependencies, and reads every container id on the host before and after so any other id that moved is a scope violation. This PR does not wire a reader for the command into the deploy agent: every file of the agent is in the canonical-file-shape baseline and may not grow, so the reader needs its own change. AC3 (the live redeploy and the gated response from the tailnet address) is the live proof on the dev lane and is not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22172-scoped-recreate
+    statement: >-
+      The recreate effect recreates only the declared service, leaves every other container id unchanged, and is refused for an undeclared compose file or service or for any lane but dev.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the executor scope recreates only the declared service and reports any other changed container id as a scope violation -- falsifier: uv run pytest tests/unit/handlers/test_handler_standalone_compose_recreate_omn22172.py -q
+      - id: AC2
+        statement: >-
+          AC2: a compose file or service not declared in the node contract, and any prod lane, is refused and docker is not called -- falsifier: uv run pytest tests/unit/handlers/test_handler_standalone_compose_recreate_omn22172.py -k refused -q
+      - id: AC4
+        statement: >-
+          AC4: the effect is a node with a contract.yaml whose declared lanes and targets the handler reads -- falsifier: uv run pytest tests/unit/handlers/test_handler_standalone_compose_recreate_omn22172.py -k contract -q
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The handler against a fake docker.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_standalone_compose_recreate_omn22172.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22172-ac1-scope
+    description: >-
+      The handler recreates only the declared service and reports a moved foreign container id as a scope violation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_standalone_compose_recreate_omn22172.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn22172-ac2-refusal
+    description: >-
+      An undeclared compose file, service or lane is refused before Docker is called.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_standalone_compose_recreate_omn22172.py -k refused -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn22172-ac4-contract
+    description: >-
+      The node contract declares the dev-only target policy consumed by the handler.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_standalone_compose_recreate_omn22172.py -k contract -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn22172-ac1-process-integration
+    description: >-
+      Deploy probe. On a hosted runner, load the real node contract and resolve its handler through the real service registry. Execute the concrete Docker effect handler against a stateful subprocess simulator and assert the no-dependencies single-service command and full-host before/after readback. A foreign container movement must be a scope violation. This does not claim a live Docker deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 COMPOSE_PROJECT_NAME=landing-l23795-lab uv run --frozen pytest tests/integration/handlers/test_standalone_compose_recreate_omn22172.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2, AC4]
+  - id: dod-omn22172-ac1-deploy-probe
+    description: >-
+      Deploy probe. The handler GitHub serves at the checked-out commit defines the recreate effect. The probe reads the file from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_standalone_compose_recreate.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'class HandlerStandaloneComposeRecreate' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

@@ -8,6 +8,9 @@ from omnibase_infra.handlers.models.mcp.enum_mcp_operation_type import (
 from omnibase_infra.handlers.models.mcp.model_mcp_handler_config import (
     ModelMcpHandlerConfig,
 )
+from omnibase_infra.handlers.models.mcp.model_mcp_server_timeouts import (
+    ModelMcpServerTimeouts,
+)
 from omnibase_infra.handlers.models.mcp.model_mcp_tool_call import (
     ModelMcpToolCall,
 )
@@ -18,6 +21,7 @@ from omnibase_infra.handlers.models.mcp.model_mcp_tool_result import (
 __all__ = [
     "EnumMcpOperationType",
     "ModelMcpHandlerConfig",
+    "ModelMcpServerTimeouts",
     "ModelMcpToolCall",
     "ModelMcpToolResult",
 ]
