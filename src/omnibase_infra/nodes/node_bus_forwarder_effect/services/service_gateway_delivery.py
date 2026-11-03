@@ -43,6 +43,10 @@ _DIRECTIONS: tuple[Literal["outbound", "inbound"], ...] = ("outbound", "inbound"
 class ProtocolGatewayConsumer(Protocol):
     """Concrete pull surface used by the Kafka-backed gateway runtime."""
 
+    async def start(self) -> None: ...
+
+    async def close(self) -> None: ...
+
     async def poll(
         self,
         *,
