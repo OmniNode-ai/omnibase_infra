@@ -31,10 +31,12 @@ import pytest
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -106,14 +108,13 @@ def create_envelope(
     event: ModelNodeIntrospectionEvent,
     now: datetime | None = None,
     correlation_id: UUID | None = None,
-) -> ModelEventEnvelope[ModelNodeIntrospectionEvent]:
+) -> ModelInjectedRequest[ModelNodeIntrospectionEvent]:
     """Create a test envelope wrapping an introspection event."""
-    return ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=event,
-        envelope_timestamp=now or TEST_NOW,
+    return ModelInjectedRequest(
+        event=event,
+        now=now or TEST_NOW,
+        input_id=uuid4(),
         correlation_id=correlation_id or uuid4(),
-        source_tool="test",
     )
 
 
