@@ -36,7 +36,7 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn22130-ac2-di-two-profile
-    description: The constructor signature, the contract-declared timeouts and the two-profile server start and stop. Fails at the merge base, where the constructor takes three optional parameters and the timeouts are module literals.
+    description: The constructor signature, the contract-declared timeouts, and the server start and stop with kafka_enabled off and on against a fake lifecycle (it binds no real Kafka or overlay service). Fails at the merge base, where the constructor takes three optional parameters and the timeouts are module literals.
     source: manual
     checks:
       - check_type: test_passes
@@ -67,7 +67,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/handler_contract_config_loader.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q "key.checked(transport"'
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/handler_contract_config_loader.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q "] = _checked_transport_value("'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
