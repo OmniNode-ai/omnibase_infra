@@ -97,6 +97,13 @@ LIVE_SIGNATURES = (
         "snapshot_id",
         id="OMN-15302-baselines_comparisons.snapshot_id",
     ),
+    pytest.param(
+        "node_projection_agent_actions",
+        "0000_create_agent_observability_tables.sql",
+        "agent_status_events",
+        "correlation_id",
+        id="OMN-21920-agent_status_events.correlation_id",
+    ),
 )
 
 
@@ -843,49 +850,28 @@ def test_fixed_migration_is_green_on_the_same_drifted_shape(
         assert _psql_stdout(present, f"{table}.{column} presence probe") == "1", (
             present.stdout
         )
-    finally:
-        _drop_database(server, database)
 
-
-def _assert_agent_status_index_survives_missing_correlation_id(
-    server: Server,
-) -> None:
-    """OMN-21920: the correlation index must not fail on a drifted table.
-
-    Run from ``test_reconciliation_preserves_pre_existing_rows`` rather than as
-    its own test: a new test in this module is collected and skipped on every
-    split without Postgres, and the skip-count baseline may only shrink.
-    """
-    node = "node_projection_agent_actions"
-    filename = "0000_create_agent_observability_tables.sql"
-    path = _migration_path(node, filename)
-    database = _new_database(server)
-    try:
-        seeded = _psql(
-            server,
-            database,
-            "-v",
-            "ON_ERROR_STOP=1",
-            "-c",
-            _drifted_table_ddl(path, "agent_status_events", "correlation_id"),
+        # Indexes the migration declares on the drifted table must survive the
+        # reconciliation (OMN-21920: an index on the missing column failed it).
+        indexes = re.findall(
+            rf"CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(?:public\.)?{table}\b",
+            path.read_text("utf-8"),
+            re.I,
         )
-        assert seeded.returncode == 0, seeded.stderr
-        result = _psql(server, database, "-v", "ON_ERROR_STOP=1", "-f", str(path))
-        assert result.returncode == 0, result.stdout + result.stderr
-        probe = _psql_script(
-            server,
-            database,
-            "SELECT count(*) FROM pg_indexes "
-            "WHERE indexname = 'idx_agent_status_correlation';",
-        )
-        assert _psql_stdout(probe, "correlation index probe") == "1", probe.stdout
+        for index in indexes:
+            probe = _psql_script(
+                server,
+                database,
+                "SELECT count(*) FROM pg_indexes WHERE indexname = :'idx';",
+                idx=index,
+            )
+            assert _psql_stdout(probe, f"{index} index probe") == "1", probe.stdout
     finally:
         _drop_database(server, database)
 
 
 def test_reconciliation_preserves_pre_existing_rows(server: Server) -> None:
     """A drifted table with data keeps every row; nothing is dropped."""
-    _assert_agent_status_index_survives_missing_correlation_id(server)
     path = _migration_path(
         "node_projection_cost_summary", "0001_create_llm_cost_aggregates.sql"
     )
