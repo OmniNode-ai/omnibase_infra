@@ -166,6 +166,7 @@ x-lakshman-runtime-env: &lakshman-runtime-env
   ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
   ONEX_MARKETPLACE_SKILLS_ROOT: /app/skills
   ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
+  ONEX_RUNTIME_KERNEL_PLUGINS: ${ONEX_RUNTIME_KERNEL_PLUGINS:?runtime policy contract must set ONEX_RUNTIME_KERNEL_PLUGINS}
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: lakshman
   KAFKA_ENVIRONMENT: lakshman
@@ -203,7 +204,7 @@ x-lakshman-runtime-env: &lakshman-runtime-env
   # tests/test_glm_endpoint_surface_omn6790.py.
   # OMN-20173: Coding Plan use is Claude Code only; no system endpoint default.
   LLM_GLM_URL: ${LLM_GLM_URL:-}
-  LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
+  LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-}
   # Correction (b): every cloud model credential below is OPTIONAL. The lane
   # must reach a healthy /health with none of them set; wiring a model backend
   # is a later, separate step for the lane owner.
@@ -465,7 +466,7 @@ services:
       POSTGRES_DB: omnibase_infra
       NODE_POSTGRES_DB: omnidash_analytics
       REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"
-    entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
+    entrypoint: ["tail", "-f", "/dev/null"]
     volumes:
       - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
     networks: !override
@@ -761,7 +762,7 @@ services:
       DB_USER: role_omninode
       MIGRATION_DIR: /work
       PGPASSWORD: ${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD required for operator tenant path}
-      PGCONNECT_TIMEOUT: "10"
+      PGCONNECT_TIMEOUT: ${PGCONNECT_TIMEOUT:-10}
     command: ["bash", "/run-cloud-migrations.sh"]
     logging: *logging-defaults
   onex-api:
