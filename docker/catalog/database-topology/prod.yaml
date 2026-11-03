@@ -80,6 +80,7 @@ databases:
               - automation_liveness_state
               - automation_run_history
               - board_probe_results
+              - brief_quality_vs_outcome
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
@@ -99,9 +100,11 @@ databases:
               - lab_job_transitions
               - lab_lane_health
               - lab_proof_receipts
+              - lane_drift_and_stalls
               - live_events
               - log_entries
               - open_obligations
+              - orchestration_style_outcomes
               - pr_landing_state
               - pr_landing_transitions
               - pr_state
@@ -113,11 +116,13 @@ databases:
               - savings_injection_signals
               - savings_validator_catch_signals
               - session_content
+              - subagent_waste
               - topic_activity
               - topic_produce_windows
               - work_events
               - work_ledger_rows
               - work_ledger_state
+              - work_outcome_units
               - worktree_reconcile_hosts
             privileges:
               - INSERT
@@ -449,5 +454,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: b27c61e8801134deb58ecf11d2133c92c76bc73865795a5996c82a9c8e841473
+  sha256: 34c56402edc2d587893dd9485cd272ab5bb35fa00b716893ee12fb39df5308e0
 topology_instance: local
