@@ -164,9 +164,10 @@ retry_delay_seconds="${UV_RETRY_DELAY_SECONDS:-10}"
 while true; do
   if uv "$@"; then
     exit 0
+  else
+    status=$?
   fi
 
-  status=$?
   if [ "${attempt}" -ge "${max_attempts}" ]; then
     echo "uv $* failed after ${attempt} attempt(s)" >&2
     exit "${status}"
@@ -244,8 +245,8 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install --no-deps \
     "omninode-claude>=0.27.0,<1.0.0" \
-    "omninode-memory>=0.18.8,<1.0.0" \
-    "omninode-intelligence>=0.25.1,<1.0.0"
+    "omninode-memory>=0.18.9,<1.0.0" \
+    "omninode-intelligence>=0.25.3,<1.0.0"
 
 # ============================================================================
 # Sibling-repo install: workspace vs release mode
