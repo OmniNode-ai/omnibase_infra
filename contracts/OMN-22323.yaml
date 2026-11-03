@@ -1,0 +1,46 @@
+# OMN-22323 contract file for omnibase_infra: the topic-naming-lint commit hook judges the staged files.
+schema_version: "1.0.0"
+ticket_id: "OMN-22323"
+title: "omnibase_infra git commit takes 309 to 391 s because topic-naming-lint, no-omnimarket-dependency and onex-validate-imports scan the whole repository on every commit"
+summary: "topic-naming-lint read every node contract and every Python file under src/omnibase_infra on every commit. Each finding of that lint is a function of one file, so the hook now judges the staged files and reaches the verdict the whole-tree scan reaches for them; a staged validator input (the lint script, its baseline, the contract-validation node, topic constants, the runtime that wires it) and a call with no file argument still scan the whole tree. no-omnimarket-dependency and onex-validate-imports are left whole-tree: the first reads the manifest, the lock and every module, and the second imports every module of src to find cycles, which is not a property of the changed files."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22323-commit-hook-cost
+    statement: "A commit's topic lint costs what the commit changes, with every hook still running and still refusing what it refuses."
+    acceptance:
+      - id: AC1
+        statement: "AC1: git commit of a small omnibase_infra change finishes in under 240 s on h053, measured with lab-run --via bus before and after on h053 and h051 and recorded as a table in the PR body -- falsifier: the before and after rows in the PR body, produced by the same lab-run command on the same change"
+      - id: AC2
+        statement: "AC2: every hook in the commit stage still runs and none is skipped, removed, moved or given a wider allowlist -- falsifier: uv run pytest of a test over .pre-commit-config.yaml that compares hook ids, stages and allowlists with origin/main"
+      - id: AC3
+        statement: "AC3: each of topic-naming-lint, no-omnimarket-dependency and onex-validate-imports that is made incremental or cached per run has a falsifier test in which a violation planted in a changed file is still refused -- falsifier: uv run pytest of the per-hook falsifier tests"
+      - id: AC4
+        statement: "AC4: a violation in a file the staged diff does not touch is still caught where the check's rule is not provably local to changed files -- falsifier: uv run pytest of a test that plants a violation in an unchanged file and runs the hook"
+evidence_requirements:
+  - kind: tests
+    description: "The config comparison and the staged topic lint falsifier tests pass."
+    command: "uv run pytest tests/ci/test_precommit_hook_cost_omn22323.py tests/unit/handlers/test_staged_commit_hook_scans_omn22323.py tests/unit/scripts/validation/test_lint_topic_names.py -q -p no:cacheprovider --no-cov"
+dod_evidence:
+  - id: dod-001
+    description: "Every hook of origin/dev is still present in the commit stage with its exclude pattern; a removed, delayed or loosened hook is refused by the comparison. The h053 and h051 before and after git commit table is in the pull request body."
+    source: generated
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/ci/test_precommit_hook_cost_omn22323.py -q -p no:cacheprovider --no-cov"
+  - id: dod-002
+    description: "A violation planted in a changed Python file, contract or consumer declaration is refused by the staged topic lint with the exit code and output of the whole-tree scan."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/handlers/test_staged_commit_hook_scans_omn22323.py -q -p no:cacheprovider --no-cov -k 'refused_like_the_whole_tree'"
+  - id: dod-003
+    description: "A violation in a file the staged diff does not touch is caught by the whole-tree mode, and a staged validator input makes the hook scan the whole tree."
+    source: generated
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/handlers/test_staged_commit_hook_scans_omn22323.py -q -p no:cacheprovider --no-cov -k 'unchanged_file or validator_input'"

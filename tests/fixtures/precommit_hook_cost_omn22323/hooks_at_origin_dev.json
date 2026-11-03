@@ -1,0 +1,1818 @@
+{
+ "base": "origin/dev 500a9d04a79bbffb36c764744c66121604fb7a0c",
+ "default_stages": [
+  "pre-commit"
+ ],
+ "hooks": {
+  "alarm-manifest-restart-bounds": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "anthropic-key-prefix-workflows": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "anti-growth-baseline": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   },
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   },
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   },
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "autoclose-history": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "block-operational-artifacts": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "board-check-coverage": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "body-reading-workflows-trigger-on-edit": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "boot-gate-rollout-deadline-check": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "broker-principal-effect": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "c11-negative-paths-grading": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "c12-provider-catalogue-grading": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "c13-customer-local-grading": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "c16-receipt-identity-grading": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "c28-consumer-flow-grading": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "c29-customer-byo-key-grading": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "canonical-file-shape": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "cascade-provenance-block": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "census-container-health": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "census-desired-state-drift": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "census-health-collector": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-added-large-files": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-ai-slop": [
+   {
+    "exclude": "936fe2fd1294",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-canonical-inference": [
+   {
+    "exclude": "130bfcb00110",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-cli-registry-vocabulary": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-context-field-presence": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-core-compatible-range": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-dep-provenance": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-dep-provenance-dev-tags": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-dev-lane-required-env-vars": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-dev-tenant-fold-required-env-vars": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-direct-model-call": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-push"
+    ]
+   }
+  ],
+  "check-end-of-file": [
+   {
+    "exclude": "4c619903d1d7",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-env-reads": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-evidence-provenance-probe": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-hardcoded-model-config-compute": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-hardcoded-topic-compute": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-lane-attestation": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-local-paths-compute": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-lockfile-registry-allowlist": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-merge-conflict": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-no-credential-in-log": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-no-credential-in-log-self-test": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-no-io-outside-effects": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-no-raw-sqlite3": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-node-boundary-imports": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-push"
+    ]
+   }
+  ],
+  "check-pin-reachability": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-public-runner-placement": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-realm-no-clients": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-receipt-honesty": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-reconciler-movement-proof": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-reconciler-privilege": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-release-identity": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-required-env-vars": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-runtime-image-identity": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-shape-gate-independence": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-strict-gate-ordering": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-stub-implementations": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-terminal-cost-completeness": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "check-url-authority": [
+   {
+    "exclude": "130bfcb00110",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "ci-evidence-policy": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "ci-live-contact": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "cloud-migration-alias-staleness": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "compose-image-retention-policy": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "contract-discovery-reconciliation": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "contract-result-applier-construction": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "contract-topic-category": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "contracts-strict-load": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "customer-cli-no-internal-parameter": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "d11-workflow-verdict-regression": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "delegation-response-contract-seam": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "delegation-routing-tiers-binding": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "deploy-agent-branch-installs": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "deploy-agent-health-convergence": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "deployment-config": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "dev-cloud-migration-scope": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "dev-lane-branch-installs-handler": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "dev-tenant-projection-fold": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "developer-principal-plan": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "discovery-manifest-live-replay": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "envelope-tenant-dimension": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "exposed-identifier-gate": [
+   {
+    "exclude": "303ccaf5d4ad",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "gate-runner-entrypoint-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "git-env-scrub": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "governed-helper-primitive": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "handler-any-signature": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "handler-di-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "handler-dispatch-entrypoint": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "handler-event-type-source": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "handler-routing-schema-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "hostile-review-agent-accept": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "impacted-test-selector": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "imperative-contract-guard-caller": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "incident-replay-coverage": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "integration-skip-guard": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "kafka-no-hardcoded-fallback": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lab-census-alarm-episodes": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lab-load-probe-honesty": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lab-pass-criterion-bindings": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lab-probe-windows": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lab-proof-profiles": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lab-reconcile-model-evidence": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lane-carrier-build-scope": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lane-presence-guard": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lane-sync-drift": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lane-sync-receipt": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lane-sync-stability": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "linear-transport-consolidation": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "lint-pricing-manifest": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "llm-topology-validator": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "main-target-guard": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-push"
+    ]
+   }
+  ],
+  "mirror-source-consume-only": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "mypy-type-check": [
+   {
+    "exclude": "1e8a03029d79",
+    "stages": [
+     "pre-push"
+    ]
+   }
+  ],
+  "no-bare-compose-teardown": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-bare-feature-flags": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-baseline-refreeze": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-cloud-bus": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-coding-plan-endpoint": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-consul-references": [
+   {
+    "exclude": "729a542903e4",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-env-fallbacks": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-env-file": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-git-precommit-additional-dependencies": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-hardcoded-topics": [
+   {
+    "exclude": "7a4dd289b077",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-infra-inmemory-import": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-literal-event-type-in-tests": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-noncanonical-lifecycle-classes": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-omnimarket-dependency": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-onex-env-reads": [
+   {
+    "exclude": "729a542903e4",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-planning-docs": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-plugin-daemon-classes": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-staging-pr-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-untracked-todos": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "no-untyped-metadata": [
+   {
+    "exclude": "523371148180",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "nonrequired-check-failure-rate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "normalization-symmetry": [
+   {
+    "exclude": null,
+    "stages": [
+     "manual"
+    ]
+   }
+  ],
+  "onex-check-duplication-sweep": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-check-migration-append-only": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-check-migration-class": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-check-migration-required": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-check-migration-rls-policy-atomicity": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-check-node-migration-declarations": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-check-node-migration-sync": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-check-tenant-guc-domain-parity": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-check-topology-grant-delivery": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-delegation-dispatch-consumer-kwarg-parity": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-imperative-orchestrator-ratchet": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-orchestration-monolith-ratchet": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-orchestrator-reducer-state-invariant": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-any-types": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-architecture": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-architecture-layers": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-push"
+    ]
+   }
+  ],
+  "onex-validate-backend-secret-discipline": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-clean-root": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-contracts": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-db-quality-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-declarative-nodes": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-imports": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-markdown-links": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-migration-freeze": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-migration-sequence": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-naming": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-patterns": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-published-events": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-runtime-profiles": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-test-root-collection": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "onex-validate-unions": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "operation-match-fanout": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "operation-match-requires-operation": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "operator-script-topic-namespace": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "persistent-lab-receipt": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "plugin-pin-cascade-evidence": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "precommit-fail-loud-meta-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "precommit-interpreter-resolution": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "precommit-pin-parity": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "prepr-tenant-lifecycle": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "prepush-deploy-scope-dod": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-push"
+    ]
+   }
+  ],
+  "prod-promotion-lineage-guard": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "provider-key-redaction": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "provider-rung-canary-grading": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "public-repo-hygiene": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "publish-flow-attribution-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "reducer-purity-check": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "refuse-ai-coauthor-trailer": [
+   {
+    "exclude": null,
+    "stages": [
+     "commit-msg"
+    ]
+   }
+  ],
+  "refuse-staged-tmp-files": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "reject-deploy-gate-skip-token": [
+   {
+    "exclude": "160fb6303e58",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "reject-deploy-gate-skip-token-commit-msg": [
+   {
+    "exclude": null,
+    "stages": [
+     "commit-msg"
+    ]
+   }
+  ],
+  "reject-node-implementations": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "reject-required-check-skip-vector": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "release-train-nightly-tests": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "review-voter-model-from-overlay": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "rolling-runner-registration-preflight": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "ruff-fix": [
+   {
+    "exclude": "0e838afdc9e1",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "ruff-format": [
+   {
+    "exclude": "0e838afdc9e1",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "runner-disk-admission-restore-regression": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "runner-disk-admission-self-pause": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "runner-image-playwright-chromium-libs": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "runner-routing-audit": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "runtime-boot-dev-lane-class": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "runtime-boot-suites-skip-guard": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "scheduled-script-unit-drift": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "schema-migrations-tracker-shape": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "seed-provenance-check": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "shell-hygiene": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "shellcheck": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "skip-count-ratchet": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "slot-migration-principal-confinement": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "stack-shape": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "subscribe-wiring-health": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "subscriber-dispatcher-resolution": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "subscription-flow-counter-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "tenant-scoped-ingress-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "topic-enum-drift-check": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "topic-naming-lint": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "topic-parity-gate": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "transport-mock-lint": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "type-ignore-budget": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "validate-gitignore-baseline": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "validate-model-dump-json-mode": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "validate-spdx-headers": [
+   {
+    "exclude": "3277b01a6015",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "validate-validator-requirements": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "workflow-inline-python-imports": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "workflow-input-default-type-parity": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "workflow-uv-available": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "workspace-config-root-resolve": [
+   {
+    "exclude": null,
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ],
+  "yamlfmt": [
+   {
+    "exclude": "d247d27ed88b",
+    "stages": [
+     "pre-commit"
+    ]
+   }
+  ]
+ }
+}

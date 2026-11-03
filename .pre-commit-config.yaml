@@ -2010,7 +2010,11 @@ repos:
         stages: [pre-commit]
       # Topic naming lint — validate onex.{kind}.{producer}.{event}.v{n} convention
       # (OMN-3188: YAML contracts; OMN-3259: Python enum/constant files)
-      # Triggers on contract*.yaml OR any *.py change; always scans full source tree.
+      # Triggers on contract*.yaml OR any *.py change. Judges the staged files: every
+      # finding is a function of one file. A staged validator input (the lint script,
+      # its baseline, the contract-validation node, topic constants, the runtime that
+      # wires it) and a call with no file argument scan the full source tree, as
+      # CI and `pre-commit run --all-files` do (see scripts/validation/run_topic_lint.sh).
       - id: topic-naming-lint
         # OMN-19315: the existing wrapper also refuses mixed consumer topic sets.
         name: Topic Naming Lint
@@ -2018,7 +2022,7 @@ repos:
         language: system
         types_or: [yaml, python]
         files: (contract.*\.yaml|\.py)$
-        pass_filenames: false
+        pass_filenames: true
         stages: [pre-commit]
       # OMN-4885: Validate published_events topics appear in event_bus.publish_topics
       - id: onex-validate-published-events

@@ -17,6 +17,12 @@
 # Usage: invoked by pre-commit as a system-language hook.
 set -euo pipefail
 
+# OMN-22323: pre-commit hands over the staged files; a staged-files call judges only
+# those (every finding is a function of one file). No arguments scans the whole tree.
+if [[ $# -gt 0 ]]; then
+    exec uv run --frozen python -m omnibase_infra.handlers.staged_commit_hook_scans topic-naming-lint "$@"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LINT="$SCRIPT_DIR/lint_topic_names.py"
 
