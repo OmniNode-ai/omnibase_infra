@@ -1,0 +1,93 @@
+# docker-compose.cost-estimator-web.yml
+# OMN-22162 (one-runtime plan task T18f) — the cost estimator page, served from the .51 report host on the
+# tailnet only. This is the lab preview; production serves the same page code through the website deploy,
+# behind the password gate, with promotion left to the operator (RULING 2026-11-02T21:56:30Z, OMN-22190).
+#
+# One container: the page image built from the web front end's repository (that repository's own Dockerfile; the page
+# image stays there). It carries the page and its thin /api/estimator/* proxy, and holds no state. The estimator
+# API it proxies to is NOT in this file: it keeps answering where it answers today (onex-api on the dev lane,
+# /v1/estimator/*) until T18c to T18e move it inside the runtime, and then COST_ESTIMATOR_API_BASE_URL is the one
+# value that changes (the host env file, never this repository).
+#
+# Why this is a standalone file and not a docker/catalog entry: the catalog renders every published port as
+# "external:internal" on all interfaces (src/omnibase_infra/docker/catalog/generator.py), so no catalog entry can
+# bind one address. This service must answer on the host's tailnet address and nowhere else, including not on the
+# LAN: the same reason docker-compose.factory-floor-web.yml and docker-compose.pypi-cache.yml are standalone.
+#
+# Why config/validation/stack_shape.yaml lists this file under not_a_stack: it is not a lane's runtime stack. It
+# runs on the report host, beside no runtime, no broker and no database, and a lane's application container count
+# (OMN-21891, T1) is a count of the containers of a lane's stack. The dev lane's own declaration of this service
+# stays judged, and stays in the baseline, until it is removed from docker-compose.dev-lane.yml.
+#
+# THE GATE (OMN-22190). The page image reads two values:
+#   FEATURE_ESTIMATOR_GATE_ENABLED  the page's default is on, so the page fails closed. Passed through from the
+#                                   host env file; unset here reads as `true`.
+#   ESTIMATOR_GATE_PASSWORD         the gate password. Passed through from the host env file, which takes it from
+#                                   the secret store; it is never in this repository, and no default here names
+#                                   one (unset reads as empty, and the page then opens nothing).
+# On .51 the host env file may set FEATURE_ESTIMATOR_GATE_ENABLED=false, because the host is tailnet only and
+# nobody outside the tailnet can reach it. With the flag on, the password is required: the gate is on and the page
+# renders only its password form until a visitor holds a valid signed cookie.
+#
+# Deployment values come from the host's own env file, never from this repository. The five that have no safe
+# default are required: `docker compose` refuses to render without them.
+#   COST_ESTIMATOR_WEB_IMAGE        the page image tag, built on the host from the web front end's clone (no registry holds it)
+#   COST_ESTIMATOR_BIND_ADDR        the host's tailnet address (the address the port is published on)
+#   COST_ESTIMATOR_PORT             the published port
+#   COST_ESTIMATOR_API_BASE_URL     the origin of the API the page proxies to (today onex-api on the dev lane)
+#   COST_ESTIMATOR_AUTH_URL         the public origin visitors reach the page at (next-auth refuses a loopback one)
+#
+# Bring up (on the serving host, env file in place):
+#   docker compose --env-file <host env file> -f docker/docker-compose.cost-estimator-web.yml up -d
+# Tear down:
+#   docker compose --env-file <host env file> -f docker/docker-compose.cost-estimator-web.yml down
+name: cost-estimator-web
+services:
+  cost-estimator-web:
+    image: ${COST_ESTIMATOR_WEB_IMAGE:?set COST_ESTIMATOR_WEB_IMAGE to the page image tag built from the web front end clone}
+    # The image exists in no registry; a pull attempt would only replace a clear "no such image" with a registry error.
+    pull_policy: never
+    container_name: omninode-cost-estimator-report
+    restart: unless-stopped
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${COST_ESTIMATOR_BIND_ADDR:?set COST_ESTIMATOR_BIND_ADDR to the host tailnet address}:${COST_ESTIMATOR_PORT:?set COST_ESTIMATOR_PORT}:3000"
+    environment:
+      FEATURE_ESTIMATOR_ENABLED: "true"
+      FEATURE_ESTIMATOR_GATE_ENABLED: ${FEATURE_ESTIMATOR_GATE_ENABLED:-true}
+      ESTIMATOR_GATE_PASSWORD: ${ESTIMATOR_GATE_PASSWORD:-}
+      # A production build of the front end redirects any host it does not know to its public origin; visitors
+      # reach this host at its tailnet name and port, so the page opts in to serving that host (OMN-21481).
+      OMNIWEB_SERVE_ANY_HOST: "true"
+      DELEGATION_API_BASE_URL: ${COST_ESTIMATOR_API_BASE_URL:?set COST_ESTIMATOR_API_BASE_URL to the origin of the estimator API}
+      ONEX_API_BASE_URL: ${COST_ESTIMATOR_API_BASE_URL:?set COST_ESTIMATOR_API_BASE_URL to the origin of the estimator API}
+      AUTH_URL: ${COST_ESTIMATOR_AUTH_URL:?set COST_ESTIMATOR_AUTH_URL to the origin visitors reach the page at}
+      AUTH_TRUST_HOST: "true"
+      # The page has no login and the estimator routes are public, so the next-auth names carry non-secret
+      # placeholders that pass the front end's own validators (the dev lane's declaration does the same).
+      AUTH_SECRET: ${COST_ESTIMATOR_AUTH_PLACEHOLDER:-cost-estimator-report-host-placeholder}
+      KEYCLOAK_ISSUER: "https://cost-estimator.invalid/realms/placeholder"
+      KEYCLOAK_CLIENT_ID: "placeholder"
+      KEYCLOAK_CLIENT_SECRET: ${COST_ESTIMATOR_AUTH_PLACEHOLDER:-cost-estimator-report-host-placeholder}
+      NODE_ENV: "production"
+    mem_limit: 512m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/cost-estimator"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    labels:
+      - "com.omninode.service=cost-estimator-web"
+      - "com.omninode.host=report"
+      - "com.omninode.ticket=OMN-22162"
