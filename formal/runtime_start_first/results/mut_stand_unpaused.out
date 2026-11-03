@@ -1,0 +1,71 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 5 and seed -8713430017294175547 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 59277] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmp_l65o71d/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-354095999200289407/Naturals.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-354095999200289407/Integers.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-354095999200289407/FiniteSets.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-354095999200289407/TLC.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-354095999200289407/Sequences.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module RuntimeStartFirst
+Linting of module RuntimeStartFirst
+Starting... (2026-11-02 19:43:09)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-02 19:43:09.
+Error: Invariant AtMostOneServing is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ nDeg = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "idle"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ agentUp = TRUE
+/\ fv = [n |-> "down", o |-> "active"]
+/\ lastRan = "o"
+/\ nStandby = FALSE
+/\ frontUp = TRUE
+/\ st = [n |-> "none", o |-> "serving"]
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = TRUE
+/\ nCrashes = 0
+/\ eff = <<0, 0, 0>>
+/\ age = 0
+
+State 2: <StartN line 262, col 3 to line 268, col 172 of module RuntimeStartFirst>
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ nDeg = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "created"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ agentUp = TRUE
+/\ fv = [n |-> "down", o |-> "active"]
+/\ lastRan = "o"
+/\ nStandby = FALSE
+/\ frontUp = TRUE
+/\ st = [n |-> "serving", o |-> "serving"]
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = TRUE
+/\ nCrashes = 0
+/\ eff = <<0, 0, 0>>
+/\ age = 0
+
+52 states generated, 30 distinct states found, 20 states left on queue.
+The depth of the complete state graph search is 5.
+Finished in 00s at (2026-11-02 19:43:09)
