@@ -80,6 +80,7 @@ databases:
               - automation_liveness_state
               - automation_run_history
               - board_probe_results
+              - brief_quality_vs_outcome
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
@@ -99,9 +100,11 @@ databases:
               - lab_job_transitions
               - lab_lane_health
               - lab_proof_receipts
+              - lane_drift_and_stalls
               - live_events
               - log_entries
               - open_obligations
+              - orchestration_style_outcomes
               - pr_landing_state
               - pr_landing_transitions
               - pr_state
@@ -113,12 +116,14 @@ databases:
               - savings_injection_signals
               - savings_validator_catch_signals
               - session_content
+              - subagent_waste
               - topic_activity
               - topic_produce_windows
               - transcript_mirror_runs
               - work_events
               - work_ledger_rows
               - work_ledger_state
+              - work_outcome_units
               - worktree_reconcile_hosts
             privileges: [INSERT, SELECT, UPDATE]
             schema: omninode_internal

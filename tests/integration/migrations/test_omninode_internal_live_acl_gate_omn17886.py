@@ -513,6 +513,32 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     )
     assert alert_liveness_live == {"SELECT", "INSERT", "UPDATE"}
 
+    # OMN-22320: node_projection_work_questions/0001 grants the runtime
+    # SELECT/INSERT/UPDATE on the five work-question tables, the topology
+    # declares exactly that, and the build delivers it with no DELETE.
+    for work_question_table in (
+        "work_outcome_units",
+        "orchestration_style_outcomes",
+        "lane_drift_and_stalls",
+        "brief_quality_vs_outcome",
+        "subagent_waste",
+    ):
+        work_question_declared = {
+            privilege
+            for principal, relation, privilege in declared_acl(
+                load_topology_profile(PROFILE)
+            ).table_grants
+            if principal == _RUNTIME and relation == work_question_table
+        }
+        assert work_question_declared == {"SELECT", "INSERT", "UPDATE"}, (
+            work_question_table
+        )
+        work_question_live = _live_privileges(
+            fresh_build, work_question_table, _RUNTIME
+        )
+        assert work_question_live == work_question_declared, work_question_table
+        assert "DELETE" not in work_question_live, work_question_table
+
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
     new = sorted(live - allowed)
