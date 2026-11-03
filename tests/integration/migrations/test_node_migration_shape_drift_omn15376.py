@@ -68,6 +68,7 @@ from tests.helpers.util_migration_shape import (
     guarded_create_tables,
     node_migration_files,
     shape_reconciliation_exempt_ids,
+    without_guarded_column_additions,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres, pytest.mark.serial]
@@ -639,7 +640,7 @@ def _drift_scope() -> list[tuple[str, Path]]:
 
 
 def _strip_reconciliation(sql: str) -> str:
-    """Delete every BEGIN/END reconciliation region -- the pre-fix variant."""
+    """Derive the pre-fix variant from marked regions or guarded column adds."""
     pattern = re.compile(
         re.escape(RECONCILIATION_BEGIN)
         + r".*?"
@@ -648,6 +649,8 @@ def _strip_reconciliation(sql: str) -> str:
         re.S,
     )
     stripped, count = pattern.subn("", sql)
+    if count == 0:
+        stripped, count = without_guarded_column_additions(sql)
     assert count > 0, "no reconciliation region found — RED would be vacuous"
     return stripped
 
