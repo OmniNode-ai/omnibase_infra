@@ -21,7 +21,7 @@ Handler Architecture:
     - Handlers are stateless classes (no mutable state between calls)
     - Handlers receive all context via the envelope (event, correlation_id, timestamp)
     - Handlers return ModelHandlerOutput containing events and metadata
-    - Time-based decisions use envelope.timestamp or datetime.now(UTC)
+    - Time-based decisions use request.now, and request.clock for durations
 
 Related Tickets:
     - OMN-888 (C1): Registration Orchestrator
