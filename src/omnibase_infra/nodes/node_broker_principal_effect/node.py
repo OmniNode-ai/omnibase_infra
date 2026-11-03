@@ -24,6 +24,7 @@ class NodeBrokerPrincipalEffect(NodeEffect):
         - ``HandlerBrokerPrincipalList``: the principals under a prefix (Admin API check).
         - ``HandlerBrokerPrincipalApply``: drift check, ACLs, read-back, then password.
         - ``HandlerBrokerPrincipalVerify``: ACLs against the plan, then a login.
+        - ``HandlerBrokerPrincipalDescribe``: the principal's ACLs, read only (OMN-20823).
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:

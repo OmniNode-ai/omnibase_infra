@@ -1,0 +1,130 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20823"
+title: "A mint orchestrator and make mint-local give a developer's machine its login on the local broker"
+summary: >-
+  node_developer_principal_mint_orchestrator (ORCHESTRATOR_GENERIC, an onex.nodes entry point, runtime_profiles [local-dev]) routes developer_principal.mint to HandlerDeveloperPrincipalMint, which sequences node_broker_principal_effect and node_developer_principal_plan_compute in process: converge calls list, plan, apply and verify and stops at the first failure; audit calls list, plan and the new read-only broker.principal.describe operation of node_broker_principal_effect (HandlerBrokerPrincipalDescribe), mutating nothing and taking no password. `make mint-local` takes an OS file lock on .mint-local.flock beside the env file that is held until the run and its children end, so a killed run never leaves it busy, and a busy run names a live recorded holder or says the holder has not recorded its pid yet, requires `make check-sasl-local`, audits, generates the password on the host, runs the orchestrator with `onex node` inside runtime-effects with the password passed only by variable name, checks the node's state root for it before removing it, stores the login with `onex auth lane-login --lane local` through a pipe, and prints `verified` only after a host-side `onex delegate --bus kafka --lane local` carrying the stack's tenant wrote a terminal event for its correlation id. The in-process run is plan D5, accepted by the operator as plan section 13 question 1. The command topic is entered in the runtime publisher inventory, so the wiring gate passes with no allowlist entry. The ticket named a `cli` profile; local-dev is the registered profile no deployed runtime carries, as in OMN-20821 and OMN-20822. The plan named minted and mint-failed event topics; the local runtime publishes a handler's one result to one terminal topic, so the node publishes one mint-completed terminal whose status is success or failure.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn20823-mint-orchestrator"
+    statement: "A developer machine mints, audits and proves its login on the broker it runs, in process, with the password in no argument, output, log or state."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: in converge mode the handler calls list, plan, apply, verify in that order and a plan refusal results in zero apply calls; in audit mode it makes zero mutating calls and reports every ACL outside the plan -- falsifier: `uv run pytest tests/unit/nodes/node_developer_principal_mint_orchestrator -k \"order or audit\" -q` shows apply called after a refusal, a different order, a mutating call in audit mode, or an unreported extra ACL"
+      - id: "AC2"
+        statement: "AC2: `make mint-local` on the T1 stack exits 0, prints the principal name, `create` and `verified`, the `lanes:` block of `~/.onex/config.yaml` has a `local` entry whose `sasl_username` is that principal, and the host-side delegation wrote a receipt with a terminal event for its correlation id -- falsifier: a nonzero exit, no `local` entry in the `lanes:` block, or no receipt with a terminal event"
+      - id: "AC3"
+        statement: "AC3: with a valid stored identity a second `make mint-local` prints `unchanged` and performs no Admin API mutation; an existing principal holding an ACL outside the plan is not reported `unchanged`: the run stops with the extra ACLs named and the password untouched; after `onex auth lane-logout --lane local` the next run prints `rotate`, the principal's ACL list is identical (a diff of two `rpk security acl list` outputs is empty) and the host-side delegation succeeds with the new password -- falsifier: the second run mutates the broker, the diff is not empty, or the delegation is refused for authentication"
+      - id: "AC4"
+        statement: "AC4: two `make mint-local` runs started together: in the stubbed test exactly one reaches the Admin API (one password mutation recorded), the other prints `mint-local: busy` naming the lock holder, ends with a non-zero make status and has no mutation attributed to it; in the lab step, started after a `lane-logout` so both would otherwise mint, exactly one run executes the node and exactly one prints `busy`; a lock directory whose recorded process was killed is removed by the next run, which says so and proceeds -- falsifier: `uv run pytest tests/unit/infra/test_make_mint_local.py -k lock -q` shows two mutations, a loser without the `busy` line or with status 0, a stale lock that blocks the next run, or a live lock that is removed"
+      - id: "AC5"
+        statement: "AC5: the minted password appears nowhere under the `onex node` state root (removed by the target and checked before removal), in `docker logs` of the `runtime-effects` container, in `ps` output sampled every 100 ms during the run, or in the target's own output; the temporary input file is gone after the run -- falsifier: a literal search of those four places for the stored password finds it, or the input file remains in the container"
+      - id: "AC6"
+        statement: "AC6: after `onex auth lane-logout --lane local`, with `KAFKA_SASL_USERNAME` and `KAFKA_SASL_PASSWORD` unset in the environment and `ONEX_TENANT_ID` set, `onex delegate --bus kafka --lane local` is refused before it connects and names `onex auth lane-login`; a separate test shows that with the two ambient variables both set it uses them (the supported fallback of `delegate_lane_credentials.py:144-149`) -- falsifier: the first command connects anonymously or fails with a handshake error, or the second test shows the ambient pair ignored"
+      - id: "AC7"
+        statement: "AC7: the host probe carries the stack's tenant: with distinct native and stack identities (two different tenants in the test), the request published by the probe names the stack's tenant, including when `LOCAL_ENV_FILE` points at a path other than the default -- falsifier: `uv run pytest tests/unit/infra/test_make_mint_local.py -k tenant -q` shows the native identity on the request or the default env file read under an overridden path"
+      - id: "AC8"
+        statement: "AC8: on a stack with no tenant, `make mint-local` either prints `verified` with a receipt carrying a terminal event, or exits non-zero naming the missing terminal; it never prints `verified` without a correlated terminal event -- falsifier: `uv run pytest tests/unit/infra/test_make_mint_local.py -k no_terminal -q` shows `verified` printed on a stub that returns no terminal"
+      - id: "AC9"
+        statement: "AC9: the manifest filters for `main` and `effects` own none of the node, `uv run python scripts/check_subscribe_wiring_health.py` passes with no allowlist or baseline entry added, and the canonical-file-shape ratchet, the contract validation and the new pre-commit entry pass -- falsifier: the wiring gate names the mint command as having no publisher, a profile owns the node, or `pre-commit run --all-files` adds or needs a baseline line"
+evidence_requirements:
+  - kind: "tests"
+    description: "The orchestrator, describe, make mint-local and lane local tests pass."
+    command: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_mint_orchestrator tests/unit/nodes/node_broker_principal_effect/test_broker_principal_describe.py tests/unit/infra/test_make_mint_local.py tests/unit/cli/test_delegate_lane_local_omn20823.py"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20823-ac1-order-and-audit"
+    description: >-
+      Through fake steps that journal every call: converge calls list, plan, apply, verify in that order; a refused plan makes no apply call; a refused apply makes no verify call and names the extra ACL; a failed step ends the run naming it. Audit calls list, plan and describe only, makes no apply or verify call, and reports a DENY and a host-scoped ALLOW as ACLs outside the plan. Fails at the parent, which has no handler.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_mint_orchestrator/test_developer_principal_mint.py -k \"order or audit\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-ac1-describe-read-only"
+    description: >-
+      broker.principal.describe keeps every binding the broker reports (ALLOW, DENY, host-scoped ALLOW, ALTER), refuses a reply that is not a list of bindings with a typed error, takes no password and creates no ACL. Fails at the parent, which has no describe handler.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect/test_broker_principal_describe.py"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-ac4-lock"
+    description: >-
+      The real make mint-local against recording stubs, following approved Amendments 2 and 3: descriptor 9 takes an exclusive nonblocking kernel flock on the stable .mint-local.flock file beside the env file. The run and its children retain the lock until their last inherited descriptor closes; killing the shell does not let a contender mint while its child is still running. The file is never unlinked or recreated, and legacy .mint-local.lock and .mint-local.lock.recover directories are neither read nor removed; every older runner and its children must have ended before first use. Two concurrent runs record one password mutation: the loser makes none, prints mint-local busy, and exits 75 from the recipe (make is nonzero). Only a positive numeric recorded pid that is still alive is named; otherwise the message says the lock is held by a run that has not yet recorded its pid. This checks recorded-pid liveness, not kernel-owner identity. Missing Perl with Fcntl and other lock errors fail closed with recipe exit 1 before mint mutations. After every holder ends, the next run acquires immediately; the stale-pid notice describes replacing the old record, not physically removing the lock file. Amendment 2 supersedes the copied directory-lock mechanism in AC4 while leaving its criterion text unchanged and preserving exclusion, truthful busy reporting, kill recovery and release. The original dev merge base 2e4087d1b has no mint-local target. The directory-lock Makefile at 7b5d145d4735 is the recovery and child-retention regression baseline; the paused pre-pid regression fails on 41c710ef8eff before Amendment 3. The existing one-mutation concurrency case is a retained positive control, not a claimed new RED.
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/infra/test_make_mint_local.py -k lock"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-ac6-lane-local-refusal"
+    description: >-
+      The no-login refusal and ambient-pair fallback already exist at dev merge base dee05932; the three original CLI cases remain regression checks. An offline functional journey first runs the new real make mint-local target against the recording fake broker, container and host probe, runs the real auth lane-login command with its stdin secret, and confirms that the real store holds the minted identity and delegate binds it. After real auth lane-logout, a separate case with no ambient SASL pair is refused naming onex auth lane-login before the recorded runtime handoff, and a case with the ambient pair dispatches without a stored identity bound. The two journey cases fail at dee05932 because mint-local is absent, not because this change introduces the inherited credential guard. This is not a Kafka connection or real-broker proof.
+    source: "manual"
+    binds_ac: ["AC6"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_delegate_lane_local_omn20823.py tests/unit/cli/test_mint_local_logout_journey_omn20823.py"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-ac7-tenant"
+    description: >-
+      With the shell exporting one tenant, the default env file naming a second and an overridden LOCAL_ENV_FILE naming a third, every host probe carries the overridden file's tenant; a stack with no tenant passes none. Fails at the parent, which has no mint-local target.
+    source: "manual"
+    binds_ac: ["AC7"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/infra/test_make_mint_local.py -k tenant"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-ac8-no-terminal"
+    description: >-
+      A probe stub that answers success but writes no terminal event makes make mint-local exit non-zero naming the missing terminal, without printing verified, on a first mint and on a machine whose stored login is valid. Fails at the parent, which has no mint-local target.
+    source: "manual"
+    binds_ac: ["AC8"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/infra/test_make_mint_local.py -k no_terminal"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-ac9-profile-ownership"
+    description: >-
+      discover_contracts_from_paths over the node's contract, filtered by filter_manifest_for_runtime_profile, leaves nothing for main or effects and the node for local-dev (positive control); the contract's command topic is in the runtime publisher inventory; exactly one developer-principal-mint pre-commit entry runs the tests. Fails at the parent, which has no such node.
+    source: "manual"
+    binds_ac: ["AC9"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_mint_orchestrator/test_developer_principal_mint.py -k \"profile_ownership or publishes_one_terminal or pre_commit_entry\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-ac2-ac3-stubbed-make"
+    description: >-
+      The real make mint-local against a recording fake broker and container (stubbed docker and host onex): a first run prints the principal, create and verified and stores lane local; a second prints unchanged with no password mutation; an ACL outside the plan is refused, named, with the password untouched; after a logout the run prints rotate and verifies. Stub-level only: the lab step on the PR is the readback against the real SASL stack. Fails at the parent, which has no mint-local target.
+    source: "manual"
+    binds_ac: ["AC2", "AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/infra/test_make_mint_local.py -k \"first_run or unchanged or drift or rotate\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-ac5-no-secret"
+    description: >-
+      Across a create and a rotate, no generated password is in any argument of any docker or onex call, in the target's output, or in a file left in the fake container; a password written into the node's state root is found by the target's own search and fails the run before anything is stored (positive control). Stub-level only for docker logs and ps: the lab step on the PR searches those. Fails at the parent, which has no mint-local target.
+    source: "manual"
+    binds_ac: ["AC5"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/infra/test_make_mint_local.py -k no_secret"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20823-deploy-probe-handler-source"
+    description: >-
+      deploy-scope source readback for a node no deployed runtime carries (its only profile is local-dev): read the mint handler at the evaluated commit through GitHub and require the handler class the change introduces; it does not deploy a service or claim a runtime runs it; it fails at the merge base with dev, 2e4087d1b, which has no such file; every commit on this branch from b1f3f6123 onward carries it; the AC1 tests above exercise the handler's behaviour.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_developer_principal_mint.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerDeveloperPrincipalMint:" > /dev/null'
+        cwd: "${OMNI_HOME}/omnibase_infra"

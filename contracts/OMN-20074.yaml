@@ -258,15 +258,15 @@ dod_evidence:
               legacy = namespace['load_selection_oracle'](required + ('onex-change-control',))
               retired = namespace['load_selection_oracle'](required)
               assert legacy['header']['corpus']['contracts_discovered'] == 154
-              assert retired['header']['corpus']['contracts_discovered'] == 162
+              assert retired['header']['corpus']['contracts_discovered'] == 163
               assert retired['header']['required_onex_nodes_packages'] == list(required)
               assert retired['header']['required_missing_packages'] == []
-              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 141}
+              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 142}
               for section in ('dispatchers', 'routes', 'probes', 'discovery_errors'):
                   assert legacy[section] == retired[section], section
-              assert len(retired['dispatchers']) == 131
-              assert len(retired['routes']) == 115
-              assert len(retired['probes']) == 1121
+              assert len(retired['dispatchers']) == 132
+              assert len(retired['routes']) == 116
+              assert len(retired['probes']) == 1124
           print('Tracked dispatch parity closure and inventories passed')
           PY
         cwd: ${OMNI_HOME}/omnibase_infra

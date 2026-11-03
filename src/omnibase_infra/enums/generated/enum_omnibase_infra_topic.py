@@ -30,6 +30,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_CONTRACT_VALIDATION_REQUESTED_V1 = contract_topic_value('nodes/node_contract_validate_compute/contract.yaml', 'omnibase-infra', 'CMD_CONTRACT_VALIDATION_REQUESTED_V1')  # onex.cmd.omnibase-infra.contract-validation-requested.v1
     CMD_DELEGATION_REQUEST_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnibase-infra', 'CMD_DELEGATION_REQUEST_V1')  # onex.cmd.omnibase-infra.delegation-request.v1
     CMD_DELEGATION_ROUTING_REQUEST_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnibase-infra', 'CMD_DELEGATION_ROUTING_REQUEST_V1')  # onex.cmd.omnibase-infra.delegation-routing-request.v1
+    CMD_DEVELOPER_PRINCIPAL_MINT_REQUESTED_V1 = contract_topic_value('nodes/node_developer_principal_mint_orchestrator/contract.yaml', 'omnibase-infra', 'CMD_DEVELOPER_PRINCIPAL_MINT_REQUESTED_V1')  # onex.cmd.omnibase-infra.developer-principal-mint-requested.v1
     CMD_FAULT_INJECT_FIXTURE_V1 = contract_topic_value('nodes/node_fault_inject_fixture_compute/contract.yaml', 'omnibase-infra', 'CMD_FAULT_INJECT_FIXTURE_V1')  # onex.cmd.omnibase-infra.fault-inject-fixture.v1
     CMD_GATEWAY_ATTACH_REQUEST_V1 = contract_topic_value('nodes/node_gateway_attach_effect/contract.yaml', 'omnibase-infra', 'CMD_GATEWAY_ATTACH_REQUEST_V1')  # onex.cmd.omnibase-infra.gateway-attach-request.v1
     CMD_GATEWAY_DETACH_REQUEST_V1 = contract_topic_value('nodes/node_gateway_attach_effect/contract.yaml', 'omnibase-infra', 'CMD_GATEWAY_DETACH_REQUEST_V1')  # onex.cmd.omnibase-infra.gateway-detach-request.v1
@@ -78,6 +79,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CONSUMER_HEALTH_V1 = contract_topic_value('nodes/node_consumer_health_triage_effect/contract.yaml', 'omnibase-infra', 'EVT_CONSUMER_HEALTH_V1')  # onex.evt.omnibase-infra.consumer-health.v1
     EVT_CONTRACT_VALIDATION_COMPLETED_V1 = contract_topic_value('nodes/node_contract_validate_compute/contract.yaml', 'omnibase-infra', 'EVT_CONTRACT_VALIDATION_COMPLETED_V1')  # onex.evt.omnibase-infra.contract-validation-completed.v1
     EVT_DB_ERROR_V1 = contract_topic_value('nodes/node_db_error_linear_effect/contract.yaml', 'omnibase-infra', 'EVT_DB_ERROR_V1')  # onex.evt.omnibase-infra.db-error.v1
+    EVT_DEVELOPER_PRINCIPAL_MINT_COMPLETED_V1 = contract_topic_value('nodes/node_developer_principal_mint_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_DEVELOPER_PRINCIPAL_MINT_COMPLETED_V1')  # onex.evt.omnibase-infra.developer-principal-mint-completed.v1
     EVT_EVAL_COMPLETED_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_EVAL_COMPLETED_V1')  # onex.evt.omnibase-infra.eval-completed.v1
     EVT_EVENT_FORWARDED_V1 = contract_topic_value('nodes/node_event_forward_effect/contract.yaml', 'omnibase-infra', 'EVT_EVENT_FORWARDED_V1')  # onex.evt.omnibase-infra.event-forwarded.v1
     EVT_FAULT_INJECT_FIXTURE_COMPLETED_V1 = contract_topic_value('nodes/node_fault_inject_fixture_compute/contract.yaml', 'omnibase-infra', 'EVT_FAULT_INJECT_FIXTURE_COMPLETED_V1')  # onex.evt.omnibase-infra.fault-inject-fixture-completed.v1

@@ -30,6 +30,7 @@
 #     make up-local            # write ~/.omnibase/local.env + model overlay if absent, then boot
 #     make status-local        # migration gate, runtime /health bodies, delegate consumer group
 #     make check-sasl-local    # prove the local broker refuses anonymous clients and accepts onex-local (OMN-20820)
+#     make mint-local          # mint this machine's login on the local broker as lane local, then prove it (OMN-20823)
 #     make delegate-local PROMPT="..."  # one delegation through your runtime on the local broker
 #     make tenant-local        # give your runtime a tenant (delegation refuses without one), then make up-local
 #     make secret-local PROVIDER=gemini # register your tenant's provider key from stdin or a hidden prompt
@@ -52,7 +53,7 @@
 
 .PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
         seed-keycloak seed-infisical _check-docker _check-env-file \
-        local-env up-local up-local-mirror status-local check-sasl-local delegate-local tenant-local secret-local down-local down-local-volumes
+        local-env up-local up-local-mirror status-local check-sasl-local mint-local delegate-local tenant-local secret-local down-local down-local-volumes
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
 LOCAL_ENV_FILE ?= $(HOME)/.omnibase/local.env
@@ -60,6 +61,11 @@ LOCAL_OVERLAY_FILE ?= $(HOME)/.omnibase/local.bifrost.yaml
 LOCAL_PROJECT := omnibase-infra-local
 # OMN-20820: the one SCRAM superuser redpanda-local-sasl creates on the laptop broker.
 LOCAL_SASL_USER := onex-local
+# OMN-20823: make mint-local. The Admin API as runtime-effects reaches it, the grants
+# file of the developer principal, and the one prompt the host-side probe sends.
+LOCAL_ADMIN_URL ?= http://redpanda:9644
+MINT_DECLARATION := deploy/local/developer-principal-grants.yaml
+MINT_PROBE_PROMPT := Reply with exactly one word: hello
 ONEX_CLI := uv run python -m omnibase_infra.docker.catalog.cli
 
 help: ## Show this help
@@ -191,6 +197,114 @@ check-sasl-local: _check-docker ## Laptop profile: prove the broker refuses anon
 	    $$broker rpk cluster info -X brokers=localhost:19092 > /dev/null || { \
 	    echo "FAIL: the local superuser $(LOCAL_SASL_USER) was refused" >&2; exit 1; }; \
 	  echo "==> OK: the local broker refuses anonymous clients and accepts $(LOCAL_SASL_USER)"
+
+# OMN-20823 (plan D6, amended): .mint-local.flock is a stable file beside the
+# env file. Before first use, every old-version runner for that env file and
+# all its children must have ended; legacy .lock/.lock.recover artifacts stay.
+# Perl takes an OS lock on inherited FD 9. The shell and its children retain it
+# until the last descriptor closes, including after the shell is SIGKILLed.
+# The file is never unlinked, and the PID is written only after acquisition.
+# The password is generated here,
+# reaches the node only as the variable ONEX_MINT_PASSWORD of docker exec (never
+# an argument), reaches lane-login only on its stdin, and is never printed. The
+# state-root search reads it from its own environment and fails on any directory
+# or file it cannot read: exit 0 clean, 10 found, anything else fails closed.
+# `onex node --output receipt` prints one JSON: for a completed run .result is
+# the orchestrator's result; for a failed run .result is the runtime summary and
+# .result.handler_result is the orchestrator's result.
+mint-local: _check-docker ## Laptop profile: mint this machine's login on the local broker and prove it with one delegation (OMN-20823)
+	@if ! command -v perl >/dev/null 2>&1 || ! perl -MFcntl=:flock -e 1 >/dev/null 2>&1; then \
+	    echo "mint-local: perl with Fcntl is required for the lock" >&2; exit 1; \
+	  fi; \
+	  lock="$$(dirname "$(LOCAL_ENV_FILE)")/.mint-local.flock"; \
+	  mkdir -p "$$(dirname "$$lock")" || exit 1; \
+	  busy() { echo "mint-local: busy, lock held by pid $$1 (exit 75)" >&2; exit 75; }; \
+	  exec 9<>"$$lock" || { echo "mint-local: could not take the lock: could not open the file" >&2; exit 1; }; \
+	  perl -MFcntl=:flock -Mstrict -Mwarnings -e 'open(my $$fh, "+<&=9") or do { print STDERR "mint-local: could not take the lock: $$!\n"; exit 1; }; if (!flock($$fh, LOCK_EX|LOCK_NB)) { exit 75 if $$!{EWOULDBLOCK} || $$!{EAGAIN}; print STDERR "mint-local: could not take the lock: $$!\n"; exit 1; }'; \
+	  acquired=$$?; \
+	  case $$acquired in \
+	    0) ;; \
+	    75) holder=$$(cat "$$lock" 2>/dev/null); \
+	      case "$$holder" in \
+	        ""|*[!0-9]*) ;; \
+	        *) if [ "$$holder" -gt 0 ] 2>/dev/null && kill -0 "$$holder" 2>/dev/null; then busy "$$holder"; fi ;; \
+	      esac; \
+	      echo "mint-local: busy, lock held by a run that has not yet recorded its pid (exit 75)" >&2; exit 75 ;; \
+	    *) exit 1 ;; \
+	  esac; \
+	  holder=$$(cat "$$lock") || exit 1; \
+	  case "$$holder" in \
+	    ""|*[!0-9]*) ;; \
+	    *) if ! kill -0 "$$holder" 2>/dev/null; then \
+	      echo "mint-local: removing a stale lock left by pid $$holder, which is not running"; \
+	    fi ;; \
+	  esac; \
+	  perl -Mstrict -Mwarnings -e 'open(my $$fh, "+<&=9") or do { print STDERR "mint-local: could not record the lock pid: $$!\n"; exit 1; }; seek($$fh, 0, 0) && truncate($$fh, 0) && print($$fh "$$ARGV[0]\n") && close($$fh) or do { print STDERR "mint-local: could not record the lock pid: $$!\n"; exit 1; };' "$$$$" || exit 1; \
+	  work=""; container="$(LOCAL_PROJECT)-runtime-effects"; in_dir="/tmp/onex-mint-$$$$"; \
+	  trap 'docker exec -u omniinfra "$$container" rm -rf "$$in_dir" >/dev/null 2>&1; rm -rf $${work:+"$$work"}' EXIT; \
+	  trap 'exit 130' INT; trap 'exit 143' TERM; \
+	  work=$$(mktemp -d) || exit 1; \
+	  $(MAKE) --no-print-directory check-sasl-local || { \
+	    echo "mint-local: the local broker is not secured; run make up-local first" >&2; exit 1; }; \
+	  user=$$(id -un) && host=$$(hostname -s) || exit 1; \
+	  tenant=$$(sed -n 's/^ONEX_TENANT_ID=//p' "$(LOCAL_ENV_FILE)" | tail -n 1); \
+	  scan='import os, sys; s = os.environb.get(b"ONEX_MINT_PASSWORD", b""); r = sys.argv[1]; sys.exit(2) if not (s and os.path.isdir(r)) else sys.exit(10 if any(s in open(os.path.join(d, f), "rb").read() for d, _, fs in os.walk(r, onerror=lambda x: (_ for _ in ()).throw(x)) for f in fs) else 0)'; \
+	  run_node() { \
+	    jq -n --arg mode "$$1" --rawfile decl "$(MINT_DECLARATION)" --arg login "$$user" \
+	      --arg device "$$host" --arg url "$(LOCAL_ADMIN_URL)" --arg pwenv "$$2" \
+	      '{mode: $$mode, declaration_yaml: $$decl, login: $$login, device: $$device, admin_url: $$url, password_env_ref: $$pwenv}' \
+	      > "$$work/input.json" && chmod 644 "$$work/input.json" || return 1; \
+	    docker exec -u omniinfra "$$container" mkdir -p "$$in_dir" \
+	      && docker cp "$$work/input.json" "$$container:$$in_dir/input.json" > /dev/null || return 1; \
+	    docker exec -u omniinfra -e HOME=/home/omniinfra -e ONEX_MINT_PASSWORD "$$container" \
+	      onex node node_developer_principal_mint_orchestrator --input "$$in_dir/input.json" \
+	      --state-root "$$in_dir/state" --output receipt > "$$work/receipt.json"; \
+	    if [ -n "$$2" ]; then \
+	      docker exec -u omniinfra -e ONEX_MINT_PASSWORD "$$container" python3 -c "$$scan" "$$in_dir/state" 2>/dev/null; \
+	      case $$? in \
+	        0) ;; \
+	        10) echo "mint-local: the password was found under the onex node state root" >&2; return 1 ;; \
+	        *) echo "mint-local: the onex node state root could not be searched for the password" >&2; return 1 ;; \
+	      esac; \
+	    fi; \
+	    docker exec -u omniinfra "$$container" rm -rf "$$in_dir" || return 1; \
+	    [ "$$(jq -r '(.result | .handler_result // .).status // empty' "$$work/receipt.json" 2>/dev/null)" = success ] && return 0; \
+	    echo "mint-local: the mint stopped at $$(jq -r '(.result | .handler_result // .).failed_step // "the node"' "$$work/receipt.json" 2>/dev/null): $$(jq -r '(.result | .handler_result // .).reason // "no receipt"' "$$work/receipt.json" 2>/dev/null)" >&2; \
+	    jq -r '(.result | .handler_result // .).extra_acls[]? | "mint-local: ACL outside the plan: " + .' "$$work/receipt.json" >&2 2>/dev/null; \
+	    return 1; \
+	  }; \
+	  probe() { \
+	    rm -rf "$$work/probe" && mkdir "$$work/probe" || return 1; \
+	    if [ -n "$$tenant" ]; then \
+	      ONEX_TENANT_ID="$$tenant" onex delegate --bus kafka --lane local --json --state-root "$$work/probe" \
+	        "$(MINT_PROBE_PROMPT)" > "$$work/probe.json" 2> "$$work/probe.err"; \
+	    else \
+	      onex delegate --bus kafka --lane local --json --state-root "$$work/probe" \
+	        "$(MINT_PROBE_PROMPT)" > "$$work/probe.json" 2> "$$work/probe.err"; \
+	    fi; \
+	    cid=$$(jq -r '.correlation_id // empty' "$$work/probe.json" 2>/dev/null); \
+	    run=$$(jq -r '.run_id // empty' "$$work/probe.json" 2>/dev/null); \
+	    [ "$$(jq -r '.status // empty' "$$work/probe.json" 2>/dev/null)" = success ] && [ -n "$$cid" ] && [ -n "$$run" ] \
+	      && jq -e --arg cid "$$cid" '.terminal_payload.correlation_id == $$cid' \
+	        "$$work/probe/runs/$$run/workflow_result.json" > /dev/null 2>&1; \
+	  }; \
+	  run_node audit "" || exit 1; \
+	  principal=$$(jq -r '(.result | .handler_result // .).principal // empty' "$$work/receipt.json"); \
+	  if [ "$$(jq -r '.result | (.handler_result // .) | (.exists == true) and (.extra_acls | length) == 0 and (.missing_acls | length) == 0' "$$work/receipt.json")" = true ] \
+	      && probe; then \
+	    echo "mint-local: $$principal unchanged"; exit 0; \
+	  fi; \
+	  ONEX_MINT_PASSWORD=$$(openssl rand -hex 32) && [ -n "$$ONEX_MINT_PASSWORD" ] || exit 1; \
+	  export ONEX_MINT_PASSWORD; \
+	  run_node converge ONEX_MINT_PASSWORD || exit 1; \
+	  principal=$$(jq -r '(.result | .handler_result // .).principal // empty' "$$work/receipt.json"); \
+	  echo "mint-local: principal $$principal"; \
+	  echo "mint-local: $$(jq -r '(.result | .handler_result // .).action' "$$work/receipt.json")"; \
+	  printf '%s\n' "$$ONEX_MINT_PASSWORD" \
+	    | onex auth lane-login --lane local --sasl-username "$$principal" --sasl-password-stdin || exit 1; \
+	  unset ONEX_MINT_PASSWORD; \
+	  probe || { echo "mint-local: the host delegation wrote no terminal event for correlation $${cid:-none}" >&2; exit 1; }; \
+	  echo "mint-local: verified"
 
 delegate-local: _check-docker ## Laptop profile: one delegation through your runtime on the local broker (PROMPT="...")
 	@test -n "$(PROMPT)" || { echo 'usage: make delegate-local PROMPT="Reply with exactly one word: hello"'; exit 2; }
