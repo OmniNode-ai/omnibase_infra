@@ -264,9 +264,9 @@ dod_evidence:
               assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 141}
               for section in ('dispatchers', 'routes', 'probes', 'discovery_errors'):
                   assert legacy[section] == retired[section], section
-              assert len(retired['dispatchers']) == 129
-              assert len(retired['routes']) == 113
-              assert len(retired['probes']) == 1097
+              assert len(retired['dispatchers']) == 131
+              assert len(retired['routes']) == 115
+              assert len(retired['probes']) == 1121
           print('Tracked dispatch parity closure and inventories passed')
           PY
         cwd: ${OMNI_HOME}/omnibase_infra
