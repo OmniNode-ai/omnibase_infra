@@ -48,6 +48,10 @@ one_shots:
   - "*-topics"
 compose_files: docker/docker-compose*.yml
 not_a_stack:
+  # OMN-22162 (T18f): the cost estimator page on the .51 report host, one tailnet-bound container beside no
+  # runtime, no broker and no database. The dev lane's own cost-estimator-web stays judged and baselined below
+  # until it leaves docker/docker-compose.dev-lane.yml.
+  - docker/docker-compose.cost-estimator-web.yml
   - docker/docker-compose.dns-cache.yml
   - docker/docker-compose.gate-runner.yml
   - docker/docker-compose.gateway-attach-test-lane.yml

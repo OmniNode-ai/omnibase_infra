@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-21864: one tailnet login may hold six machine principals on the lab broker.
+"""OMN-22356: one tailnet login may hold seven machine principals on the lab broker.
 
-The lab declaration capped a login at five machines, so the sixth device of the
-operator's login was refused (HTTP 409). The operator approved raising the cap to six.
+The lab declaration capped a login at six machines (OMN-21864, raised from five for
+h053), so the seventh device of the operator's login, h106, was refused (HTTP 409).
+Pool hosts hold the same permissions as their peers, so the cap is seven.
 These tests drive the issuer itself with the lab declaration and a fake broker: a login
-is issued six distinct devices, the seventh is refused, and a device already held still
+is issued seven distinct devices, the eighth is refused, and a device already held still
 rotates at the cap. The local declaration for the developer-run broker is a separate
 file and keeps its own cap.
 """
@@ -51,23 +52,23 @@ def issuer(tmp_path: Path) -> lpi.Issuer:
     return lpi.Issuer(declaration, _Broker(), lpi.Ledger(tmp_path / "issuances.jsonl"))
 
 
-def test_lab_declaration_caps_a_login_at_six_machines() -> None:
-    assert lpi.load_declaration(GRANTS).max_devices_per_login == 6
+def test_lab_declaration_caps_a_login_at_seven_machines() -> None:
+    assert lpi.load_declaration(GRANTS).max_devices_per_login == 7
 
 
-def test_a_login_is_issued_six_devices_and_the_seventh_is_refused(
+def test_a_login_is_issued_seven_devices_and_the_eighth_is_refused(
     issuer: lpi.Issuer,
 ) -> None:
-    for number in range(6):
+    for number in range(7):
         answer = issuer.issue(LOGIN, {"lane": "dev", "device": f"mac-{number}"})
         assert answer["action"] == "created"
     with pytest.raises(lpi.IssuerError) as refused:
-        issuer.issue(LOGIN, {"lane": "dev", "device": "mac-6"})
+        issuer.issue(LOGIN, {"lane": "dev", "device": "mac-7"})
     assert refused.value.status is HTTPStatus.CONFLICT
 
 
 def test_a_device_already_held_rotates_at_the_cap(issuer: lpi.Issuer) -> None:
-    for number in range(6):
+    for number in range(7):
         issuer.issue(LOGIN, {"lane": "dev", "device": f"mac-{number}"})
-    answer = issuer.issue(LOGIN, {"lane": "dev", "device": "mac-5"})
+    answer = issuer.issue(LOGIN, {"lane": "dev", "device": "mac-6"})
     assert answer["action"] == "rotated"

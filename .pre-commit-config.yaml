@@ -231,6 +231,11 @@ repos:
       - id: handler-di-gate
         require_serial: true
         args: [--baseline, .onex_ratchets/handler_di_baseline.txt]
+      # OMN-22358: producer/consumer topic-normalization symmetry. The local entry named
+      # a module that never existed and ran manual-stage and skipped, so it never
+      # ran; core's own hook id runs at pre-commit and in pre-commit.ci.
+      - id: normalization-symmetry
+        require_serial: true
       # OMN-21939: four validators this repo used to run from its own script
       # copies. The rule code is omnibase_core's; only the inputs stay here.
       # OMN-17320 exposed-identifier gate: salted-SHA256 denylist of customer
@@ -2256,12 +2261,6 @@ repos:
         pass_filenames: false
         files: ^src/omnibase_infra/runtime/(auto_wiring/handler_wiring|service_kernel)\.py$
         stages: [pre-commit]
-      - id: normalization-symmetry
-        name: normalization-symmetry
-        entry: uv run python -m omnibase_core.validators.normalization-symmetry
-        language: system
-        pass_filenames: false
-        stages: [manual]
       # OMN-13034 (retro B-6): Lane-boundary attestation gate.
       # Rejects any staged file that contains lane-boundary attestation language
       # (markdown lane tables, compose_project declarations, GENERATED_LANE_TABLE
@@ -2790,4 +2789,4 @@ ci:
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
   # CI runs the same node with --base: the `migration-freeze` job)
-  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
+  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]

@@ -107,6 +107,7 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.models.model_contract_hotload_config import (
     ModelContractHotloadConfig,
 )
+from omnibase_infra.models.runtime import ModelRuntimeNodeSelection
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
@@ -290,17 +291,24 @@ def _current_runtime_profile_name() -> str:
     unregistered value can no longer reach a booted runtime, because
     ``load_runtime_profile`` refuses it during kernel boot.
     """
-    raw_profile = os.getenv("RUNTIME_PROFILE")
-    if raw_profile is None:
-        return "default"
-    profile = raw_profile.strip()
-    return profile.lower() if profile else "default"
+    profile = (os.getenv("RUNTIME_PROFILE") or "").strip().lower()
+    return profile or "default"
 
 
-def _runtime_profile_is_enabled(enabled_profiles: tuple[str, ...]) -> bool:
-    current_profile = _current_runtime_profile_name()
-    normalized_profiles = {profile.strip().lower() for profile in enabled_profiles}
-    return "*" in normalized_profiles or current_profile in normalized_profiles
+def _runtime_owned_service_enabled(enabled: bool, profiles: tuple[str, ...]) -> bool:
+    # OMN-22311: the local ingress and the Pattern B broker belong to the main
+    # runtime. A process bound to named contracts by ONEX_RUNTIME_NODE_SELECTION
+    # carries those contracts and nothing else (OMN-17427 AC63), so it starts
+    # neither. The broker's group carries no selection and the selected carrier
+    # shares main's KAFKA_INSTANCE_ID (OMN-19513), so the claude hook-events
+    # writer became a second member of main's broker group on a one-partition
+    # topic: on the dev lane it held the partition, main held none, and
+    # main's consumer_sync read CRITICAL. OMN-18087 AC11 scoped the kernel's own
+    # groups by the selection and did not reach this one.
+    if not enabled or ModelRuntimeNodeSelection.from_env().is_active:
+        return False
+    normalized = {profile.strip().lower() for profile in profiles}
+    return "*" in normalized or _current_runtime_profile_name() in normalized
 
 
 def _normalize_prefetch_policy(value: str) -> PrefetchPolicy:
@@ -2627,14 +2635,12 @@ class RuntimeHostProcess:
         )
 
     def _is_local_ingress_effectively_enabled(self) -> bool:
-        return self._local_ingress_config.enabled and _runtime_profile_is_enabled(
-            self._local_ingress_config.enabled_profiles
-        )
+        config = self._local_ingress_config
+        return _runtime_owned_service_enabled(config.enabled, config.enabled_profiles)
 
     def _is_pattern_b_broker_effectively_enabled(self) -> bool:
-        return self._pattern_b_broker_config.enabled and _runtime_profile_is_enabled(
-            self._pattern_b_broker_config.enabled_profiles
-        )
+        config = self._pattern_b_broker_config
+        return _runtime_owned_service_enabled(config.enabled, config.enabled_profiles)
 
     async def dispatch_local_ingress_request(
         self,
