@@ -81,10 +81,7 @@ resolve_lane_name() {
     local compose_project="$1"
     local lane="${compose_project#omnibase-infra}"
     lane="${lane#-}"
-    if [[ -z "${lane}" ]]; then
-        lane="dev"
-    fi
-    echo "${lane}"
+    echo "${lane:-dev}"
 }
 
 resolve_lane_overlay_filename() {
@@ -107,11 +104,9 @@ resolve_lane_overlay_filename() {
             # Dev lane: no docker-compose.dev.yml exists. The dev overlay is
             # docker-compose.dev-lane.yml and is appended by
             # resolve_compose_file_args' else-branch, not named here.
-            return 0
             ;;
         stability-test|prod|judge|dogfood)
             echo "docker-compose.${lane}.yml"
-            return 0
             ;;
         *)
             _compose_files_log_error "Unknown lane '${lane}' derived from compose project '${compose_project}'."
@@ -134,11 +129,7 @@ resolve_lane_overlay_filename() {
 # There is no fallback to a committed overlay: this repository ships only the
 # neutral docker/lane-overlays/local.bifrost.example.yaml template.
 _lane_overlay_dir_candidate() {
-    local dir="${ONEX_LANE_OVERLAY_DIR:-}"
-    if [[ -z "${dir}" && -n "${ONEX_WORKSPACE_CONFIG_ROOT:-}" ]]; then
-        dir="${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/lane-overlays"
-    fi
-    printf '%s' "${dir}"
+    printf '%s' "${ONEX_LANE_OVERLAY_DIR:-${ONEX_WORKSPACE_CONFIG_ROOT:+${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/lane-overlays}}"
 }
 
 # Strict form, for a caller that must stop before any compose call (the pre-PR
@@ -199,22 +190,34 @@ resolve_compose_file_args() {
     # `deploy_target` is the directory that CONTAINS docker/ -- the versioned
     # deploy root for onex-runtime-deploy, the ambient clone for the refresh
     # wrappers. Both spell the same files.
-    local _out_args_name="$1"
+    local -n compose_files_out="$1"
     local deploy_target="$2"
     local compose_project="$3"
 
     local docker_dir="${deploy_target}/docker"
+    # OMN-21288: the existing writer definitions interpolate contract-owned
+    # gates only on primary dev. Other instances keep both legacy profiles.
+    local policy_key policy_value
+    if [[ -r "${docker_dir}/runtime-policy.env" ]]; then
+        while IFS='=' read -r policy_key policy_value; do
+            [[ "${policy_key}" =~ ^DEV_RUNTIME_MAIN_.*_(RUNTIME|FULL)_PROFILE$ ]] || continue
+            if [[ "${compose_project}" != "${DEV_COMPOSE_PROJECT:-omnibase-infra}" ]]; then
+                policy_value="${BASH_REMATCH[1],,}"
+            fi
+            export "${policy_key}=${policy_value}"
+        done < "${docker_dir}/runtime-policy.env"
+    fi
     export_lane_overlay_dir "${compose_project}"
     if [[ "${compose_project}" == "omnibase-infra-dogfood" ]]; then
-        eval "${_out_args_name}=(-f $(printf '%q' "${docker_dir}/docker-compose.dogfood.yml"))"
+        compose_files_out=(-f "${docker_dir}/docker-compose.dogfood.yml")
         return 0
     fi
-    eval "${_out_args_name}=(-f $(printf '%q' "${docker_dir}/docker-compose.infra.yml"))"
+    compose_files_out=(-f "${docker_dir}/docker-compose.infra.yml")
 
     local overlay_filename
     overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
     if [[ -n "${overlay_filename}" ]]; then
-        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/${overlay_filename}") )"
+        compose_files_out+=(-f "${docker_dir}/${overlay_filename}")
     else
         # Dev/lab lane (bare omnibase-infra project). OMN-15379: layer the
         # dev-lane overlay, whose content includes ONEX_MIGRATION_LANE=dev for
@@ -224,7 +227,6 @@ resolve_compose_file_args() {
         # family's KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_* environment. It is a
         # separate file precisely so no non-dev lane can inherit it from the
         # base: see the header of docker/docker-compose.dev-lane.yml.
-        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-lane.yml") )"
-        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-tenant-fold.yml") )"
+        compose_files_out+=(-f "${docker_dir}/docker-compose.dev-lane.yml" -f "${docker_dir}/docker-compose.dev-tenant-fold.yml")
     fi
 }
