@@ -380,14 +380,14 @@ class HandlerGraph(
             transport_type=EnumInfraTransportType.GRAPH,
         )
 
-    async def shutdown(self, timeout_seconds: float = 30.0) -> None:
+    async def shutdown(self, timeout_seconds: float | None = None) -> None:
         """Close database connections and release resources.
 
         Gracefully shuts down the handler by closing all active connections
         and releasing resources.
 
         Args:
-            timeout_seconds: Maximum time to wait for shutdown. Defaults to 30.0.
+            timeout_seconds: SPI compatibility argument; cleanup delegates to the driver.
         """
         correlation_id = uuid4()
         logger.info(
