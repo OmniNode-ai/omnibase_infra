@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.scripts.test_deploy_runtime_folded_services_omn21288 import (
     DEV_PROJECT,
@@ -41,6 +42,24 @@ WRITER = "projection-claude-hook-events-writer"
 NODE = "projection_claude_hook_events"
 
 
+def _services(overlay: Path) -> dict[str, dict[str, object]]:
+    """The ``services`` mapping of a compose overlay, parsed (comments ignored)."""
+    # compose's ``!override`` tag only changes how overlays merge; the value it wraps is plain YAML.
+    parsed = yaml.safe_load(
+        re.sub(r"!override[ \t]*", "", overlay.read_text(encoding="utf-8"))
+    )
+    services = parsed["services"]
+    assert isinstance(services, dict)
+    return services
+
+
+def _declaration(text: str, name: str) -> str:
+    """The handler's own ``readonly NAME=(...)`` declaration, verbatim."""
+    match = re.search(rf"^readonly {name}=\(.*?\)$", text, re.M | re.S)
+    assert match, name
+    return match.group(0)
+
+
 def _array(text: str, name: str) -> list[str]:
     match = re.search(rf"^readonly {name}=\((.*?)\)$", text, re.M | re.S)
     assert match, name
@@ -53,15 +72,17 @@ def _array(text: str, name: str) -> list[str]:
 
 
 def test_dev_lane_overlay_neither_starts_the_writer_nor_excludes_the_node() -> None:
-    text = (DOCKER / "docker-compose.dev-lane.yml").read_text(encoding="utf-8")
-    assert WRITER not in text
-    assert "ONEX_RUNTIME_NODE_EXCLUSION" not in text
-    assert NODE not in text
+    services = _services(DOCKER / "docker-compose.dev-lane.yml")
+    assert "omninode-runtime" in services  # positive control: the overlay really parsed
+    assert WRITER not in services
+    for name, service in services.items():
+        rendered = yaml.safe_dump(service)
+        assert "ONEX_RUNTIME_NODE_EXCLUSION" not in rendered, name
+        assert NODE not in rendered, name
 
 
 def test_fold_overlay_gates_the_writer_under_a_folded_profile() -> None:
-    text = FOLD_OVERLAY.read_text(encoding="utf-8")
-    assert f'  {WRITER}:\n    profiles: !override ["folded-hook-events"]' in text
+    assert _services(FOLD_OVERLAY)[WRITER]["profiles"] == ["folded-hook-events"]
 
 
 def test_dev_main_runtime_keeps_the_instance_id_the_writer_shared() -> None:
@@ -98,9 +119,9 @@ def test_deploy_handler_retires_the_previous_writer_before_main_restarts(
     assert retired == [WRITER]
     harness = (
         _harness("", DEV_PROJECT)
-        + "\nreadonly RETIRED_NODE_CARRIER_SERVICES=("
-        + " ".join(shlex.quote(service) for service in retired)
-        + ")\n"
+        + "\n"
+        + _declaration(DEPLOY.read_text(), "RETIRED_NODE_CARRIER_SERVICES")
+        + "\n"
         + _function("restart_services")
         + f"\nCALLS={shlex.quote(str(calls))}"
         + f"\nWRITER={shlex.quote(WRITER)}"
