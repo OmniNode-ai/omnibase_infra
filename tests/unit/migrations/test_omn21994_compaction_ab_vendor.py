@@ -38,7 +38,7 @@ _NODE = "node_projection_compaction_ab"
 _CREATE = "0000_create_compaction_ab.sql"
 _GRANT = "0001_grant_omninode_runtime_compaction_ab.sql"
 _VENDORED = [
-    (_CREATE, "f22e271a66d581fbea657a4f209de267809700ad5aef29fdfac148cd1656f2b5"),
+    (_CREATE, "934d8b2aff324f0be7ab2836fab8547769dd1f3bea451220a27a5746a7b3e97e"),
     (_GRANT, "3bc2e87ba848872098ef2f4b358943a7dd788201482ddc431041ba0cbaeade15"),
 ]
 _CLASSES = {_CREATE: "forward-only", _GRANT: "expand-only"}
