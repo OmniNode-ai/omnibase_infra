@@ -35,11 +35,8 @@ def _sql() -> str:
     )
 
 
-def test_create_and_acl_successor_are_vendored() -> None:
-    assert sorted(path.name for path in _VENDOR.glob("*")) == [
-        _CREATE,
-        "0001_revoke_undeclared_runtime_grants.sql",
-    ]
+def test_only_the_create_file_is_vendored() -> None:
+    assert sorted(path.name for path in _VENDOR.glob("*")) == [_CREATE]
 
 
 def test_vendor_bytes_and_manifest_binding_are_exact() -> None:
@@ -63,43 +60,6 @@ def test_vendor_bytes_and_manifest_binding_are_exact() -> None:
             _SHA256,
         ]
     ]
-
-
-def test_acl_successor_is_checksum_bound_and_scoped_to_the_five_tables() -> None:
-    filename = "0001_revoke_undeclared_runtime_grants.sql"
-    path = _VENDOR / filename
-    sql = path.read_text(encoding="utf-8")
-    sql = "\n".join(
-        line for line in sql.splitlines() if not line.lstrip().startswith("--")
-    )
-    revoke = re.search(r"REVOKE ALL PRIVILEGES ON\s+(.*?)\s+FROM\s+(\w+);", sql, re.S)
-    assert revoke is not None
-    assert revoke.group(2) == "omninode_runtime"
-    assert {table.strip() for table in revoke.group(1).split(",")} == {
-        f"omninode_internal.{table}" for table in _TABLES
-    }
-    assert "aclexplode(c.relacl)" in sql
-    assert "1 / (count(*) = 0)::int" in sql
-    artifact = f"nodes/{_NODE}/{filename}"
-    rows = [
-        row.split("\t")
-        for row in (_FORWARD / "_ledger/application-migrations.tsv")
-        .read_text()
-        .splitlines()
-        if row.split("\t", 1)[0] == artifact
-    ]
-    assert rows == [
-        [
-            artifact,
-            f"node:{_NODE}",
-            f"node:{_NODE}",
-            "omninode_internal",
-            f"node:{_NODE}:{filename}",
-            hashlib.sha256(path.read_bytes()).hexdigest(),
-        ]
-    ]
-    classes = yaml.safe_load((_ROOT / "config/migration_classes.yaml").read_text())
-    assert classes["migrations"][f"forward/{artifact}"] == "forward-only"
 
 
 def test_migration_class_is_forward_only() -> None:
