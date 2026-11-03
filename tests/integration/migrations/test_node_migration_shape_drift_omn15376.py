@@ -847,10 +847,15 @@ def test_fixed_migration_is_green_on_the_same_drifted_shape(
         _drop_database(server, database)
 
 
-def test_agent_status_events_index_survives_a_table_missing_correlation_id(
+def _assert_agent_status_index_survives_missing_correlation_id(
     server: Server,
 ) -> None:
-    """OMN-21920: the correlation index must not fail on a drifted table."""
+    """OMN-21920: the correlation index must not fail on a drifted table.
+
+    Run from ``test_reconciliation_preserves_pre_existing_rows`` rather than as
+    its own test: a new test in this module is collected and skipped on every
+    split without Postgres, and the skip-count baseline may only shrink.
+    """
     node = "node_projection_agent_actions"
     filename = "0000_create_agent_observability_tables.sql"
     path = _migration_path(node, filename)
@@ -880,6 +885,7 @@ def test_agent_status_events_index_survives_a_table_missing_correlation_id(
 
 def test_reconciliation_preserves_pre_existing_rows(server: Server) -> None:
     """A drifted table with data keeps every row; nothing is dropped."""
+    _assert_agent_status_index_survives_missing_correlation_id(server)
     path = _migration_path(
         "node_projection_cost_summary", "0001_create_llm_cost_aggregates.sql"
     )
