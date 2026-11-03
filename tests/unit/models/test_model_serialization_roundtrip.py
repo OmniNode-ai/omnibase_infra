@@ -40,6 +40,7 @@ from omnibase_infra.enums import (
     EnumDispatchStatus,
     EnumInfraTransportType,
 )
+from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
 from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy import (
     ModelKafkaConnectRetryPolicy,
 )
@@ -57,6 +58,7 @@ from omnibase_infra.event_bus.models.model_publish_receipt import (
     ModelPublishReceipt,
 )
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.model_runtime_fold_policy import ModelRuntimeFoldPolicy
 from omnibase_infra.runtime.enums.enum_contract_attach_gate_phase import (
     EnumContractAttachGatePhase,
 )
@@ -290,7 +292,7 @@ def _make_publish_receipt() -> ModelPublishReceipt:
     between repos -- exactly the class of boundary this suite exists to pin.
     """
     return ModelPublishReceipt(
-        topic="onex.evt.roundtrip.v1",
+        topic=EnumPlatformTopic.EVT_NODE_HEARTBEAT_V1.value,
         partition=2,
         offset=17,
         cluster="redpanda:9092",
@@ -609,6 +611,10 @@ def _make_contract_attach_gate_status() -> ModelContractAttachGateStatus:
 
 
 MODEL_FACTORIES: dict[type[BaseModel], Any] = {
+    ModelRuntimeFoldPolicy: lambda: ModelRuntimeFoldPolicy(
+        folded_profiles=("projection-writer-savings",),
+        foldable_services={"projection-writer-savings": "projection-savings-writer"},
+    ),
     # Event bus models (5/6 covered)
     ModelEventHeaders: _make_event_headers,
     ModelDlqEvent: _make_dlq_event,

@@ -1,0 +1,83 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22275
+title: "The omnibase_infra Hostile Review job accepts a verified agent receipt, so credit exhaustion no longer holds every omnibase_infra head"
+summary: >-
+  The Hostile Reviewer workflow gains one gate-accept step in the root job. The step runs the omnimarket gate-accept node, read from omnimarket's newest dev tag and run inside the omniintelligence environment the job already built, never from the pull request's checkout, and writes decision, reason and receipt_id to its outputs. Only pass_agent skips the enforcement step, whose run text and env are unchanged; any other decision, a clone without the node, or a node that does not run leaves the voters' verdict standing. The CI overlay fetch also reads the node's overlay directory. CI Summary's external sweep is unchanged and reads the accepted root job and gate as success.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22275-workflow-step
+    statement: >-
+      The workflow carries one gate-accept step that holds a node call and nothing else.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: The omnibase_infra hostile-reviewer.yml carries the one gate-accept step in the same shape as omnimarket (a node call, `if: always()`, and the Enforce step gaining only the `decision != 'pass_agent'` condition) -- falsifier: a workflow-file test in omnibase_infra run with `uv run pytest tests/ci -k hostile_review_agent_accept -v -rs` fails when the step holds more than a node call or the Enforce step run text differs from the default branch
+  - id: req-omn22275-outcomes
+    statement: >-
+      A verified passing receipt for the exact head turns the gate green; nothing else does.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: A degraded voter result with a verified passing receipt for the exact head turns "Hostile Review Gate" green, a blocked voter result stays red, and a receipt for another head is refused -- falsifier: the same workflow test run over the workflow own steps with a node fake finds any of the three outcomes different
+  - id: req-omn22275-ci-summary
+    statement: >-
+      CI Summary reads the accepted run as success.
+    acceptance:
+      - id: AC3
+        statement: >-
+          AC3: CI Summary of an omnibase_infra pull request is green after an accepted agent receipt -- falsifier: `uv run pytest tests/ci -k ci_summary_external_sweep -v -rs` fails to show the sweep reading the accepted job as success
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The workflow's own review, accept and enforcement steps run with a node fake, the clone step runs against a fake git, and the CI Summary external sweep reads the resulting rows.
+    command: uv run --frozen pytest tests/ci -k "hostile_review_agent_accept or ci_summary_external_sweep" -q -n 0 --no-cov -p no:randomly
+  - kind: manual
+    description: >-
+      Hosted-runner deployment configuration probe: the workflow file the runner reads carries the accept step in the root job before the last step, with the enforcement step conditioned on its decision, and the focused workflow tests pass. Requires no gateway, key or lab host.
+    command: "deploy: uv run --frozen pytest tests/ci -k hostile_review_agent_accept -q -n 0 --no-cov -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22275-ac1-step-shape
+    description: >-
+      The step-shape test pins the added step to one node call run from the omnimarket clone under if always(), the enforcement step's run text and env by digest, and the clone step's never-fail contract. At the merge base the workflow has no accept step, so these cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_hostile_review_agent_accept_step_shape_omn22275.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn22275-ac2-outcomes
+    description: >-
+      The workflow's own steps run with a node fake: a degraded voter result with a receipt for the exact head turns both contexts green, a receipt for another head or a blocking finding from an answering voter stays red, a blocked quorum is unchanged, and a clone without the node or a node that does not run leaves the verdict standing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_hostile_review_agent_accept_omn22275.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn22275-ac3-ci-summary
+    description: >-
+      CI Summary's external sweep, over the rows the simulated runs produce, files no failure for the accepted run and still names each unaccepted one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci -k ci_summary_external_sweep -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn22275-deploy
+    description: >-
+      Deploy probe -- the workflow file at the checked-out commit carries the accept step id and the enforcement condition, and the workflow tests pass; fails when either is missing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci -k hostile_review_agent_accept -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "grep -qF \"steps.accept.outputs.decision != 'pass_agent'\" .github/workflows/hostile-reviewer.yml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
