@@ -1132,6 +1132,9 @@ COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
     ),
     "ONEX_REGISTRATION_AUTO_ACK": "true",
     "ONEX_SERVICE_CLIENT_SECRET": "test-service-secret",
+    # OMN-21591: kernel plugins are announced by the runtime policy overlay key;
+    # the base infra file interpolates it with the fail-closed `:?` form.
+    "ONEX_RUNTIME_KERNEL_PLUGINS": "delegation",
     # OMN-16843: x-runtime-env builds OMNINODE_INTERNAL_DB_URL from this with
     # the fail-closed ${VAR:?} form, so the layered render aborts without it.
     # Render-only, never a real credential.
