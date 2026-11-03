@@ -37,7 +37,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/cli/test_delegate_terminal_resolver_failure_terminal.py -q -k no_terminal_sentence_kept --no-cov
+        check_value: uv run --frozen pytest tests/unit/cli/test_delegate_terminal_resolver_failure_terminal.py -q -k "no_terminal_sentence_kept or failure_terminal_resolved" --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22216-deploy
     description: "CLI read-side change: the resolver module at the branch head imports the boundary failure envelope mirror model. Runs on a pull request runner with no lab host."
