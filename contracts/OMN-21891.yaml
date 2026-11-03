@@ -71,6 +71,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn21891-ac3-ci-summary-strict
+    description: The stack-shape job is a STRICT_GATE_JOBS member of scripts/ci/ci_summary_gate.py, so a skipped, cancelled or failed Stack Shape job fails CI Summary and a missing one holds it pending into the poller deadline, on pull_request, merge_group and push. At the merge base the job is unregistered and these tests fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_gate.py -q --no-cov -n 0 -k stack_shape
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
   - id: dod-omn21891-core-pin-deploy
     description: Hosted-runner check that the omnibase-core pin that carries ValidatorStackShape, its commit and the locked version agree and the recorded runner identity matches this checkout. It needs no Docker daemon, private runtime or credentials and fails for the previous pin.
     source: manual

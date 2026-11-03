@@ -1199,6 +1199,7 @@ route:
         - Shape-Gate Independence (OMN-20298)
         - Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline
         - Skip Count Ratchet (OMN-18776)
+        - Stack Shape (OMN-21891)
         - Stale TODO Gate
         - Subscribe Wiring Health
         - Topic Drift Check

@@ -1,0 +1,66 @@
+# OMN-22002 contract file for omnibase_infra: the validation ledger consumes the validator run and triggered events.
+schema_version: "1.0.0"
+ticket_id: "OMN-22002"
+title: "The validation ledger consumes the validator run and triggered events, one row per refusing validator"
+summary: "node_validation_ledger_projection_compute subscribes, through its contract, to the validator run and validator-triggered topics omnibase_core publishes, and HandlerValidatorEventLedgerProject turns each event into one validation_ledger.append intent that the existing HandlerValidationLedgerAppend persists. The dispatch-parity oracle carries contract references instead of topic literals so the change is not blocked by the hardcoded-topic hook. AC2's duration is not met: neither wire event carries one."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22002-ledger-consumes-validator-events
+    statement: "The validation ledger projection subscribes to both validator topics through its contract and projects each event into exactly one idempotent ledger row through the existing append path."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the validation ledger write path subscribes to onex.evt.platform.validator-triggered.v1 and onex.evt.platform.validator-run.v1 through contract-declared topics, with no topic literal in handler code -- falsifier: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect -q fails on the contract subscription test, and the hardcoded-topic validator reports a finding on the changed source"
+      - id: AC2
+        statement: "AC2: one triggered event for a refusing validator produces exactly one ledger row carrying validator id, repository, commit, verdict and duration, and a replay of the same event adds no second row -- falsifier: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect -q -k \"triggered and idempotent\" fails"
+      - id: AC3
+        statement: "AC3: the row count for a canary commit equals the number of refusing validators in that run's report, read on the lab runtime after the omnibase_core canary run publishes through the broker overlay -- falsifier: a lab-run of the canary followed by a count query on the lab validation ledger prints a number unlike the report's failing-validator count"
+      - id: AC4
+        statement: "AC4: the node runs on the in-memory default and with the broker overlay with no code change -- falsifier: the node test run twice, once per overlay, yields different rows for the same fixture events"
+evidence_requirements:
+  - kind: tests
+    description: "The projection tests, the dispatch seam test and the oracle tests pass."
+    command: "uv run pytest tests/unit/nodes/node_validation_ledger_write_effect tests/integration/runtime/test_validator_event_ledger_dispatch_omn22002.py tests/ci/test_dispatch_parity_fixture_topic_free_omn22002.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The projection contract subscribes to both validator topics and routes each to HandlerValidatorEventLedgerProject; the handler source carries no topic literal."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py -q -p no:cacheprovider -k "contract_subscribes or no_topic_literal"
+  - id: dod-002
+    description: "A real triggered event dispatched through the wired projection contract yields the append intent for the Kafka position it arrived on."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_validator_event_ledger_dispatch_omn22002.py -q -p no:cacheprovider
+  - id: dod-003
+    description: "AC4's broker-overlay half is NOT run here: no test in this repository starts the broker overlay, and the lab run is the only place it can be observed. This entry proves the in-process precondition: the ledger row is a pure function of the message (the same fixture events yield the same rows on two independent runs), and a message handed to the real wired dispatch engine yields the same append intent as one handed directly to the handler, so the projection has no bus-specific branch."
+    source: generated
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py tests/integration/runtime/test_validator_event_ledger_dispatch_omn22002.py -q -p no:cacheprovider -k "same_events or dispatch_seam_intent_equals_direct"
+  - id: dod-ac2-subset
+    description: "AC2 is NOT met as written: the criterion asks for a duration, and neither wire event carries one (ModelValidatorRunEvent has one emitted_at and no start or end; ModelValidatorTriggeredEvent has no timestamp). The field that would be needed is a duration in the wire models, owned by omnibase_core. This entry binds AC2 only because the push gate refuses an unbound criterion; it proves the rest of AC2 (one triggered event yields one row whose stored event holds the validator id, repository, commit and verdict, and a replay adds no second row) and does not prove the duration."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py -q -p no:cacheprovider -k "triggered"
+  - id: dod-ac3-count
+    description: "AC3's lab count is NOT proven by this entry: the row count for a canary commit read on the lab ledger is posted in the lab comment, not here. This entry binds AC3 only because the push gate refuses an unbound criterion; it proves the counting rule in process: three triggered events (one per refusing validator) and one run event yield three triggered rows plus one run row, and replaying the whole run adds none."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_validation_ledger_write_effect/test_validator_event_ledger_omn22002.py -q -p no:cacheprovider -k "commit_row_count_equals_refusing"
+  - id: dod-deploy
+    description: "Deploy probe: the projection contract GitHub serves at the PR branch subscribes to the validator-triggered topic through contract-declared topics. The live readback after the deploy agent rolls the image is the validation ledger row count on the lab, posted in the lab comment; this probe proves source identity only."
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_validation_ledger_projection_compute/contract.yaml?ref=omn-22002-validator-events-ledger" | grep -q ''onex.evt.platform.validator-triggered.v1'''

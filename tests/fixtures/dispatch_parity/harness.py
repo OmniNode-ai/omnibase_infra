@@ -78,6 +78,11 @@ from omnibase_infra.runtime.message_dispatch_engine import (
     MessageDispatchEngine,
     _derive_dlq_topic,
 )
+from tests.fixtures.dispatch_parity.topic_refs import (
+    SYNTHETIC_PROBE_TOPICS,
+    decode_topics,
+    encode_topics,
+)
 
 # ---------------------------------------------------------------------------
 # Fixture-header metadata: corpus completeness (design D6) and P0 outcomes (D5/D7).
@@ -156,7 +161,7 @@ P0_OUTCOMES: dict[str, Any] = {
             "multi-handler ambiguity guard (handler_wiring.py:2242-2281), returned "
             "(), and registered ZERO dispatch routes — every inbound message fell "
             "through to NO_DISPATCHER (live-proven on node_rsd_orchestrator: "
-            "synthetic publish to onex.evt.rsd.scores-calculated.v1 offset 19, "
+            "synthetic publish of an rsd scores-calculated event at offset 19, "
             "runtime log 2026-07-02T18:12:20 'No dispatcher found ... routing to DLQ "
             "topic onex.dlq.omnibase-infra.rsd.v1'). Each handler entry now declares "
             "its topic-derived event_type alias (+ message_category), so a route "
@@ -583,13 +588,13 @@ async def _run_probes(
     # ---- P2 explicit category edges (synthesized topics) ----
     synthetic_p2 = [
         # unparseable category -> INVALID_MESSAGE, no DLQ
-        ("onex.evt.nomatch", "P2_unparseable_category"),
+        (SYNTHETIC_PROBE_TOPICS["P2_unparseable_category"], "P2_unparseable_category"),
         # projections suffix (unmapped in _SUFFIX_TO_CATEGORY per design) 5-seg
-        ("onex.proj.omnibase-infra.some-projection.v1", "P2_projections_suffix"),
+        (SYNTHETIC_PROBE_TOPICS["P2_projections_suffix"], "P2_projections_suffix"),
         # non-5-segment ONEX-ish topic
         ("weird.events.topic", "P2_non_5_segment"),
         # case variant of an events topic (IGNORECASE parity)
-        ("onex.EVT.omnibase-infra.SOME-THING.v1", "P2_case_variant"),
+        (SYNTHETIC_PROBE_TOPICS["P2_case_variant"], "P2_case_variant"),
     ]
     for topic, family in synthetic_p2:
         alias = derive_event_type_alias_for_topic(topic)
@@ -822,13 +827,36 @@ def load_selection_oracle(
     Only its independently captured inventory header differs. Both inventories
     stay committed so a missing declared OCC install cannot be accepted.
     """
+    # Imported here, not referenced as a module global: the AC11 probe in
+    # contracts/OMN-20074.yaml execs this function alone from the tracked blob.
+    from tests.fixtures.dispatch_parity.harness import load_snapshot_file
+
     fixture_dir = Path(__file__).resolve().parent
-    with (fixture_dir / "selection-oracle-v2.json").open() as stream:
-        snapshot: dict[str, Any] = json.load(stream)
+    snapshot = load_snapshot_file(fixture_dir / "selection-oracle-v2.json")
     if "onex-change-control" not in required_packages:
         with (fixture_dir / "selection-oracle-no-occ-v2.header.json").open() as stream:
             snapshot["header"].update(json.load(stream))
     return snapshot
+
+
+def load_snapshot_file(path: Path | str) -> dict[str, Any]:
+    """Read a snapshot written by :func:`write_snapshot`, resolving topic references.
+
+    The committed oracle carries no topic literal (OMN-22002): each topic is a
+    ``${topic:<ref>}`` token that resolves from the live contract corpus here.
+    """
+    contracts = _corpus_from_discovery()[0]
+    snapshot: dict[str, Any] = json.loads(
+        decode_topics(Path(path).read_text(encoding="utf-8"), contracts)
+    )
+    return snapshot
+
+
+def write_snapshot(snapshot: dict[str, Any], path: Path | str) -> None:
+    """Write ``snapshot`` with every topic replaced by its contract reference."""
+    contracts = _corpus_from_discovery()[0]
+    text = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
+    Path(path).write_text(encode_topics(text, contracts), encoding="utf-8")
 
 
 def strip_volatile_header_fields(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -980,7 +1008,7 @@ def main() -> int:
     args = parser.parse_args()
 
     snapshot = build_snapshot()
-    _write_json(snapshot, args.out)
+    write_snapshot(snapshot, args.out)
     h = snapshot["header"]["corpus"]
     print(
         f"corpus: {h['contracts_discovered']} contracts, "
