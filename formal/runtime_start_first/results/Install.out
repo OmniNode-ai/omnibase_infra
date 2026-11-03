@@ -1,11 +1,11 @@
 TLC2 Version 2026.11.02.164701 (rev: dc6a944)
-Running breadth-first search Model-Checking with fp 83 and seed 1945381850378248104 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 44007] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmp_8q6uznc/RuntimeStartFirst.tla
-Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-9198521521997910688/Naturals.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-9198521521997910688/Integers.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-9198521521997910688/FiniteSets.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-9198521521997910688/TLC.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-9198521521997910688/Sequences.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Running breadth-first search Model-Checking with fp 0 and seed -3870822741698640960 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 21431] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmphx22wc9i/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16976547560668130778/Naturals.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16976547560668130778/Integers.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16976547560668130778/FiniteSets.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16976547560668130778/TLC.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16976547560668130778/Sequences.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -13,22 +13,30 @@ Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module RuntimeStartFirst
 Linting of module RuntimeStartFirst
-Starting... (2026-11-02 19:41:13)
+Starting... (2026-11-02 21:46:47)
 Implied-temporal checking--satisfiability problem has 2 branches.
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-02 19:41:13.
-Checking 2 branches of temporal properties for the current state space with 112354 total distinct states at (2026-11-02 19:41:16)
-Finished checking temporal properties in 01s at 2026-11-02 19:41:18
-Progress(16) at 2026-11-02 19:41:18: 233,025 states generated (233,025 s/min), 56,177 distinct states found (56,177 ds/min), 13,150 states left on queue.
-Progress(29) at 2026-11-02 19:41:21: 619,477 states generated, 131,480 distinct states found, 0 states left on queue.
-Checking 2 branches of temporal properties for the complete state space with 262960 total distinct states at (2026-11-02 19:41:21)
-Finished checking temporal properties in 03s at 2026-11-02 19:41:24
+Finished computing initial states: 1 distinct state generated at 2026-11-02 21:46:47.
+Checking 2 branches of temporal properties for the current state space with 49418 total distinct states at (2026-11-02 21:46:51)
+Finished checking temporal properties in 00s at 2026-11-02 21:46:51
+Progress(14) at 2026-11-02 21:46:51: 102,186 states generated (102,186 s/min), 24,710 distinct states found (24,710 ds/min), 6,637 states left on queue.
+Checking 2 branches of temporal properties for the current state space with 727304 total distinct states at (2026-11-02 21:47:51)
+Finished checking temporal properties in 31s at 2026-11-02 21:48:23
+Progress(30) at 2026-11-02 21:48:23: 1,362,070 states generated (1,259,884 s/min), 363,657 distinct states found (338,947 ds/min), 41,579 states left on queue.
+Progress(33) at 2026-11-02 21:49:23: 1,908,149 states generated (546,079 s/min), 500,655 distinct states found (136,998 ds/min), 48,525 states left on queue.
+Progress(39) at 2026-11-02 21:50:23: 3,200,530 states generated (1,292,381 s/min), 803,049 distinct states found (302,394 ds/min), 43,420 states left on queue.
+Checking 2 branches of temporal properties for the current state space with 1865274 total distinct states at (2026-11-02 21:51:23)
+Finished checking temporal properties in 01min 19s at 2026-11-02 21:52:43
+Progress(43) at 2026-11-02 21:52:43: 3,789,266 states generated (588,736 s/min), 932,637 distinct states found (129,588 ds/min), 26,895 states left on queue.
+Progress(53) at 2026-11-02 21:52:49: 4,154,546 states generated, 1,008,358 distinct states found, 0 states left on queue.
+Checking 2 branches of temporal properties for the complete state space with 2016716 total distinct states at (2026-11-02 21:52:49)
+Finished checking temporal properties in 36s at 2026-11-02 21:53:25
 Model checking completed. No error has been found.
   Estimates of the probability that TLC did not check all reachable states
   because two distinct states had the same fingerprint:
-  calculated (optimistic):  val = 3.5E-9
-  based on the actual fingerprints:  val = 7.0E-10
-619477 states generated, 131480 distinct states found, 0 states left on queue.
-The depth of the complete state graph search is 29.
+  calculated (optimistic):  val = 1.7E-7
+  based on the actual fingerprints:  val = 8.3E-9
+4154546 states generated, 1008358 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 53.
 The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 3).
-Finished in 11s at (2026-11-02 19:41:24)
+Finished in 06min 41s at (2026-11-02 21:53:29)
