@@ -46,8 +46,8 @@ class HandlerPlacementSession:
         if margin_s <= 0 or margin_s >= ttl_s:
             raise ValueError("margin_s must be positive and below ttl_s")
         self._adapter = adapter
-        self._runtime_id = runtime_id
-        self._node_names = tuple(node_names)
+        self.runtime_id = runtime_id
+        self.node_names = tuple(node_names)
         self._ttl_s = ttl_s
         self._margin_s = margin_s
         self._clock = clock
@@ -67,14 +67,6 @@ class HandlerPlacementSession:
     @property
     def lease_id(self) -> int:
         return self._lease_id
-
-    @property
-    def runtime_id(self) -> str:
-        return self._runtime_id
-
-    @property
-    def node_names(self) -> tuple[str, ...]:
-        return self._node_names
 
     def within_deadline(self) -> bool:
         """True while the session is open and its local deadline has not passed."""
@@ -99,10 +91,8 @@ class HandlerPlacementSession:
         self._lease_id = lease_id
         self._extend(sent, granted)
         await self._adapter.put(
-            f"{MEMBERS_PREFIX}{self._runtime_id}",
-            json.dumps(
-                {"runtime_id": self._runtime_id, "nodes": list(self._node_names)}
-            ),
+            f"{MEMBERS_PREFIX}{self.runtime_id}",
+            json.dumps({"runtime_id": self.runtime_id, "nodes": list(self.node_names)}),
             lease_id=lease_id,
         )
 

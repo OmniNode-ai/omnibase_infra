@@ -115,8 +115,8 @@ class HandlerPlacementRuntime:
             )
         self._runtime_id = runtime_id
         self._session = session
-        self._elections = dict(elections)
-        self._nodes = dict(nodes)
+        self._elections = {**elections}
+        self._nodes = {**nodes}
         self._serving_reader = serving_reader
         self._min_serving = min_serving
         self._keepalive_interval_s = keepalive_interval_s
