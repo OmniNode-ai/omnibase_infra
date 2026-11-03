@@ -53,8 +53,7 @@ def _remote_with_commit(tmp_path: Path) -> tuple[Path, str]:
     _run(["git", "config", "user.name", "lane"], remote)
     _run(["git", "config", "commit.gpgsign", "false"], remote)
     _run(["uv", "lock", "--no-config"], remote)
-    # The throwaway remote must carry its lock even on hosts ignoring *.lock globally.
-    _run(["git", "add", "-f", "pyproject.toml", "uv.lock"], remote)
+    _run(["git", "add", "pyproject.toml", "uv.lock"], remote)
     _run(["git", "commit", "-q", "-m", "chore: fake verifier"], remote)
     return remote, _run(["git", "rev-parse", "HEAD"], remote)
 
