@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_lab_lane_compose_busy_compute
+contract_name: node_lab_lane_compose_busy_compute
+node_name: node_lab_lane_compose_busy_compute
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
+  purity: pure
+  idempotent: true
+description: >-
+  Decide, without I/O, whether a lab lane that answers is mid compose deploy. The resolve-lab-lane action's wait-while-busy path (OMN-20410) asks this node; the no-answer wait (OMN-20509) keeps the action's shared busy test.
+input_model:
+  name: ModelLabLaneComposeBusyRequest
+  module: omnibase_infra.models.health.model_lab_lane_compose_busy_request
+  description: One deploy agent reading, the shared busy reason and the declared settle stages.
+output_model:
+  name: ModelLabLaneComposeBusyDecision
+  module: omnibase_infra.models.health.model_lab_lane_compose_busy_decision
+  description: The busy detail to wait on, empty when the lane may be graded now.
+capabilities:
+  - name: lab_lane.compose_busy_decide
+    description: Decide whether an answering lane's agent reading is a compose deploy.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: lab_lane.compose_busy_decide
+      handler:
+        name: HandlerLabLaneComposeBusy
+        module: omnibase_infra.handlers.handler_lab_lane_compose_busy
+      description: Pure decision from one deploy agent reading.
+      supported_operations: [lab_lane.compose_busy_decide]
+      input_model:
+        name: ModelLabLaneComposeBusyRequest
+        module: omnibase_infra.models.health.model_lab_lane_compose_busy_request
+        description: One deploy agent reading and the declared settle stages.
+# The rule as data. A ``settling`` agent with no active job, whose last result
+# names one of these stages, is not a compose deploy. A ``lab_overlay`` settle
+# mutates the k3s lane, not the compose project (OMN-19501). Measured on dev-201
+# 2026-11-02: job d273b5c3 ran 08:19:00Z to 08:55:04Z, then the agent read
+# settling / lab_overlay with no active job until 09:09:05Z, and the next job
+# started 09:09:35Z; counting that window as a deploy left C16 no idle read in
+# its 2400 s budget. Every other stage stays a deploy.
+config:
+  compose_busy_policy:
+    non_deploy_settling_stages:
+      - lab_overlay
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+metadata:
+  description: Decide whether an answering lab lane is mid compose deploy, without I/O.
+  author: OmniNode Team
+  license: MIT
+  tags: [compute, lab_lane, deploy_wait]
+  related_tickets: [OMN-21866, OMN-20410, OMN-20509]

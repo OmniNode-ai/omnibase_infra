@@ -43,4 +43,8 @@ runs:
         LANE_MATCH: ${{ inputs.match }}
         LANE_DEPLOY_WAIT_SECONDS: ${{ inputs.deploy-wait-seconds }}
         LANE_DEPLOY_WAIT_WHILE_BUSY: ${{ inputs.wait-while-busy }}
-      run: python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"
+      # OMN-21866: the wait-while-busy test is node_lab_lane_compose_busy_compute's
+      # handler, which needs the repository's environment. The shell does not
+      # parse the flag: resolve_lab_lane.py reads it once and re-execs itself
+      # under uv for that mode, so this line is plain POSIX sh (no Bash 4).
+      run: exec python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"

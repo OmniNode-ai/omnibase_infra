@@ -1,0 +1,40 @@
+{
+  "provenance": "Read live from the dev-201 deploy agent's /health and /queue surfaces on 2026-11-02 by lane m4-c16-relaunch-0845. Job d273b5c3 ran 08:19:00Z to 08:55:04Z; the agent then read settling / lab_overlay with no active job and 1 to 3 commands queued, refused connections at 09:09:05Z (re-exec), read idle at 09:09:20Z and started job dd80afe5 at 09:09:35Z. Bodies are trimmed to the fields the resolver reads. C16 runs 41370897700 and 41383900853 ended RED at the 2400 s wait with this agent reading busy.",
+  "settle_started_at": "2026-11-02T08:55:04Z",
+  "settle_ended_at": "2026-11-02T09:09:05Z",
+  "settling": {
+    "observed_at": "2026-11-02T09:01:33Z",
+    "health": {
+      "state": "settling",
+      "active_job": null,
+      "last_result": {
+        "correlation_id": "d273b5c3-3958-412f-90f2-9785ed12b3d8",
+        "status": "success",
+        "completed_at": "2026-11-02T08:55:04.863317+00:00",
+        "settling": true,
+        "settling_stage": "lab_overlay"
+      }
+    },
+    "queue": {
+      "in_flight_correlation_id": null,
+      "commands_ahead": 2,
+      "control_topic_lag_age_seconds": 25.327166
+    }
+  },
+  "next_job": {
+    "observed_at": "2026-11-02T09:09:35Z",
+    "health": {
+      "state": "deploying",
+      "active_job": {
+        "correlation_id": "dd80afe5-add9-4845-8b31-c9023519a8be",
+        "current_phase": "compose_gen"
+      },
+      "last_result": {
+        "correlation_id": "d273b5c3-3958-412f-90f2-9785ed12b3d8",
+        "settling": false,
+        "settling_stage": null
+      }
+    },
+    "queue": {"commands_ahead": 1, "control_topic_lag_age_seconds": 1.0}
+  }
+}
