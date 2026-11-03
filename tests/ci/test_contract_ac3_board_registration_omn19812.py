@@ -33,21 +33,24 @@ def test_ac3_is_declared_once_with_the_tickets_statement() -> None:
     )
 
 
-def test_exactly_one_item_binds_ac3_and_runs_the_tickets_falsifier() -> None:
+def test_exactly_one_item_binds_ac3_with_a_hosted_runnable_check() -> None:
     data = _load()
     binders = [i for i in data["dod_evidence"] if "AC3" in i.get("binds_ac", [])]
     assert len(binders) == 1
     checks = binders[0]["checks"]
     assert checks
-    assert any(
-        c["check_type"] == "command" and FALSIFIER in c["check_value"] for c in checks
+    assert any(c["check_type"] == "test_passes" for c in checks)
+    statement = next(
+        a["statement"]
+        for r in data["requirements"]
+        for a in r["acceptance"]
+        if a["id"] == "AC3"
     )
+    assert FALSIFIER in statement
 
 
-def test_the_ac3_check_resolves_the_sibling_checkout_from_an_env_var() -> None:
+def test_no_ac3_check_needs_the_sibling_checkout() -> None:
     data = _load()
     binder = next(i for i in data["dod_evidence"] if "AC3" in i.get("binds_ac", []))
-    commands = [c for c in binder["checks"] if c["check_type"] == "command"]
-    assert commands
-    for check in commands:
-        assert 'cd "${BOARD_REPO_DIR:?' in check["check_value"]
+    for check in binder["checks"]:
+        assert "BOARD_REPO_DIR" not in check["check_value"]

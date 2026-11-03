@@ -120,14 +120,11 @@ dod_evidence:
     binds_ac:
       - AC6
   - id: dod-omn19812-ac3-board-registration
-    description: The ticket's own falsifier runs in the sibling board checkout named by BOARD_REPO_DIR; its registration test reads the board's PROBES, READBACKS and EVIDENCE tables and fails when the C28 PROBES entry, the missing READBACKS entry or the kept EVIDENCE prose is absent. The contract-shape test here fails at the merge base, where the contract declares no AC3, and passes here. At the sibling's origin/dev f16faf507e09 the falsifier gave 6 passed.
+    description: The ticket's own falsifier runs in the sibling board checkout, which the hosted runner does not have, so it is run by hand there and not bound as a hosted check; its registration test reads the board's PROBES, READBACKS and EVIDENCE tables and fails when the C28 PROBES entry, the missing READBACKS entry or the kept EVIDENCE prose is absent. The contract-shape test here fails at the merge base, where the contract declares no AC3, and passes here. At the sibling's origin/dev f16faf507e09 the falsifier gave 6 passed.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_contract_ac3_board_registration_omn19812.py -q --no-cov
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: cd "${BOARD_REPO_DIR:?set BOARD_REPO_DIR to the sibling board checkout}" && uv run pytest tests/scripts/test_c28_consumer_flow_probe_registration.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
