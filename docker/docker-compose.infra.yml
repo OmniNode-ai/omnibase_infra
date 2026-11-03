@@ -209,6 +209,7 @@ x-runtime-env: &runtime-env
   ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
   # Restrict the runtime surface to first-party infra + marketplace packages.
   ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
+  ONEX_RUNTIME_KERNEL_PLUGINS: ${ONEX_RUNTIME_KERNEL_PLUGINS:?runtime policy contract must set ONEX_RUNTIME_KERNEL_PLUGINS}
   # OMN-6440: Runtime contract YAMLs from omnibase_core (env var override for Docker)
   ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}

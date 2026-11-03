@@ -34,6 +34,11 @@ class ModelRuntimePolicyContract(BaseModel):
     name: Literal["runtime_policy"]
     version: int = Field(ge=1)
     active_runtime_packages: tuple[str, ...] = Field(min_length=1)
+    # OMN-21591: the lane overlay's runtime.kernel_plugins -- the announced
+    # kernel_plugin entries this lane's kernel registers, in registration order.
+    # Required: the code holds no default list. A name here must be announced by a
+    # package in active_runtime_packages or the kernel refuses to boot.
+    kernel_plugins: tuple[str, ...]
     llm_cloud_endpoint_host_allowlist: tuple[str, ...] = Field(default=())
     bifrost_vertex_gemini_endpoint_url: str = Field(min_length=1)
     google_cloud_project: str = Field(min_length=1)
@@ -91,8 +96,7 @@ class ModelRuntimePolicyContract(BaseModel):
     @model_validator(mode="after")
     def _requires_runtime_profiles(self) -> ModelRuntimePolicyContract:
         required = {"dev", "stability-test", "judge", "prod", "lakshman", "dogfood"}
-        observed = set(self.profiles)
-        if observed != required:
+        if (observed := set(self.profiles)) != required:
             msg = f"runtime policy profiles must be {sorted(required)}, got {sorted(observed)}"
             raise ValueError(msg)
 

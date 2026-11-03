@@ -1,0 +1,55 @@
+# OMN-21591 contract file for omnibase_infra: kernel plugins are announced and enabled by overlay, not looked up by name in the container.
+schema_version: "1.0.0"
+ticket_id: "OMN-21591"
+title: "Contract hot loading A3: Kernel plugins are announced and enabled by overlay, not looked up by name in the container"
+summary: "Boot step 0 announces every installed kernel plugin as a kernel_plugin entry from the package metadata; the kernel selects the entries the lane overlay's runtime.kernel_plugins names from the catalog, before the container exists, and registers them; a name the catalog does not hold is a typed boot error. The two entry-point lookups filtered to the delegation and intelligence names leave service_kernel.py, and the runtime policy contract (the dev lane's overlay data) names the plugins its lanes enable."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn21591-kernel-plugins-from-catalog
+    statement: "The kernel registers the kernel plugins its lane overlay names and the catalog holds as announced kernel_plugin entries, and holds no plugin name or entry-point lookup of its own."
+    acceptance:
+      - id: AC1
+        statement: "AC1: a fixture plugin announced and named in the overlay is registered; one announced and not named is not; one named and not announced is a typed boot error before the container starts -- falsifier: three unit tests, run for both the `delegation` and the `intelligence` plugin, each registered as before when named."
+      - id: AC2
+        statement: "AC2: `git grep -n '\"delegation\"\\|\"intelligence\"' src/omnibase_infra/runtime/service_kernel.py` finds no match -- falsifier: a match."
+      - id: AC3
+        statement: "AC3: The delegation and intelligence plugins load on the dev lane's compose configuration with their overlay entries added and behave as before -- falsifier: an existing delegation or intelligence plugin test fails unmodified."
+evidence_requirements:
+  - kind: tests
+    description: "The kernel plugin selection tests, the step 0 tests and the runtime policy tests pass."
+    command: "uv run pytest tests/unit/runtime/test_kernel_plugins_from_catalog.py tests/unit/runtime/test_boot_step0_catalog.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -n 0 -q --no-cov -o addopts=''"
+dod_evidence:
+  - id: dod-omn21591-ac1-selection
+    description: "For both the delegation and the intelligence plugin: announced and named is selected and instantiated, announced and not named is left out, named and not announced raises KernelPluginNotAnnouncedError, and the kernel selects between boot step 0 and the container."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel_plugins_from_catalog.py -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn21591-ac2-no-names
+    description: "The kernel source names neither plugin; the same grep run over a file that does name one finds it."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel_plugins_from_catalog.py -n 0 -q --no-cov -o addopts='' -k 'TestTheKernelCarriesNoPluginName'"
+  - id: dod-omn21591-ac3-plugins-unchanged
+    description: "The existing domain plugin, discovery and step 0 tests pass unmodified, and the runtime policy contract renders the overlay key the compose files require."
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_domain_plugin_discovery.py tests/unit/runtime/test_domain_plugin_discovery_seam.py tests/unit/runtime/test_domain_plugin_shutdown.py tests/unit/runtime/test_boot_step0_catalog.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -n 0 -q --no-cov -o addopts=''"
+  - id: dod-omn21591-deploy
+    description: "Deploy-scope check the hosted runner can run: the runtime policy contract renders ONEX_RUNTIME_KERNEL_PLUGINS=delegation into docker/runtime-policy.env, and every runtime service that sets the active package surface also requires the key; a rendered value that differs from the tracked env file, or a service without the key, fails it."
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel_plugin_overlay_key_omn21591.py -n 0 -q --no-cov -o addopts=''"

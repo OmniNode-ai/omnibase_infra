@@ -9,10 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.models.node_announce.model_package_contract_record import (
     ModelPackageContractRecord,
 )
+from omnibase_infra.models.node_announce.model_package_plugin_record import (
+    ModelPackagePluginRecord,
+)
 
 
 class ModelPackageInventory(BaseModel):
     """Records for the active packages, in the order the metadata listed them.
+
+    ``plugins`` holds the kernel plugin entries of the same packages (OMN-21591); they
+    are announced as ``kernel_plugin`` entries and are never contracts to wire.
 
     ``fingerprint`` covers every entry point of the group, active or not, as
     ``(name, distribution, version)``: it is what changes when a package is
@@ -22,6 +28,10 @@ class ModelPackageInventory(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     records: tuple[ModelPackageContractRecord, ...] = ()
+    plugins: tuple[ModelPackagePluginRecord, ...] = Field(
+        default=(),
+        description="Kernel plugins of the active packages, in the order the metadata listed them",
+    )
     fingerprint: tuple[tuple[str, str, str], ...] = Field(default=())
 
     @property

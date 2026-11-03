@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from uuid import uuid5
 
+from omnibase_core.enums.enum_announced_node_kind import EnumAnnouncedNodeKind
 from omnibase_core.enums.enum_announcement_operation import EnumAnnouncementOperation
 from omnibase_core.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.contract_registration.model_node_announcement import (
@@ -74,6 +75,10 @@ class HandlerRegistrationFromAnnouncement:
     ) -> ModelRegistrationFromAnnouncementResult:
         announcement = request.announcement
         identity = request.identity
+        if announcement.node_kind is not EnumAnnouncedNodeKind.NODE:
+            return ModelRegistrationFromAnnouncementResult(
+                skipped_reason=f"kind {announcement.node_kind.value} registers no node"
+            )
         if announcement.operation is not EnumAnnouncementOperation.ANNOUNCE:
             return ModelRegistrationFromAnnouncementResult(
                 skipped_reason=f"operation {announcement.operation.value} registers nothing"

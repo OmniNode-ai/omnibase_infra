@@ -39,6 +39,14 @@ class ModelPackageAnnounceRequest(BaseModel):
         default=None,
         description="Admission policy; None means the permissive Tier 0 policy",
     )
+    announce_kernel_plugins: bool = Field(
+        default=False,
+        description=(
+            "Whether step 0 also announces the installed kernel plugins as "
+            "kernel_plugin entries (OMN-21591). The kernel's step 0 sets it; a "
+            "caller that folds only a node catalog leaves it off."
+        ),
+    )
     catalog_group: str = Field(
         default="node-catalog", description="Consumer group the catalog subscribes with"
     )

@@ -104,8 +104,7 @@ def load_contract(
             overlay = ModelDevBrokerMemoryPolicy.model_validate(
                 yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
             )
-            raw = raw | overlay.model_dump()
-            return ModelRuntimePolicyContract.model_validate(raw)
+            return ModelRuntimePolicyContract.model_validate(raw | overlay.model_dump())
     return base
 
 
@@ -118,6 +117,7 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
             contract.auxiliary_services_omnimemory_enabled
         ),
         "ONEX_ACTIVE_RUNTIME_PACKAGES": ",".join(contract.active_runtime_packages),
+        "ONEX_RUNTIME_KERNEL_PLUGINS": ",".join(contract.kernel_plugins),
         "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST": ",".join(
             contract.llm_cloud_endpoint_host_allowlist
         ),
