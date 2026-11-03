@@ -12,7 +12,7 @@
 # effects.
 #
 # Related Tickets:
-#   - OMN-14471: Refactor legacy scripts/check_release_identity.py -> canonical node
+#   - OMN-14471: Refactor the legacy check-release-identity gate -> canonical node
 #   - OMN-13412: Fresh-deploy fitness gates (original release-identity invariant)
 #   - OMN-12515: Imperative-contract guard (scan_freestanding_imperative_io) context
 #   - OMN-17240: An EMPTY published-tag set is a PASS only when it is CREDIBLE.
@@ -34,6 +34,8 @@ contract_version:
 node_version: "0.1.0"
 # Node type - COMPUTE for the pure version-ahead / src-change fitness logic
 node_type: "COMPUTE_GENERIC"
+descriptor:
+  node_archetype: "compute"
 # Description
 description: >
   Pure COMPUTE node for the fresh-deploy fitness release-identity gate. Given the declared pyproject version, the published git tags, the changed-file set, and the checkout's git-derived tag-state provenance, it decides whether packaged source (src/**) is merging onto an already-published version without a bump. An empty published-tag set is a pass only when it is credible: a bundle-cloned or shallow tree, or a declared version with a non-zero patch component, is refused as "tag state unavailable" rather than read as "nothing published yet" (OMN-17240). Returns an exit-code (0/1/2), the target stream, a human-readable message, and a machine-readable reason code. No I/O, no side effects.

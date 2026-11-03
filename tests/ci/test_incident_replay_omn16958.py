@@ -13,13 +13,14 @@ environment.
 
 THE REGRESSION CLASS IS ``false_green``: nothing in this repo read hook
 interpreters at all, so every commit gate was green while the config refused
-commits on a stock Mac. The guard is omnimarket's OMN-17219
-``validate_precommit_interpreter.py``, ported unchanged.
+commits on a stock Mac. The guard is the core
+precommit-interpreter-resolution hook (omnimarket's OMN-17219 rule, now shipped by
+``omnibase_core``).
 
 THE ARTIFACT is the byte-for-byte ``.pre-commit-config.yaml`` blob at
 ``omnibase_infra@9114ea9cc`` -- the ``origin/dev`` head the OMN-16958 fix
 branched from -- taken with ``git show``, not retyped. The replay points the
-real guard's ``CONFIG_PATH`` at those bytes and requires it to refuse, naming
+real core runtime at those bytes and requires it to refuse, naming
 exactly the nine ``language: system`` entries. The accept control is the live
 config (``test_live_config_has_no_bare_interpreter_hooks`` in
 ``tests/ci/test_precommit_interpreter_gate.py``), so a guard stuck closed fails.
@@ -28,18 +29,18 @@ config (``test_live_config_has_no_bare_interpreter_hooks`` in
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import re
-import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
+
+from omnibase_core.nodes.node_precommit_interpreter_check_compute.runtime_precommit_interpreter_check import (
+    main as core_main,
+)
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-GATE = REPO_ROOT / "scripts" / "validation" / "validate_precommit_interpreter.py"
 FIXTURE = (
     REPO_ROOT / "tests" / "fixtures" / "omn16958" / "pre-commit-config.yaml.captured"
 )
@@ -60,18 +61,6 @@ BARE_PYTHON3_HOOKS = {
 }
 
 
-def _load_gate() -> Any:
-    spec = importlib.util.spec_from_file_location(
-        f"precommit_interpreter_gate_{Path(__file__).stem}", GATE
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_the_captured_config_is_unmodified() -> None:
     assert hashlib.sha256(FIXTURE.read_bytes()).hexdigest() == EXPECTED_SHA256
 
@@ -79,13 +68,7 @@ def test_the_captured_config_is_unmodified() -> None:
 def test_the_real_guard_rejects_the_config_that_refused_the_commit(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    gate = _load_gate()
-    original = gate.CONFIG_PATH
-    gate.CONFIG_PATH = FIXTURE
-    try:
-        rc = gate.main()
-    finally:
-        gate.CONFIG_PATH = original
+    rc = core_main([str(FIXTURE), "--root", str(REPO_ROOT)])
     err = capsys.readouterr().err
 
     assert rc == 1, err

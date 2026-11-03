@@ -61,6 +61,7 @@ class ModelHealthResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+@router.get("/api/nodes/health", include_in_schema=False)
 @router.get(
     "/health",
     response_model=ModelHealthResponse,
@@ -84,7 +85,6 @@ async def health() -> ModelHealthResponse:
     response_model=ModelContractResolveOutput,
     summary="Resolve a contract with overlay patches",
     tags=["contract"],
-    status_code=status.HTTP_200_OK,
 )
 async def contract_resolve(
     request: Request,
