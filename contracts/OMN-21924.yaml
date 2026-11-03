@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21924
+title: The runtime image's allowed commands are declared in data and a compose command or console script outside the list is refused by the stack-shape check
+summary: The infra half of the image-command rule. config/validation/stack_shape.yaml declares image_commands, the console scripts file and the allowed and developer-only console script lists; the stack-shape test passes them to omnibase_core's validator. The rule itself is omnibase_core's, so this branch waits on the core release that carries it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21924-image-commands-data
+    statement: The data file lists the image's allowed commands and classifies every console script of pyproject.toml.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a compose service whose command is outside the declared allowed list is refused by the stack-shape check naming the service and the command, and the list lives in data and not in code -- falsifier: `uv run pytest tests/unit/docker -q -k allowed_commands` fails with one planted `python -m` service"
+      - id: AC2
+        statement: "AC2: every console script the packages declare is either run by a lane, removed or marked developer-only, with the list of each in the pull request body -- falsifier: a console script that appears in none of the three lists"
+      - id: AC3
+        statement: "AC3: the check extends T1's validator and adds no second validator -- falsifier: `git diff --name-only origin/dev` lists a new validator file beside T1's"
+evidence_requirements:
+  - kind: tests
+    description: The allowed-commands and stack-shape tests pass.
+    command: uv run pytest tests/unit/docker -q -k allowed_commands
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21924-ac1-allowed-commands
+    description: A planted python -m runtime service is refused by service name and command under the real image_commands list; the declared image command passes.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker -q --no-cov -o addopts='' -k allowed_commands
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21924-ac2-console-scripts
+    description: Every [project.scripts] entry of pyproject.toml is on the allowed list or the developer-only list, and the real stack-shape run judges them.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -o addopts='' -k real
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21924-ac3-no-second-validator
+    description: The branch adds no validator file; the rule is T1's validator in omnibase_core.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: test -z "$(git diff --name-only --diff-filter=A origin/dev -- 'src/omnibase_infra/validation/*validator*' 'scripts/*validator*')"
+        cwd: ${OMNI_HOME}/omnibase_infra

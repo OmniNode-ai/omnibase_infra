@@ -57,6 +57,41 @@ not_a_stack:
   - docker/docker-compose.pypi-cache.yml
   - docker/docker-compose.pypi-canary.yml
   - docker/docker-compose.runners*.yml
+# OMN-21924 (one-runtime plan task T27): the runtime image starts one command, and a console
+# script is run by a lane, is developer-only, or is refused. image_commands lists the first
+# token of every entrypoint or command a runtime service may set (a runtime service that sets
+# neither starts the image's CMD, which docker/Dockerfile.runtime declares). A console script
+# of console_scripts_file's [project.scripts] that is on neither list below fails the check, so
+# a new `python -m` entry point cannot arrive beside the node that should carry it. Every reason
+# names the compose file or lane that runs the command, or states that none does (grep over
+# docker/, scripts/, the .github workflows, the lane-mirror deploy overlay and the lane census
+# manifest; recorded in the pull request body).
+image_commands:
+  - command: onex-runtime
+    reason: the image's start command (CMD in docker/Dockerfile.runtime); every omninode-runtime service of every lane runs it
+console_scripts_file: pyproject.toml
+console_scripts_allowed:
+  - name: onex-runtime
+    reason: run by every lane's omninode-runtime service (the image CMD in docker/Dockerfile.runtime)
+  - name: onex-gateway-forwarder
+    reason: T26 decides keep or fold; today the lane-mirror forwarder runs it (docker/docker-compose.gateway.yml and the lane-mirror deploy overlay)
+  - name: onex-gateway-canary-probe
+    reason: run by the lane-mirror forwarder's healthcheck (docker/docker-compose.gateway.yml); follows the forwarder's T26 decision
+developer_only:
+  - name: omni-infra
+    reason: no compose file, Dockerfile, deploy overlay, workflow or lane manifest runs it
+  - name: onex-action-authorization-claim
+    reason: no compose file, Dockerfile, deploy overlay, workflow or lane manifest runs it
+  - name: onex-git-hook-relay
+    reason: installed into a developer clone's git hooks by scripts/install-git-hooks.sh; no lane runs it
+  - name: onex-infra-test
+    reason: entry point omnibase_infra.cli.infra_test; no compose file, Dockerfile, deploy overlay, workflow or lane manifest runs it
+  - name: onex-linear-relay
+    reason: no compose file, Dockerfile, deploy overlay, workflow or lane manifest runs it
+  - name: onex-status
+    reason: entry point omnibase_infra.tui; no compose file, Dockerfile, deploy overlay, workflow or lane manifest runs it
+  - name: verify-container-manifest
+    reason: no compose file, Dockerfile, deploy overlay, workflow or lane manifest runs it
 baseline:
   - service: "*-infra-runtime-image"
     files: 3

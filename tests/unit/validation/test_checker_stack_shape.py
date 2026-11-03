@@ -55,6 +55,12 @@ _INFRA = Path("docker/docker-compose.infra.yml")
 _OVERLAY = Path("docker/docker-compose.overlay.yml")
 _PLANTED = ("projection-claude-hook-events-writer", "cost-estimator-web")
 _RULES = {r.rule_id: r for r in ValidatorStackShape().contract.rules}
+_PASSED_THROUGH = (
+    "image_commands",
+    "console_scripts_file",
+    "console_scripts_allowed",
+    "developer_only",
+)
 
 
 # -- the data file, expanded into the format the core validator reads ------------------------------
@@ -175,13 +181,17 @@ def effective_data(
         entries.extend(
             {"file": file, "service": name, "ticket": ticket} for file, name in hits
         )
-    effective = {
+    effective: dict[str, object] = {
         "runtime": runtime,
         "dependencies": _strings(data, "dependencies"),
         "one_shots": sorted(admitted),
         "lanes": {file: {"compose_files": [file]} for file in files},
         "baseline": entries,
     }
+    # OMN-21924: the image-command and console-script lists are core format already
+    for key in _PASSED_THROUGH:
+        if key in data:
+            effective[key] = data[key]
     return yaml.safe_dump(effective, sort_keys=False), tuple(issues)
 
 
