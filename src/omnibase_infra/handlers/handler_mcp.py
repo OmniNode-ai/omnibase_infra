@@ -78,11 +78,6 @@ logger = logging.getLogger(__name__)
 # Handler ID for ModelHandlerOutput
 HANDLER_ID_MCP: str = "mcp-handler"
 
-# Shutdown timeout constants (can be overridden via class attributes)
-_DEFAULT_SHUTDOWN_TIMEOUT: float = 5.0
-_DEFAULT_CANCEL_TIMEOUT: float = 1.0
-_DEFAULT_STARTUP_TIMEOUT: float = 2.0
-
 # Error message truncation limit for health check responses
 _ERROR_MESSAGE_MAX_LENGTH: int = 200
 
@@ -135,51 +130,26 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         Auth failures and successes are audit-logged (see MCPAuthMiddleware).
 
     Dispatcher Integration:
-        Tool execution routes through AdapterONEXToolExecution when an
-        executor is provided at construction time (OMN-2697).
+        Tool execution routes through the AdapterONEXToolExecution that the
+        server lifecycle builds during initialize() (OMN-2697).
 
-    Class Attributes:
-        shutdown_timeout: Timeout for graceful server shutdown (default: 5.0s).
-        cancel_timeout: Timeout for forced cancellation after graceful fails (default: 1.0s).
-        startup_timeout: Timeout for server readiness check during startup (default: 2.0s).
+    Server timeouts (OMN-22130):
+        The graceful shutdown, forced cancellation and startup readiness
+        timeouts are declared in the handler contract
+        (metadata.transport.server_timeouts)
+        and arrive through initialize(config); the handler holds no literal.
     """
 
-    # Configurable timeout attributes (can be overridden on subclasses or instances)
-    shutdown_timeout: float = _DEFAULT_SHUTDOWN_TIMEOUT
-    cancel_timeout: float = _DEFAULT_CANCEL_TIMEOUT
-    startup_timeout: float = _DEFAULT_STARTUP_TIMEOUT
-
-    def __init__(
-        self,
-        container: ModelONEXContainer | None = None,
-        registry: ServiceMCPToolRegistry | None = None,
-        executor: AdapterONEXToolExecution | None = None,
-    ) -> None:
-        """Initialize HandlerMCP with optional ONEX container for dependency injection.
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize HandlerMCP with the ONEX container (OMN-22130).
 
         Args:
-            container: Optional ONEX container providing dependency injection for
-                services, configuration, and runtime context. When None, the handler
-                operates in standalone mode without container-based DI.
-            registry: Optional MCP tool registry for dynamic tool discovery.
-                If provided, tools are looked up from this registry. If not
-                provided, the handler uses its local _tool_registry dict.
-            executor: Optional tool execution adapter for dispatching to
-                ONEX orchestrators. If provided, tool calls are routed through
-                this adapter. If not provided, placeholder execution is used.
-
-        Note:
-            The container parameter is optional to support two instantiation paths:
-            1. Registry-based: RuntimeHostProcess creates handlers via registry lookup
-               with no-argument constructor calls. Container is None in this case.
-            2. DI-based: Explicit container injection for full ONEX integration.
-
-            When container is provided, it enables future DI-based service resolution
-            (e.g., dispatcher routing, metrics integration).
+            container: ONEX container the runtime injects. The server lifecycle
+                built in initialize() resolves its services from it.
 
         MCP Integration (OMN-1281):
-            When registry and executor are provided, the handler operates in
-            "integrated mode" with full MCP tool discovery and execution:
+            initialize() starts MCPServerLifecycle, whose registry and executor
+            put the handler in "integrated mode" with tool discovery and execution:
             - Tools are discovered from the event bus registry via ServiceMCPToolDiscovery
             - Tool list is cached in ServiceMCPToolRegistry
             - Tool execution routes through AdapterONEXToolExecution
@@ -195,9 +165,9 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         self._initialized: bool = False
         self._tool_registry: ModelNameKeyedTable[ProtocolMCPToolDefinition] = ModelNameKeyedTable()  # fmt: skip
 
-        # MCP integration components (OMN-1281)
-        self._mcp_registry: ServiceMCPToolRegistry | None = registry
-        self._mcp_executor: AdapterONEXToolExecution | None = executor
+        # MCP integration components (OMN-1281), set from the lifecycle
+        self._mcp_registry: ServiceMCPToolRegistry | None = None
+        self._mcp_executor: AdapterONEXToolExecution | None = None
 
         # Server lifecycle components (OMN-1282)
         self._server: uvicorn.Server | None = None
@@ -322,7 +292,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         self,
         host: str,
         port: int,
-        timeout: float = 2.0,
+        timeout: float,
         poll_interval: float = 0.05,
     ) -> None:
         """Wait for server to be ready by polling TCP connect.
@@ -540,11 +510,6 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 # - Resource leaks from partial initialization
                 try:
                     # Create and start MCPServerLifecycle for tool discovery
-                    # Container is required for lifecycle initialization
-                    if self._container is None:
-                        raise ValueError(
-                            "Container required for MCPServerLifecycle initialization"
-                        )
                     self._lifecycle = MCPServerLifecycle(
                         container=self._container,
                         config=server_config,
@@ -612,7 +577,7 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                     await self._wait_for_server_ready(
                         self._config.host,
                         self._config.port,
-                        timeout=self.startup_timeout,
+                        timeout=self._config.server_timeouts.startup_seconds,
                     )
                     self._server_started_at = time.time()
 
@@ -712,16 +677,15 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
 
         This method performs graceful shutdown with timeout protection:
         1. Signal uvicorn server to stop
-        2. Wait for server task with timeout (max 5s graceful, 1s forced)
+        2. Wait for server task with the contract's graceful, then forced, timeout
         3. Shutdown MCPServerLifecycle (registry, discovery, sync)
         4. Clear tool registry and reset state
 
-        Safe to call multiple times. Never hangs indefinitely (max ~6s with defaults).
+        Safe to call multiple times. Never hangs indefinitely.
 
         Note:
-            Timeouts are configurable via class attributes:
-            - shutdown_timeout: Graceful shutdown timeout (default: 5.0s)
-            - cancel_timeout: Forced cancellation timeout (default: 1.0s)
+            The graceful and forced waits are config.server_timeouts
+            shutdown_seconds and cancel_seconds (contract-declared).
         """
         shutdown_correlation_id = uuid4()
 
@@ -735,9 +699,11 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
         )
 
         # Stop uvicorn server with timeout protection (OMN-1282)
+        config = self._config
         if (
             self._server is not None
             and self._server_task is not None
+            and config is not None
             and not self._skip_server
         ):
             # Signal server to stop
@@ -748,23 +714,25 @@ class HandlerMCP(MixinEnvelopeExtraction, MixinAsyncCircuitBreaker):
                 logger.debug(
                     "Waiting for server task to complete",
                     extra={
-                        "timeout_seconds": self.shutdown_timeout,
+                        "timeout_seconds": config.server_timeouts.shutdown_seconds,
                         "correlation_id": str(shutdown_correlation_id),
                     },
                 )
-                await asyncio.wait_for(self._server_task, timeout=self.shutdown_timeout)
+                await asyncio.wait_for(
+                    self._server_task, timeout=config.server_timeouts.shutdown_seconds
+                )
             except TimeoutError:
                 logger.warning(
                     "Server shutdown timed out, forcing cancellation",
                     extra={
-                        "timeout_seconds": self.shutdown_timeout,
+                        "timeout_seconds": config.server_timeouts.shutdown_seconds,
                         "correlation_id": str(shutdown_correlation_id),
                     },
                 )
                 self._server_task.cancel()
                 try:
                     await asyncio.wait_for(
-                        self._server_task, timeout=self.cancel_timeout
+                        self._server_task, timeout=config.server_timeouts.cancel_seconds
                     )
                 except (TimeoutError, asyncio.CancelledError):
                     pass  # Best effort

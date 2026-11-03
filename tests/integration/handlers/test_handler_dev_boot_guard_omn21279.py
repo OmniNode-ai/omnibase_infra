@@ -125,6 +125,7 @@ class _Host:
             lane_config_for=lambda lane: SimpleNamespace(
                 compose_project=PROJECT, disabled_services=()
             ),
+            lane_folded_profiles=lambda lane: frozenset(),
             _run=self.run,
             _compose_file_args=lambda lane: ["-f", "compose.yml"],
             candidate_probe_file_args=_probe_file_args,

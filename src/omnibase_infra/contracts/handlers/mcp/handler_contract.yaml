@@ -95,6 +95,12 @@ metadata:
     stateless: true
     # JSON response mode for compatibility (recommended)
     json_response: true
+    # Server lifecycle timeouts in seconds (OMN-22130): graceful uvicorn
+    # shutdown, forced cancellation after that, and the startup readiness wait.
+    server_timeouts:
+      shutdown_seconds: 5.0
+      cancel_seconds: 1.0
+      startup_seconds: 2.0
   security:
     # =========================================================================
     # SECURITY CONFIGURATION
