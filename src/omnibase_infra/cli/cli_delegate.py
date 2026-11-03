@@ -119,7 +119,7 @@ import socket
 import sys
 import time
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -257,6 +257,9 @@ from omnibase_infra.models.delegation.delegate_request_payload import (
 )
 from omnibase_infra.models.delegation.delegate_request_payload import (
     build_delegate_request_payload as _request_payload,
+)
+from omnibase_infra.models.delegation.model_delegate_incomplete_terminal import (
+    ModelDelegateIncompleteTerminal,
 )
 from omnibase_infra.models.delegation.model_delegate_lineage import (
     LINEAGE_KINDS,
@@ -1218,37 +1221,6 @@ def _write_incomplete_run_files(
     return run_dir
 
 
-def _unterminalized_receipt_fields(
-    envelope: dict[str, object],
-    *,
-    reason: str,
-) -> tuple[EnumDelegateIncompleteClass, dict[str, object]]:
-    """Classify a delegation receipt that carries no terminal, and what it knew.
-
-    ``timeout`` when the runtime's own workflow result says so, ``failed`` for
-    every other way of ending without a terminal payload. The runtime's error
-    and type ride along so the receipt names the cause the capture log holds
-    rather than only the resolver's "no resolvable terminal".
-    """
-    result = envelope.get("result")
-    summary = result if isinstance(result, dict) else {}
-    workflow_result = str(summary.get("workflow_result") or "")
-    terminal_class = (
-        EnumDelegateIncompleteClass.TIMEOUT
-        if workflow_result == "timeout"
-        else EnumDelegateIncompleteClass.FAILED
-    )
-    known: dict[str, object] = {
-        "workflow_result": workflow_result or None,
-        "runtime_error_type": str(summary.get("runtime_error_type") or "") or None,
-        "runtime_error": sanitize_error_string(str(summary.get("error") or "")) or None,
-        "terminal_payload": summary.get("terminal_payload"),
-        "wire_correlation_id": summary.get("wire_correlation_id") or None,
-        "resolution_error": sanitize_error_string(reason),
-    }
-    return terminal_class, known
-
-
 def _write_unterminalized_run_files(
     *,
     envelope: dict[str, object],
@@ -1259,16 +1231,19 @@ def _write_unterminalized_run_files(
     task_type_resolution: str,
     addressing: ModelDelegateRunAddressing,
     phase_durations: ModelDelegatePhaseDurations | None,
+    queue_depth_observer: Callable[[], ModelDelegateQueueDepth] | None = None,
 ) -> None:
     """Write the receipt for a delegation receipt that holds no terminal (OMN-17427)."""
-    terminal_class, known = _unterminalized_receipt_fields(envelope, reason=reason)
+    terminal = ModelDelegateIncompleteTerminal.from_envelope(
+        envelope, reason=reason, queue_depth_observer=queue_depth_observer
+    )
     _write_incomplete_run_files(
         run_id=str(envelope["run_id"]),
         correlation_id=str(envelope["correlation_id"]),
-        terminal_class=terminal_class,
+        terminal_class=terminal.terminal_class,
         status=EnumSkillResultStatus.FAILED,
-        failure_reason=sanitize_error_string(reason),
-        known=known,
+        failure_reason=terminal.failure_reason,
+        known=terminal.known,
         state_root=state_root,
         prompt=prompt,
         task_type=task_type,
@@ -1520,6 +1495,7 @@ def _write_local_run_files(
     contract_path: Path | None = None,
     payload_path: Path | None = None,
     phase_durations: ModelDelegatePhaseDurations | None = None,
+    queue_depth_observer: Callable[[], ModelDelegateQueueDepth] | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -1637,6 +1613,7 @@ def _write_local_run_files(
             task_type_resolution=task_type_resolution,
             addressing=addressing,
             phase_durations=phase_durations,
+            queue_depth_observer=queue_depth_observer,
         )
         raise
     if result is None:
@@ -3645,8 +3622,8 @@ class DelegateCommand(click.Command):
     "session_model",
     default=None,
     help=(
-        "The caller's Claude Code session model, such as claude-opus-5-5 "
-        "(OMN-20557). It rides in the request metadata and is the run's "
+        "The caller's Claude Code session model id (OMN-20557). It rides in "
+        "the request metadata and is the run's "
         "savings baseline: the receipt names baseline_source session_model, "
         "and a model the pricing manifest does not price is reported as "
         "BASELINE_UNRESOLVED with no saving. Omitted, the fixed default "
@@ -4624,6 +4601,13 @@ def run_delegate(
                         # runtime has finished, so every phase it reached is
                         # closed.
                         phase_durations=phase_stopwatch.durations(),
+                        queue_depth_observer=functools.partial(
+                            observe_delegate_queue_depth,
+                            bus=bus,
+                            broker=locus_decision.broker,
+                            command_topic=locus_decision.command_topic,
+                            consumer_groups=locus_decision.lane_consumer_groups,
+                        ),
                     ),
                 )
             # OMN-17427: a run that returned normally but whose writer did not
@@ -4665,15 +4649,18 @@ def run_delegate(
                 consumer_groups=locus_decision.lane_consumer_groups,
             )
             click.echo(f"{exc} Queue: {queue_depth.describe()}.", err=True)
+            timeout_terminal = ModelDelegateIncompleteTerminal.from_hard_timeout(
+                error=str(exc), queue_depth=queue_depth
+            )
             # OMN-17427: the timeout is also the run's receipt on disk. Both
             # branches below end the run, so the file is written before either.
             elapsed_seconds = time.monotonic() - dispatch_started
             _write_incomplete_run_files(
                 run_id=str(run_id),
                 correlation_id=str(correlation_id),
-                terminal_class=EnumDelegateIncompleteClass.TIMEOUT,
+                terminal_class=timeout_terminal.terminal_class,
                 status=EnumSkillResultStatus.FAILED,
-                failure_reason=sanitize_error_string(str(exc)),
+                failure_reason=timeout_terminal.failure_reason,
                 known={
                     "declared_timeout_seconds": terminal_wait_seconds,
                     "grace_seconds": _HARD_TIMEOUT_GRACE_SECONDS,

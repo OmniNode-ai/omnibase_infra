@@ -57,10 +57,11 @@ def test_exactly_one_lane_folds_effects() -> None:
 
 def test_rendered_env_carries_the_fold_for_that_lane_only() -> None:
     rendered = render_env(load_contract())
-    assert {k: v for k, v in rendered.items() if k.endswith("_FOLDED_PROFILES")} == {
-        FOLDED_KEY: "effects",
-        "DEV_RUNTIME_MAIN_FOLDED_PROFILES": "tenant-projection",
-    }
+    folds = {k: v for k, v in rendered.items() if k.endswith("_FOLDED_PROFILES")}
+    # Primary dev folds its own roles (OMN-21288 tenant and writer folds), never effects.
+    dev_folds = folds.pop("DEV_RUNTIME_MAIN_FOLDED_PROFILES").split(",")
+    assert "effects" not in dev_folds
+    assert folds == {FOLDED_KEY: "effects"}
     committed = (ROOT / "docker" / "runtime-policy.env").read_text(encoding="utf-8")
     assert committed == format_dotenv(rendered)
 
