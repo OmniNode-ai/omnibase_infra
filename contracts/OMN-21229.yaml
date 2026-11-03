@@ -6,7 +6,7 @@ summary: "EventBusKafka.subscribe and EventBusInmemory.subscribe return a ModelS
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - "EventBusKafka.subscribe and EventBusInmemory.subscribe return ModelSubscriptionHandle (awaiting it is stop)"
+  - public_api
 requirements:
   - id: req-omn21229-subscription-lifecycle
     statement: "A subscription has a lifecycle the runtime can trust: a failed start leaves no callback, stop after drain lets the in-flight callback finish, and only completed records are committed."
