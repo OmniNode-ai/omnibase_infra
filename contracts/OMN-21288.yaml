@@ -43,12 +43,12 @@ requirements:
       - id: AC21288291
         statement: |-
           AC21288291: the before reading (dev topics, partitions, groups, zero-consumer groups, memory and the per-boot topic spec count) is recorded with read times beside the plan's figures -- falsifier: re-read the numbers from the broker admin endpoint and show they match within the tolerance for a live bus
-      - id: AC9
+      - id: AC21288292
         statement: |-
-          AC9: a planted extra topic spec at boot fails the check -- falsifier: uv run pytest of the new test with one spec appended to the boot provisioning list fails, and passes without it
-      - id: AC10
+          AC21288292: a planted extra topic spec at boot fails the check -- falsifier: uv run pytest of the new test with one spec appended to the boot provisioning list fails, and passes without it
+      - id: AC21288293
         statement: |-
-          AC10: the baseline record is data, not code -- falsifier: a test that changes the declared baseline value and sees the check's verdict change with no code edit
+          AC21288293: the baseline record is data, not code -- falsifier: a test that changes the declared baseline value and sees the check's verdict change with no code edit
   - id: req-omn21288-ac6-contract-http-mount
     statement: "One-runtime plan T15: a contract declares an ASGI factory and path prefix and the runtime serves that application on its existing HTTP port."
     acceptance:
@@ -236,7 +236,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "planted or within_the_recorded"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC9]
+    binds_ac: [AC21288292]
   - id: dod-omn21288-ac8-baseline-is-data
     description: >-
       The same boot list passes against a temporary baseline file declaring its count and fails against one declaring a count one lower, with no code edit between the two; the record refuses unknown keys, an unknown lane and a repository list larger than the image list. The test file is new on this branch, so the run fails at the merge base.
@@ -245,7 +245,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "declared_value or typed or larger or lane"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC10]
+    binds_ac: [AC21288293]
   - id: dod-omn21288-topic-baseline-calendar
     description: >-
       Reject impossible calendar dates, non-UTC timestamps and malformed measurement SHAs while accepting a real leap day. This exercises the typed baseline record loaded from the committed data file.
@@ -259,7 +259,7 @@ dod_evidence:
     description: >-
       Hosted-runner deployment check: construct the runtime provisioner over the repository contracts and standalone manifests, read its emitted boot-count log and apply the committed baseline validator. A real additional manifest must raise ValueError and a duplicate topic must leave the count unchanged. No broker, Docker daemon or running lane is required.
     source: manual
-    binds_ac: [AC9, AC10]
+    binds_ac: [AC21288292, AC21288293]
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -k 'planted or duplicate_manifest or within_the_recorded or declared_value or committed_baseline' -q --no-cov -p no:cacheprovider
