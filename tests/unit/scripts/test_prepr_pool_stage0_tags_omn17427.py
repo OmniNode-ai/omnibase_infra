@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shlex
@@ -15,8 +16,9 @@ from pathlib import Path
 import pytest
 
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 ROOT = Path(__file__).resolve().parents[3]
 PROVE = ROOT / "scripts/runtime_build/prepr_pool_prove.sh"
 SIBLINGS = ("omnibase_core", "omnibase_spi", "omnimarket", "omniintelligence")
@@ -132,6 +134,7 @@ def _params(tmp_path: Path, **overrides: str) -> Path:
     # A nonempty retired pin must be ignored, even though it cannot resolve.
     values.update(
         TAG="stage0-test",
+        CLONE_BASE_URL="https://github.com/OmniNode-ai",
         W=str(tmp_path / "work"),
         SLOT_KIND="isolated",
         COMPAT_REF="retired-compat-pin-must-be-ignored",
@@ -149,30 +152,6 @@ def _params(tmp_path: Path, **overrides: str) -> Path:
     return params
 
 
-# OMN-22153 KNOWN GAP: prepr_pool_prove.sh clones omnibase_infra, omnibase_core,
-# omnibase_spi and omnimarket and no fifth repository, while stage_workspace.sh
-# now vendors omniintelligence. The script cannot be edited in this change (every
-# line naming a GitHub URL is an unbaselined hardcoded-config finding that fails
-# the hook on any touch), so a pool proof today needs the clone made by hand,
-# which is what this helper does. Moving the pool's clone list onto
-# sibling_clone_manifest.sh removes the helper and the exclusion below.
-POOL_CLONES_BY_HAND = "omniintelligence"
-
-
-def _clone_by_hand(env: dict[str, str], tmp_path: Path) -> None:
-    done = _run(
-        env,
-        "git",
-        "clone",
-        "-q",
-        "--branch",
-        "dev",
-        str(tmp_path / "origins" / f"{POOL_CLONES_BY_HAND}.git"),
-        str(tmp_path / "work/root" / POOL_CLONES_BY_HAND),
-    )
-    assert done.returncode == 0, done.stdout + done.stderr
-
-
 @pytest.mark.parametrize("use_tag", [False, True])
 def test_pool_clone_selects_infra_tag_and_only_current_siblings(
     tmp_path: Path, use_tag: bool
@@ -187,7 +166,9 @@ def test_pool_clone_selects_infra_tag_and_only_current_siblings(
     done = _run(env, "bash", str(PROVE), str(params), "clone")
     assert done.returncode == 0, done.stdout + done.stderr
     root = tmp_path / "work/root"
-    assert {path.name for path in root.iterdir()} == set(REPOS) - {POOL_CLONES_BY_HAND}
+    # OMN-22153: the clone set is the vendored set of the tree under test, so the
+    # pool proof clones omniintelligence beside the other siblings.
+    assert {path.name for path in root.iterdir()} == set(REPOS)
     assert "omnibase_compat" not in done.stdout + done.stderr
     expected = (
         commits["omnibase_infra"]
@@ -195,9 +176,28 @@ def test_pool_clone_selects_infra_tag_and_only_current_siblings(
         else _git(env, tmp_path / "origins/omnibase_infra.git", "rev-parse", "dev")
     )
     assert _git(env, root / "omnibase_infra", "rev-parse", "HEAD") == expected
-    for repo in SIBLINGS[:2]:
+    for repo in ("omnibase_core", "omnibase_spi"):
         assert _git(env, root / repo, "rev-parse", "HEAD") == commits[repo]
         assert (root / repo / "source.txt").read_text() == "tagged\n"
+    assert (root / "omniintelligence/pyproject.toml").is_file()
+
+
+def test_pool_clone_set_is_the_manifest_vendored_set(tmp_path: Path) -> None:
+    # The pool proof must not keep a second list: whatever the tree under test
+    # vendors (SIBLING_VENDORED_REPOS) plus omnibase_infra itself is what it clones.
+    env, _, _ = _origins(tmp_path)
+    done = _run(env, "bash", str(PROVE), str(_params(tmp_path)), "clone")
+    assert done.returncode == 0, done.stdout + done.stderr
+    manifest = ROOT / "scripts/runtime_build/sibling_clone_manifest.sh"
+    listed = _run(
+        env,
+        "bash",
+        "-c",
+        f'source {shlex.quote(str(manifest))}; printf "%s\\n" "${{SIBLING_VENDORED_REPOS[@]}}"',
+    )
+    assert listed.returncode == 0, listed.stdout + listed.stderr
+    cloned = {path.name for path in (tmp_path / "work/root").iterdir()}
+    assert cloned == {"omnibase_infra", *listed.stdout.split()}
 
 
 def test_pool_clone_fails_when_the_infra_dev_tag_cannot_be_cloned(
@@ -222,20 +222,10 @@ def test_pool_staging_passes_spi_pins_or_selects_dev_tags(
     )
     cloned = _run(env, "bash", str(PROVE), str(params), "clone")
     assert cloned.returncode == 0, cloned.stdout + cloned.stderr
-    _clone_by_hand(env, tmp_path)
     root = tmp_path / "work/root"
     before = {repo: _git(env, root / repo, "rev-parse", "HEAD") for repo in SIBLINGS}
     done = _run(env, "bash", str(PROVE), str(params), "build")
     assert done.returncode == 1, done.stdout + done.stderr
-    if not stage_tags:
-        # OMN-22153 KNOWN GAP: the sha-pin mode passes immutable pins for the
-        # three siblings it knew, and RT-1 requires a pin for every vendored
-        # repository. The mode could not build an audited image before this
-        # change (a sha pin records no dev-merge tag), so STAGE_DEV_TAGS=1 is the
-        # mode that stages; this pins the refusal until the script is changed.
-        assert "missing=['omniintelligence']" in done.stderr + done.stdout
-        assert "stage rc=4" in done.stdout
-        return
     assert "MODEL_ENDPOINT is required" in done.stderr
     assert "stage rc=0" in done.stdout
     assert (tmp_path / "make.log").read_text().startswith("local-env ")
@@ -269,3 +259,18 @@ def test_pool_staging_passes_spi_pins_or_selects_dev_tags(
         if stage_tags:
             assert entry["dev_merge_tag"] == tags[repo]
     assert (workspace / "routing_tiers.yaml").read_text() == "tiers: []\n"
+
+
+def test_pool_clone_base_is_injected_not_spelled_in_the_script() -> None:
+    # OMN-22153: the on-host script builds every clone URL from the base the
+    # driver sets from the repository layer map, so the script names no host.
+    assert "github.com" not in PROVE.read_text(encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        "prepr_runtime_pool", ROOT / "scripts/runtime_build/prepr_runtime_pool.py"
+    )
+    assert spec is not None and spec.loader is not None
+    pool = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = pool
+    spec.loader.exec_module(pool)
+    assert "CLONE_BASE_URL" in pool.RESERVED_PARAMS
+    assert pool.clone_base_url() == "https://github.com/OmniNode-ai"

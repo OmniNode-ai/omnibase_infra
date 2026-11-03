@@ -11,6 +11,8 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: first_party_sources.yaml lists omniintelligence as a vendored package built from its dev-merge tag, and the sibling clone manifest and the dev image build stage it, with the registry install kept for non-dev lanes -- falsifier: uv run --frozen pytest tests/scripts/test_first_party_sources_omn17427.py -q -n 0 --no-cov"
+      - id: AC4
+        statement: "AC4: the pre-merge pool driver and its on-host script hold none of the values check-hardcoded-model-config-compute named in them: the driver's timeouts, ssh connect timeout, command prefixes and git host come from the prepr_runtime_pool contract overlay in the workspace config root, and the clone base and poll interval reach the script as driver-set params -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_overlay_omn22153.py and the hook run over both files reads zero findings"
   - id: req-omn22153-dev-deploy
     statement: A dev deploy through the deploy agent carries omniintelligence at a dev-merge tag that contains omniintelligence#1202.
     acceptance:
@@ -67,4 +69,22 @@ dod_evidence:
           test -n "$tag";
           doc="$(gh api "repos/OmniNode-ai/omniintelligence/contents/src/omniintelligence/nodes/node_pattern_storage_effect/contract.yaml?ref=$tag" --jq .content | base64 -d)";
           grep -q '^http_mount:' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22153-ac1-pool-proof-clones-vendored-set
+    description: The pre-merge pool proof clones every sibling in the tree under test's SIBLING_VENDORED_REPOS, omniintelligence included, and passes a repo-ref for each to the workspace stage, in both the sha-pin mode and the STAGE_DEV_TAGS mode. At the merge base the pool script cloned only omnibase_core, omnibase_spi and omnimarket and the sha-pin stage ended missing=['omniintelligence'] with rc=4.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22153-ac2-pool-values-in-overlay
+    description: The pool driver reads its values from the typed overlay and the overlay model refuses a missing or unknown key; the hook that named 29 findings in the driver and its script reads none.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_overlay_omn22153.py -q -n 0 --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra

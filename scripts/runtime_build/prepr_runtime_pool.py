@@ -102,22 +102,25 @@ from typing import Any, Protocol
 
 import yaml
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parents[1]
+
+def _sibling(*parts: str) -> Path:
+    return Path(__file__).resolve().parents[2].joinpath(*parts)
+
+
 # OMN-20934: the pool names the lab's machines, so it is deployment config and
 # never ships here. Whoever runs the pool supplies it under their workspace
 # config root, resolved by the runtime's workspace config owner resolver.
 POOL_CONFIG_RELATIVE = Path("config") / "lab" / "prepr_runtime_pool.yaml"
 # OMN-20934: the lane manifest is private config too; the census planner owns
 # where it is read from.
-LANE_CENSUS_PLAN_PY = SCRIPT_DIR.parent / "lane_census_plan.py"
-PROVE_SH = SCRIPT_DIR / "prepr_pool_prove.sh"
-SLOT_LEASE_PY = SCRIPT_DIR / "prepr_teardown_slot.py"
-SLOT_POLICY_PY = SCRIPT_DIR / "prepr_slot_policy.py"
+LANE_CENSUS_PLAN_PY = _sibling("scripts", "lane_census_plan.py")
+PROVE_SH = _sibling("scripts", "runtime_build", "prepr_pool_prove.sh")
+SLOT_LEASE_PY = _sibling("scripts", "runtime_build", "prepr_teardown_slot.py")
+SLOT_POLICY_PY = _sibling("scripts", "runtime_build", "prepr_slot_policy.py")
 # OMN-19566: the receipt module, the fact publisher and the profile registry
-LAB_PASS_RECEIPT_PY = SCRIPT_DIR.parent / "ci" / "lab_pass_receipt.py"
-PUBLISH_LAB_FACT_PY = SCRIPT_DIR.parent / "ci" / "publish_lab_fact_event.py"
-PROFILE_REGISTRY = REPO_ROOT / "config" / "lab_proof_profiles.yaml"
+LAB_PASS_RECEIPT_PY = _sibling("scripts", "ci", "lab_pass_receipt.py")
+PUBLISH_LAB_FACT_PY = _sibling("scripts", "ci", "publish_lab_fact_event.py")
+PROFILE_REGISTRY = _sibling("config", "lab_proof_profiles.yaml")
 RUNTIME_PROOF_KIND = "runtime_image"
 
 KINDS = ("isolated", "prepr-slot")
@@ -145,13 +148,9 @@ POST_BRINGUP_PARAM = "POST_BRINGUP_CMD"
 #: the node runs (its consumer group, its own loggers), never on discovery.
 LIVE_TERM_DOT = "[.]"
 
-# Prepended to every remote command: a non-login ssh shell on a Docker Desktop
-# Mac has no docker on PATH, and a bare `docker ps` there reads zero containers
-# and is false (STATUS ledger:4019).
-REMOTE_PATH = (
-    "export PATH=/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:"
-    "$HOME/.local/bin:/opt/homebrew/bin:$PATH; "
-)
+# Prepended to every remote command (the overlay's remote_command_prefix): a
+# non-login ssh shell on a Docker Desktop Mac has no docker on PATH, and a bare
+# `docker ps` there reads zero containers and is false (STATUS ledger:4019).
 
 
 # --------------------------------------------------------------------------- config
@@ -244,6 +243,18 @@ def default_pool_config() -> Path:
             f"that holds {POOL_CONFIG_RELATIVE}, or pass --config <path>"
         )
     return path
+
+
+def overlay() -> Any:
+    """The driver's contract overlay (OMN-22153), in the config root of the pool table."""
+    from omnibase_infra.models.prepr_pool import ModelPreprPoolOverlay
+
+    root = default_pool_config().parents[len(POOL_CONFIG_RELATIVE.parts) - 1]
+    return ModelPreprPoolOverlay.read(root)
+
+
+def _remote(command: str) -> str:
+    return str(overlay().remote_command_prefix) + command
 
 
 def load_pool_config(path: Path | None = None) -> PoolConfig:
@@ -407,7 +418,7 @@ class Transport(Protocol):
 class SshTransport:
     def __init__(
         self,
-        connect_timeout: int = 10,
+        connect_timeout: int = 0,
         local_check: Callable[[str], bool] = is_this_host,
     ) -> None:
         self._local_check = local_check
@@ -416,7 +427,7 @@ class SshTransport:
             "-o",
             "BatchMode=yes",
             "-o",
-            f"ConnectTimeout={connect_timeout}",
+            f"ConnectTimeout={connect_timeout or overlay().ssh_connect_timeout_s}",
         ]
 
     def _local(self, host: PoolHost) -> bool:
@@ -428,8 +439,7 @@ class SshTransport:
         try:
             if self._local(host):
                 proc = subprocess.run(
-                    ["bash", "-c", command],
-                    cwd=Path.home(),
+                    ["bash", "-c", overlay().local_command_prefix + command],
                     capture_output=True,
                     text=True,
                     timeout=timeout,
@@ -437,7 +447,7 @@ class SshTransport:
                 )
             else:
                 proc = subprocess.run(
-                    ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
+                    ["ssh", *self._opts, host.ssh_target, _remote(command)],
                     capture_output=True,
                     text=True,
                     timeout=timeout,
@@ -476,8 +486,7 @@ class LocalTransport:
             "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
         )
         proc = subprocess.Popen(
-            ["bash", "-c", REMOTE_PATH + command],
-            cwd=Path.home(),
+            ["bash", "-c", overlay().local_command_prefix + _remote(command)],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -700,10 +709,11 @@ def survey(
 ) -> list[HostState]:
     states: list[HostState] = []
     max_workers = max(1, sum(host.status != "excluded" for host in cfg.hosts))
+    probe_s = overlay().probe_timeout_s
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             i: executor.submit(
-                transport.run, host, _probe_command(cfg, host), timeout=30
+                transport.run, host, _probe_command(cfg, host), timeout=probe_s
             )
             for i, host in enumerate(cfg.hosts)
             if host.status != "excluded"
@@ -757,7 +767,7 @@ def acquire_lease(
         f"printf '%s' {shlex.quote(body)} > {lease}/lease.json && echo ACQUIRED; "
         f"else echo HELD; cat {lease}/lease.json 2>/dev/null; fi"
     )
-    rc, out = transport.run(host, cmd, timeout=30)
+    rc, out = transport.run(host, cmd, timeout=overlay().lease_call_timeout_s)
     if rc == 0 and "ACQUIRED" in out:
         return True, "acquired"
     if "HELD" not in out:
@@ -788,7 +798,7 @@ def acquire_lease(
             f"else {held_now}; fi; rmdir {guard}; "
             f"else {held_now}; fi"
         )
-        rc, out = transport.run(host, break_cmd, timeout=30)
+        rc, out = transport.run(host, break_cmd, timeout=overlay().lease_call_timeout_s)
         if rc == 0 and "ACQUIRED" in out:
             return (
                 True,
@@ -849,7 +859,7 @@ def release_lease(
         f"'') echo ABSENT;; *) echo FOREIGN;; esac; rmdir {guard}; "
         "else echo GUARDBUSY; fi"
     )
-    rc, out = transport.run(host, cmd, timeout=30)
+    rc, out = transport.run(host, cmd, timeout=overlay().lease_call_timeout_s)
     if "RELEASED" in out:
         return True, "released"
     if "ABSENT" in out:
@@ -1793,7 +1803,7 @@ def publish_events(
             capture_output=True,
             text=True,
             check=False,
-            timeout=120,
+            timeout=overlay().fact_publish_timeout_s,
         )
         said = (done.stdout.strip() or done.stderr.strip() or "no output").splitlines()
         results.append(f"  publish {m.key}: rc={done.returncode} {said[-1][:240]}")
@@ -1844,7 +1854,7 @@ def dispatch_check_runs(
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=60,
+                timeout=overlay().check_run_dispatch_timeout_s,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             results.append(
@@ -2103,27 +2113,14 @@ def run_proof(
 
 
 # Set by the driver from the pool config; a params file cannot override them.
-RESERVED_PARAMS = (
-    "TAG",
-    "W",
-    "MODEL_ENDPOINT",
-    "DOCKER_CONFIG_MODE",
-    "SLOT_KIND",
-    "PREPR_SLOT",
-    "PROJECT",
-    "MAIN_PORT",
-    "EFFECTS_PORT",
-    "SLOT_PORTS",
-    "POSITIVE_CONTROL",
-    "NEIGHBOUR_PROJECTS",
-    "REASON",
-    "OVERLAY_FILE",
-    "POST_UP_COMMAND",
-    "ONEX_PREPR_LEASE_TOKEN",
-    "ONEX_PREPR_LEASE_DIR",
-    "ONEX_PREPR_REAPER_HELD",
-    "ONEX_LANE_LOCK_HELD",
-    "ONEX_LANE_LOCK_DIR",
+RESERVED_PARAMS = tuple(
+    shlex.split(
+        "TAG W MODEL_ENDPOINT CLONE_BASE_URL PROBE_POLL_S DOCKER_CONFIG_MODE SLOT_KIND "
+        "PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS POSITIVE_CONTROL "
+        "NEIGHBOUR_PROJECTS REASON OVERLAY_FILE POST_UP_COMMAND ONEX_PREPR_LEASE_TOKEN "
+        "ONEX_PREPR_LEASE_DIR ONEX_PREPR_REAPER_HELD ONEX_LANE_LOCK_HELD "
+        "ONEX_LANE_LOCK_DIR"
+    )
 )
 
 
@@ -2183,6 +2180,8 @@ def _run_stack(
         f"TAG={tag}",
         f"W={work}",
         f"MODEL_ENDPOINT={shlex.quote(cfg.model_endpoint)}",
+        f"CLONE_BASE_URL={shlex.quote(overlay().clone_base_url())}",
+        f"PROBE_POLL_S={overlay().probe_poll_s}",
         f"DOCKER_CONFIG_MODE={shlex.quote(host.docker_config)}",
         f"SLOT_KIND={host.kind}",
         f"PREPR_SLOT={host.slot}",
@@ -2256,7 +2255,8 @@ def _run_stack(
         return rc
 
     try:
-        transport.run(host, f"mkdir -p {remote_dir}", timeout=30)
+        setup_s = overlay().remote_setup_timeout_s
+        transport.run(host, f"mkdir -p {remote_dir}", timeout=setup_s)
         if transport.put(host, PROVE_SH, f"{remote_dir}/prove.sh") or transport.put(
             host, local_env, f"{remote_dir}/params.env"
         ):
@@ -2285,7 +2285,7 @@ def _run_stack(
                 if "lease-lost" in outputs:
                     break
                 phase_run(phase, 600)
-            transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
+            transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=setup_s)
     return outputs
 
 
@@ -2406,7 +2406,7 @@ def resolve_ref_in_clone(clone: Path, ref: str) -> str:
         ["git", "-C", str(clone), "rev-parse", "--verify", "--quiet", spec],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=overlay().git_resolve_timeout_s,
         check=False,
         # a git hook's GIT_DIR would override -C and read some other repository
         env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
