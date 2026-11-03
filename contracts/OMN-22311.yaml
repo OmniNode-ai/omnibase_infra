@@ -12,6 +12,8 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: a RuntimeHostProcess whose ONEX_RUNTIME_NODE_SELECTION names a contract does not start the Pattern B broker or the local ingress on profile main, and an unselected main process still starts both -- falsifier: uv run pytest tests/unit/runtime/test_pattern_b_broker_node_selection.py -q fails 1 of 4 at origin/dev f2b065a51, where the writer's environment admits the broker"
+      - id: AC2
+        statement: "The forward corpus removes omninode_runtime's undeclared direct grants from the five work-questions tables, in one transaction with an ACL assertion, without changing the create migration or grants on other relations or to other principals."
 evidence_requirements:
   - kind: tests
     description: "The hook-events writer's recorded environment starts no broker and no local ingress; the main runtime still starts its broker under the same group name."
@@ -20,6 +22,20 @@ evidence_requirements:
     description: "Deploy check: on the dev lane after a deploy at this head, the main runtime's /health reports consumer_sync HEALTHY and the broker group has one member."
     command: "deploy: curl -s http://host.docker.internal:8085/health | python3 -c 'import json,sys; d=json.load(sys.stdin); x=[v for v in d[\"details\"][\"runtime_health\"][\"dimensions\"] if v[\"name\"]==\"consumer_sync\"][0]; assert x[\"status\"]==\"HEALTHY\", x'"
 dod_evidence:
+  - id: dod-work-questions-acl
+    description: "The delivered node-stream repair is checksum-bound, revokes only the five work-questions tables, and asserts the runtime ACL before committing. Live PostgreSQL scope, rerun and rollback cases are in tests/integration/migrations/test_work_questions_runtime_acl_omn22311.py."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/migrations/test_work_questions_runtime_acl_omn22311.py -q -p no:cacheprovider'
+  - id: dod-hosted-deploy-config
+    description: "Deploy preflight: load the shipped runtime config through the kernel loader, verify that the selected writer starts no broker or ingress, and that the unselected main runtime subscribes under its existing broker group. Uses a recording transport, so a hosted runner needs no lane containers."
+    source: generated
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: command
+        check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_node_selected_kernel_broker_omn22311.py -q -p no:cacheprovider'
   - id: dod-001
     description: "A node-selected kernel starts neither the Pattern B broker nor the local ingress, and the unselected main runtime starts both."
     source: generated
