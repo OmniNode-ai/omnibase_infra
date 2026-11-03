@@ -53,6 +53,7 @@ EXPECTED_VIOLATIONS = {
     "mut_stop_early": "Invariant GaplessThroughStop is violated.",
     "mut_stop_unverified": "Invariant StopOnlyWhenLit is violated.",
     "mut_abort_stops_old": "Invariant FailedLeavesOldServing is violated.",
+    "mut_abort_after_stop": "Invariant FailedLeavesOldServing is violated.",
     "mut_open_early": "Invariant WindowStartsWithNewStandby is violated.",
     "mut_no_bound": "Invariant WindowBounded is violated.",
     "mut_rollback_keeps_front": "Invariant RolledBackIsOld is violated.",

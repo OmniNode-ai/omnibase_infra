@@ -60,7 +60,7 @@
 (* GaplessWhileOldHealthy mut_no_retry                                        *)
 (* GaplessThroughStop     mut_stop_early                                      *)
 (* StopOnlyWhenLit        mut_stop_unverified                                 *)
-(* FailedLeavesOldServing mut_abort_stops_old                                 *)
+(* FailedLeavesOldServing mut_abort_stops_old, mut_abort_after_stop              *)
 (* WindowStartsWithNewStandby mut_open_early                                  *)
 (* WindowBounded          mut_no_bound                                        *)
 (* RolledBackIsOld        mut_rollback_keeps_front                            *)
@@ -319,9 +319,10 @@ RecordResume ==
 AbortStart ==
   /\ agentUp
   /\ ph \in PrePh
+  /\ (MUT = "abort_after_stop" \/ ~(st["o"] = "stopping" \/ (st["o"] = "dead" /\ ~crashed["o"])))
   /\ \/ st["n"] = "dead"
      \/ (age >= Bound /\ ph # "switched")
-     \/ (age >= Bound /\ ph = "switched" /\ fv["n"] # "active")
+     \/ (ph = "switched" /\ (fv["n"] # "active" \/ ~Ready("n")))
   /\ st' = IF st["n"] = "serving" THEN [st EXCEPT !["n"] = "fenced"] ELSE st
   /\ ph' = "aborting"
   /\ age' = 0
@@ -360,14 +361,21 @@ Switch ==
 StopOld ==
   /\ Mode = "redeploy"
   /\ agentUp
-  /\ \/ (ph = "switched" /\ fv["n"] = "active" /\ (MUT = "stop_unverified" \/ Ready("n")))
+  /\ \/ (ph = "switched" /\ fv["n"] = "active" /\ age >= 1 /\ (MUT = "stop_unverified" \/ Ready("n")))
      \/ (MUT = "stop_early" /\ ph = "promoted" /\ st["n"] = "serving")
-  /\ st["o"] \in {"fenced", "dead"}
-  /\ st' = IF st["o"] = "fenced" THEN [st EXCEPT !["o"] = "stopping"] ELSE st
+  /\ st["o"] = "fenced"
+  /\ st' = [st EXCEPT !["o"] = "stopping"]
   /\ litAtStop' = Ready("n")
+  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, ph, age, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, nStandby>>
+
+RecordStop ==
+  /\ Mode = "redeploy"
+  /\ agentUp
+  /\ ph \in {"switched", "promoted"}
+  /\ st["o"] \in {"stopping", "dead"}
   /\ ph' = "stopping"
   /\ age' = 0
-  /\ UNCHANGED <<pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, nStandby>>
+  /\ UNCHANGED <<st, pos, pub, eff, lastRan, fv, frontUp, installed, dage, agentUp, crashed, nCrashes, aCrashes, nServed, unready, degraded, nDeg, copied, litAtStop, nStandby>>
 
 DoneRedeploy ==
   /\ Mode = "redeploy"
@@ -470,7 +478,7 @@ RolledBack ==
   /\ Mode = "install"
   /\ agentUp
   /\ ph = "rolling_back"
-  /\ st["o"] = "serving"
+  /\ Ready("o")
   /\ st' = IF st["n"] \in {"none", "dead"} THEN st ELSE [st EXCEPT !["n"] = "dead"]
   /\ ph' = "rolled_back"
   /\ age' = 0
@@ -480,13 +488,13 @@ Next ==
   \/ Publish \/ BootN \/ OldDies \/ Tick \/ AgentCrash \/ AgentRestart \/ TerminalStutter
   \/ \E i \in Insts : Consume(i) \/ Crash(i) \/ Probe(i) \/ Degrade(i) \/ Recover(i)
   \/ StartN \/ Fence \/ RecordFence \/ Resume \/ ResumeReplay \/ RecordResume
-  \/ AbortStart \/ AbortUnfence \/ AbortFinish \/ Switch \/ StopOld \/ DoneRedeploy \/ LostAfterStop
+  \/ AbortStart \/ AbortUnfence \/ AbortFinish \/ Switch \/ StopOld \/ RecordStop \/ DoneRedeploy \/ LostAfterStop
   \/ OpenWindow \/ ResumeInstall \/ CreateFront \/ Complete \/ RollbackStart \/ CopyBack
   \/ RestartOld \/ RolledBack
 
 AgentStep ==
   \/ StartN \/ Fence \/ RecordFence \/ Resume \/ RecordResume \/ AbortStart \/ AbortUnfence
-  \/ AbortFinish \/ Switch \/ StopOld \/ DoneRedeploy \/ LostAfterStop \/ OpenWindow
+  \/ AbortFinish \/ Switch \/ StopOld \/ RecordStop \/ DoneRedeploy \/ LostAfterStop \/ OpenWindow
   \/ ResumeInstall \/ CreateFront \/ Complete \/ RollbackStart \/ CopyBack \/ RestartOld
   \/ RolledBack
 
