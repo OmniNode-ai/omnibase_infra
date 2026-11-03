@@ -86,7 +86,16 @@ def _run(
 def test_recorded_lab_overlay_settle_is_not_a_compose_deploy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """On origin/dev this waits the whole budget and exits 1, as run 41383900853."""
+    """AC1: the recorded lab_overlay settle proceeds instead of exhausting the wait.
+
+    Falsifier, run at this PR's head with only the resolver taken from the base
+    (the test imports nothing this PR adds beyond the fixture, so it collects):
+    ``git checkout origin/dev -- .github/actions/resolve-lab-lane/resolve_lab_lane.py``
+    then this test alone fails ``assert code == 0`` with ``1 == 0``, the same
+    exit 1 as run 41383900853; ``git checkout HEAD -- <that path>`` restores it.
+    The other tests in this file name ``compose_busy_reason`` and fail at the
+    base by AttributeError, which is not the falsifier.
+    """
     world = World(ready_at=0, busy_until=10**6, busy_payload=SETTLING)
     code, written = _run(tmp_path, monkeypatch, world)
     assert code == 0
@@ -168,9 +177,30 @@ def test_the_settle_rule_is_node_contract_data_not_a_resolver_constant() -> None
     assert declared["non_deploy_settling_stages"] == ["lab_overlay"]
     policy = ModelLabLaneComposeBusyPolicy.from_node_contract()
     assert policy.non_deploy_settling_stages == ("lab_overlay",)
-    source = (ACTION_DIR / "resolve_lab_lane.py").read_text(encoding="utf-8")
-    assert "lab_overlay" not in source
-    assert "settling_stage" not in source
+
+
+def test_the_resolver_exemption_follows_the_contract_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolver's answer moves with the policy it is handed, not with its source."""
+    from omnibase_infra.models.health.model_lab_lane_compose_busy_policy import (
+        ModelLabLaneComposeBusyPolicy,
+    )
+
+    assert resolver.compose_busy_reason(SETTLING) is None
+    monkeypatch.setattr(
+        ModelLabLaneComposeBusyPolicy,
+        "from_node_contract",
+        classmethod(lambda cls: cls(non_deploy_settling_stages=())),
+    )
+    assert resolver.compose_busy_reason(SETTLING) == "state=settling"
+    monkeypatch.setattr(
+        ModelLabLaneComposeBusyPolicy,
+        "from_node_contract",
+        classmethod(lambda cls: cls(non_deploy_settling_stages=("onex_api_pin",))),
+    )
+    assert resolver.compose_busy_reason(SETTLING) == "state=settling"
+    assert resolver.compose_busy_reason(_with_stage("onex_api_pin")) is None
 
 
 def test_the_handler_is_bound_from_the_node_contract() -> None:
@@ -213,61 +243,43 @@ def test_handler_reads_the_declared_stages_from_its_request() -> None:
     assert handler.handle(undeclared).busy_reason == "state=settling"
 
 
-def _action_bash() -> str:
-    """Find the Bash 4+ the Linux action requires, including on a macOS lab host."""
-    for directory in os.get_exec_path():
-        candidate = Path(directory) / "bash"
-        if not candidate.is_file() or not os.access(candidate, os.X_OK):
-            continue
-        version = subprocess.run(
-            [str(candidate), "-c", "(( BASH_VERSINFO[0] >= 4 ))"],
-            check=False,
-            timeout=5,
-        )
-        if version.returncode == 0:
-            return str(candidate)
-    pytest.fail("The resolve-lab-lane action requires Bash 4+ on PATH")
+FLAGS: list[tuple[str, bool]] = [
+    ("true", True),
+    ("TRUE", True),
+    ("TrUe", True),
+    ("1", True),
+    ("yes", True),
+    ("YeS", True),
+    ("false", False),
+    ("0", False),
+    ("no", False),
+    ("", False),
+    ("anything", False),
+    (" true ", False),
+    ("TRU\u0130", False),
+    ("\u0442rue", False),
+]
 
 
-@pytest.mark.parametrize(
-    ("flag", "interpreter"),
-    [
-        ("true", "uv"),
-        ("TRUE", "uv"),
-        ("TrUe", "uv"),
-        ("1", "uv"),
-        ("yes", "uv"),
-        ("YeS", "uv"),
-        ("false", "python3"),
-        ("0", "python3"),
-        ("no", "python3"),
-        ("", "python3"),
-        ("anything", "python3"),
-        (" true ", "python3"),
-    ],
-)
-def test_action_executes_the_selected_interpreter(
-    tmp_path: Path, flag: str, interpreter: str
+def _stub(path: Path, body: str) -> None:
+    path.write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
+    path.chmod(0o755)
+
+
+@pytest.mark.parametrize("shell", ["/bin/sh", "bash"])
+@pytest.mark.parametrize(("flag", "_waits"), FLAGS)
+def test_action_step_is_posix_and_always_starts_python3(
+    tmp_path: Path, shell: str, flag: str, _waits: bool
 ) -> None:
-    """Execute the shipped shell, including case folding, quoting and exec status."""
+    """The shipped step, run by a POSIX sh too: no ``${var,,}``, no flag parse."""
     action = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
+    step = action["runs"]["steps"][0]
+    assert step["shell"] == "bash"
     for name in ("uv", "python3"):
-        executable = tmp_path / name
-        executable.write_text(
-            f"#!/bin/sh\nprintf '%s\\n' '{name}' \"$@\"\nexit 37\n",
-            encoding="utf-8",
-        )
-        executable.chmod(0o755)
+        _stub(tmp_path / name, f"printf '%s\\n' '{name}' \"$@\"\nexit 37\n")
     action_path = tmp_path / "action directory with spaces"
     result = subprocess.run(
-        [
-            _action_bash(),
-            "-eu",
-            "-o",
-            "pipefail",
-            "-c",
-            action["runs"]["steps"][0]["run"],
-        ],
+        [shell, "-eu", "-c", step["run"]],
         env={
             **os.environ,
             "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
@@ -279,12 +291,75 @@ def test_action_executes_the_selected_interpreter(
         check=False,
         timeout=10,
     )
-    expected = [interpreter]
-    if interpreter == "uv":
-        expected.extend(["run", "--frozen", "python"])
-    expected.append(str(action_path / "resolve_lab_lane.py"))
     assert result.returncode == 37, result.stderr
-    assert result.stdout.splitlines() == expected
+    assert result.stdout.splitlines() == [
+        "python3",
+        str(action_path / "resolve_lab_lane.py"),
+    ]
+
+
+@pytest.mark.parametrize(("flag", "waits"), FLAGS)
+def test_launcher_and_wait_mode_share_one_flag_parse(flag: str, waits: bool) -> None:
+    env = {"LANE_DEPLOY_WAIT_WHILE_BUSY": flag}
+    assert resolver.wait_while_busy_requested(env) is waits
+    argv = resolver.launcher_argv(env, "/a b/resolve_lab_lane.py")
+    expected = ["uv", "run", "--frozen", "python", "/a b/resolve_lab_lane.py"]
+    assert argv == (expected if waits else None)
+    assert resolver.launcher_argv({**env, resolver.UNDER_UV_MARKER: "1"}, "x") is None
+
+
+@pytest.mark.parametrize(("flag", "waits"), [("TrUe", True), ("no", False)])
+def test_shipped_script_reexecs_under_uv_only_for_wait_mode(
+    tmp_path: Path, flag: str, waits: bool
+) -> None:
+    """End to end: the real file under an isolated python3, then the real package.
+
+    The stub ``uv`` records its argv and the loop marker, then runs the script
+    under this test's interpreter, which has the repository environment. The
+    run ends on the resolver's own RED for an empty overlay.
+    """
+    import sys
+
+    record = tmp_path / "uv-argv"
+    _stub(
+        tmp_path / "uv",
+        f'printf \'%s\\n\' "$@" "marker=$LANE_RESOLVER_UNDER_UV" > "{record}"\n'
+        f'shift 3\nexec "{sys.executable}" -c '
+        '"import omnibase_infra, runpy, sys; '
+        "sys.argv = sys.argv[1:]; "
+        'runpy.run_path(sys.argv[0], run_name=\'__main__\')" "$@"\n',
+    )
+    script = ACTION_DIR / "resolve_lab_lane.py"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {resolver.UNDER_UV_MARKER, "LAB_LANES_JSON"}
+    }
+    result = subprocess.run(
+        [sys.executable, "-I", str(script)],
+        env={
+            **env,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "LANE_DEPLOY_WAIT_WHILE_BUSY": flag,
+            "LANE_REQUIRE": "gateway_url",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode == 1, result.stderr
+    assert "no lab lane is declared" in result.stdout
+    if waits:
+        assert record.read_text().splitlines() == [
+            "run",
+            "--frozen",
+            "python",
+            str(script),
+            "marker=1",
+        ]
+    else:
+        assert not record.exists()
 
 
 @pytest.mark.parametrize(
@@ -304,7 +379,7 @@ def test_action_executes_the_selected_interpreter(
         (" true ", 0),
     ],
 )
-def test_python_wait_mode_matches_shell_truthy_parsing(
+def test_python_wait_mode_follows_the_one_flag_parse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str, expected_code: int
 ) -> None:
     world = World(ready_at=0, busy_until=10**6, busy_payload=NEXT_JOB)

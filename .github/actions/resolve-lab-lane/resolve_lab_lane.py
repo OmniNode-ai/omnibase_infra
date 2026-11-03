@@ -255,7 +255,7 @@ def deploy_agent_busy_reason(snapshot: Mapping[str, Any]) -> str | None:
 # OMN-21866: the busy test for a lane that ANSWERS (wait-while-busy only). The
 # rule lives in node_lab_lane_compose_busy_compute: its contract lists the settle
 # stages that are not a compose deploy, and its handler decides. The import needs
-# the package, so the action runs this path under ``uv run`` (action.yml); the
+# the package, so launcher_argv re-execs that mode under ``uv run``; the
 # no-answer wait keeps the shared test above and counts every settle (OMN-20509).
 def compose_busy_reason(snapshot: Mapping[str, Any]) -> str | None:
     from omnibase_infra.handlers import handler_lab_lane_compose_busy as handler
@@ -334,6 +334,34 @@ def _env_value(value: Any) -> str:
     return str(value)
 
 
+WAIT_WHILE_BUSY_VALUES = frozenset({"true", "1", "yes"})
+# Set on the re-exec below so the uv-run interpreter never launches uv again.
+UNDER_UV_MARKER = "LANE_RESOLVER_UNDER_UV"
+
+
+def wait_while_busy_requested(env: Mapping[str, str]) -> bool:
+    """The one parse of ``LANE_DEPLOY_WAIT_WHILE_BUSY`` (OMN-21866).
+
+    The action's shell does not read the flag: it always starts this file
+    under ``python3``, and :func:`launcher_argv` decides from this same answer
+    whether to re-exec under ``uv``, so interpreter choice and wait mode can
+    never disagree, and the step needs no Bash 4 ``${var,,}``.
+    """
+    return env.get("LANE_DEPLOY_WAIT_WHILE_BUSY", "").lower() in WAIT_WHILE_BUSY_VALUES
+
+
+def launcher_argv(env: Mapping[str, str], script: str) -> list[str] | None:
+    """The ``uv run`` argv the wait-while-busy mode needs, or None to run here.
+
+    That mode imports node_lab_lane_compose_busy_compute's handler, which needs
+    the repository environment; every other mode stays on the bare ``python3``
+    a sparse checkout of the action directory has.
+    """
+    if not wait_while_busy_requested(env) or env.get(UNDER_UV_MARKER) == "1":
+        return None
+    return ["uv", "run", "--frozen", "python", script]
+
+
 def main(environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
     try:
@@ -383,8 +411,7 @@ def main(environ: Mapping[str, str] | None = None) -> int:
     waited: float | None = None
     wait_detail = ""
     total_budget = wait_budget
-    while_busy = env.get("LANE_DEPLOY_WAIT_WHILE_BUSY", "").lower()
-    wait_while_busy = while_busy in {"true", "1", "yes"}
+    wait_while_busy = wait_while_busy_requested(env)
     if lane is not None and wait_budget > 0 and wait_while_busy:
         if "deploy_agent_url" not in lane:
             _say(
@@ -524,4 +551,10 @@ def main(environ: Mapping[str, str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    from pathlib import Path
+
+    _argv = launcher_argv(os.environ, str(Path(__file__).resolve()))
+    if _argv is not None:
+        os.environ[UNDER_UV_MARKER] = "1"
+        os.execvp(_argv[0], _argv)  # noqa: S606 -- fixed argv, no shell, no input
     sys.exit(main())

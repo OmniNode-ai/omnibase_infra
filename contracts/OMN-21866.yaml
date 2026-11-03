@@ -42,3 +42,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: env -u PYTHONPATH uv run --frozen pytest tests/integration/nodes/test_lab_lane_overlay_settle_omn21866.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21866-ac1-one-flag-parse
+    description: The resolve-lab-lane step is plain POSIX sh that always starts python3; resolve_lab_lane.py parses LANE_DEPLOY_WAIT_WHILE_BUSY once and re-execs itself under uv run only for wait-while-busy, so interpreter choice and wait mode share one parse. The step test runs the shipped run line under /bin/sh and bash and fails on the prior ${var,,} line.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_overlay_settle_omn21866.py -q -k "posix or one_flag_parse or reexec or follows_the_contract"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
