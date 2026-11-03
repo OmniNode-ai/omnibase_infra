@@ -213,6 +213,7 @@ def _vendored_read_write(
     node: str | None = None,
     schema: str = "omninode_internal",
     access: Literal["read", "write", "read_write"] = "read_write",
+    role: str | None = None,
 ) -> ContractTableDeclaration:
     """A vendored relation whose role, node dir and create file follow the table."""
     migration = f"docker/migrations/forward/nodes/{node_dir or f'node_projection_{table}'}/{create_file or f'0000_create_{table}.sql'}"
@@ -225,7 +226,7 @@ def _vendored_read_write(
             schema=schema,
             migration=migration,
             access=access,
-            role=table,
+            role=role or table,
         ),
     )
 
@@ -392,23 +393,8 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # INSERT, UPDATE. Retired by the omnimarket OMN-19861
     # node_projection_demo_readiness pull request merging and the pin advancing
     # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:demo_readiness_latest",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-            "0000_create_demo_readiness_latest.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="demo_readiness_latest",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-                "0000_create_demo_readiness_latest.sql"
-            ),
-            access="read_write",
-            role="demo_readiness",
-        ),
+    _vendored_read_write(
+        "demo_readiness_latest", "node_projection_demo_readiness", role="demo_readiness"
     ),
     # The four bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
@@ -490,6 +476,18 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             "brief_quality_vs_outcome",
             "subagent_waste",
         )
+    ),
+    # OMN-21994: node_projection_compaction_ab/0000 creates the compaction A/B
+    # rows and per-build series tables ahead of the pinned omnimarket node
+    # contract, whose Event Chain Gate loads it against this topology; 0001
+    # grants omninode_runtime on both. Retired when the pin advances past the
+    # omnimarket node_projection_compaction_ab contract; the OMN-18863 expiry
+    # module names this bridge.
+    *(
+        _vendored_read_write(
+            t, "node_projection_compaction_ab", "0000_create_compaction_ab.sql"
+        )
+        for t in ("compaction_ab_rows", "compaction_ab_build_series")
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings

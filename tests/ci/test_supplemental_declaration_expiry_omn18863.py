@@ -113,6 +113,10 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "delegation_lab_job_outbox": "omnimarket#4277",
     "compaction_current_context": "omnimarket OMN-21090 (node_projection_compaction_current_context)",
     "compaction_receipts": "omnimarket OMN-21336 (node_projection_compaction_receipts)",
+    **dict.fromkeys(
+        ("compaction_ab_rows", "compaction_ab_build_series"),
+        "omnimarket OMN-21994 (node_projection_compaction_ab)",
+    ),
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "local_environment": "omnimarket OMN-19988 (node_projection_local_environment)",
     "local_alerts": "omnimarket OMN-19991 (node_projection_local_alerts)",

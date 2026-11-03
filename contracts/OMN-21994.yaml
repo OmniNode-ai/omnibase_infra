@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21994
+title: omnibase_infra topology grants for the compaction A/B projection tables
+summary: >-
+  Infra half only. Vendors the compaction A/B create and grant migrations from omnimarket's node_projection_compaction_ab, declares compaction_ab_rows and compaction_ab_build_series with the infra-first vendored bridge, and so adds both tables to the omninode_runtime table grants in the three topology instances, which is what the Event Chain Gate's projection-binding privilege check reads. The ticket's AC1 to AC4 (upsert key and out-of-order, candidate_id refusal, floor ratchet, live denominators) are the omnimarket node's own and are carried on omnimarket#4858; none of them is evidenced here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21994-topology-grants
+    statement: >-
+      The shipped topology grants omninode_runtime the privileges the projection-binding check demands on compaction_ab_rows and compaction_ab_build_series, in every profile, derived from declarations and not hand-listed.
+    acceptance:
+      - id: AC5
+        statement: >-
+          AC5: the omninode_runtime principal holds SELECT, INSERT and UPDATE on omninode_internal.compaction_ab_rows and omninode_internal.compaction_ab_build_series in the three topology instances, and the auto-wiring projection-binding check resolves both tables on every shipped profile -- falsifier: the focused test calls the real resolver on a contract-spelled declaration of each table and it raises "lacks declared read privileges"
+evidence_requirements:
+  - kind: tests
+    description: The vendored bytes, ledger rows and classes, the interim declarations, and the real projection-binding resolver on every shipped profile.
+    command: uv run pytest tests/unit/migrations/test_omn21994_compaction_ab_vendor.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21994-ac5-topology-grants
+    description: The vendored bytes are bound to ledger rows and classes, both tables are declared by the interim bridge, and the real _resolve_projection_database_target resolves both tables to the omninode_runtime principal for read and write on every shipped profile. It fails at 69e235149, where the resolver raises "lacks declared read privileges" for compaction_ab_rows.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21994_compaction_ab_vendor.py -q --no-cov
+        cwd: .
+  - id: dod-omn21994-ac5-derivation-in-sync
+    description: The checked-in topology instances equal the derivation from the node contracts plus the interim declarations, and every contract declaration resolves against every shipped profile.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_application_database_topology.py tests/ci/test_supplemental_declaration_expiry_omn18863.py -q --no-cov
+        cwd: .
