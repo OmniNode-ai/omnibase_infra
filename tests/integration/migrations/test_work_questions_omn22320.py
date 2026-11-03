@@ -176,7 +176,7 @@ def test_runtime_grant_is_exact_and_idempotent_without_defaults(
             cur.execute("SELECT count(*) FROM pg_default_acl")
             assert cur.fetchone() == (0,)
         conn.commit()
-        grant = MIGRATION.with_name("0001_grant_work_questions.sql")
+        grant = MIGRATION.with_name("0001_grant_omninode_runtime_work_questions.sql")
         expected = {
             (table, privilege)
             for table in FIVE_TABLES
