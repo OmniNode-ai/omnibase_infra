@@ -12,6 +12,7 @@ resolver is exercised against a REAL throwaway git repo (not mocked) so the
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -1295,3 +1296,110 @@ def test_detached_refusal_names_the_full_converge_path(tmp_path: Path) -> None:
     expected = str(tmp_path / "omniclaude" / "scripts" / "converge-canonical-clone.sh")
     assert expected in str(excinfo.value)
     assert DRIFT_OVERRIDE_ENV in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# a clone detached at the floor marker's commit is the onboarded state (OMN-22183)
+#
+# Onboarding checks every clone out at the anchor and leaves it on a detached
+# HEAD, then stamps `.onex-workspace-floor.json` with the commit it proved. The
+# guard refused that state. The rule: detached AT the commit the floor marker
+# names is accepted; detached anywhere else is refused with the repair command.
+# ---------------------------------------------------------------------------
+
+_WALK_FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures"
+    / "onboarding_walk_2026_11_02"
+    / "detached_head_refusal.json"
+)
+
+
+def _at(root: Path) -> dict[str, str]:
+    """The registry-root keyword of the guard, read from its signature."""
+    return {next(iter(inspect.signature(check_omnimarket_drift).parameters)): str(root)}
+
+
+def _second_commit(root: Path) -> str:
+    (root / "second.txt").write_text("y", encoding="utf-8")
+    for args in (["add", "second.txt"], ["commit", "--quiet", "-m", "second"]):
+        subprocess.run(
+            ["git", "-C", str(root), *args], check=True, env=_scrubbed_git_env()
+        )
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_scrubbed_git_env(),
+    ).stdout.strip()
+
+
+def _detached_clone_with_floor(tmp_path: Path, floor_commit: str | None) -> str:
+    """A detached omnimarket clone at its second commit; the floor names ``floor_commit``."""
+    root = tmp_path / "omnimarket"
+    root.mkdir()
+    first = _make_git_repo(root)
+    second = _second_commit(root)
+    subprocess.run(
+        ["git", "-C", str(root), "checkout", "--quiet", "--detach", "HEAD"],
+        check=True,
+        env=_scrubbed_git_env(),
+    )
+    if floor_commit is not None:
+        named = {"first": first, "second": second}.get(floor_commit, floor_commit)
+        (tmp_path / ".onex-workspace-floor.json").write_text(
+            json.dumps({"omnimarket_commit": named}), encoding="utf-8"
+        )
+    return second
+
+
+def test_walk_2026_11_02_detached_at_the_floor_commit_is_accepted(
+    tmp_path: Path,
+) -> None:
+    head = _detached_clone_with_floor(tmp_path, "second")
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=head,
+    ):
+        assert check_omnimarket_drift(**_at(tmp_path)) is None
+
+
+def test_walk_2026_11_02_detached_elsewhere_is_refused_with_the_repair_command(
+    tmp_path: Path,
+) -> None:
+    head = _detached_clone_with_floor(tmp_path, "first")
+    recorded = json.loads(_WALK_FIXTURE.read_text(encoding="utf-8"))
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=head,
+    ):
+        with pytest.raises(OmnimarketDriftError) as excinfo:
+            check_omnimarket_drift(**_at(tmp_path))
+    message = str(excinfo.value)
+    assert recorded["refusal_head"] in message
+    assert head[:12] in message
+    assert recorded["repair_tail"] in message
+
+
+@pytest.mark.parametrize("floor", [None, ""])
+def test_walk_2026_11_02_detached_with_no_floor_commit_is_refused(
+    tmp_path: Path, floor: str | None
+) -> None:
+    head = _detached_clone_with_floor(tmp_path, floor)
+    with patch(
+        "omnibase_infra.cli.omnimarket_drift_guard.installed_omnimarket_commit",
+        return_value=head,
+    ):
+        with pytest.raises(OmnimarketDriftError, match="DETACHED HEAD"):
+            check_omnimarket_drift(**_at(tmp_path))
+
+
+def test_walk_2026_11_02_fixture_carries_the_recorded_refusal() -> None:
+    recorded = json.loads(_WALK_FIXTURE.read_text(encoding="utf-8"))
+    assert recorded["refusal"].startswith(recorded["refusal_head"])
+    assert recorded["detached_commit_prefix"] in recorded["refusal"]
+    # The same rule is pinned in the omniclaude fixture the onboarding guide is
+    # tested against, so the guard and the guide cannot drift apart.
+    assert "floor marker names is accepted" in recorded["rule"]
+    assert "refused with the repair command" in recorded["rule"]
