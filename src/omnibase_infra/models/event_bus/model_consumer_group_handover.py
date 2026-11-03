@@ -26,6 +26,12 @@ Shape, as a TOP-LEVEL key in the node's ``contract.yaml``::
       from_version: v1
       from_auto_offset_reset: earliest
 
+A retired group whose id is not ``{env}.<service>.<node>.consume.<version>`` (a
+consumer that set its own ``KAFKA_CONSUMER_GROUP``) is named by its literal id
+through the optional ``from_group_id`` (OMN-21932)::
+
+      from_group_id: agent-observability-postgres
+
 The source group is derived with the same ``compute_consumer_group_id`` and the
 runtime's own environment, so one declaration serves every lane whose retired
 container used ``{env}.<service>.<node>.consume.<version>`` (the dev, stability,
@@ -45,7 +51,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.models import ModelNodeIdentity
@@ -77,8 +83,36 @@ class ModelConsumerGroupHandover(BaseModel):
         ),
     )
 
+    from_group_id: str | None = Field(
+        default=None,
+        min_length=1,
+        strict=True,
+        description=(
+            "The retired consumer group's literal id, for a group the derived "
+            "name cannot express. Returned verbatim by ``source_group`` in every "
+            "environment; when unset the group is derived from the three "
+            "segments above."
+        ),
+    )
+
+    @field_validator("from_group_id")
+    @classmethod
+    def _group_id_is_trimmed(cls, value: str | None) -> str | None:
+        if value is not None and value != value.strip():
+            raise ValueError(
+                "from_group_id must not be blank or carry leading or trailing "
+                "whitespace"
+            )
+        return value
+
     def source_group(self, environment: str) -> str:
-        """The retired consumer group in ``environment``."""
+        """The retired consumer group in ``environment``.
+
+        ``from_group_id`` verbatim when declared, otherwise the group derived
+        from the service, node and version segments.
+        """
+        if self.from_group_id is not None:
+            return self.from_group_id
         return compute_consumer_group_id(
             ModelNodeIdentity(
                 env=environment,

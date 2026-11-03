@@ -1,3 +1,5 @@
+Live-contact exception: the changed ratchet files are adequacy receipt data and a baseline list that name no external service, so there is no contact surface to record.
+Live-contact exception (OMN-21698): the changed adequacy receipt only refreshes the handler module sha256 after the clock injection; it is recorded data and names no external service, so there is no contact surface to record.
 Live-contact exception: the changed CI-tooling file is the CI Summary poller's gate registry, which reads a jobs list already fetched by the poller and contacts no service itself, and tests/unit/scripts/ci/test_ci_summary_gate.py feeds it recorded job rows for a missing, skipped, failed, cancelled and successful Stack Shape job, so the verdict path is exercised end to end with no service response to record.
 Live-contact exception: the changed pre-push hook swaps a flock binary call for a local fcntl lock helper on a cache file and adds no call to any external service, so there is no contact surface to record; the unchanged git fetch of the verifier tag is exercised against a throwaway remote.
 
