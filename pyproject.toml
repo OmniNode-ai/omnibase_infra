@@ -202,6 +202,9 @@ skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 event_bus_kafka = "omnibase_infra.event_bus.event_bus_kafka:EventBusKafka"
 state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
 
+[project.entry-points."onex.node_broker_resolvers"]
+overlay = "omnibase_infra.handlers.handler_node_broker_resolve:HandlerNodeBrokerResolve"
+
 [project.entry-points."onex.domain_plugins"]
 registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:ServiceRegistration"
 
@@ -688,6 +691,7 @@ node_migration_freeze_check_compute = "omnibase_infra.nodes.node_migration_freez
 node_migration_sequence_check_compute = "omnibase_infra.nodes.node_migration_sequence_check_compute"
 node_model_health_effect = "omnibase_infra.nodes.node_model_health_effect"
 node_model_router_compute = "omnibase_infra.nodes.node_model_router_compute"
+node_node_broker_resolve_effect = "omnibase_infra.nodes.node_node_broker_resolve_effect"
 node_node_graph_reducer = "omnibase_infra.nodes.node_node_graph_reducer"
 node_onboarding_orchestrator = "omnibase_infra.nodes.node_onboarding_orchestrator"
 node_pattern_lifecycle_effect = "omnibase_infra.nodes.node_pattern_lifecycle_effect"

@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22362
+title: omnibase_infra registers the node broker resolver that onex run-node consumes
+summary: Operator request 2026-11-03 is that the default broker is in the contract overlay. omnibase_core now consumes a node broker resolver and cannot read the lab lane declaration, so omnibase_infra registers one under the onex.node_broker_resolvers entry-point group. It reads event_bus (type kafka with a lane, or type inmemory) from the node's overlay under the workspace config root, resolves a kafka lane to its declared broker and client transport with the readers onex delegate uses, and refuses a missing overlay, a missing event_bus or an unusable lane with a typed error that names the overlay path.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - onex.node_broker_resolvers entry-point group
+requirements:
+  - id: req-omn22362-resolver
+    statement: The registered resolver answers a node's broker from its contract overlay and nothing else.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a Redpanda overlay resolves to the lane's declared broker and client transport with KAFKA_BOOTSTRAP_SERVERS set to another value, and an in-memory overlay resolves to an in-memory binding with no transport -- falsifier: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov -k 'redpanda or inmemory'"
+      - id: AC2
+        statement: "AC2: a node with no overlay, an overlay with no event_bus, or a lane the declaration does not bind is refused with a typed error naming the overlay path, through onex run-node as well -- falsifier: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov -k 'missing_overlay or without_event_bus or does_not_bind or no_overlay'"
+evidence_requirements:
+  - kind: tests
+    description: The resolver falsifiers pass against the omnibase_core branch that consumes the protocol; at the merge base there is no resolver and onex run-node reads the environment variable.
+    command: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22362-ac1
+    description: AC1 the Redpanda overlay resolves to the lane broker and the in-memory overlay to an in-memory binding.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov --tb=line -k "redpanda or inmemory"
+        cwd: .
+  - id: dod-omn22362-ac2
+    description: AC2 a missing overlay, a missing event_bus and an unusable lane are refused naming the overlay path.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov --tb=line -k "missing_overlay or without_event_bus or does_not_bind or no_overlay"
+        cwd: .

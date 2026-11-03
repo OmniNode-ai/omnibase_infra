@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_node_broker_resolve_effect
+contract_name: node_node_broker_resolve_effect
+node_name: node_node_broker_resolve_effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on it.
+descriptor:
+  node_archetype: effect
+description: Resolve the broker a node is reached on (answering omnibase_core ModelNodeBrokerBinding) from the event_bus its contract overlay declares and the lane declaration it names. Registered with omnibase_core under onex.node_broker_resolvers so onex run-node reads no environment variable for the broker.
+runtime_profiles: [local-dev]
+input_model:
+  name: ModelNodeBrokerResolveRequest
+  module: omnibase_infra.models.workspace.model_node_broker_resolve_request
+  description: The node and the workspace root that locates the config owner.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: node_broker.resolve
+      handler:
+        name: HandlerNodeBrokerResolve
+        module: omnibase_infra.handlers.handler_node_broker_resolve
+      description: Read the node's overlay event_bus and resolve its lane to a broker and client transport.
+      supported_operations: [node_broker.resolve]
+      input_model:
+        name: ModelNodeBrokerResolveRequest
+        module: omnibase_infra.models.workspace.model_node_broker_resolve_request
+        description: Typed node broker resolution request.
+      output_fields: [bus_type, overlay_path, lane, bootstrap_servers, security_protocol, sasl_mechanism, sasl_username]
+io_operations:
+  - operation: node_broker.resolve
+    description: Resolve the broker a node is reached on.
+    input_fields: [overlay_key, workspace_root]
+    output_fields: [bus_type, overlay_path, lane, bootstrap_servers, security_protocol, sasl_mechanism, sasl_username]
+capabilities:
+  - name: node_broker.resolve
+    description: Resolve a node's broker from its contract overlay, refusing a missing overlay with the overlay path.
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  description: The default broker is in the contract overlay (operator ruling 2026-11-03); no environment variable, flag or code default selects it.
+  author: OmniNode Team
+  license: MIT
+  tags: [effect, workspace, config, event_bus]
+  related_tickets: [OMN-22362]
