@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-21932
+title: "ModelConsumerGroupHandover names the retired consumer group by its literal id, so a folded consumer node can hand over from a group that the derived name cannot express"
+summary: >
+  ModelConsumerGroupHandover derived the retired consumer group as env.service.node.consume.version, so a folded consumer whose retired group carries its own literal id could not declare a handover. The model now takes a typed optional from_group_id; source_group(environment) returns it verbatim when set and the derived name when unset. A blank, whitespace-padded or non-string value is refused, and the four-field form stays valid.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21932-from-group-id
+    statement: The handover model names a retired group by its literal id, validated, with no change to the derived form.
+    acceptance:
+      - id: AC1
+        statement: "AC1: ModelConsumerGroupHandover accepts an optional from_group_id, source_group(environment) returns it verbatim when set and the derived name when unset, and the existing four-field form stays valid -- falsifier: uv run pytest on the new model tests in omnibase_infra, red on the base sha and green on the branch"
+      - id: AC2
+        statement: "AC2: a blank, whitespace-padded or non-string from_group_id is refused by the model with a validation error -- falsifier: uv run pytest on the new model tests, parametrized over the three invalid values"
+      - id: AC3
+        statement: "AC3: the handover preflight and the contract loader accept a contract that declares from_group_id on a real broker-free lab slot from the pushed branch -- falsifier: uv run pytest tests/unit/contracts -q through /omni:lab-run at the pushed sha"
+evidence_requirements:
+  - kind: tests
+    description: "The from_group_id model, loader and preflight tests pass"
+    command: "uv run pytest tests/unit/models/event_bus tests/unit/contracts/test_consumer_group_handover_from_group_id_omn21932.py tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -q --no-cov -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21932-ac1-ac2-model
+    binds_ac: [AC1, AC2]
+    description: The model tests cover the verbatim and derived source group, the four-field form, and the refusal of blank, whitespace-padded and non-string values.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/models/event_bus -q --no-cov -k from_group_id -p no:randomly"
+  - id: dod-omn21932-ac3-loader-preflight
+    binds_ac: [AC3]
+    description: The contract loader reads a contract declaring from_group_id, refuses invalid values, and the preflight hands over from the literal group on the in-memory bus, with no broker.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/contracts -q --no-cov -p no:randomly"
