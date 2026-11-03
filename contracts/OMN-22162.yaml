@@ -44,9 +44,12 @@ dod_evidence:
     binds_ac:
       - AC22162002
   - id: dod-omn22162-report-host-compose-deploy-probe
-    description: Hosted-runner probe reads the report host's compose file from GitHub at the checked-out commit and requires the one service, the tailnet bind address as a required value, and the gate flag and password passed through from the host env; the base has no such file and the probe fails. It checks the published deployment declaration only; serving the page on the report host needs the page image built there and its host env file, which this change does not do.
+    description: Hosted-runner probe reads the report host's compose file from GitHub at the checked-out commit and requires the one service, the tailnet bind address as a required value, and the gate flag and password passed through from the host env. The compose tests execute the required-value refusals, address binding and gate defaults and overrides alongside that readback, including when the verifier scopes this contract to this changed evidence item. The probe runs inside the repository clone under OMNI_HOME; the merge base's relative cwd is refused by containment. Serving the page on the report host still needs the page image built there and its host env file.
     source: manual
     checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_cost_estimator_web_report_host_compose.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: >-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.cost-estimator-web.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys, yaml; d = yaml.safe_load(sys.stdin); assert list(d["services"]) == ["cost-estimator-web"]; s = d["services"]["cost-estimator-web"]; assert s["ports"][0].startswith("${COST_ESTIMATOR_BIND_ADDR:?"); e = s["environment"]; assert e["ESTIMATOR_GATE_PASSWORD"] == "${ESTIMATOR_GATE_PASSWORD:-}"; assert e["FEATURE_ESTIMATOR_GATE_ENABLED"] == "${FEATURE_ESTIMATOR_GATE_ENABLED:-true}"'
