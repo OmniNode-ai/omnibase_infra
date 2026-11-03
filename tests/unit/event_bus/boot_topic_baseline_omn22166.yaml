@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Boot topic baseline (OMN-22166, one-runtime plan T29).
+#
+# `dev_observed` is the pre-T28 dev lane as read on 2026-11-01 (plan T29 and its
+# section 6 boot-topics paragraph). It is recorded, not asserted: the full 2,296
+# depends on every installed runtime package and the marketplace skill manifests,
+# which a unit run does not carry. `repo_slice` is what this repository's own
+# boot provisioning path builds from its contracts and its cli/services manifests
+# with no installed packages, and the unit test holds it as a ceiling: a boot
+# that builds more specs fails. When T28 lands, record the measured dev figures
+# under `dev_after_t28` and lower `max_specs` in the same change.
+dev_observed:
+  read_at: "2026-11-01T13:13Z"
+  broker_topics: 2559
+  specs_per_boot: 2296
+  skill_manifest_specs: 427
+dev_after_t28:
+  read_at: ""
+  broker_topics: 0
+  specs_per_boot: 0
+repo_slice:
+  measured_at_sha: 500a9d04a79bbffb36c764744c66121604fb7a0c
+  max_specs: 209
