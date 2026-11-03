@@ -182,7 +182,7 @@ _FALLBACK_MATRIX: list[VersionConstraint] = [
     ),
     VersionConstraint(
         package="omnibase_spi",
-        min_version="0.23.7",
+        min_version="0.23.11",
         max_version="0.24.0",
     ),
 ]
