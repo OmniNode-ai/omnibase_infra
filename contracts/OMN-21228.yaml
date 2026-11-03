@@ -39,10 +39,9 @@ dod_evidence:
     binds_ac: ["AC1"]
   - id: dod-omn21228-ac1-deploy
     description: >-
-      The producer module that applies the fence is present on the pushed branch of the repository whose runtime the change deploys with; the probe reads the branch through the GitHub contents API and exits non-zero where the module is absent.
+      Deploy compatibility probe: the checked-out Kafka bus runs against a disposable Redpanda broker on the verifier's Docker engine. The two fencing tests require InfraProducerFencedError and use independent read_committed consumers to reject fenced or aborted records, with a read_uncommitted positive control for the aborted in-flight record. The probe exercises the source under verification rather than reading a moving branch.
     source: manual
     checks:
       - check_type: command
-        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/kafka_transactional_producer.py?ref=omn-21228-transactional-publish' --jq .content | base64 -d | grep -q 'class KafkaTransactionalProducer'"
-        cwd: ${OMNI_HOME}/omnibase_infra
+        check_value: "docker info --format '{{.ServerVersion}}' && env PYTHONDONTWRITEBYTECODE=1 COMPOSE_PROJECT_NAME=omn21228-transactional-proof uv run --frozen pytest tests/integration/event_bus/test_transactional_publish.py -q --no-cov"
     binds_ac: ["AC1"]
