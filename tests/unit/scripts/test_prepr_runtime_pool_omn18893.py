@@ -2960,8 +2960,8 @@ def test_local_transport_runs_locally_without_ssh(
     assert str(Path.home()) in output
     assert "marker" in output
     assert all(argv[0] != "ssh" for argv in calls)
-    assert calls[0] == ["bash", "-c", command]
-    assert calls[0][2] == command
+    assert calls[0] == ["bash", "-c", pool.settings().local_command_prefix + command]
+    assert calls[0][2].endswith(command)
 
 
 def test_local_transport_put_copies_file(tmp_path: Path) -> None:

@@ -273,4 +273,4 @@ def test_pool_clone_base_is_injected_not_spelled_in_the_script() -> None:
     sys.modules[spec.name] = pool
     spec.loader.exec_module(pool)
     assert "CLONE_BASE_URL" in pool.RESERVED_PARAMS
-    assert pool.clone_base_url() == "https://github.com/OmniNode-ai"
+    assert pool.settings().clone_base_url() == "https://git.example.invalid/OmniNode-ai"

@@ -18,7 +18,7 @@ OVERLAY_FILE = POOL_CONFIG_ROOT / "config/onex/overlays/prepr_runtime_pool/overl
 
 
 def test_the_overlay_loads_through_the_driver() -> None:
-    overlay = pool.overlay()
+    overlay = pool.settings()
     assert overlay.probe_poll_s > 0
     assert overlay.remote_command_prefix.startswith("export PATH=")
 
@@ -39,7 +39,7 @@ def test_an_unknown_overlay_key_is_refused() -> None:
 
 
 def test_the_clone_base_joins_the_overlay_host_and_the_layer_map_org() -> None:
-    base = pool.overlay().clone_base_url()
+    base = pool.settings().clone_base_url()
     assert base.startswith("https://git.example.invalid/")
     assert base.count("/") == 3
     assert base.rsplit("/", 1)[1]

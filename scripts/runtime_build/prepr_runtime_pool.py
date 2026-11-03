@@ -245,7 +245,7 @@ def default_pool_config() -> Path:
     return path
 
 
-def overlay() -> Any:
+def settings() -> Any:
     """The driver's contract overlay (OMN-22153), in the config root of the pool table."""
     from omnibase_infra.models.prepr_pool import ModelPreprPoolOverlay
 
@@ -254,7 +254,7 @@ def overlay() -> Any:
 
 
 def _remote(command: str) -> str:
-    return str(overlay().remote_command_prefix) + command
+    return str(settings().remote_command_prefix) + command
 
 
 def load_pool_config(path: Path | None = None) -> PoolConfig:
@@ -427,7 +427,7 @@ class SshTransport:
             "-o",
             "BatchMode=yes",
             "-o",
-            f"ConnectTimeout={connect_timeout or overlay().ssh_connect_timeout_s}",
+            f"ConnectTimeout={connect_timeout or settings().ssh_connect_timeout_s}",
         ]
 
     def _local(self, host: PoolHost) -> bool:
@@ -439,7 +439,7 @@ class SshTransport:
         try:
             if self._local(host):
                 proc = subprocess.run(
-                    ["bash", "-c", overlay().local_command_prefix + command],
+                    ["bash", "-c", settings().local_command_prefix + command],
                     capture_output=True,
                     text=True,
                     timeout=timeout,
@@ -486,7 +486,7 @@ class LocalTransport:
             "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
         )
         proc = subprocess.Popen(
-            ["bash", "-c", overlay().local_command_prefix + _remote(command)],
+            ["bash", "-c", settings().local_command_prefix + _remote(command)],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -709,7 +709,7 @@ def survey(
 ) -> list[HostState]:
     states: list[HostState] = []
     max_workers = max(1, sum(host.status != "excluded" for host in cfg.hosts))
-    probe_s = overlay().probe_timeout_s
+    probe_s = settings().probe_timeout_s
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             i: executor.submit(
@@ -767,7 +767,7 @@ def acquire_lease(
         f"printf '%s' {shlex.quote(body)} > {lease}/lease.json && echo ACQUIRED; "
         f"else echo HELD; cat {lease}/lease.json 2>/dev/null; fi"
     )
-    rc, out = transport.run(host, cmd, timeout=overlay().lease_call_timeout_s)
+    rc, out = transport.run(host, cmd, timeout=settings().lease_call_timeout_s)
     if rc == 0 and "ACQUIRED" in out:
         return True, "acquired"
     if "HELD" not in out:
@@ -798,7 +798,9 @@ def acquire_lease(
             f"else {held_now}; fi; rmdir {guard}; "
             f"else {held_now}; fi"
         )
-        rc, out = transport.run(host, break_cmd, timeout=overlay().lease_call_timeout_s)
+        rc, out = transport.run(
+            host, break_cmd, timeout=settings().lease_call_timeout_s
+        )
         if rc == 0 and "ACQUIRED" in out:
             return (
                 True,
@@ -859,7 +861,7 @@ def release_lease(
         f"'') echo ABSENT;; *) echo FOREIGN;; esac; rmdir {guard}; "
         "else echo GUARDBUSY; fi"
     )
-    rc, out = transport.run(host, cmd, timeout=overlay().lease_call_timeout_s)
+    rc, out = transport.run(host, cmd, timeout=settings().lease_call_timeout_s)
     if "RELEASED" in out:
         return True, "released"
     if "ABSENT" in out:
@@ -1803,7 +1805,7 @@ def publish_events(
             capture_output=True,
             text=True,
             check=False,
-            timeout=overlay().fact_publish_timeout_s,
+            timeout=settings().fact_publish_timeout_s,
         )
         said = (done.stdout.strip() or done.stderr.strip() or "no output").splitlines()
         results.append(f"  publish {m.key}: rc={done.returncode} {said[-1][:240]}")
@@ -1854,7 +1856,7 @@ def dispatch_check_runs(
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=overlay().check_run_dispatch_timeout_s,
+                timeout=settings().check_run_dispatch_timeout_s,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             results.append(
@@ -2180,8 +2182,8 @@ def _run_stack(
         f"TAG={tag}",
         f"W={work}",
         f"MODEL_ENDPOINT={shlex.quote(cfg.model_endpoint)}",
-        f"CLONE_BASE_URL={shlex.quote(overlay().clone_base_url())}",
-        f"PROBE_POLL_S={overlay().probe_poll_s}",
+        f"CLONE_BASE_URL={shlex.quote(settings().clone_base_url())}",
+        f"PROBE_POLL_S={settings().probe_poll_s}",
         f"DOCKER_CONFIG_MODE={shlex.quote(host.docker_config)}",
         f"SLOT_KIND={host.kind}",
         f"PREPR_SLOT={host.slot}",
@@ -2255,7 +2257,7 @@ def _run_stack(
         return rc
 
     try:
-        setup_s = overlay().remote_setup_timeout_s
+        setup_s = settings().remote_setup_timeout_s
         transport.run(host, f"mkdir -p {remote_dir}", timeout=setup_s)
         if transport.put(host, PROVE_SH, f"{remote_dir}/prove.sh") or transport.put(
             host, local_env, f"{remote_dir}/params.env"
@@ -2406,7 +2408,7 @@ def resolve_ref_in_clone(clone: Path, ref: str) -> str:
         ["git", "-C", str(clone), "rev-parse", "--verify", "--quiet", spec],
         capture_output=True,
         text=True,
-        timeout=overlay().git_resolve_timeout_s,
+        timeout=settings().git_resolve_timeout_s,
         check=False,
         # a git hook's GIT_DIR would override -C and read some other repository
         env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
