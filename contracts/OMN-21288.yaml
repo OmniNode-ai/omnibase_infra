@@ -386,6 +386,15 @@ dod_evidence:
         check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC11]
+  - id: dod-omn21288-ac11-deploy-agent-recreate-path
+    description: >-
+      The deploy agent's own runtime recreate (the real DeployExecutor._compose_up for the runtime scope, with the committed fold policy and no patch over the retire step) stops and removes a still-running previous-revision projection-claude-hook-events-writer container, volumes kept, before the compose up that recreates omninode-runtime, and never names the writer in a compose up. The first test fails with the deploy agent's executor.py from 88546cc4cd2e (the retire step covered only tenant-projection-writer, so the writer kept running and joined the runtime-main consumer group with a stale image) and passes on this branch. Hosted runner needs no Docker daemon, running lane or credentials.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_recreate_retires_hook_events_writer_omn21288.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC11]
 context:
   remaining_after_this_change: "AC2 end state remains pending the remaining baselined workload folds; the stack-shape data and baseline are unchanged in this revision."
   tenant_fold_proof: "The live fold readings are post-merge through the deploy agent. This revision's unit and broker proofs do not deploy dev."
