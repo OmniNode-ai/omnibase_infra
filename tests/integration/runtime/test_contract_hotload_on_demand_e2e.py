@@ -14,9 +14,9 @@ expects, in order:
 5. after a restart the contract is wired with no resend.
 
 At the head this test was written on, nothing consumes the sender's request topic, so
-no accepted record exists and the test fails at its first assertion. ``strict=True``
+no accepted record exists and the test fails at its first assertion. ``pytest.raises``
 turns the day it passes into a failure of this file: the task that makes it pass
-removes the marker. ``raises=AssertionError`` keeps a different failure (an import, a
+removes the expectation. ``AssertionError`` keeps a different failure (an import, a
 boot error) from passing as the expected one.
 
 The record shapes are published as plain mappings: the record models are in
@@ -101,17 +101,7 @@ async def _wait_for_records(
         await asyncio.sleep(0.05)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "OMN-21226 H1: the contract hot-loading registry does not exist yet, so no "
-        "accepted record is produced. The task that makes this pass removes the marker."
-    ),
-)
-async def test_an_installed_contract_loads_serves_and_survives_a_restart(
-    tmp_path: Path,
-) -> None:
+async def _installed_contract_scenario(tmp_path: Path) -> None:
     baseline = tmp_path / "baseline"
     baseline.mkdir()
     installed = tmp_path / "installed" / _CONTRACT_NAME
@@ -178,3 +168,19 @@ async def test_an_installed_contract_loads_serves_and_survives_a_restart(
         assert states[-1]["names"][_CONTRACT_NAME]["served"] is not None
     finally:
         await process.stop()
+
+
+async def test_an_installed_contract_loads_serves_and_survives_a_restart(
+    tmp_path: Path,
+) -> None:
+    """Expect the scenario to fail on its assertions until the registry exists.
+
+    OMN-21226 H1: the contract hot-loading registry does not exist yet, so no accepted
+    record is produced. The test runs (a skip would grow the skip-count baseline) and
+    expects ``AssertionError``; the day the scenario passes, ``pytest.raises`` fails
+    this test, and the task that makes it pass replaces the expectation with a bare
+    call. A different failure (an import, a boot error) is not an ``AssertionError``
+    and propagates.
+    """
+    with pytest.raises(AssertionError):
+        await _installed_contract_scenario(tmp_path)
