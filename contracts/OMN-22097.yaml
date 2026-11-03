@@ -62,10 +62,10 @@ dod_evidence:
       - check_type: command
         check_value: '! grep -q "appends /v1/traces automatically" src/omnibase_infra/runtime/tracing.py'
   - id: dod-deploy
-    description: "Deploy probe: tracing.py on the PR branch (read from GitHub by branch name) builds the exporter URL with the /v1/traces suffix."
+    description: "Deploy probe: model_otlp_traces_endpoint.py on the PR branch (read from GitHub by branch name), the model tracing.py builds the exporter URL with, carries the /v1/traces suffix."
     source: generated
     checks:
       - check_type: command
-        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/tracing.py?ref=omn-22097-phoenix-dispatch-spans" | grep -Fq "/v1/traces"'
+        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/observability/model_otlp_traces_endpoint.py?ref=omn-22097-phoenix-dispatch-spans" | grep -Fq "/v1/traces"'
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_dispatch_tracing_http_omn22097.py -q -p no:cacheprovider
