@@ -80,3 +80,12 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_delegate_path_fixed_budget_omn21604.py tests/unit/runtime/test_delegation_budget_deadline_check_omn21604.py -q -n 0 -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
+  - id: dod-omn21604-ac3-consumer-dispatch-integration
+    description: >-
+      A serialized delegation envelope crosses the real consumer callback, wire-model coercion and YAML fault-route admission guard before reaching a recording handler. Both HTTP 429 and 503 routes admit their declared 300 s or 240 s budget unchanged, refuse a 240 s or 301 s request against a 300 s declaration before invoking the handler, and refuse a non-dogfood runtime identity. Restoring the merge-base exact-240 validator makes the non-default budget cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_dogfood_fault_budget_dispatch_omn21604.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
