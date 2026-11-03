@@ -94,6 +94,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolClusterMetadata": "protocols/protocol_cluster_metadata.py",  # [NODE] OMN-16769 the two ClusterMetadata methods (topics/partitions_for_topic) the DLQ offset reader calls. Declared structurally so the metadata snapshot is not typed as Any (the repo's Any-type gate) — aiokafka ships no stubs for this class
     "ProtocolTopicPartition": "protocols/protocol_topic_partition.py",  # [NODE] OMN-16769 canonical infra-local topic/partition shape used by read-only Kafka surfaces that avoid importing concrete aiokafka classes at module import time.
     "ProtocolTopicRegistry": "protocols/protocol_topic_registry.py",  # [DI] OMN-5839
+    "ProtocolTransactionalProducer": "protocols/protocol_transactional_producer.py",  # [DI] OMN-21228 fenced transactional batch publisher; the in-memory fake and the Kafka producer implement it
     "ProtocolValidationLedgerRepository": "protocols/protocol_validation_ledger_repository.py",
     "ProtocolPatternBBrokerTransport": "protocols/protocol_pattern_b_broker_transport.py",  # [RUNTIME] OMN-10204 Pattern B broker transport boundary
     "ProtocolTopicProvisioner": "protocols/protocol_topic_provisioner.py",  # [RUNTIME] OMN-13237 per-contract boot interleave provisioner boundary (provision+readiness); fake-swappable for the no-global-gather regression test
