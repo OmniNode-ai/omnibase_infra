@@ -69,3 +69,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: onex node node_api_fixture_record_effect --contract src/omnibase_infra/nodes/node_api_fixture_record_effect/contract.yaml --input ${ONEX_RECORD_VALIDATION_REQUEST} --backend event_bus=inmemory --state-root .onex_state/api-fixture-readback
+  - id: dod-recorder-hosted-deploy-readback
+    source: generated
+    status: pending
+    description: >-
+      Hosted deploy check for the recorder transport change: load the real node contract, dispatch through RuntimeLocal with the in-memory bus, record 63 routes over real local HTTP sockets, and read the terminal workflow result. Route failure and a leaked account must refuse output while still reading cleanup counts. This synthetic service check does not establish private corpus acceptance.
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen python -m pytest tests/integration/handlers/test_api_fixture_record_contract.py -q

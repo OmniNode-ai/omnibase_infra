@@ -39,6 +39,8 @@ from omnibase_infra.models.model_api_fixture_record_request import (
 from omnibase_infra.models.model_api_fixture_record_result import (
     ModelApiFixtureRecordResult,
 )
+from omnibase_infra.runtime.models.model_http_client_config import ModelHttpClientConfig
+from omnibase_infra.runtime.providers.provider_http_client import ProviderHttpClient
 
 _OBJECT = TypeAdapter(dict[str, JsonValue])
 _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -687,12 +689,15 @@ class HandlerApiFixtureRecord:
         # No idle keep-alive connection: a route that fails inside the service
         # answers 500 and closes its connection, which would otherwise break the
         # next request on the pooled connection and abort the recording.
-        async with httpx.AsyncClient(
-            timeout=overlay.timeout_seconds,
-            follow_redirects=False,
-            trust_env=False,
-            limits=httpx.Limits(max_keepalive_connections=0),
-        ) as client:
+        client = await ProviderHttpClient(
+            ModelHttpClientConfig(
+                timeout_seconds=overlay.timeout_seconds,
+                follow_redirects=False,
+                trust_env=False,
+                max_keepalive_connections=0,
+            )
+        ).create()
+        async with client:
             # A missing baseline stops before the first mutation.
             before = await _counts(client, overlay, variables)
             try:
