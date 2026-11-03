@@ -95,7 +95,7 @@ class FakeBroker(lpi.Broker):
         return self.listings[principal]
 
 
-def _overlay(tmp_path: Path, *rows: dict[str, str]) -> Path:
+def _overlay(tmp_path: Path, *rows: dict[str, object]) -> Path:
     path = tmp_path / "developer-principal-overlay.yaml"
     path.write_text(
         yaml.safe_dump(
@@ -107,6 +107,12 @@ def _overlay(tmp_path: Path, *rows: dict[str, str]) -> Path:
         )
     )
     return path
+
+
+def _sub(tmp_path: Path, n: int) -> Path:
+    sub = tmp_path / f"overlay-{n}"
+    sub.mkdir()
+    return sub
 
 
 def _listing(principal: str, drop: str | None = None, extra: str | None = None) -> str:
@@ -198,6 +204,64 @@ def test_a_row_still_cannot_carry_a_grant(
         lpi.load_overlay(
             _overlay(tmp_path, {**MACHINE_ROW, "grants": "x"}), declaration
         )
+
+
+def test_a_machine_row_may_bind_grant_roles_the_issuer_does_not_grant(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    """OMN-21622: a machine row names the grant roles it holds beyond the profile.
+
+    The roles' grant sets are declared and applied by the deployment's own broker ACL
+    declaration, so the issuer reads the binding as part of a valid row and issues the
+    same profile with or without it.
+    """
+    bound = {**MACHINE_ROW, "grant_roles": ["host-drift-fleet"]}
+    overlay = lpi.load_overlay(_overlay(tmp_path, bound, DEVELOPER_ROW), declaration)
+    assert overlay.principals == {"dev-ops-lab-host", "dev-ana-ana-laptop"}
+    granted = []
+    for n, row in enumerate((MACHINE_ROW, bound)):
+        broker = FakeBroker()
+        lpi.Issuer(
+            declaration,
+            broker,
+            lpi.Ledger(tmp_path / f"ledger-{n}.jsonl"),
+            lpi.load_overlay(_overlay(_sub(tmp_path, n), row), declaration),
+        ).issue("ops@example.invalid", {"lane": "dev", "device": "lab-host"})
+        granted.append(sorted(broker.granted))
+    assert {name for name, _ in granted[0]} >= set(MACHINE_TOPICS)
+    assert len(MACHINE_TOPICS) == 13
+    assert granted[0] == granted[1]
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        pytest.param({**DEVELOPER_ROW, "grant_roles": ["x"]}, id="no-role-defaults"),
+        pytest.param(
+            {**DEVELOPER_ROW, "role": "developer", "grant_roles": ["x"]},
+            id="explicit-developer",
+        ),
+        pytest.param(
+            {**DEVELOPER_ROW, "role": "admin", "grant_roles": ["x"]}, id="unknown-role"
+        ),
+        pytest.param(
+            {**DEVELOPER_ROW, "role": 7, "grant_roles": ["x"]}, id="non-string-role"
+        ),
+    ],
+)
+def test_only_a_machine_row_binds_grant_roles(
+    declaration: lpi.Declaration, tmp_path: Path, row: dict[str, object]
+) -> None:
+    with pytest.raises(lpi.DeclarationError, match="only a machine binds grant_roles"):
+        lpi.load_overlay(_overlay(tmp_path, row), declaration)
+
+
+def test_a_machine_row_may_bind_an_empty_list_of_grant_roles(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    row = {**MACHINE_ROW, "grant_roles": []}
+    overlay = lpi.load_overlay(_overlay(tmp_path, row), declaration)
+    assert overlay.principals == {"dev-ops-lab-host"}
 
 
 # --- the drift check -----------------------------------------------------------
