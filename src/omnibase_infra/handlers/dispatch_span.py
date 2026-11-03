@@ -14,6 +14,7 @@ does not import runtime modules, so the runtime can use it without an import cyc
 from __future__ import annotations
 
 import functools
+import inspect
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 
@@ -29,16 +30,29 @@ _SPAN_NAME = "message_dispatch_engine.dispatch"
 def traced_dispatch[**P](
     dispatch: Callable[P, Awaitable[ModelDispatchResult]],
 ) -> Callable[P, Coroutine[object, object, ModelDispatchResult]]:
-    """Wrap an async ``dispatch(self, topic, envelope, ...)`` in one span."""
+    """Wrap an async ``dispatch(self, topic, envelope, ...)`` in one span.
+
+    The topic is read by binding the call to the wrapped signature. A call that
+    does not bind (no topic, too many arguments) is passed straight to the wrapped
+    function so the engine raises its own error, outside any span.
+    """
+    signature = inspect.signature(dispatch)
+    if "topic" not in signature.parameters:
+        raise TypeError(f"{dispatch.__qualname__} must take a 'topic' parameter")
 
     @functools.wraps(dispatch)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> ModelDispatchResult:
         provider = trace.get_tracer_provider()
         if isinstance(provider, ProxyTracerProvider | NoOpTracerProvider):
             return await dispatch(*args, **kwargs)
-        topic = str(kwargs["topic"] if "topic" in kwargs else args[1])
+        try:
+            topic = str(signature.bind(*args, **kwargs).arguments["topic"])
+        except TypeError:
+            return await dispatch(*args, **kwargs)
         started = time.perf_counter()
-        with provider.get_tracer(_TRACER_NAME).start_as_current_span(
+        with trace.get_tracer(
+            _TRACER_NAME, tracer_provider=provider
+        ).start_as_current_span(
             _SPAN_NAME, attributes={"omninode.dispatch.topic": topic}
         ) as span:
             try:

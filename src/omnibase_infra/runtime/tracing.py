@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import os
 
+from omnibase_infra.models.observability import model_otlp_traces_endpoint as otlp
 from omnibase_infra.runtime.tracing_contract_descriptor import (
     contract_otel_exporter_endpoint,
 )
@@ -48,8 +49,7 @@ def configure_tracing() -> bool:
     endpoint = contract_otel_exporter_endpoint()
     if not endpoint:
         logger.debug(
-            "descriptor.otel_exporter_otlp_endpoint resolved empty "
-            "(OTEL_EXPORTER_OTLP_ENDPOINT not set) — tracing disabled"
+            "OTEL_EXPORTER_OTLP_ENDPOINT not set (resolved empty) — tracing off"
         )
         return False
 
@@ -73,7 +73,7 @@ def configure_tracing() -> bool:
         provider = TracerProvider(resource=resource)
 
         # Phoenix takes OTLP HTTP on its main port; endpoint= is used verbatim, so add the path.
-        url = f"{endpoint.rstrip('/').removesuffix('/v1/traces')}/v1/traces"
+        url = otlp.ModelOtlpTracesEndpoint(base_url=endpoint).traces_url
         provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=url)))
 
         trace.set_tracer_provider(provider)

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 
 import pytest
 from opentelemetry import trace
@@ -120,6 +120,19 @@ class TestDispatchSpan:
         (span,) = _spans(exporter)
         assert span.attributes is not None
         assert span.attributes["omninode.dispatch.topic"] == _TOPIC
+
+    @pytest.mark.asyncio
+    async def test_call_without_topic_raises_the_engines_own_error(
+        self, exporter: InMemorySpanExporter
+    ) -> None:
+        """Argument binding failures are the engine's to report, not the wrapper's."""
+        dispatch: Callable[..., Awaitable[object]] = _engine().dispatch
+        with pytest.raises(TypeError, match="topic"):
+            await dispatch(envelope=_envelope())
+        with pytest.raises(TypeError):
+            await dispatch()
+
+        assert _spans(exporter) == ()
 
     @pytest.mark.asyncio
     async def test_no_span_without_a_tracer_provider(
