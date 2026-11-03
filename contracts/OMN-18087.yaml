@@ -91,3 +91,4 @@ dod_evidence:
       - check_type: command
         check_value: >-
           bash -o pipefail -c 'docker logs ${RUNTIME_CONTAINER:-omninode-runtime} 2>&1 | grep -F "Boot subscription split:" > /dev/null'
+# heal probe OMN-22424 (lab fixture, throwaway branch)
