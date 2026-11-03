@@ -978,16 +978,20 @@ def active_dev_instance() -> str:
     return _DevInstanceSelection.name
 
 
+def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
+    services: set[str] = load_dev_boot_guard().folded_dev_services(
+        _load_runtime_policy_env(), lane_folded_profiles(lane)
+    )
+    return services
+
+
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
         config = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
-        if "tenant-projection" in lane_folded_profiles(lane):
+        if retired := _folded_dev_services(lane):
             config = config.model_copy(
-                update={
-                    "disabled_services": config.disabled_services
-                    | {"tenant-projection-writer"}
-                }
+                update={"disabled_services": config.disabled_services | retired}
             )
         return config
     config = _LANE_CONFIGS[lane]
@@ -1117,10 +1121,7 @@ def resolve_prod_target_service(cmd: ModelRebuildRequested) -> str:
 
 def _compose_file_args(lane: EnumRuntimeLane) -> list[str]:
     """Return the ``-f <file>`` token sequence for a lane's compose invocation."""
-    args: list[str] = []
-    for compose_file in lane_config_for(lane).compose_files:
-        args.extend(["-f", compose_file])
-    return args
+    return [arg for path in lane_config_for(lane).compose_files for arg in ("-f", path)]
 
 
 @contextlib.contextmanager
@@ -2038,7 +2039,8 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # command with no restart. Applied first, as the launcher applies the store
     # before anything below reads the environment.
     env.update(operator_store_overlay())
-    for key, value in _load_runtime_policy_env().items():
+    policy = _load_runtime_policy_env()
+    for key, value in policy.items():
         env.setdefault(key, value)
     # OMN-20932: resolve the private lane-overlay directory every lane compose
     # file mounts. Left unset when none exists, so compose refuses loudly.
@@ -2090,6 +2092,11 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
         env.update(extra_env)
     # Contract values win over inherited, operator, lane-fragment and caller settings.
     env.update(_dev_broker_policy_env(env))
+    env.update(
+        load_dev_boot_guard().fold_compose_env(
+            policy, active_dev_instance() == DEFAULT_DEV_INSTANCE
+        )
+    )
     return env
 
 
@@ -6206,34 +6213,25 @@ class DeployExecutor:
             f"{was_down or 'no absent service'}"
         )
 
-    def _retire_folded_dev_tenant_projections(
+    def _retire_folded_dev_services(
         self, lane: EnumRuntimeLane, config: ModelLaneConfig | None = None
     ) -> None:
-        """Retire the primary dev tenant projection carrier before main takes its role; keep volumes."""
-        if (
-            lane is not EnumRuntimeLane.DEV
-            or active_dev_instance() != DEFAULT_DEV_INSTANCE
-        ):
-            return
+        """Retire each primary dev container whose role main now carries; keep volumes."""
+        if lane is not EnumRuntimeLane.DEV:
+            return  # Other dev instances fold nothing (lane_folded_profiles).
         config = lane_config_for(lane) if config is None else config
-        if "tenant-projection-writer" not in config.disabled_services:
-            return
-        project = config.compose_project
-        census = _run(
-            [
-                "docker",
-                "ps",
-                "-aq",
-                "--filter",
-                f"label=com.docker.compose.project={project}",
-                "--filter",
-                "label=com.docker.compose.service=tenant-projection-writer",
-            ],
-            timeout=30,
-        )
-        if census.returncode != 0:
-            raise RuntimeError("Cannot read folded tenant projection container census")
-        containers = census.stdout.split()
+        project = f"label=com.docker.compose.project={config.compose_project}"
+        containers: list[str] = []
+        # Docker ANDs label filters, so each retired service has its own census.
+        for service in sorted(_folded_dev_services(lane) & config.disabled_services):
+            label = f"label=com.docker.compose.service={service}"
+            census = _run(
+                ["docker", "ps", "-aq", "--filter", project, "--filter", label],
+                timeout=30,
+            )
+            if census.returncode != 0:
+                raise RuntimeError(f"Cannot read folded {service} container census")
+            containers.extend(census.stdout.split())
         if not containers:
             return
         for command in (
@@ -6242,7 +6240,7 @@ class DeployExecutor:
         ):
             result = _run(command, timeout=60)
             if result.returncode != 0:
-                raise RuntimeError("Cannot retire folded tenant projection container")
+                raise RuntimeError("Cannot retire folded dev containers")
 
     def _compose_up(
         self,
@@ -6325,7 +6323,7 @@ class DeployExecutor:
         elif not deps_phase:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
         if scope is Scope.RUNTIME and "omninode-runtime" in requested_services:
-            self._retire_folded_dev_tenant_projections(lane, config)
+            self._retire_folded_dev_services(lane, config)
         cmd = [
             *_compose_argv(lane),
             "--profile",
