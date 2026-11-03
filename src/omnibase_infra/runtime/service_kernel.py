@@ -4868,6 +4868,8 @@ async def bootstrap() -> int:
             """Handle shutdown signal with correlation tracking."""
             nonlocal shutdown_reason
             shutdown_reason = f"signal:{sig.name}"
+            if health_server is not None:  # OMN-22377 (A5): the latch comes first
+                health_server.mark_stopping()
             logger.info(
                 "Received %s, initiating graceful shutdown... (correlation_id=%s)",
                 sig.name,
@@ -5394,6 +5396,11 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
+        # OMN-22377 (A5): stop accepting on the shared listener and answer what it
+        # already accepted BEFORE any teardown below can change readiness.
+        if health_server is not None:
+            await health_server.drain_shared_listener()
+
         # Stop ServiceRuntimeHealthMonitor before tearing down runtime consumers.
         if runtime_health_monitor is not None:
             try:
@@ -5633,17 +5640,7 @@ async def bootstrap() -> int:
         # Stop health server (fast, non-blocking)
         if health_server is not None:
             try:
-                health_stop_start_time = time.time()
                 await health_server.stop()
-                health_stop_duration = time.time() - health_stop_start_time
-                logger.debug(
-                    "Health server stopped in %.3fs (correlation_id=%s)",
-                    health_stop_duration,
-                    correlation_id,
-                    extra={
-                        "duration_seconds": health_stop_duration,
-                    },
-                )
             except Exception as health_stop_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop health server: %s (correlation_id=%s)",
