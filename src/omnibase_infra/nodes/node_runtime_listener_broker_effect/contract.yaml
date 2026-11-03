@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_runtime_listener_broker_effect
+contract_name: node_runtime_listener_broker_effect
+node_name: node_runtime_listener_broker_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Deploy-agent broker of the runtime host listeners (design rev 4 section 3 and rule A6): hands the held listener to a runtime by SCM_RIGHTS over a unix socket, keeps the per-pool table of provisional and confirmed sessions and the handover-in-progress flag, and answers detach requests granted, wait or alone so the last confirmed acceptor never leaves during a handover.
+input_model:
+  name: ModelRuntimeListenerBrokerRequest
+  module: omnibase_infra.models.model_runtime_listener_broker_request
+  description: One broker operation for one pool on behalf of one session.
+output_model:
+  name: ModelRuntimeListenerBrokerResponse
+  module: omnibase_infra.models.model_runtime_listener_broker_response
+  description: The broker's answer, a refusal code or the result.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: get
+      handler: {name: HandlerRuntimeListenerBroker, module: omnibase_infra.handlers.handler_runtime_listener_broker}
+    - operation: attach
+      handler: {name: HandlerRuntimeListenerBroker, module: omnibase_infra.handlers.handler_runtime_listener_broker}
+    - operation: confirmed
+      handler: {name: HandlerRuntimeListenerBroker, module: omnibase_infra.handlers.handler_runtime_listener_broker}
+    - operation: detach_request
+      handler: {name: HandlerRuntimeListenerBroker, module: omnibase_infra.handlers.handler_runtime_listener_broker}
+    - operation: end
+      handler: {name: HandlerRuntimeListenerBroker, module: omnibase_infra.handlers.handler_runtime_listener_broker}
+    - operation: handover_begin
+      handler: {name: HandlerRuntimeListenerBroker, module: omnibase_infra.handlers.handler_runtime_listener_broker}
+    - operation: handover_end
+      handler: {name: HandlerRuntimeListenerBroker, module: omnibase_infra.handlers.handler_runtime_listener_broker}
+    - operation: serve
+      handler: {name: HandlerRuntimeListenerBrokerServer, module: omnibase_infra.handlers.handler_runtime_listener_broker_server}
+capabilities:
+  - name: runtime_listener.broker
+    description: Broker the held runtime host listeners to the runtimes of a pool with detach grants.
+metadata:
+  ticket: OMN-22379
+  author: OmniNode Team
+  description: Host-local effect run inside the deploy agent process. The wire shape is documented on the request and response models.
+  tags: [effect, deployment, dev]

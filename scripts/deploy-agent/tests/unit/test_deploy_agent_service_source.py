@@ -148,7 +148,10 @@ def test_dev_lane_unit_exists_and_is_fenced_to_dev() -> None:
         "scripts/deploy-agent/.venv/bin/python" in text
     )
     assert "/data/omninode/deploy-agent/venv" not in text
-    assert not any(ln.strip().startswith("WatchdogSec=") for ln in text.splitlines())
+    # OMN-22379 declares WatchdogSec on this unit, off (0) until the install node
+    # pings WATCHDOG=1; a nonzero value without pings would kill the agent.
+    watchdog = [ln.strip() for ln in text.splitlines() if ln.startswith("WatchdogSec=")]
+    assert watchdog == ["WatchdogSec=0"]
 
 
 def test_dev_unit_does_not_touch_the_prod_bus() -> None:

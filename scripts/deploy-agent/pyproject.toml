@@ -66,6 +66,10 @@ no_implicit_reexport = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# OMN-22379: the listener holder and broker are omnibase_infra handlers (the
+# file-shape ratchet refuses a new module here), and the released omnibase-infra
+# this project locks does not carry them yet. Tests import them from this tree.
+pythonpath = ["../../src"]
 markers = [
     "unit: unit tests in isolation",
     "dev_boot_guard: test drives the real dev boot guard and recovery store (OMN-21279)",
