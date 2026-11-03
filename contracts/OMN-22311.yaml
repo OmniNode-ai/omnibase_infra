@@ -1,0 +1,37 @@
+# OMN-22311 contract file for omnibase_infra: a node-selected kernel does not start the Pattern B broker or the local ingress.
+schema_version: "1.0.0"
+ticket_id: "OMN-22311"
+title: "A node-selected kernel starts the Pattern B broker, so the hook-events writer takes main's broker partition and main's consumer_sync reads CRITICAL"
+summary: "The claude hook-events writer (OMN-19513) is the runtime kernel with ONEX_RUNTIME_NODE_SELECTION=projection_claude_hook_events, RUNTIME_PROFILE=main and KAFKA_INSTANCE_ID=runtime-main. The Pattern B broker and the local ingress were gated on the profile alone, so the writer started a second broker in main's group pattern-b-broker-onex-cmd-omnimarket-pattern-b-dispatch-v1.__i.runtime-main on a one-partition topic. Read on the primary dev lane 2026-11-03T07:42Z: the group was Stable with 2 members, the writer held partition 0, omninode-runtime held none and rejoined every cooldown (generation 3821), and the :8085 consumer_sync dimension read CRITICAL, which fails the container healthcheck. A process bound to named contracts now starts neither service; an unselected process starts both under the unchanged group name."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22311-node-selected-kernel-no-broker
+    statement: "A RuntimeHostProcess whose ONEX_RUNTIME_NODE_SELECTION names a contract does not start the Pattern B broker or the local ingress, and an unselected main-profile process starts both as before, with the broker group name unchanged."
+    acceptance:
+      - id: AC1
+        statement: "AC1: a RuntimeHostProcess whose ONEX_RUNTIME_NODE_SELECTION names a contract does not start the Pattern B broker or the local ingress on profile main, and an unselected main process still starts both -- falsifier: uv run pytest tests/unit/runtime/test_pattern_b_broker_node_selection.py -q fails 1 of 4 at origin/dev f2b065a51, where the writer's environment admits the broker"
+evidence_requirements:
+  - kind: tests
+    description: "The hook-events writer's recorded environment starts no broker and no local ingress; the main runtime still starts its broker under the same group name."
+    command: "uv run pytest tests/unit/runtime/test_pattern_b_broker_node_selection.py tests/integration/runtime/test_node_selected_kernel_broker_omn22311.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Deploy check: on the dev lane after a deploy at this head, the main runtime's /health reports consumer_sync HEALTHY and the broker group has one member."
+    command: "deploy: curl -s http://host.docker.internal:8085/health | python3 -c 'import json,sys; d=json.load(sys.stdin); x=[v for v in d[\"details\"][\"runtime_health\"][\"dimensions\"] if v[\"name\"]==\"consumer_sync\"][0]; assert x[\"status\"]==\"HEALTHY\", x'"
+dod_evidence:
+  - id: dod-001
+    description: "A node-selected kernel starts neither the Pattern B broker nor the local ingress, and the unselected main runtime starts both."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/test_pattern_b_broker_node_selection.py tests/integration/runtime/test_node_selected_kernel_broker_omn22311.py tests/unit/runtime/test_omn17857_pattern_b_boot_topic_provision.py tests/unit/runtime/test_runtime_local_ingress.py -q -p no:cacheprovider'
+  - id: dod-002
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, the deployed runtime image's gate refuses the runtime-owned services under the hook-events writer's node selection and admits them for the unselected main runtime; an image built before this change has no such gate and exits non-zero. It reads the dev lane's runtime container, which a hosted runner does not have, so only the local Done gate runs it."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import os; from omnibase_infra.runtime.runtime_host_process import _runtime_owned_service_enabled as on; os.environ["RUNTIME_PROFILE"] = "main"; os.environ.pop("ONEX_RUNTIME_NODE_SELECTION", None); assert on(True, ("main",)) is True; os.environ["ONEX_RUNTIME_NODE_SELECTION"] = "projection_claude_hook_events"; assert on(True, ("main",)) is False; print("OMN-22311 gate present")'
