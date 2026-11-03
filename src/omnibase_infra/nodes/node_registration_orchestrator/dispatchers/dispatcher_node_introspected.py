@@ -57,7 +57,6 @@ Related:
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -75,6 +74,12 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
+from omnibase_infra.models.dispatch.model_system_clock import (
+    SYSTEM_CLOCK,
+)
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
     ModelNodeRegistrationAcked,
 )
@@ -84,9 +89,13 @@ from omnibase_infra.models.registration.events.model_node_registration_accepted 
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
+from omnibase_infra.models.registration.model_registration_settings import (
+    ModelRegistrationSettings,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
     extract_envelope_fields,
 )
+from omnibase_infra.protocols.protocol_clock import ProtocolClock
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED
 from omnibase_infra.utils import sanitize_error_message
 
@@ -104,17 +113,7 @@ logger = logging.getLogger(__name__)
 # Actual topic is configured via ModelDispatchRoute.topic_pattern.
 TOPIC_ID_NODE_INTROSPECTION = "node.introspection"
 
-_ENV_AUTO_ACK = "ONEX_REGISTRATION_AUTO_ACK"
 _ACK_TOPIC: str = SUFFIX_NODE_REGISTRATION_ACKED
-
-
-def _auto_ack_enabled() -> bool:
-    """Return True when ONEX_REGISTRATION_AUTO_ACK=true in the environment.
-
-    Intended for local/dev use only — in production external nodes send their
-    own ack command, bypassing the distributed handshake.  See OMN-3444.
-    """
-    return os.environ.get(_ENV_AUTO_ACK, "false").lower() == "true"
 
 
 class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
@@ -154,6 +153,8 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         self,
         handler: HandlerNodeIntrospected,
         event_bus: ProtocolEventBus | None = None,
+        clock: ProtocolClock = SYSTEM_CLOCK,
+        settings: ModelRegistrationSettings | None = None,
     ) -> None:
         """Initialize dispatcher with wrapped handler and circuit breaker.
 
@@ -161,15 +162,23 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             handler: HandlerNodeIntrospected instance to delegate to.
             event_bus: Optional event bus for direct-publishing the auto-ACK
                 command (Path B, OMN-3444). When None, auto-ACK is silently
-                skipped even if ONEX_REGISTRATION_AUTO_ACK=true.
+                skipped even if auto-ACK is enabled.
+            clock: Clock the dispatcher reads time through, and hands to the
+                handler request. Defaults to the system clock; tests pass a
+                fixed clock.
+            settings: Operator switches (auto-ACK, local and dev use only, see
+                OMN-3444). When None, each dispatch resolves the switches the
+                node contract declares; an injected value is used as given.
 
         Circuit Breaker:
             Initialized with KAFKA transport settings per dispatcher_resilience.md:
             - threshold=3: Open after 3 consecutive failures
             - reset_timeout=20.0: 20 seconds before testing recovery
         """
+        self._clock = clock
         self._handler = handler
         self._event_bus = event_bus
+        self._settings = settings
 
         # Initialize circuit breaker using mixin pattern
         # Configuration follows knowledge-base-internal:reference/omnibase-infra-dispatcher-resilience.md guidelines
@@ -246,10 +255,10 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         Raises:
             InfraUnavailableError: If circuit breaker is OPEN.
         """
-        # NOTE: Both started_at and handler 'now' use direct datetime.now(UTC)
+        # NOTE: Both started_at and handler 'now' read the injected clock
         # instead of ModelDispatchContext.now due to protocol signature limitation.
         # See OMN-5738 below for details.
-        started_at = datetime.now(UTC)
+        started_at = self._clock.now()
 
         correlation_id, raw_payload = extract_envelope_fields(envelope)
 
@@ -287,30 +296,29 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # succeeded, or we returned early).
             assert isinstance(payload, ModelNodeIntrospectionEvent)
 
-            # Use injected time from ModelDispatchContext instead of datetime.now(UTC)
+            # Use injected time from ModelDispatchContext instead of the clock
             # once the dispatcher protocol carries that context. Currently,
             # the ProtocolMessageDispatcher.handle()
             # signature accepts only the envelope, so there is no way to receive the
             # dispatch engine's ModelDispatchContext.now timestamp. When the protocol
             # is updated to pass ModelDispatchContext (or the envelope carries a
-            # dispatch_timestamp field), replace this direct clock access with the
+            # dispatch_timestamp field), replace this clock read with the
             # injected value for full time-injection compliance.
-            now = datetime.now(UTC)
+            now = self._clock.now()
 
-            # Create envelope for handler (ProtocolMessageHandler signature)
-            handler_envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent] = (
-                ModelEventEnvelope(
-                    envelope_id=uuid4(),
-                    payload=payload,
-                    envelope_timestamp=now,
+            # Create the typed request for the handler (clock reading and input id injected)
+            handler_request: ModelInjectedRequest[ModelNodeIntrospectionEvent] = (
+                ModelInjectedRequest(
+                    event=payload,
+                    now=now,
+                    input_id=uuid4(),
                     correlation_id=correlation_id,
-                    source_tool=self.dispatcher_id,
-                    tenant_id=None,
+                    clock=self._clock,
                 )
             )
 
             # Delegate to wrapped handler
-            handler_output = await self._handler.handle(handler_envelope)
+            handler_output = await self._handler.handle(handler_request)
             output_events = list(handler_output.events)
             output_intents = handler_output.intents
 
@@ -322,7 +330,11 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # NOTE: The "wrong topic" routing bug (OMN-4880) has been fixed — output_events are
             # now routed per-event-type via DispatchResultApplier.topic_router.
             if (
-                _auto_ack_enabled()
+                (
+                    self._settings.auto_ack
+                    if self._settings is not None
+                    else ModelRegistrationSettings.auto_ack_from_contract()
+                )
                 and self._event_bus is not None
                 and any(
                     isinstance(e, ModelNodeRegistrationAccepted) for e in output_events
@@ -350,7 +362,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                     topic=_ACK_TOPIC,
                 )
                 logger.debug(
-                    "Auto-ACK published for node %s (ONEX_REGISTRATION_AUTO_ACK=true)",
+                    "Auto-ACK published for node %s",
                     payload.node_id,
                     extra={
                         "node_id": str(payload.node_id),
@@ -358,7 +370,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                     },
                 )
 
-            completed_at = datetime.now(UTC)
+            completed_at = self._clock.now()
             duration_ms = (completed_at - started_at).total_seconds() * 1000
 
             # Record success for circuit breaker (coroutine-safe)
@@ -392,7 +404,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         except ValidationError as e:
             # ValidationError indicates malformed message payload - not a handler error
             # Return INVALID_MESSAGE to route to DLQ without retry
-            completed_at = datetime.now(UTC)
+            completed_at = self._clock.now()
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             sanitized_error = sanitize_error_message(e)
 
@@ -425,7 +437,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             raise
 
         except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
-            completed_at = datetime.now(UTC)
+            completed_at = self._clock.now()
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             sanitized_error = sanitize_error_message(e)
 

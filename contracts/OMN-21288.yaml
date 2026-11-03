@@ -37,6 +37,18 @@ requirements:
       - id: AC5
         statement: |-
           AC5: every DRIFT or MISSING unit in the lab-host drift fixture except the prod-pinned deploy-agent.service declares a committed installer, the log monitor installs through install-host-maintenance.sh --log-monitor (run against a temporary home with a fake systemctl) and the git-mirror units through the omninode-host-maintenance-sync.sh manifest (row parity with the drift manifest), the text report prints repair=bash <installer> <args>, and no tracked unit's Documentation= URL names a missing repo path -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
+  - id: req-omn21288-ac6-topic-baseline
+    statement: "The dev lane's topic-spec count per boot is recorded before the boot-provisioning change, held as data, and a boot that grows it fails a check."
+    acceptance:
+      - id: AC21288291
+        statement: |-
+          AC21288291: the before reading (dev topics, partitions, groups, zero-consumer groups, memory and the per-boot topic spec count) is recorded with read times beside the plan's figures -- falsifier: re-read the numbers from the broker admin endpoint and show they match within the tolerance for a live bus
+      - id: AC21288292
+        statement: |-
+          AC21288292: a planted extra topic spec at boot fails the check -- falsifier: uv run pytest of the new test with one spec appended to the boot provisioning list fails, and passes without it
+      - id: AC21288293
+        statement: |-
+          AC21288293: the baseline record is data, not code -- falsifier: a test that changes the declared baseline value and sees the check's verdict change with no code edit
   - id: req-omn21288-ac6-contract-http-mount
     statement: "One-runtime plan T15: a contract declares an ASGI factory and path prefix and the runtime serves that application on its existing HTTP port."
     acceptance:
@@ -217,6 +229,52 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
+  - id: dod-omn21288-ac6-baseline-record
+    description: >-
+      The baseline data file carries the dev lane's recorded per-boot spec count, the time it was read and its source, typed by ModelTopicBootBaseline with extra=forbid. The file is new on this branch, so the check fails at the merge base. The live broker figures (topics, partitions, groups, memory) are in the pull request body with their read times; a hosted runner cannot read the dev broker.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          grep -c 'read_at: "2026-11-01T23:29:24Z"' config/boot_topic_specs.yaml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC21288291]
+  - id: dod-omn21288-ac7-planted-spec-fails
+    description: >-
+      The test builds the provisioning list through TopicProvisioner, discovers one extra spec from a real standalone manifest at boot and requires the planted list to be over the committed record by one while the unplanted list is within it. The baseline validator must raise ValueError for the planted list. The test file is new on this branch, so the run fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "planted or within_the_recorded"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC21288292]
+  - id: dod-omn21288-ac8-baseline-is-data
+    description: >-
+      The same boot list passes against a temporary baseline file declaring its count and fails against one declaring a count one lower, with no code edit between the two; the record refuses unknown keys, an unknown lane and a repository list larger than the image list. The test file is new on this branch, so the run fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -q --no-cov -k "declared_value or typed or larger or lane"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC21288293]
+  - id: dod-omn21288-topic-baseline-calendar
+    description: >-
+      Reject impossible calendar dates, non-UTC timestamps and malformed measurement SHAs while accepting a real leap day. This exercises the typed baseline record loaded from the committed data file.
+    source: manual
+    binds_ac: [AC21288291]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -k 'read_time or measured_at' -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21288-topic-baseline-deploy-check
+    description: >-
+      Hosted-runner deployment check: construct the runtime provisioner over the repository contracts and standalone manifests, read its emitted boot-count log and apply the committed baseline validator. A real additional manifest must raise ValueError and a duplicate topic must leave the count unchanged. No broker, Docker daemon or running lane is required.
+    source: manual
+    binds_ac: [AC21288292, AC21288293]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/event_bus/test_topic_boot_baseline_omn21288.py -k 'planted or duplicate_manifest or within_the_recorded or declared_value or committed_baseline' -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21288-runtime-writers-fold
     description: >-
       The committed dev policy folds the five projection-writer profiles into main. Their existing dev-lane definitions resolve inactive profiles from the rendered contract; the tenant-only fold overlay declares none of the five writers. The deploy handler and agent retire the mapped containers by compose labels before main is recreated, retaining volumes. Other instances retain runtime and full profiles. The live dev readback is pending the deploy agent post-merge redeploy.
