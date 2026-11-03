@@ -12,7 +12,7 @@
 # Credential cache:
 #   - Cache key = SHA256(RUNNER_LABELS + GITHUB_ORG_URL)
 #   - Avoids re-registration if version hash matches (token reuse across restarts)
-#   - Cache stored at /home/runner/.runner-creds/<cache-key>
+#   - Cache stored at ${RUNNER_USER_HOME}/.runner-creds/<cache-key>
 
 set -euo pipefail
 
@@ -46,14 +46,13 @@ _fix_docker_socket_gid() {
         return 0
     fi
 
-    local host_gid
+    local host_gid container_gid owning_group
     host_gid=$(stat -c '%g' "${socket}" 2>/dev/null || echo "")
     if [[ -z "${host_gid}" ]]; then
         echo "[entrypoint] Could not determine Docker socket GID — skipping"
         return 0
     fi
 
-    local container_gid
     container_gid=$(getent group docker | cut -d: -f3 2>/dev/null || echo "")
 
     if [[ "${host_gid}" == "${container_gid}" ]]; then
@@ -64,7 +63,6 @@ _fix_docker_socket_gid() {
     echo "[entrypoint] Docker socket GID mismatch: socket=${host_gid}, container docker group=${container_gid}"
 
     # Is the socket's GID already claimed by a group in this image?
-    local owning_group
     owning_group=$(getent group "${host_gid}" | cut -d: -f1 2>/dev/null || echo "")
 
     if [[ -n "${owning_group}" ]]; then
@@ -81,8 +79,22 @@ _fix_docker_socket_gid() {
     echo "[entrypoint] Docker group GID updated to ${host_gid}"
 }
 
+# OMN-21807: the cache and workspace mounts are per-runner NAMED volumes, so a
+# recreate removes a thin container layer instead of a layer full of caches
+# (containerd's garbage collector locked every `docker rm` on the host for about
+# 28 minutes per runner before). A named volume takes its owner from the image
+# directory it covers: ~/.cache exists in the image and is runner-owned, but the
+# job workspace does not, so Docker creates it root-owned and config.sh and the
+# jobs, which run as `runner`, could not write to it. Hand both mount points to
+# runner, top-level only (a recursive chown of gigabytes of cache would cost
+# minutes on every start). Create absent directories for runners without these
+# mounts, and let mkdir/chown failures stop startup with their original errors.
+# Existing descendants retain their owners: Docker seeds the cache from the
+# runner-owned image directory, and a new workspace volume starts empty.
+RUNNER_USER_HOME="${RUNNER_USER_HOME:-/home/runner}"
 if [[ "$(id -u)" -eq 0 ]]; then
     _fix_docker_socket_gid
+    mkdir -p "${RUNNER_USER_HOME}/.cache" "${RUNNER_HOME:-${RUNNER_USER_HOME}/actions-runner}/${RUNNER_WORK_DIR:-_work}" && chown runner:runner "${RUNNER_USER_HOME}/.cache" "${RUNNER_HOME:-${RUNNER_USER_HOME}/actions-runner}/${RUNNER_WORK_DIR:-_work}" || exit "$?"
 fi
 
 # ---------------------------------------------------------------------------
@@ -103,7 +115,7 @@ RUNNER_WORK_DIR="${RUNNER_WORK_DIR:-_work}"
 
 MAX_RETRIES=3
 BACKOFF_SECONDS=(20 40 80)
-CRED_CACHE_DIR="/home/runner/.runner-creds"
+CRED_CACHE_DIR="${RUNNER_USER_HOME}/.runner-creds"
 LOG_FILE="${LOG_FILE:-/tmp/runner-listener.log}"
 
 # ---------------------------------------------------------------------------
@@ -318,13 +330,18 @@ _as_runner() {
 # Registration
 # ---------------------------------------------------------------------------
 
+# OMN-21765: the registration token is handed to config.sh in the environment
+# (ACTIONS_RUNNER_INPUT_TOKEN, which the runner reads for any input it is not
+# given as a flag), never as --token. A container process is listed in the HOST's
+# ps with its whole argv, so `config.sh --token <value>` showed the token to
+# every login on the host for as long as registration took. The variable is set
+# for the one config.sh call and is not exported to the listener.
 _register() {
     echo "[entrypoint] Registering runner: ${RUNNER_NAME} @ ${GITHUB_ORG_URL}"
     echo "[entrypoint] Labels: ${RUNNER_LABELS} | Group: ${RUNNER_GROUP:-<none: repo-scoped>}"
 
     local config_args=(
         --url "${GITHUB_ORG_URL}"
-        --token "${RUNNER_TOKEN}"
         --name "${RUNNER_NAME}"
         --labels "${RUNNER_LABELS}"
         --work "${RUNNER_WORK_DIR}"
@@ -339,7 +356,7 @@ _register() {
         config_args+=(--runnergroup "${RUNNER_GROUP}")
     fi
 
-    _as_runner "${RUNNER_HOME}/config.sh" "${config_args[@]}"
+    ACTIONS_RUNNER_INPUT_TOKEN="${RUNNER_TOKEN}" _as_runner "${RUNNER_HOME}/config.sh" "${config_args[@]}"
 }
 
 _deregister() {
@@ -348,14 +365,14 @@ _deregister() {
         return 0
     fi
     echo "[entrypoint] Attempting graceful de-registration..."
-    _as_runner "${RUNNER_HOME}/config.sh" remove --token "${RUNNER_TOKEN}" 2>/dev/null || true
+    ACTIONS_RUNNER_INPUT_TOKEN="${RUNNER_TOKEN}" _as_runner "${RUNNER_HOME}/config.sh" remove 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
 # Main entrypoint loop
 # ---------------------------------------------------------------------------
 
-RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
+RUNNER_HOME="${RUNNER_HOME:-${RUNNER_USER_HOME}/actions-runner}"
 cd "${RUNNER_HOME}"
 
 shutdown_requested=0

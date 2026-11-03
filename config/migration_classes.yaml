@@ -374,6 +374,12 @@ migrations:
   forward/nodes/node_projection_local_environment/0000_create_local_environment.sql: forward-only # ALTER TABLE public.local_environment ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
   forward/nodes/node_projection_local_environment/0001_grant_tenant_projection_writer_local_environment.sql: expand-only
   forward/nodes/node_projection_local_environment/0002_force_rls_local_environment.sql: forward-only # ALTER TABLE public.local_environment FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_local_alerts/0000_create_local_alerts.sql: forward-only # ALTER TABLE public.local_alerts ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_local_alerts/0001_grant_tenant_projection_writer_local_alerts.sql: expand-only
+  forward/nodes/node_projection_local_alerts/0002_force_rls_local_alerts.sql: forward-only # ALTER TABLE public.local_alerts FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_local_identity/0000_create_local_identity.sql: forward-only # ALTER TABLE public.local_identity ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_local_identity/0001_grant_tenant_projection_writer_local_identity.sql: expand-only
+  forward/nodes/node_projection_local_identity/0002_force_rls_local_identity.sql: forward-only # ALTER TABLE public.local_identity FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
   forward/nodes/node_projection_demo_readiness/0000_create_demo_readiness_latest.sql: forward-only # UNIQUE INDEX on created table
@@ -431,6 +437,8 @@ migrations:
   forward/nodes/node_projection_session_replay/0002_grant_omninode_runtime_session_replay_snapshots.sql: expand-only
   forward/nodes/node_projection_skill_executions/0001_create_skill_execution_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SKILL_EXECUTION_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_SKILL_EXEC_S
   forward/nodes/node_projection_skill_executions/0002_skill_execution_snapshots_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
+  forward/nodes/node_projection_skill_lifecycle/0001_create_skill_executions.sql: forward-only # NOT NULL and constraint reconciliation
+  forward/nodes/node_projection_skill_lifecycle/0002_grant_tenant_projection_writer_skill_executions.sql: forward-only # enforced tenant RLS
   forward/nodes/node_projection_swarm/0001_create_swarm_runs.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SWARM_RUNS_PKEY
   forward/nodes/node_projection_swarm/0002_grant_omninode_runtime_swarm_runs.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/0000_create_tenant_inference_credentials.sql: expand-only
@@ -463,6 +471,8 @@ migrations:
   forward/nodes/node_projection_work_ledger/0004_grant_work_ledger_ro_work_ledger_state.sql: expand-only # additive guarded GRANT SELECT to a read-only role
   forward/nodes/node_projection_work_ledger/0005_grant_role_omnidash_work_ledger_rows_select.sql: expand-only
   forward/nodes/node_projection_work_ledger/0006_work_ledger_ingested_at.sql: forward-only # ALTER TABLE ADD COLUMN IF NOT EXISTS nullable ingested_at (additive); ALTER COLUMN SET DEFAULT on the existing table (omninode_internal.work_ledger_rows), declared forward-only per the checker's rule
+  forward/nodes/node_projection_work_questions/0000_create_work_questions.sql: forward-only # CREATE TABLE IF NOT EXISTS and ADD COLUMN IF NOT EXISTS for the five work-question tables
+  forward/nodes/node_projection_work_questions/0001_grant_omninode_runtime_work_questions.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the five work-question tables
   forward/nodes/node_projection_worktree_reconcile/0000_create_worktree_reconcile_hosts.sql: expand-only # additive
   forward/nodes/node_projection_worktree_reconcile/0001_grant_runtime_worktree_reconcile.sql: expand-only # additive
   forward/nodes/node_renderer_capability_projection/0001_create_renderer_capability_projection.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT RENDERER_CAPABILITY_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT UQ_RENDERE

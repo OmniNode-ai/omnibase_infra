@@ -119,7 +119,7 @@ import socket
 import sys
 import time
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -145,10 +145,7 @@ from omnibase_infra.cli.contract_registry import (
     field_vocabulary,
     node_input_model,
 )
-from omnibase_infra.cli.delegate_caller import (
-    DELEGATE_CALLER_LANE_METADATA_KEY,
-    resolve_delegate_caller,
-)
+from omnibase_infra.cli.delegate_caller import resolve_delegate_caller
 from omnibase_infra.cli.delegate_env_config_overrides import (
     env_config_overrides,
     format_override_line,
@@ -255,6 +252,15 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
     HandlerWorkspaceRuntimeConfigMaterializer,
 )
+from omnibase_infra.models.delegation.delegate_request_payload import (
+    DELEGATE_TICKET_METADATA_KEY,
+)
+from omnibase_infra.models.delegation.delegate_request_payload import (
+    build_delegate_request_payload as _request_payload,
+)
+from omnibase_infra.models.delegation.model_delegate_incomplete_terminal import (
+    ModelDelegateIncompleteTerminal,
+)
 from omnibase_infra.models.delegation.model_delegate_lineage import (
     LINEAGE_KINDS,
     ModelDelegateLineage,
@@ -270,6 +276,9 @@ from omnibase_infra.models.delegation.model_delegate_phase_durations import (
 from omnibase_infra.models.delegation.model_delegate_refusal import (
     ModelDelegateRefusal,
 )
+from omnibase_infra.models.delegation.model_delegate_session_model import (
+    ModelDelegateSessionModel,
+)
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
@@ -278,6 +287,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DELEGATE_NODE_NAME",
+    "DELEGATE_TICKET_METADATA_KEY",
     "DELEGATE_SOURCE",
     "INSTALL_IDENTITY_MODULE",
     "TENANT_OVERLAY_ENV",
@@ -1211,37 +1221,6 @@ def _write_incomplete_run_files(
     return run_dir
 
 
-def _unterminalized_receipt_fields(
-    envelope: dict[str, object],
-    *,
-    reason: str,
-) -> tuple[EnumDelegateIncompleteClass, dict[str, object]]:
-    """Classify a delegation receipt that carries no terminal, and what it knew.
-
-    ``timeout`` when the runtime's own workflow result says so, ``failed`` for
-    every other way of ending without a terminal payload. The runtime's error
-    and type ride along so the receipt names the cause the capture log holds
-    rather than only the resolver's "no resolvable terminal".
-    """
-    result = envelope.get("result")
-    summary = result if isinstance(result, dict) else {}
-    workflow_result = str(summary.get("workflow_result") or "")
-    terminal_class = (
-        EnumDelegateIncompleteClass.TIMEOUT
-        if workflow_result == "timeout"
-        else EnumDelegateIncompleteClass.FAILED
-    )
-    known: dict[str, object] = {
-        "workflow_result": workflow_result or None,
-        "runtime_error_type": str(summary.get("runtime_error_type") or "") or None,
-        "runtime_error": sanitize_error_string(str(summary.get("error") or "")) or None,
-        "terminal_payload": summary.get("terminal_payload"),
-        "wire_correlation_id": summary.get("wire_correlation_id") or None,
-        "resolution_error": sanitize_error_string(reason),
-    }
-    return terminal_class, known
-
-
 def _write_unterminalized_run_files(
     *,
     envelope: dict[str, object],
@@ -1252,16 +1231,19 @@ def _write_unterminalized_run_files(
     task_type_resolution: str,
     addressing: ModelDelegateRunAddressing,
     phase_durations: ModelDelegatePhaseDurations | None,
+    queue_depth_observer: Callable[[], ModelDelegateQueueDepth] | None = None,
 ) -> None:
     """Write the receipt for a delegation receipt that holds no terminal (OMN-17427)."""
-    terminal_class, known = _unterminalized_receipt_fields(envelope, reason=reason)
+    terminal = ModelDelegateIncompleteTerminal.from_envelope(
+        envelope, reason=reason, queue_depth_observer=queue_depth_observer
+    )
     _write_incomplete_run_files(
         run_id=str(envelope["run_id"]),
         correlation_id=str(envelope["correlation_id"]),
-        terminal_class=terminal_class,
+        terminal_class=terminal.terminal_class,
         status=EnumSkillResultStatus.FAILED,
-        failure_reason=sanitize_error_string(reason),
-        known=known,
+        failure_reason=terminal.failure_reason,
+        known=terminal.known,
         state_root=state_root,
         prompt=prompt,
         task_type=task_type,
@@ -1513,6 +1495,7 @@ def _write_local_run_files(
     contract_path: Path | None = None,
     payload_path: Path | None = None,
     phase_durations: ModelDelegatePhaseDurations | None = None,
+    queue_depth_observer: Callable[[], ModelDelegateQueueDepth] | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -1630,6 +1613,7 @@ def _write_local_run_files(
             task_type_resolution=task_type_resolution,
             addressing=addressing,
             phase_durations=phase_durations,
+            queue_depth_observer=queue_depth_observer,
         )
         raise
     if result is None:
@@ -2060,10 +2044,6 @@ def _validate_model_choice(model: str | None) -> str | None:
     return chosen
 
 
-#: The request ``metadata`` key that names the ticket a delegation works
-#: (OMN-19514). omnimarket's delegate-skill handler reads the same key.
-DELEGATE_TICKET_METADATA_KEY = "ticket_id"
-
 #: A Linear issue identifier: a team key, a hyphen, a positive number.
 _TICKET_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9]+-[1-9][0-9]*$")
 
@@ -2444,98 +2424,6 @@ def mint_delegate_trace_context() -> tuple[uuid.UUID | None, uuid.UUID | None]:
     return uuid.uuid4(), uuid.uuid4()
 
 
-def _request_payload(
-    *,
-    prompt: str,
-    task_type: str,
-    source: str,
-    max_tokens: int | None,
-    correlation_id: uuid.UUID,
-    acceptance_criteria: tuple[str, ...] = (),
-    quality_contract_mode: str | None = None,
-    response_contract: dict[str, object] | None = None,
-    system_prompt: str | None = None,
-    requested_timeout_seconds: int | None = None,
-    backend_id: str | None = None,
-    model: str | None = None,
-    ticket_id: str | None = None,
-    caller: ModelDelegateCaller | None = None,
-    tenant_id: str | None = None,
-    trace_id: uuid.UUID | None = None,
-    span_id: uuid.UUID | None = None,
-    lineage: Mapping[str, str] | None = None,
-    named_tests: Mapping[str, str] | None = None,
-) -> dict[str, object]:
-    """Build the delegate request, setting only the fields the caller supplied."""
-    payload: dict[str, object] = {
-        "prompt": prompt,
-        "task_type": task_type,
-        "source": source,
-        "correlation_id": str(correlation_id),
-    }
-    if max_tokens is not None:
-        payload["max_tokens"] = max_tokens
-    if acceptance_criteria:
-        payload["acceptance_criteria"] = list(acceptance_criteria)
-    if quality_contract_mode is not None:
-        payload["quality_contract_mode"] = quality_contract_mode
-    if response_contract is not None:
-        payload["response_contract"] = response_contract
-    if system_prompt is not None:
-        payload["system_prompt"] = system_prompt
-    if requested_timeout_seconds is not None:
-        payload["requested_timeout_seconds"] = requested_timeout_seconds
-    # OMN-19124: the caller's explicit rung pin, written under the field name
-    # the node contract already declares. Omitted entirely when unset, like
-    # every other optional field here, because ``ModelDelegateSkillRequest``
-    # declares ``extra="forbid"`` and a null would be a shape change on every
-    # existing caller's payload.
-    if backend_id is not None:
-        payload["backend_id"] = backend_id
-    # OMN-20844: the model the customer's own provider key runs for this call,
-    # written under the optional field the node contract declares. Omitted
-    # entirely when unset, never null, because ``ModelDelegateSkillRequest``
-    # declares ``extra="forbid"`` and existing callers keep their payload shape.
-    if model is not None:
-        payload["model"] = model
-    # OMN-19514: the ticket this delegation works, in the request's metadata
-    # map, which every released request consumer already accepts. Omitted
-    # entirely when no ticket was named.
-    metadata: dict[str, str] = {}
-    if ticket_id is not None:
-        metadata[DELEGATE_TICKET_METADATA_KEY] = ticket_id
-    # OMN-19860: who issued the run. The lane rides in the same metadata map;
-    # the session rides in the declared ``session_id`` field, only ever as a
-    # UUID. Each is omitted entirely when unresolved.
-    if caller is not None and caller.lane is not None:
-        metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
-    # OMN-20606: the delegation this run falls back or escalates from, already
-    # validated by resolve_delegate_lineage. Omitted entirely when unnamed.
-    if lineage:
-        metadata.update(lineage)
-    # OMN-17427: the tests a code answer is graded by, under the metadata keys
-    # omnimarket's delegation port reads. Omitted entirely when none are named.
-    if named_tests:
-        metadata.update(named_tests)
-    if metadata:
-        payload["metadata"] = metadata
-    if caller is not None and caller.session_id is not None:
-        payload["session_id"] = caller.session_id
-    # OMN-17427: the tenant of the install the command runs under, written to
-    # the ``tenant_id`` field the request model has declared since OMN-14058.
-    # Omitted entirely when unresolved (the in-process first-delegation path),
-    # like every other optional field here.
-    if tenant_id is not None:
-        payload["tenant_id"] = tenant_id
-    # OMN-19437: the trace context the handler copies onto the terminal. Omitted
-    # entirely when the contract's request model does not declare it yet.
-    if trace_id is not None:
-        payload["trace_id"] = str(trace_id)
-    if span_id is not None:
-        payload["span_id"] = str(span_id)
-    return payload
-
-
 def _write_payload(
     *,
     prompt: str,
@@ -2559,6 +2447,7 @@ def _write_payload(
     span_id: uuid.UUID | None = None,
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
+    session_model: str | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -2584,42 +2473,39 @@ def _write_payload(
     OS process every time), so it owns this run's tracing identity end to end
     instead of delegating that responsibility downstream.
 
-    THE FOUR CALLER-STATED FIELDS (OMN-18305 residual, measured 2026-09-15).
-    ``ModelDelegateSkillRequest`` has carried ``acceptance_criteria``,
-    ``quality_contract_mode``, ``response_contract`` and ``system_prompt``
-    since OMN-15193/OMN-15482, and the quality-gate reducer already branches on
-    ``replace_task_class`` — but this CLI wrote none of them, so the ONLY
-    rubric a ``onex delegate`` caller could be graded against was the one the
-    task class declares. That is the rubric that was wrong in both failures
-    measured on 2026-09-15: a drafting prompt refused on ``planning``'s
-    ``covers_dependencies`` and another refused on ``research``'s
-    ``cites_sources``. Each field is omitted entirely when unset, so no
-    existing caller changes shape.
+    Caller-stated criteria, response contract and system prompt are omitted
+    when unset (OMN-18305). Payload validation errors become usage errors here
+    for both the command and direct ``run_delegate`` callers (OMN-20557).
     """
     tmp_dir = state_root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     payload_path = tmp_dir / f"delegate-input-{run_id}.json"
-    payload = _request_payload(
-        prompt=prompt,
-        task_type=task_type,
-        source=source,
-        max_tokens=max_tokens,
-        correlation_id=correlation_id,
-        acceptance_criteria=acceptance_criteria,
-        quality_contract_mode=quality_contract_mode,
-        response_contract=response_contract,
-        system_prompt=system_prompt,
-        requested_timeout_seconds=requested_timeout_seconds,
-        backend_id=backend_id,
-        model=model,
-        ticket_id=ticket_id,
-        caller=caller,
-        tenant_id=tenant_id,
-        trace_id=trace_id,
-        span_id=span_id,
-        lineage=lineage,
-        named_tests=named_tests,
-    )
+    try:
+        payload = _request_payload(
+            prompt=prompt,
+            task_type=task_type,
+            source=source,
+            max_tokens=max_tokens,
+            correlation_id=correlation_id,
+            acceptance_criteria=acceptance_criteria,
+            quality_contract_mode=quality_contract_mode,
+            response_contract=response_contract,
+            system_prompt=system_prompt,
+            requested_timeout_seconds=requested_timeout_seconds,
+            backend_id=backend_id,
+            model=model,
+            ticket_id=ticket_id,
+            caller_lane=caller.lane if caller is not None else None,
+            session_id=caller.session_id if caller is not None else None,
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            span_id=span_id,
+            lineage=lineage,
+            named_tests=named_tests,
+            session_model=session_model,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -3732,6 +3618,19 @@ class DelegateCommand(click.Command):
     ),
 )
 @click.option(
+    "--session-model",
+    "session_model",
+    default=None,
+    help=(
+        "The caller's Claude Code session model id (OMN-20557). It rides in "
+        "the request metadata and is the run's "
+        "savings baseline: the receipt names baseline_source session_model, "
+        "and a model the pricing manifest does not price is reported as "
+        "BASELINE_UNRESOLVED with no saving. Omitted, the fixed default "
+        "baseline is used. A malformed value is a usage error, never dropped."
+    ),
+)
+@click.option(
     "--caller-lane",
     "caller_lane",
     default=None,
@@ -3910,6 +3809,7 @@ def delegate_command(
     named_tests: tuple[str, ...] = (),
     test_files: tuple[str, ...] = (),
     answer_path: str | None = None,
+    session_model: str | None = None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print the result.
 
@@ -3989,6 +3889,7 @@ def delegate_command(
             own_correlation_id=correlation_id,
         )
         lineage = resolved_lineage.as_metadata() if resolved_lineage else None
+        ModelDelegateSessionModel.from_flag(session_model)
         resolved_named_tests = ModelDelegateNamedTests.from_flags(
             named_tests, test_files, answer_path
         )
@@ -4030,6 +3931,7 @@ def delegate_command(
             correlation_id=correlation_id,
             lineage=lineage,
             named_tests=named_test_metadata,
+            session_model=session_model,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -4067,6 +3969,7 @@ def run_delegate(
     correlation_id: uuid.UUID | None = None,
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
+    session_model: str | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -4398,12 +4301,18 @@ def run_delegate(
             span_id=span_id,
             lineage=lineage,
             named_tests=named_tests,
+            session_model=session_model,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.
         click.echo(f"ticket: {ticket_id or 'none'} ({ticket_resolution})", err=True)
         # OMN-19860: and who issued it, the same way.
         click.echo((caller or ModelDelegateCaller.unattributed()).describe(), err=True)
+        # OMN-20557: and the session model its saving is stated against.
+        click.echo(
+            f"session model: {session_model if session_model is not None else 'none'}",
+            err=True,
+        )
         # OMN-20606: and what it follows, when it follows anything.
         if lineage:
             click.echo(
@@ -4692,6 +4601,13 @@ def run_delegate(
                         # runtime has finished, so every phase it reached is
                         # closed.
                         phase_durations=phase_stopwatch.durations(),
+                        queue_depth_observer=functools.partial(
+                            observe_delegate_queue_depth,
+                            bus=bus,
+                            broker=locus_decision.broker,
+                            command_topic=locus_decision.command_topic,
+                            consumer_groups=locus_decision.lane_consumer_groups,
+                        ),
                     ),
                 )
             # OMN-17427: a run that returned normally but whose writer did not
@@ -4733,15 +4649,18 @@ def run_delegate(
                 consumer_groups=locus_decision.lane_consumer_groups,
             )
             click.echo(f"{exc} Queue: {queue_depth.describe()}.", err=True)
+            timeout_terminal = ModelDelegateIncompleteTerminal.from_hard_timeout(
+                error=str(exc), queue_depth=queue_depth
+            )
             # OMN-17427: the timeout is also the run's receipt on disk. Both
             # branches below end the run, so the file is written before either.
             elapsed_seconds = time.monotonic() - dispatch_started
             _write_incomplete_run_files(
                 run_id=str(run_id),
                 correlation_id=str(correlation_id),
-                terminal_class=EnumDelegateIncompleteClass.TIMEOUT,
+                terminal_class=timeout_terminal.terminal_class,
                 status=EnumSkillResultStatus.FAILED,
-                failure_reason=sanitize_error_string(str(exc)),
+                failure_reason=timeout_terminal.failure_reason,
                 known={
                     "declared_timeout_seconds": terminal_wait_seconds,
                     "grace_seconds": _HARD_TIMEOUT_GRACE_SECONDS,

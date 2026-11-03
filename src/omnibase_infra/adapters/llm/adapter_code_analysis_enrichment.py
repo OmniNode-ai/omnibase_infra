@@ -48,6 +48,7 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumLlmOperationType,
 )
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts as _t
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -60,11 +61,9 @@ from omnibase_spi.contracts.enrichment.contract_enrichment_result import (
 
 logger = logging.getLogger(__name__)
 
+
 # Prompt version -- bump this when the system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
-
-# Default model identifier sent to the Coder-14B endpoint.
-_DEFAULT_MODEL: str = "qwen2.5-coder-14b"
 
 # Default maximum tokens for the analysis response.
 _DEFAULT_MAX_TOKENS: int = 1024
@@ -81,8 +80,6 @@ _CHARS_PER_TOKEN: int = 4
 # leave room for the prompt, system message, and completion.
 _MAX_DIFF_CHARS: int = 32_000
 
-# Timeout for the git subprocess (seconds).
-_GIT_TIMEOUT_SECONDS: float = 15.0
 
 # Relevance score assigned when the diff is non-empty and analysis succeeds.
 _ANALYSIS_RELEVANCE_SCORE: float = 0.85
@@ -129,7 +126,7 @@ class AdapterCodeAnalysisEnrichment:
         handler_category: ``EFFECT`` -- performs external I/O (git + LLM HTTP).
 
     Example:
-        >>> adapter = AdapterCodeAnalysisEnrichment()
+        >>> adapter = AdapterCodeAnalysisEnrichment(model=routed_model)
         >>> result = await adapter.enrich(
         ...     prompt="What functions were affected?",
         ...     context="diff --git a/foo.py ...",
@@ -140,7 +137,8 @@ class AdapterCodeAnalysisEnrichment:
     def __init__(
         self,
         base_url: str | None = None,
-        model: str = _DEFAULT_MODEL,
+        *,
+        model: str,
         max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = _DEFAULT_TEMPERATURE,
         api_key: str | None = None,
@@ -151,7 +149,7 @@ class AdapterCodeAnalysisEnrichment:
             base_url: Base URL of the Coder-14B endpoint.  Defaults to the
                 ``LLM_CODER_URL`` environment variable, falling back to
                 ``http://localhost:8000``.
-            model: Model identifier string sent in inference requests.
+            model: Model identifier from the model-routing policy.
             max_tokens: Maximum tokens for the LLM completion.
             temperature: Sampling temperature (lower = more deterministic).
             api_key: Optional Bearer token for authenticated endpoints.
@@ -164,7 +162,7 @@ class AdapterCodeAnalysisEnrichment:
 
         self._transport = TransportHolderLlmHttp(
             target_name="coder-14b-enrichment",
-            max_timeout_seconds=120.0,
+            max_timeout_seconds=_t().llm_coder_max_seconds,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
 
@@ -258,12 +256,11 @@ class AdapterCodeAnalysisEnrichment:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             api_key=self._api_key,
+            timeout_seconds=_t().llm_coder_request_seconds,
         )
 
-        response = await self._handler.handle(request)
+        summary = (await self._handler.handle(request)).generated_text or ""
         latency_ms = (time.perf_counter() - start) * 1000
-
-        summary = response.generated_text or ""
         if not summary:
             summary = "## Analysis Unavailable\n\nThe model did not return a response."
             logger.warning(
@@ -322,7 +319,7 @@ class AdapterCodeAnalysisEnrichment:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=_GIT_TIMEOUT_SECONDS
+                proc.communicate(), timeout=_t().git_diff_seconds
             )
             if proc.returncode != 0:
                 logger.debug(
@@ -336,7 +333,7 @@ class AdapterCodeAnalysisEnrichment:
             if proc is not None:
                 proc.kill()
                 await proc.wait()
-            logger.debug("git diff HEAD timed out after %.0fs", _GIT_TIMEOUT_SECONDS)
+            logger.debug("git diff HEAD timed out after %.0fs", _t().git_diff_seconds)
             return ""
         except asyncio.CancelledError:
             if proc is not None:

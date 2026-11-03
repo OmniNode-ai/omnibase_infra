@@ -129,6 +129,7 @@ handler_routing:
         - registration_id
     # Deregister Node - PostgreSQL Backend
     # Marks registration record as inactive in PostgreSQL.
+    # OMN-21761: handle(request) takes one ModelRegistryRequest; correlation_id rides on the request.
     - operation: "deregister_node"
       handler:
         name: "HandlerPostgresDeactivate"

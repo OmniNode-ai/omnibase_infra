@@ -31,9 +31,11 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.nodes.node_gateway_link_health_projection_compute.models import (
     ModelPayloadGatewayLinkHealthUpsert,
+)
+from omnibase_infra.nodes.node_gateway_link_health_write_effect.container.container_handler_db import (
+    bind_handler_db,
 )
 from omnibase_infra.nodes.node_gateway_link_health_write_effect.models import (
     ModelGatewayLinkHealthUpsertResult,
@@ -97,7 +99,7 @@ class HandlerGatewayLinkHealthUpsert:
                 directly; runtime composition owns that IO boundary.
         """
         self._container = container
-        self._db_handler = HandlerDb(container) if container is not None else None
+        self._db_handler = bind_handler_db(container) if container is not None else None
         self._db_dsn = db_dsn.strip() if db_dsn else ""
         self._initialized: bool = False
         self._db_init_lock = asyncio.Lock()

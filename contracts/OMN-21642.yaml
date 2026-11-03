@@ -1,0 +1,37 @@
+# OMN-21642 contract file for omnibase_infra: the pre-push ticket-contract leg runs the PR writer's own contract_prerequisite.
+schema_version: "1.0.0"
+ticket_id: "OMN-21642"
+title: "the pre-push ticket-contract check refuses exactly what onex scm pr-create refuses: it runs contract_prerequisite from the pinned omnimarket release"
+summary: "The prepush-deploy-scope-dod hook judged only the verifier's check-value shape guard, so a contract with no dod_evidence, or with acceptance criteria no dod_evidence item binds, passed the push and was then refused twice by onex scm pr-create (FRICTION 2026-10-31T01:38:58Z, about 25 lane-minutes). The hook now runs contract_prerequisite, the function pr-create calls, from the omnimarket release the repo-evidence caller pins, and that pin moves from 0.4.305, which has no such function, to 0.4.320."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21642-hook-runs-pr-create-prerequisite
+    statement: "The pre-push ticket-contract leg refuses a head-side contract with no dod_evidence, or with an acceptance criterion no dod_evidence item binds, with the same text onex scm pr-create refuses it with."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the recorded OMN-21629 contract with its dod_evidence section removed is refused by the hook with the pr-create text, and it is passed at origin/dev 4284f5bf5 -- falsifier: uv run pytest tests/ci/test_ticket_contract_prerequisite_parity_omn21642.py -k no_dod_evidence fails at origin/dev 4284f5bf5"
+      - id: AC2
+        statement: "AC2: the recorded OMN-21629 contract with every binds_ac removed is refused by the hook as unbound acceptance criteria AC1, AC2 -- falsifier: uv run pytest tests/ci/test_ticket_contract_prerequisite_parity_omn21642.py -k unbound fails at origin/dev 4284f5bf5"
+      - id: AC3
+        statement: "AC3: pr-create's own module binding of contract_prerequisite is the function the hook runs, and the two give one verdict on every fixture -- falsifier: uv run pytest tests/ci/test_ticket_contract_prerequisite_parity_omn21642.py -k parity"
+evidence_requirements:
+  - kind: tests
+    description: "The planted fixtures are refused with pr-create's text, the recorded contract passes, and pr-create and the hook agree."
+    command: "uv run pytest tests/ci/test_ticket_contract_prerequisite_parity_omn21642.py tests/ci/test_ticket_contract_prepush_omn20870.py tests/ci/test_check_deploy_scope_dod.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The hook refuses a contract with no dod_evidence and one with unbound acceptance criteria, each with the pr-create text."
+    source: generated
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/ci/test_ticket_contract_prerequisite_parity_omn21642.py -q -p no:cacheprovider -k "no_dod_evidence or unbound"'
+  - id: dod-002
+    description: "pr-create and the hook run one contract_prerequisite and agree on every planted fixture."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/ci/test_ticket_contract_prerequisite_parity_omn21642.py -q -p no:cacheprovider -k parity'

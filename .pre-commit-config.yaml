@@ -62,6 +62,16 @@ repos:
         files: ^(\.github/workflows/[^/]+\.ya?ml|tests/ci/test_hostile_reviewer_voters_overlay_omn20910\.py|tests/ci/test_hostile_reviewer_dev_tag_key_omn20910\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-22275: the Hostile Reviewer workflow accepts a verified agent review
+      # receipt only through the gate-accept node's pass_agent. SYNC with the
+      # ci.yml lint step "Hostile Review accepts an agent receipt (OMN-22275)".
+      - id: hostile-review-agent-accept
+        name: Hostile Review accepts an agent receipt (OMN-22275)
+        entry: uv run --frozen pytest tests/ci/test_hostile_review_agent_accept_omn22275.py tests/ci/test_hostile_review_agent_accept_step_shape_omn22275.py tests/ci/test_ci_summary_external_sweep_agent_accept_omn22275.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(\.github/workflows/(hostile-reviewer|hostile-review-judge)\.ya?ml|scripts/ci/ci_summary_gate\.py|tests/ci/(_hostile_review_job|test_hostile_review_agent_accept|test_hostile_review_agent_accept_step_shape|test_ci_summary_external_sweep_agent_accept)_?omn22275\.py|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-20821: the developer principal plan node keeps the lab issuer's rules,
       # and the local grants declaration stays a subset of the lab's.
       - id: developer-principal-plan
@@ -192,11 +202,75 @@ repos:
   # new baseline, allowlist or suppression entry. Shrink-only baseline at
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
+  # OMN-21538: omnibase_core's generic validators, consumed by hook id at the
+  # dev-merge tag; the rules and patterns live in core. This block is the one home
+  # of the tag: the ci.yml jobs canonical-file-shape and core-validators read the
+  # rev from here, and tests/ci/test_core_validators_wired_omn21538.py parses both
+  # files for every id below. Pre-commit judges the staged files; CI runs the same
+  # ids over the files a change touches. The two hooks that take a baseline read a
+  # per-file, shrink-only one with a target of zero and no suppression marker
+  # (.onex_ratchets/handler_di_baseline.txt, config/hardcoded_model_config_baseline.yaml);
+  # no file that a canon-audit finding names (omnibase_infra#5426 and #5425, F44
+  # to F47) is admitted to either, so touching one of those files fails until the
+  # finding is fixed. The other four hooks have no baseline: a file they flag
+  # fails when touched.
+  # Not consumed yet, each for a stated reason:
+  #   - check-no-dict-any, check-no-backward-compat and pydantic-extra-forbid need a
+  #     committed baseline file, and canonical-file-shape (rule new-exception-file)
+  #     refuses one for a hook that is not in its gate list; check-no-backward-compat
+  #     also scans all of src/ on every commit.
+  #   - contract-config-compliance is a hook of omnibase_core's own config, not an id
+  #     its hook repository exports.
+  #   - detect-secrets has no hook id in the omnibase_core hook repository.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261029151319-6e0a5eee541a
+    rev: dev-20261101023710-a66b5ff79cc0
     hooks:
       - id: canonical-file-shape
         args: [--rules, file-shape]
+        require_serial: true
+      - id: check-no-raw-sqlite3
+        require_serial: true
+      - id: check-local-paths-compute
+        require_serial: true
+      - id: check-hardcoded-topic-compute
+        require_serial: true
+      - id: check-hardcoded-model-config-compute
+        require_serial: true
+      - id: check-no-io-outside-effects
+        require_serial: true
+      - id: handler-di-gate
+        require_serial: true
+        args: [--baseline, .onex_ratchets/handler_di_baseline.txt]
+      # OMN-22358: producer/consumer topic-normalization symmetry. The local entry named
+      # a module that never existed and ran manual-stage and skipped, so it never
+      # ran; core's own hook id runs at pre-commit and in pre-commit.ci.
+      - id: normalization-symmetry
+        require_serial: true
+      # OMN-21939: four validators this repo used to run from its own script
+      # copies. The rule code is omnibase_core's; only the inputs stay here.
+      # OMN-17320 exposed-identifier gate: salted-SHA256 denylist of customer
+      # identifiers that must never re-enter this PUBLIC repo. The denylist is
+      # this repo's file and holds digests, never plaintext. Escape hatch, per
+      # line only, ticket + reason required:
+      #   # onex-allow-exposed-identifier OMN-XXXXX reason="<concrete reason>"
+      - id: exposed-identifier-gate
+        require_serial: true
+        args: [--mode, blocking, --denylist, scripts/validation/exposed_identifiers_denylist.json]
+        exclude: ^(archived/|workspace/sibling-repos/).*$
+      # OMN-13412 fresh-deploy fitness: no packaged-source change on a
+      # published version without a bump. Wired as required CI too.
+      - id: check-release-identity
+        require_serial: true
+      # The core manifest excludes docs/ and CHANGELOG.md; this repo has always
+      # checked them, so the exclude is narrowed back to nothing.
+      - id: check-ai-slop
+        require_serial: true
+        exclude: ^$
+      # OMN-16958 interpreter-resolution ratchet: fails closed when a hook
+      # `entry:` -- or a shell script it calls -- shells out to a bare `python`,
+      # or an `entry:` shells out to a bare `python3`. Sanctioned form is
+      # `uv run python <script>`. CI twin: .github/workflows/precommit-parity-gate.yml.
+      - id: precommit-interpreter-resolution
         require_serial: true
   # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
   # "Ci runners should be for private repos only"). Refuses a staged workflow job
@@ -661,24 +735,6 @@ repos:
         exclude: ^(tests/|archived/).*\.py$
         pass_filenames: true # Only check changed files, not entire codebase
         stages: [pre-push] # Moved to pre-push: ~1-5s for changed files only
-      # OMN-17320: exposed-identifier gate. Salted-SHA256 denylist of customer
-      # identifiers that must never re-enter this PUBLIC repo. OMN-17288 scrubbed a
-      # live tenant slug from five files here; three hours later an unrelated lane
-      # reintroduced it in omnimarket with every gate green. The denylist holds
-      # digests, never plaintext -- writing the literal into a pattern list in a
-      # public repo would be the very occurrence the gate prevents.
-      # Same script + same denylist as omnimarket (byte-identical; parity pinned by
-      # tests/ci/test_exposed_identifier_gate.py::test_cross_repo_fingerprint_pin).
-      # Escape hatch, per line only, ticket + reason required:
-      #   # onex-allow-exposed-identifier OMN-XXXXX reason="<concrete reason>"
-      - id: exposed-identifier-gate
-        require_serial: true
-        name: Exposed identifier gate (OMN-17320)
-        entry: uv run --frozen python scripts/validation/check_exposed_identifiers.py --mode blocking
-        language: system
-        pass_filenames: true
-        stages: [pre-commit]
-        exclude: ^(archived/|workspace/sibling-repos/).*$
       # OMN-19407: the onex CLI keeps no hand-written vocabulary. Operator
       # ruling 2026-09-24: everything is fetched from the registry. Refuses a
       # `*_CHOICES` literal, a click.Choice over a literal list, and a
@@ -1092,13 +1148,6 @@ repos:
         entry: uv run --frozen python scripts/check_context_field_presence.py
         language: system
         files: ^src/.*/contract\.yaml$
-        stages: [pre-commit]
-      - id: check-release-identity
-        name: No code merged onto a published version without a bump (OMN-13412)
-        entry: uv run --frozen python scripts/check_release_identity.py
-        language: system
-        files: ^(src/.*\.py|pyproject\.toml)$
-        pass_filenames: false
         stages: [pre-commit]
       # OMN-13873: dep-provenance gate — forbid first-party git-source overrides.
       # omnibase-core / omnibase-spi / omnibase-compat must resolve from PyPI, not
@@ -1974,14 +2023,6 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
-      - id: check-ai-slop
-        require_serial: true
-        name: Check for AI-slop patterns
-        language: system
-        entry: uv run --frozen python scripts/validation/check_ai_slop.py --strict
-        types_or: [python, markdown]
-        pass_filenames: true
-        stages: [pre-commit]
       # Topic naming lint — validate onex.{kind}.{producer}.{event}.v{n} convention
       # (OMN-3188: YAML contracts; OMN-3259: Python enum/constant files)
       # Triggers on contract*.yaml OR any *.py change; always scans full source tree.
@@ -2136,21 +2177,24 @@ repos:
         files: ^(docker/(Dockerfile\.runtime|docker-compose\..*\.yml|catalog/.*\.ya?ml)|src/omnibase_infra/docker/catalog/.*\.py|tests/(unit/docker/test_delegation_routing_tiers_path_binding_omn15645\.py|fixtures/omn15645_worker_tiers_live_contact\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
-      # OMN-21288: projection writers, consumers and effects run inside the one
-      # runtime container. Refuses a dev-stack service that runs one outside it;
-      # the services that still do are a shrink-only list in the test.
-      - id: dev-stack-runtime-only
-        name: Check the dev stack runs no workload outside the runtime container
-        entry: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+      # OMN-21891 (OMN-21288 AC-2): every service of every lane's compose files is the
+      # runtime, a declared dependency, a one-shot or a baselined entry, and the runtime
+      # runs one replica. The allowlist and the shrink-only baseline are the data file
+      # config/validation/stack_shape.yaml; the check is omnibase_core's stack-shape
+      # validator. Any docker/docker-compose*.yml triggers it, as does the data file. The
+      # per-file plant loop (judges the tree once per compose file) runs in the CI job only.
+      - id: stack-shape
+        name: Check every compose service is the runtime, a dependency, a one-shot or baselined
+        entry: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k "not every_compose_file"
         language: system
-        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(docker/docker-compose[^/]*\.yml|docker/catalog/.*\.ya?ml|config/validation/stack_shape\.yaml|tests/(unit/validation/test_checker_stack_shape\.py|fixtures/stack_shape/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: dev-tenant-projection-fold
-        name: Check the primary dev tenant projection fold
+        name: Check the primary dev runtime fold (tenant projections and in-process writers)
         entry: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         language: system
-        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|runtime-policy\.env|dev-tenant-fold-required-env\.manifest\.txt)|contracts/services/runtime_policy\.contract\.yaml|scripts/runtime_build/compose_files\.sh|tests/unit/docker/test_dev_(tenant_projection_fold|stack_runtime_only)_omn21288\.py|\.pre-commit-config\.yaml)$
+        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|runtime-policy\.env|dev-tenant-fold-required-env\.manifest\.txt)|contracts/services/runtime_policy\.contract\.yaml|scripts/(runtime_build/compose_files\.sh|render_runtime_policy_env\.py)|src/omnibase_infra/(models/model_runtime_fold_policy\.py|runtime/models/model_runtime_process_policy\.py)|config/validation/stack_shape\.yaml|tests/unit/docker/test_dev_tenant_projection_fold_omn21288\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: check-dev-tenant-fold-required-env-vars
@@ -2227,12 +2271,6 @@ repos:
         pass_filenames: false
         files: ^src/omnibase_infra/runtime/(auto_wiring/handler_wiring|service_kernel)\.py$
         stages: [pre-commit]
-      - id: normalization-symmetry
-        name: normalization-symmetry
-        entry: uv run python -m omnibase_core.validators.normalization-symmetry
-        language: system
-        pass_filenames: false
-        stages: [manual]
       # OMN-13034 (retro B-6): Lane-boundary attestation gate.
       # Rejects any staged file that contains lane-boundary attestation language
       # (markdown lane tables, compose_project declarations, GENERATED_LANE_TABLE
@@ -2416,22 +2454,6 @@ repos:
         always_run: true
         stages: [pre-commit]
         files: ^(\.pre-commit-config\.yaml|scripts/.*\.(sh|py)|\.pre-commit-hooks/.*\.sh)$
-      # OMN-16958 (port of omnimarket's OMN-17219 guard, unchanged):
-      # interpreter-resolution ratchet. Fails closed the moment a hook `entry:`
-      # -- or a shell script it calls -- shells out to a bare `python`, or an
-      # `entry:` shells out to a bare `python3`. macOS ships no bare `python`
-      # outside an activated venv, so such a hook refuses every `git commit` for
-      # anyone not inside one; a bare `python3` bypasses the project
-      # environment. Sanctioned form is `uv run python <script>`. Wired as BOTH
-      # this hook and a CI step in .github/workflows/precommit-parity-gate.yml
-      # (enforcement, not detection).
-      - id: precommit-interpreter-resolution
-        name: Pre-commit interpreter-resolution gate (OMN-17219)
-        entry: uv run --frozen python scripts/validation/validate_precommit_interpreter.py
-        language: system
-        pass_filenames: false
-        stages: [pre-commit]
-        files: ^(\.pre-commit-config\.yaml|scripts/.*\.(sh|py)|\.pre-commit-hooks/.*\.sh)$
       # Pin-parity ratchet: fails closed the moment the pre-commit `rev:` pin
       # for a shared omnibase_core validator diverges from the SHA the
       # validator's dedicated CI gate workflow pins for the same validator
@@ -2527,9 +2549,10 @@ repos:
   # refusals it can decide locally. A ticket cited in the branch's commit
   # subjects with no contracts/<ticket>.yaml in the pushed HEAD fails and names
   # the file; a command / test_passes check value the released verifier's own
-  # shape guard calls prose fails and names the check. The guard runs from
-  # omnimarket==<verifier-version>, read from call-repo-evidence-gate.yml, so
-  # local and hosted share one pin. It judges shape only and runs no check.
+  # shape guard calls prose fails and names the check. The guard runs from the
+  # omnimarket dev-merge tag call-repo-evidence-gate.yml passes as verifier-tag
+  # (installed from the tag's own uv.lock, OMN-21853), so local and hosted share
+  # one pin. It judges shape only and runs no check.
   - repo: local
     hooks:
       - id: prepush-deploy-scope-dod
@@ -2776,4 +2799,4 @@ ci:
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
   # CI runs the same node with --base: the `migration-freeze` job)
-  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
+  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]

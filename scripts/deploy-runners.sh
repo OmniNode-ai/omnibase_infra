@@ -37,7 +37,7 @@
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
-#   2. Base64-encode token for safe SSH passing
+#   2. Hand the token to the host on ssh stdin (never in the ssh command string)
 #   3. Rsync runner artifacts to 192.168.86.201:~/.omnibase/runners/
 #   4. Build the versioned runner image via scripts/ci/build_runner_image.sh
 #   5. Deploy via SSH: docker compose up -d --force-recreate --remove-orphans
@@ -62,6 +62,11 @@
 #      signals, recreate that ONE service, wait for it to come back online
 #   3. Skip (and retry later) any runner executing a job; HALT if a recreated
 #      runner does not return
+#   Before each recreate it waits until `docker ps -a` on the host lists no Dead
+#   container (OMN-21807): a pending layer delete holds containerd's metadata lock
+#   and blocks every docker rm, so a second removal queued behind it only
+#   lengthens the stall. It HALTS, recreating nothing more, if one is still
+#   listed after ROLL_DEAD_MAX_SECONDS (default 3600).
 #   Skips: image build, cron installs, --remove-orphans
 #   Use when: a container-env change must reach live runners. Env is frozen at
 #   container creation, so a recreate is the only way; --soft cannot carry one.
@@ -177,7 +182,7 @@
 #
 # Trap for on-host operators (OMN-15142): this script is written to run from
 # an OPERATOR WORKSTATION that SSHes into the runner host (see run_ssh/
-# run_local below). It cannot be run directly ON the runner host targeting
+# the ssh helpers below). It cannot be run directly ON the runner host targeting
 # itself via its own Tailscale MagicDNS hostname -- self-ssh fails "Host key
 # verification failed" (no known_hosts entry for the box's own hostname).
 # Run the rsync/build/compose steps directly on-host instead in that case.
@@ -356,7 +361,7 @@ runner_pool_field() {
 
 RUNNER_HOST="$(runner_config_field runner_host)"
 # Remote path on the CI host — NOT local $HOME (which differs between macOS and Linux)
-RUNNER_HOST_DIR="/home/jonah/.omnibase/runners"
+RUNNER_HOST_DIR="${RUNNER_HOST_HOME:-/home/jonah}/.omnibase/runners"
 RUNNER_ORG="$(runner_config_field github_org)"
 RUNNER_GROUP="$(runner_config_field runner_group)"
 RUNNER_NAME_PREFIX="$(runner_config_field runner_name_prefix)"
@@ -632,15 +637,6 @@ run_ssh() {
     ssh "${RUNNER_HOST}" "$1"
 }
 
-run_local() {
-    # Run a local command (suppressed in dry-run)
-    if "${DRY_RUN}"; then
-        log "[DRY RUN] local: $*"
-        return 0
-    fi
-    "$@"
-}
-
 # ---------------------------------------------------------------------------
 # Step 1: Fetch registration token
 # ---------------------------------------------------------------------------
@@ -658,13 +654,29 @@ fetch_registration_token() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 2: Base64-encode token for safe SSH passing
+# Step 2: Hand the token to the host on ssh stdin (OMN-21765)
 # ---------------------------------------------------------------------------
+# The command string given to `ssh` becomes the argv of the remote shell, and
+# `ps` shows every argv to every login on the host for as long as the process
+# lives. A registration token (or a base64 of it, which is the same secret)
+# inside that string was therefore readable for the whole image build and
+# compose up. The token now travels on ssh stdin, which is not in any argv, and
+# is read into the remote shell's environment, where /proc/<pid>/environ is
+# mode 400 for its owner. printf is a builtin, so it is not in the local argv
+# either. The remote script text carries only the read, never a value.
 
-encode_token() {
-    local token="${1}"
-    # -w 0 prevents line wrapping (macOS base64 wraps at 76 chars by default)
-    echo -n "${token}" | base64 -w 0 2>/dev/null || echo -n "${token}" | base64 -b 0 2>/dev/null || echo -n "${token}" | base64
+# Remote shell fragment: read the token from stdin into RUNNER_TOKEN and export
+# it. Single-quoted on purpose: it is expanded by the REMOTE shell.
+REMOTE_READ_TOKEN='RUNNER_TOKEN=$(cat); if [ -z "${RUNNER_TOKEN}" ]; then echo "[deploy-runners] no registration token arrived on stdin" >&2; exit 64; fi; export RUNNER_TOKEN'
+
+# ssh_token_stdin <token> <remote script> [<prefix for the remote script>]
+ssh_token_stdin() {
+    local token="${1}" script="${2}" prefix="${3:-}"
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] ssh ${RUNNER_HOST}: ${script} (registration token on stdin)"
+        return 0
+    fi
+    printf '%s' "${token}" | ssh "${RUNNER_HOST}" "${prefix}${script}"
 }
 
 # ---------------------------------------------------------------------------
@@ -859,8 +871,7 @@ install_runner_slice() {
 # ---------------------------------------------------------------------------
 
 deploy_runners() {
-    local token_b64="${1}"
-    local remote_token_b64="${token_b64}"
+    local token="${1}"
 
     # Keep the inactive candidate overlay on the normal deploy path as well as
     # the monitor repair path. Its defaults preserve the generic fleet, while
@@ -872,15 +883,11 @@ deploy_runners() {
 
     log "Deploying runners on ${RUNNER_HOST} (force-recreate ensures fresh env)..."
 
-    if "${DRY_RUN}"; then
-        remote_token_b64="<redacted-token-b64>"
-    fi
-
-    # Decode token on remote side to avoid shell metacharacter issues
-    run_ssh "
+    # The token arrives on stdin (see ssh_token_stdin); no metacharacter in it
+    # can reach a shell parser, so no encoding is needed either.
+    ssh_token_stdin "${token}" "
         set -euo pipefail
-        RUNNER_TOKEN=\$(echo '${remote_token_b64}' | base64 -d)
-        export RUNNER_TOKEN
+        ${REMOTE_READ_TOKEN}
         cd ${RUNNER_HOST_DIR}
         if [ '${SKIP_BUILD}' = 'false' ]; then
             bash scripts/ci/build_runner_image.sh --tag omninode-runner:latest
@@ -1131,12 +1138,10 @@ deploy_with_retry() {
         else
             token=$(fetch_registration_token)
         fi
-        local token_b64
-        token_b64=$(encode_token "${token}")
 
         rsync_artifacts
         install_runner_slice
-        deploy_runners "${token_b64}"
+        deploy_runners "${token}"
         install_prune_cron
         install_monitor_timers
         install_health_cron
@@ -1380,7 +1385,7 @@ add_services_deploy() {
     log "=== Additive deploy of: ${ADD_SERVICES} ==="
     validate_add_services
 
-    local reg_handle token_b64
+    local reg_handle
     if "${DRY_RUN}"; then
         reg_handle="dry-run-handle"
     else
@@ -1388,7 +1393,6 @@ add_services_deploy() {
         # unlike --rolling this path does need a real handle.
         reg_handle="$(fetch_registration_token)"
     fi
-    token_b64=$(encode_token "${reg_handle}")
 
     rsync_artifacts
 
@@ -1401,10 +1405,6 @@ add_services_deploy() {
     fi
 
     local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
-    local remote_token_b64="${token_b64}"
-    if "${DRY_RUN}"; then
-        remote_token_b64="<redacted-token-b64>"
-    fi
 
     # No --force-recreate: additive means a converged container is left running.
     # No --remove-orphans: compose evaluates it against the WHOLE project even
@@ -1448,10 +1448,9 @@ add_services_deploy() {
             flags="${flags} --force-recreate"
         fi
 
-        run_ssh "
+        ssh_token_stdin "${reg_handle}" "
         set -euo pipefail
-        RUNNER_TOKEN=\$(echo '${remote_token_b64}' | base64 -d)
-        export RUNNER_TOKEN
+        ${REMOTE_READ_TOKEN}
         # The non-general-pool services interpolate DEPLOY_RUNNER_TOKEN, not
         # RUNNER_TOKEN. Both are ORG registration tokens for the same org.
         DEPLOY_RUNNER_TOKEN=\"\${RUNNER_TOKEN}\"
@@ -1510,6 +1509,13 @@ add_services_deploy() {
 ROLL_ONLINE_MAX_SECONDS="${ROLL_ONLINE_MAX_SECONDS:-240}"
 ROLL_ONLINE_INTERVAL_SECONDS="${ROLL_ONLINE_INTERVAL_SECONDS:-10}"
 ROLL_SKIP_RETRY_PASSES="${ROLL_SKIP_RETRY_PASSES:-2}"
+# OMN-21807: a recreate deletes the old container's layer, and containerd's
+# garbage collector holds its metadata write lock for that whole delete, so
+# every `docker rm` on the host blocks behind it. Docker lists the container
+# as Dead while that delete is pending. The roll waits for none to be listed
+# before it removes the next runner; the cap is generous because the measured
+# delete of a cache-filled layer took about 28 minutes (lane dev-restore-1515).
+ROLL_DEAD_MAX_SECONDS="${ROLL_DEAD_MAX_SECONDS:-3600}"
 
 fleet_services() {
     # Enumerate fleet services from the compose file itself, then cross-check
@@ -1618,12 +1624,10 @@ runner_is_idle() {
 }
 
 wait_for_runner_online() {
-    local name="${1}"
-    local elapsed=0
+    local name="${1}" elapsed=0 state
     while [[ "${elapsed}" -lt "${ROLL_ONLINE_MAX_SECONDS}" ]]; do
         sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
         elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
-        local state
         state=$(github_runner_state "${name}")
         if [[ "${state%% *}" == "online" ]]; then
             log "  ${name} back online after ~${elapsed}s."
@@ -1633,10 +1637,25 @@ wait_for_runner_online() {
     return 1
 }
 
+wait_for_no_dead_containers() {
+    # OMN-21807: block until `docker ps -a` on the runner host lists no Dead
+    # container, so a roll never queues a second removal behind the previous
+    # one's pending layer delete. Read-only, so it runs for real under --dry-run
+    # like the busy probes. A listing that cannot be read counts as not empty
+    # (fail closed): the lock that holds a delete can also stall the listing.
+    local elapsed=0
+    until [[ -z "$(ssh "${RUNNER_HOST}" "docker ps -a --filter status=dead --format '{{.Names}}'" 2>/dev/null || echo unreadable)" ]]; do
+        [[ "${elapsed}" -lt "${ROLL_DEAD_MAX_SECONDS}" ]] || return 1
+        log "  ${RUNNER_HOST} lists a Dead container (a layer delete is pending) or the listing is unreadable; waiting ..."
+        sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
+    done
+}
+
 roll_one_runner() {
     local name="${1}"
     local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
-    local mig_token="${2:-${DEPLOY_RUNNER_TOKEN:-}}" mig_token_b64
+    local mig_token="${2:-${DEPLOY_RUNNER_TOKEN:-}}"
     if [[ -z "${2:-}" && -n "${TOKEN_FILE}" ]]; then
         mig_token=$(<"${TOKEN_FILE}") || return 3
     fi
@@ -1644,6 +1663,11 @@ roll_one_runner() {
         warn "  ${name}: DEPLOY_RUNNER_TOKEN or --token-file is required -- refusing to recreate."
         return 3
     fi
+
+    # OMN-21807: wait for the previous runner's layer delete to finish BEFORE the
+    # idle re-check, which must stay immediately ahead of the stop: the wait can
+    # take most of an hour and a job can start in that time. Exit 4: not recreated.
+    wait_for_no_dead_containers || return 4
 
     # Re-check immediately before stopping: a job can start between the
     # selection pass and this call.
@@ -1690,11 +1714,9 @@ roll_one_runner() {
     # would delete containers this pass has not reached yet.
     # Pass the supplied handle at recreate time, without obtaining or persisting
     # one. The entrypoint can register even when its cache cannot be restored.
-    mig_token_b64=$(encode_token "${mig_token}")
-    ssh "${RUNNER_HOST}" "
+    ssh_token_stdin "${mig_token}" "
         set -euo pipefail
-        RUNNER_TOKEN=\$(echo '${mig_token_b64}' | base64 -d)
-        export RUNNER_TOKEN
+        ${REMOTE_READ_TOKEN}
         cd ${RUNNER_HOST_DIR}
         ${compose_cmd} up -d --force-recreate --no-deps --no-build ${name}
     " || return 1
@@ -1715,9 +1737,8 @@ rolling_deploy() {
     rsync_artifacts
     install_runner_slice
 
-    local services
+    local services total
     services=$(fleet_services)
-    local total
     total=$(printf '%s\n' "${services}" | grep -c .)
     log "Rolling ${total} fleet services on ${RUNNER_HOST}. Expect roughly $((total * 100 / 60)) minutes."
 
@@ -1740,8 +1761,7 @@ rolling_deploy() {
         log "Converging a single runner: ${ROLL_ONLY}."
     fi
 
-    local pass=0 done_count=0 failed="" rc
-    local skip_migration=()
+    local pass=0 done_count=0 failed="" rc skip_migration=()
     while [[ "${#pending[@]}" -gt 0 ]] && [[ "${pass}" -le "${ROLL_SKIP_RETRY_PASSES}" ]]; do
         [[ "${pass}" -eq 0 ]] || log "--- retry pass ${pass} for ${#pending[@]} runner(s) that were busy earlier ---"
         local next=()
@@ -1773,7 +1793,7 @@ rolling_deploy() {
     done
 
     if [[ -n "${failed}" ]]; then
-        err "HALTED at ${failed}: it did not come back online within ${ROLL_ONLINE_MAX_SECONDS}s. ${done_count}/${total} rolled; the rest still carry the previous container env. Investigate that container before resuming -- do NOT retry blindly, a wedged removal spawns another wedged container."
+        err "HALTED at ${failed}: it did not come back online within ${ROLL_ONLINE_MAX_SECONDS}s, or the host still lists a Dead container (an earlier removal is still deleting its layer) after ${ROLL_DEAD_MAX_SECONDS}s, in which case nothing was recreated. ${done_count}/${total} rolled; the rest still carry the previous container env. Investigate that container before resuming -- do NOT retry blindly, a wedged removal spawns another wedged container."
     fi
 
     log "Rolled ${done_count}/${total} runners."
@@ -2061,15 +2081,12 @@ secondary_deploy() {
         [[ -n "${states}" ]] || err "the org runner registry read came back empty; refusing to decide what to create"
     fi
 
-    local reg_handle token_b64 remote_token_b64
+    local reg_handle
     if "${DRY_RUN}"; then
         reg_handle="dry-run-handle"
     else
         reg_handle="$(fetch_registration_token)"
     fi
-    token_b64=$(encode_token "${reg_handle}")
-    remote_token_b64="${token_b64}"
-    "${DRY_RUN}" && remote_token_b64="<redacted-token-b64>"
     local exports=""
     local v
     for v in ${token_vars}; do
@@ -2091,12 +2108,15 @@ secondary_deploy() {
         fi
         log "  ${name} is ${status} -- creating it so it registers with a fresh token."
         flags="--no-deps --force-recreate"
-        secondary_ssh "
+        # stdin carries the token, so the here-string loop's own stdin is not
+        # inherited by this ssh (see secondary_ssh for why that matters).
+        ssh_token_stdin "${reg_handle}" "
             set -euo pipefail
-            handle=\$(echo '${remote_token_b64}' | base64 -d)
+            handle=\$(cat)
+            if [ -z \"\${handle}\" ]; then echo '[deploy-runners] no registration token arrived on stdin' >&2; exit 64; fi
             ${exports}
             ${compose_cmd} up -d ${flags} ${name}
-        " || err "compose up failed for ${name} on ${RUNNER_HOST}"
+        " "${SECONDARY_PATH_PREAMBLE} " || err "compose up failed for ${name} on ${RUNNER_HOST}"
     done <<< "${states}"
 
     if "${DRY_RUN}"; then

@@ -15,9 +15,6 @@ from omnibase_infra.lab_proof.enum_lab_proof_step_phase import EnumLabProofStepP
 from omnibase_infra.lab_proof.lab_proof_profile_registry import (
     load_lab_proof_profile_registry,
 )
-from omnibase_infra.lab_proof.model_lab_proof_bundle_policy import (
-    ModelLabProofBundlePolicy,
-)
 from omnibase_infra.lab_proof.model_lab_proof_observation import (
     ModelLabProofObservation,
 )
@@ -29,6 +26,9 @@ from omnibase_infra.lab_proof.model_lab_proof_run_report import (
     ModelLabProofRunReport,
 )
 from omnibase_infra.lab_proof.model_lab_proof_subject import ModelLabProofSubject
+from omnibase_infra.models.lab_proof.model_lab_proof_bundle_policy import (
+    ModelLabProofBundlePolicy,
+)
 from omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan import (
     HandlerLabProofPlan,
 )
@@ -41,7 +41,7 @@ CONTRACT = (
 HEAD = "bc32773871ae066939d69116271361710cb2e6d0"
 BASE = "0123456789abcdef0123456789abcdef01234567"
 INFRA = "c7150a15a94d5c4cc929de5f07bab2e7b622b497"
-LANE = "/home/prover/prove-lab-proof-build-1"
+LANE = "/srv/prover/prove-lab-proof-build-1"
 RUN = "core-1766-r1"
 CHANGED = (
     "src/omnibase_core/topics.py",

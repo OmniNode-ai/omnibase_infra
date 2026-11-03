@@ -56,6 +56,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts as _t
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -71,12 +72,9 @@ from omnibase_spi.contracts.delegation.contract_delegation_attribution import (
 
 logger = logging.getLogger(__name__)
 
+
 # Prompt version -- bump when system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
-
-# Default model identifier sent to the Coder-14B endpoint.
-# Must match the model ID returned by /v1/models.
-_DEFAULT_MODEL: str = "qwen2.5-coder-14b-instruct"
 
 # Default maximum tokens for the review response.
 _DEFAULT_MAX_TOKENS: int = 1_024
@@ -84,8 +82,6 @@ _DEFAULT_MAX_TOKENS: int = 1_024
 # Default temperature -- low for deterministic, high-quality review output.
 _DEFAULT_TEMPERATURE: float = 0.1
 
-# Per-request timeout in seconds.  Coder-14B is fast; 90 s gives headroom.
-_DEFAULT_TIMEOUT_SECONDS: float = 90.0
 
 # Delegation confidence: code review is a well-defined task for Coder-14B.
 _DELEGATION_CONFIDENCE: float = 0.92
@@ -193,7 +189,7 @@ class AdapterCodeReviewAnalysis:
         handler_category: ``EFFECT`` -- performs external I/O (HTTP call).
 
     Example:
-        >>> adapter = AdapterCodeReviewAnalysis()
+        >>> adapter = AdapterCodeReviewAnalysis(model=routed_model)
         >>> result = await adapter.review(
         ...     review_type="naming",
         ...     code_diff="- def Foo():\\n+ def foo():\\n",
@@ -205,7 +201,8 @@ class AdapterCodeReviewAnalysis:
     def __init__(
         self,
         base_url: str | None = None,
-        model: str = _DEFAULT_MODEL,
+        *,
+        model: str,
         max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = _DEFAULT_TEMPERATURE,
         api_key: str | None = None,
@@ -216,7 +213,7 @@ class AdapterCodeReviewAnalysis:
             base_url: Base URL of the Coder-14B endpoint.  Defaults to the
                 ``LLM_CODER_FAST_URL`` environment variable, falling back to
                 ``http://localhost:8001``.
-            model: Model identifier string sent in inference requests.
+            model: Model identifier from the model-routing policy.
             max_tokens: Maximum tokens for the review completion.
             temperature: Sampling temperature (lower = more deterministic).
             api_key: Optional Bearer token for authenticated endpoints.
@@ -274,7 +271,7 @@ class AdapterCodeReviewAnalysis:
 
         self._transport = TransportHolderLlmHttp(
             target_name="coder-14b-code-review",
-            max_timeout_seconds=180.0,
+            max_timeout_seconds=_t().llm_long_form_max_seconds,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
 
@@ -393,7 +390,7 @@ class AdapterCodeReviewAnalysis:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             api_key=self._api_key,
-            timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+            timeout_seconds=_t().llm_request_seconds,
         )
 
         try:

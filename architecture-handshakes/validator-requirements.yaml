@@ -55,7 +55,7 @@ known_repos:
 required_validators:
   hardcoded-local-paths:
     description: |
-      Blocks /Users/, /Volumes/, /home/, C:\Users\ absolute paths in source.
+      Blocks machine-specific absolute home-directory paths in source.
       Violations escape this on any repo without the hook wired.
     central_source: "omnibase_core.validation.validator_local_paths"
     pre_commit: required
@@ -68,6 +68,7 @@ required_validators:
     ci_workflow_keywords:
       - "validator_local_paths"
       - "validate-local-paths"
+      - "check-local-paths-compute"
     excludes:
       allowed: ["^tests/fixtures/", "^docs/"]
       forbidden: ["^tests/$", "^tests/[^f]", "^src/"]
@@ -116,6 +117,91 @@ required_validators:
       - omniintelligence
       - omninode_infra
       - onex_change_control
+  no-raw-sqlite3:
+    description: |
+      Rejects sqlite3.connect() outside *_adapter.py definitions; database access goes through an injected adapter.
+    central_source: "omnibase_core.nodes.node_no_raw_sqlite3_check_compute"
+    pre_commit: required
+    ci_workflow: required
+    required_check_on_main: null
+    silent_skip_allowed: false
+    pre_commit_hook_ids:
+      - "check-no-raw-sqlite3"
+    ci_workflow_keywords:
+      - "check-no-raw-sqlite3"
+    excludes:
+      allowed: ["^tests/fixtures/"]
+      forbidden: ["^src/"]
+    applies_to_repos:
+      - omnibase_infra
+  hardcoded-topic-compute:
+    description: |
+      Rejects quoted onex.* topic literals that a contract should declare.
+    central_source: "omnibase_core.nodes.node_hardcoded_topic_check_compute"
+    pre_commit: required
+    ci_workflow: required
+    required_check_on_main: null
+    silent_skip_allowed: false
+    pre_commit_hook_ids:
+      - "check-hardcoded-topic-compute"
+    ci_workflow_keywords:
+      - "check-hardcoded-topic-compute"
+    excludes:
+      allowed: ["^tests/fixtures/"]
+      forbidden: ["^src/"]
+    applies_to_repos:
+      - omnibase_infra
+  hardcoded-model-config:
+    description: |
+      Rejects new hardcoded lab model configuration against a per-file shrink-only baseline.
+    central_source: "omnibase_core.validation.hardcoded_model_config"
+    pre_commit: required
+    ci_workflow: required
+    required_check_on_main: null
+    silent_skip_allowed: false
+    pre_commit_hook_ids:
+      - "check-hardcoded-model-config-compute"
+    ci_workflow_keywords:
+      - "check-hardcoded-model-config-compute"
+    excludes:
+      allowed: ["^tests/fixtures/"]
+      forbidden: ["^src/"]
+    applies_to_repos:
+      - omnibase_infra
+  handler-di:
+    description: |
+      Holds handlers, nodes and command line modules to dependency injection against a per-file shrink-only baseline.
+    central_source: "omnibase_core.nodes.node_handler_di_check_effect"
+    pre_commit: required
+    ci_workflow: required
+    required_check_on_main: null
+    silent_skip_allowed: false
+    pre_commit_hook_ids:
+      - "handler-di-gate"
+    ci_workflow_keywords:
+      - "handler-di-gate"
+    excludes:
+      allowed: ["^tests/fixtures/"]
+      forbidden: ["^src/"]
+    applies_to_repos:
+      - omnibase_infra
+  no-io-outside-effects:
+    description: |
+      Rejects I/O in a module of a node package whose contract does not declare an effect archetype.
+    central_source: "omnibase_core.validation.validator_no_io_outside_effects"
+    pre_commit: required
+    ci_workflow: required
+    required_check_on_main: null
+    silent_skip_allowed: false
+    pre_commit_hook_ids:
+      - "check-no-io-outside-effects"
+    ci_workflow_keywords:
+      - "check-no-io-outside-effects"
+    excludes:
+      allowed: ["^tests/fixtures/"]
+      forbidden: ["^src/"]
+    applies_to_repos:
+      - omnibase_infra
   stub-implementations:
     description: |
       Blocks NotImplementedError, bare pass, bare TODO docstrings in non-test source.
@@ -324,7 +410,7 @@ required_validators:
     ci_workflow_keywords:
       - "aislop"
       - "ai-slop"
-      - "check_ai_slop"
+      - "runtime_ai_slop_check"
     excludes:
       allowed: ["^docs/", "^CHANGELOG\\.md$"]
       forbidden: ["^src/"]

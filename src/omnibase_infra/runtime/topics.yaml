@@ -39,3 +39,8 @@ topics:
   # inside runtime-effects; the generic node CLI publishes the mint request on its
   # local runtime bus before waiting for the mint-completed terminal.
   - onex.cmd.omnibase-infra.developer-principal-mint-requested.v1
+  # OMN-22002: omnibase_core publishes the validator run and triggered events
+  # (node_validation_report_write_effect); the validation ledger projection node
+  # consumes them, so they are declared as published outside this corpus.
+  - onex.evt.platform.validator-run.v1
+  - onex.evt.platform.validator-triggered.v1

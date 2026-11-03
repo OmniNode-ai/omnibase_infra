@@ -18,6 +18,9 @@ from omnibase_infra.lab_proof.lab_proof_profile_registry import (
     load_lab_proof_profile_registry,
 )
 from omnibase_infra.lab_proof.model_lab_proof_plan import ModelLabProofPlan
+from omnibase_infra.models.lab_proof.model_lab_proof_step_timeouts import (
+    ModelLabProofStepTimeouts,
+)
 from omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan import (
     SABOTAGE_LINE,
     HandlerLabProofPlan,
@@ -30,6 +33,7 @@ from tests.unit.nodes.node_lab_proof_plan_compute.lab_proof_fixtures import (
     LANE,
     REGISTRY,
     RUN,
+    bundle,
     core_plan,
     core_request,
 )
@@ -198,7 +202,7 @@ def test_refuses_a_row_that_runs_by_hand() -> None:
 
 def test_refuses_a_lane_root_that_is_not_a_prover_directory() -> None:
     with pytest.raises(ValueError, match="lane_root"):
-        core_request(lane_root="/home/prover")
+        core_request(lane_root="/srv/prover")
     with pytest.raises(ValueError, match="lane_root"):
         core_request(lane_root="/")
 
@@ -229,3 +233,81 @@ def test_the_base_build_is_handed_the_runtime_policy_env_before_the_bundle_env()
     argv = list(steps[_ID.BUILD_BASE].argv)
     env_files = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--env-file"]
     assert env_files == ["docker/runtime-policy.env", f"{LANE}/{RUN}/local.env"]
+
+
+@pytest.mark.parametrize("negative_control", [False, True])
+def test_every_step_takes_its_bound_and_the_bus_address_from_the_bundle_policy(
+    negative_control: bool,
+) -> None:
+    """Nothing in the handler fixes a timeout or the bus address (OMN-21623).
+
+    Every bound is given a distinct value the handler could not have held, so a
+    step that still carried its own number would not match the policy.
+    """
+    names = list(ModelLabProofStepTimeouts.model_fields)
+    distinct = {name: 1001 + index for index, name in enumerate(names)}
+    policy = bundle().model_copy(
+        update={
+            "step_timeouts": ModelLabProofStepTimeouts.model_validate(distinct),
+            "bus_bootstrap_servers": "bus.example:4321",
+            "delegation_timeout_seconds": 1100,
+        }
+    )
+    plan = HandlerLabProofPlan().handle(
+        core_request(bundle=policy, negative_control=negative_control)
+    )
+    by_id = {step.step_id: step for step in plan.steps}
+    expected = {
+        _ID.HOST_LOAD: "default_seconds",
+        _ID.PREFLIGHT_PROJECT_ABSENT: "default_seconds",
+        _ID.PREFLIGHT_IMAGE_ABSENT: "default_seconds",
+        _ID.PREFLIGHT_PORTS_FREE: "default_seconds",
+        _ID.INFRA_INIT: "default_seconds",
+        _ID.INFRA_FETCH: "git_fetch_seconds",
+        _ID.INFRA_CHECKOUT: "default_seconds",
+        _ID.INFRA_REV: "default_seconds",
+        _ID.SUBJECT_INIT: "default_seconds",
+        _ID.SUBJECT_FETCH: "git_fetch_seconds",
+        _ID.SUBJECT_CHECKOUT: "default_seconds",
+        _ID.SUBJECT_REV: "default_seconds",
+        _ID.FOCUSED_TESTS: "focused_tests_seconds",
+        _ID.SUBJECT_ARCHIVE: "default_seconds",
+        _ID.SUBJECT_EXTRACT: "default_seconds",
+        _ID.SUBJECT_HASH: "default_seconds",
+        _ID.OVERRIDE_DOCKERFILE: "default_seconds",
+        _ID.LOCAL_ENV: "default_seconds",
+        _ID.MODEL_ENDPOINT: "default_seconds",
+        _ID.GENERATE: "generate_seconds",
+        _ID.BUILD_BASE: "build_base_seconds",
+        _ID.TAG_BASE: "default_seconds",
+        _ID.BUILD_OVERRIDE: "build_override_seconds",
+        _ID.UP: "up_seconds",
+        _ID.HEALTH_MIGRATION_GATE: "health_probe_seconds",
+        _ID.HEALTH_RUNTIME_MAIN: "health_probe_seconds",
+        _ID.HEALTH_RUNTIME_EFFECTS: "health_probe_seconds",
+        _ID.IDENTITY_RUNTIME_MAIN: "identity_seconds",
+        _ID.IDENTITY_RUNTIME_EFFECTS: "identity_seconds",
+        _ID.IMPORT_SMOKE_RUNTIME_MAIN: "import_smoke_seconds",
+        _ID.IMPORT_SMOKE_RUNTIME_EFFECTS: "import_smoke_seconds",
+        _ID.WIRING_LOGS_RUNTIME_MAIN: "wiring_logs_seconds",
+        _ID.WIRING_LOGS_RUNTIME_EFFECTS: "wiring_logs_seconds",
+        _ID.DOWN: "down_seconds",
+        _ID.REMOVE_IMAGES: "remove_images_seconds",
+        _ID.REMOVE_WORKDIR: "remove_workdir_seconds",
+        _ID.RESIDUE_CONTAINERS: "default_seconds",
+        _ID.RESIDUE_VOLUMES: "default_seconds",
+        _ID.RESIDUE_NETWORKS: "default_seconds",
+        _ID.RESIDUE_IMAGES: "default_seconds",
+        _ID.RESIDUE_PORTS: "default_seconds",
+        _ID.RESIDUE_WORKDIR: "default_seconds",
+        _ID.RESIDUE_POSITIVE_CONTROL: "default_seconds",
+    }
+    if negative_control:
+        expected[_ID.NEGATIVE_CONTROL_SABOTAGE] = "default_seconds"
+    assert set(by_id) == {*expected, _ID.GOLDEN_CHAIN_DELEGATION}
+    for step_id, field in expected.items():
+        assert by_id[step_id].timeout_seconds == distinct[field], step_id
+    delegation = by_id[_ID.GOLDEN_CHAIN_DELEGATION]
+    assert delegation.timeout_seconds == policy.delegation_timeout_seconds
+    bootstrap = delegation.argv[delegation.argv.index("--kafka-bootstrap") + 1]
+    assert bootstrap == "bus.example:4321"

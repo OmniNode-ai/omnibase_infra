@@ -80,6 +80,10 @@ io_operations:
       - declaration_digest
       - refusal_kind
       - refusal
+# The one command topic a principal-specific grant addition may write: the lab
+# issuer's SCOPED_WRITE_TOPICS (OMN-20821). Read by models/developer_principal/topics.py.
+scoped_write_topics:
+  - "onex.cmd.omnimarket.github-repo-write-requested.v1"
 capabilities:
   - name: "developer_principal.plan"
     description: "Plan a developer broker principal under the lab issuer's declaration rules."

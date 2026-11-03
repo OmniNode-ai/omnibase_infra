@@ -1,0 +1,57 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22320
+title: omnibase_infra forward migration for the work-question projection tables
+summary: >-
+  Infra half only. Adds the forward migration that creates work_outcome_units, orchestration_style_outcomes, lane_drift_and_stalls, brief_quality_vs_outcome and subagent_waste in omninode_internal, with a checksum-bound ledger row and a migration class, and proves it on a real Postgres: applied twice the second pass changes nothing, from an empty database and from a database at the head of other projection chains, and the schema diff of one pass is exactly the five tables. The Postgres store behind the reducer's store protocol and its version-refusal test (AC2) are not delivered here; they are the omnimarket writer's half.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22320-migration
+    statement: >-
+      A forward migration creates exactly the five work-question tables, applies cleanly on an empty database and on a database at the previous head, and a second application changes nothing.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: a forward migration in omnibase_infra creates work_outcome_units and the four question tables, and applies cleanly on an empty database and on a database at the previous head -- falsifier: the migration test applies the migration twice on a real Postgres and the second pass changes nothing
+      - id: AC3
+        statement: >-
+          AC3: the migration adds no table beyond the five named and drops or alters no existing object -- falsifier: a test that diffs the schema before and after the migration finds exactly five added tables and no other change
+evidence_requirements:
+  - kind: tests
+    description: The vendored bytes, ledger row, class and table set, and the live-apply proofs on a disposable Postgres.
+    command: uv run pytest tests/unit/migrations/test_omn22320_work_questions_vendor.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22320-ac1-bytes-ledger
+    description: The migration bytes are bound to one ledger row and the forward-only class, the file creates exactly the five tables and removes nothing. It fails at the merge base, where the migration does not exist.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn22320_work_questions_vendor.py -q --no-cov
+        cwd: .
+  - id: dod-omn22320-ac1-live-apply
+    description: Apply the migration twice with psql on a disposable Postgres from an empty database and from a database at the head of other projection chains; the second pass leaves the schema and rows unchanged, the schema diff of the first pass is exactly the five tables with their keys and checks, and malformed rows are refused.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_work_questions_omn22320.py -q --no-cov
+        cwd: .
+  - id: dod-omn22320-ac1-runtime-grants-declared
+    description: 0001 grants omninode_runtime SELECT, INSERT and UPDATE on the five tables, the shipped topology declares exactly those grants, and the OMN-17886 live-ACL gate over a from-empty build finds no undeclared grant. It fails at 500a9d04a, where the topology does not declare the tables.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: OMN17886_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py -q --no-cov
+        cwd: .

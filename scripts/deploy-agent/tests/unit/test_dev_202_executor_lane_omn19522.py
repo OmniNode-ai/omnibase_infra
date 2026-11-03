@@ -413,6 +413,7 @@ class TestDev202PhasesOff:
         assert _FakeApplier.calls == []
 
     @pytest.mark.gateway_lane
+    @pytest.mark.usefixtures("gateway_phase_available")
     def test_dev_202_phases_off_gateway_deploy_is_a_no_op(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -517,17 +518,23 @@ class TestDev201Unchanged:
         assert cfg.postgres_container == "omnibase-infra-postgres"
         assert cfg.runtime_health_targets == RUNTIME_HEALTH_TARGETS
         assert cfg.main_runtime_container == "omninode-runtime"
-        assert cfg.disabled_phases == frozenset()
-        assert cfg.disabled_services == frozenset()
+        # OMN-21629: the one change to the default lane, declared as data in the
+        # routing table (flags: disabled_phases). See
+        # test_dev_201_gateway_off_omn21629.py.
+        assert cfg.disabled_phases == frozenset({EnumInstancePhase.GATEWAY_DEPLOY})
+        assert cfg.disabled_services == frozenset(DEV_LANE_GATEWAY_SERVICES)
         for phase in EnumInstancePhase:
-            assert lane_runs_phase(EnumRuntimeLane.DEV, phase)
+            assert lane_runs_phase(EnumRuntimeLane.DEV, phase) is (
+                phase is not EnumInstancePhase.GATEWAY_DEPLOY
+            )
 
     def test_dev_201_unchanged_compose_argv(self) -> None:
         select_dev_instance("dev-201")
-        up = _capture_compose_up(DeployExecutor())[0]
+        ups = _capture_compose_up(DeployExecutor())
+        up = ups[0]
         assert _project_of(up) == "omnibase-infra"
         assert len(_files_of(up)) == 3
-        assert "onex-api" in up
+        assert "onex-api" in [c[-1] for c in ups]
 
         builds = _capture_build(DeployExecutor())
         assert {_project_of(c) for c in builds} == {"omnibase-infra"}
@@ -537,9 +544,15 @@ class TestDev201Unchanged:
         assert set(DEV_LANE_ONLY_MIGRATION_SERVICES) <= named
 
     @pytest.mark.gateway_lane
-    def test_dev_201_unchanged_gateway_deploy_still_runs(
+    @pytest.mark.usefixtures("gateway_phase_available")
+    def test_dev_201_unchanged_gateway_deploy_runs_where_the_flag_is_absent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The gateway phase is not removed, it is a flag (OMN-21629).
+
+        The ``gateway_phase_available`` fixture puts the composition of an
+        instance without ``flags: disabled_phases`` in dev-201's slot.
+        """
         monkeypatch.setattr(
             executor_mod, "deploy_gateway_script", lambda: "/nonexistent/deploy.sh"
         )
@@ -554,7 +567,7 @@ class TestDev201Unchanged:
             )
 
     @pytest.mark.usefixtures("_fake_applier")
-    def test_dev_201_unchanged_job_runs_every_phase(
+    def test_dev_201_unchanged_job_runs_every_phase_but_the_gateway(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _, fake, _, _ = _run_dev_job(tmp_path, monkeypatch, instance="dev-201")

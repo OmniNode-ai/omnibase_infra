@@ -49,7 +49,6 @@ import importlib
 import json
 import logging
 import os
-import random
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
@@ -105,6 +104,10 @@ from omnibase_infra.gateway import (
 )
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.model_contract_hotload_config import (
+    ModelContractHotloadConfig,
+)
+from omnibase_infra.models.runtime import ModelRuntimeNodeSelection
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
@@ -193,6 +196,9 @@ if TYPE_CHECKING:
     )
     from omnibase_core.models.envelope.model_message_envelope import (
         ModelMessageEnvelope,
+    )
+    from omnibase_core.models.events.contract_registration.model_node_announcement import (
+        ModelNodeAnnouncement,
     )
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
@@ -285,17 +291,24 @@ def _current_runtime_profile_name() -> str:
     unregistered value can no longer reach a booted runtime, because
     ``load_runtime_profile`` refuses it during kernel boot.
     """
-    raw_profile = os.getenv("RUNTIME_PROFILE")
-    if raw_profile is None:
-        return "default"
-    profile = raw_profile.strip()
-    return profile.lower() if profile else "default"
+    profile = (os.getenv("RUNTIME_PROFILE") or "").strip().lower()
+    return profile or "default"
 
 
-def _runtime_profile_is_enabled(enabled_profiles: tuple[str, ...]) -> bool:
-    current_profile = _current_runtime_profile_name()
-    normalized_profiles = {profile.strip().lower() for profile in enabled_profiles}
-    return "*" in normalized_profiles or current_profile in normalized_profiles
+def _runtime_owned_service_enabled(enabled: bool, profiles: tuple[str, ...]) -> bool:
+    # OMN-22311: the local ingress and the Pattern B broker belong to the main
+    # runtime. A process bound to named contracts by ONEX_RUNTIME_NODE_SELECTION
+    # carries those contracts and nothing else (OMN-17427 AC63), so it starts
+    # neither. The broker's group carries no selection and the selected carrier
+    # shares main's KAFKA_INSTANCE_ID (OMN-19513), so the claude hook-events
+    # writer became a second member of main's broker group on a one-partition
+    # topic: on the dev lane it held the partition, main held none, and
+    # main's consumer_sync read CRITICAL. OMN-18087 AC11 scoped the kernel's own
+    # groups by the selection and did not reach this one.
+    if not enabled or ModelRuntimeNodeSelection.from_env().is_active:
+        return False
+    normalized = {profile.strip().lower() for profile in profiles}
+    return "*" in normalized or _current_runtime_profile_name() in normalized
 
 
 def _normalize_prefetch_policy(value: str) -> PrefetchPolicy:
@@ -851,6 +864,7 @@ class RuntimeHostProcess:
         prefetch_policy: PrefetchPolicy = "disabled",
         config_prefetch_status: str = "pending",
         deployment_topology: ModelDeploymentTopology | None = None,
+        node_announcements: tuple[ModelNodeAnnouncement, ...] = (),
     ) -> None:
         """Initialize the runtime host process.
 
@@ -1481,6 +1495,7 @@ class RuntimeHostProcess:
         self._introspection_service: ProtocolNodeIntrospection | None = (
             introspection_service
         )
+        self._node_announcements = node_announcements
 
         # Introspection configuration for jitter, throttle, and heartbeat timing (OMN-1930)
         # Import at runtime to avoid circular import
@@ -1947,6 +1962,12 @@ class RuntimeHostProcess:
 
         assert_venv_purity()
 
+        # Step 0c: Resolve the contract hot-load gate once (OMN-20079). A switch that
+        # is on in an environment the declared allowlist does not name (or in an
+        # unset environment), or a malformed block, fails the boot here, before
+        # architecture validation, the event bus or any wiring.
+        self._resolve_contract_hotload_gate()
+
         # Step 1: Validate architecture compliance FIRST (OMN-1138)
         # This runs before event bus starts or handlers are wired to ensure
         # clean failure without partial state if validation fails
@@ -2089,7 +2110,7 @@ class RuntimeHostProcess:
         # Subscribes to onex.evt.platform.node-registration.v1 AFTER the dispatch
         # engine is frozen. Routes incoming events to on_contract_registered()
         # then live materializes the handler into the frozen engine.
-        # No-op when KafkaContractSource is not configured.
+        # No-op unless contract_hotload.enabled is true (OMN-20079).
         await self._start_dynamic_contract_listener()
 
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
@@ -2614,14 +2635,12 @@ class RuntimeHostProcess:
         )
 
     def _is_local_ingress_effectively_enabled(self) -> bool:
-        return self._local_ingress_config.enabled and _runtime_profile_is_enabled(
-            self._local_ingress_config.enabled_profiles
-        )
+        config = self._local_ingress_config
+        return _runtime_owned_service_enabled(config.enabled, config.enabled_profiles)
 
     def _is_pattern_b_broker_effectively_enabled(self) -> bool:
-        return self._pattern_b_broker_config.enabled and _runtime_profile_is_enabled(
-            self._pattern_b_broker_config.enabled_profiles
-        )
+        config = self._pattern_b_broker_config
+        return _runtime_owned_service_enabled(config.enabled, config.enabled_profiles)
 
     async def dispatch_local_ingress_request(
         self,
@@ -5839,6 +5858,17 @@ class RuntimeHostProcess:
         self._container = ModelONEXContainer()
         return self._container
 
+    def _resolve_contract_hotload_gate(self) -> ModelContractHotloadConfig:
+        """Read ``contract_hotload`` once; start() step 0c decides, later steps follow."""
+        gate = getattr(self, "_contract_hotload_gate", None)
+        gate = gate or ModelContractHotloadConfig.from_runtime_config(
+            getattr(self, "_config", None),
+            os.getenv("ONEX_ENVIRONMENT", ""),
+            self._get_environment_from_config(),
+        )
+        self._contract_hotload_gate = gate
+        return gate
+
     def _get_environment_from_config(self) -> str:
         """Extract environment setting from config with consistent fallback.
 
@@ -6145,6 +6175,13 @@ class RuntimeHostProcess:
             )
             return
 
+        # Guard: contract hot loading is off unless the runtime config opts in
+        # (OMN-20079). contract-registered.v1 would otherwise cache and
+        # materialize any parseable contract it carries.
+        if not self._resolve_contract_hotload_gate().enabled:
+            logger.info("Baseline hot-load subscriptions off: not enabled")
+            return
+
         # Guard: only wire if KafkaContractSource is active
         if self._kafka_contract_source is None:
             logger.debug(
@@ -6352,14 +6389,18 @@ class RuntimeHostProcess:
         events through on_contract_registered() then live handler materialization.
 
         No-op when:
+        - ``contract_hotload.enabled`` is not true (the default; OMN-20079)
         - _event_bus is None
 
-        The runtime trusts events on this topic as pre-validated by omnimarket.
-        No local policy enforcement — only cache + materialize.
+        Once enabled, events on this topic are trusted as pre-validated.
 
         .. versionadded:: 0.9.4
             Added as part of OMN-11247 post-freeze dynamic contract registration.
         """
+        if not self._resolve_contract_hotload_gate().enabled:
+            logger.info("Dynamic contract listener off: contract_hotload not enabled")
+            return
+
         if self._event_bus is None:
             logger.debug("Skipping dynamic contract listener: no event bus available")
             return
@@ -6393,29 +6434,7 @@ class RuntimeHostProcess:
             ModelEventBusRecoveryConfig,
         )
 
-        config_context = ModelInfraErrorContext.with_correlation(
-            transport_type=EnumInfraTransportType.RUNTIME,
-            operation="dynamic_contract_listener.recovery_config",
-        )
-        event_bus_config = (self._config or {}).get("event_bus", {})
-        if not isinstance(event_bus_config, dict):
-            raise ProtocolConfigurationError(
-                "runtime config 'event_bus' must be a mapping",
-                context=config_context,
-            )
-        recovery_config = event_bus_config.get("recovery")
-        try:
-            recovery = (
-                ModelEventBusRecoveryConfig.model_validate(recovery_config)
-                if recovery_config is not None
-                else ModelEventBusRecoveryConfig.from_contract()
-            )
-        except ValidationError as exc:
-            raise ProtocolConfigurationError(
-                "invalid event_bus.recovery configuration for the dynamic "
-                f"contract listener: {sanitize_error_message(exc)}",
-                context=config_context,
-            ) from exc
+        recovery = ModelEventBusRecoveryConfig.from_runtime_config(self._config)
         delay = recovery.initial_backoff_seconds
         while True:
             try:
@@ -6703,110 +6722,44 @@ class RuntimeHostProcess:
         self,
         correlation_id: UUID,
     ) -> None:
-        """Publish introspection event with jitter for stampede prevention (OMN-1930).
+        """Publish startup introspection, then start the heartbeat (OMN-1930).
 
-        This method announces node presence to the platform after handlers are
-        wired. It implements two key protections:
-
-        1. **Jitter**: Random delay before publishing to prevent thundering herd
-           when many nodes restart simultaneously (e.g., cluster restart or
-           rolling deployment).
-
-        2. **Throttling**: Skips introspection if the last one was too recent,
-           preventing stampede during rapid restart cycles.
-
-        After publishing the initial introspection event, this method also starts
-        the heartbeat background task for periodic liveness announcements.
+        Delegates to ``HandlerRuntimeIntrospectionStartup``, which applies the
+        jitter and throttle protections. The heartbeat task starts only after a
+        successful publish. A no-op when introspection is not configured,
+        disabled, or throttled.
 
         Args:
             correlation_id: Correlation ID for distributed tracing.
-
-        Note:
-            This method is a no-op if:
-            - introspection_service is None (not injected)
-            - introspection_config.enabled is False
-            - Throttle check fails (last introspection too recent)
-
-        Example:
-            Called automatically by start() after handlers are wired::
-
-                await self._publish_introspection_with_jitter(
-                    correlation_id=startup_correlation_id
-                )
         """
-        # Guard: Skip if introspection not configured
-        if self._introspection_service is None:
-            logger.debug("Introspection service not configured, skipping")
-            return
+        from omnibase_infra.handlers.handler_registration_from_announcement import (
+            HandlerRegistrationFromAnnouncement,
+        )
+        from omnibase_infra.handlers.handler_runtime_introspection_startup import (
+            HandlerRuntimeIntrospectionStartup,
+        )
+        from omnibase_infra.models.model_runtime_introspection_startup_request import (
+            ModelRuntimeIntrospectionStartupRequest,
+        )
 
-        if not self._introspection_config.enabled:
-            logger.debug("Introspection disabled by config, skipping")
-            return
-
-        # Throttle check: Skip if last introspection was too recent
-        if self._last_introspection_time is not None:
-            elapsed = time.monotonic() - self._last_introspection_time
-            if elapsed < self._introspection_config.throttle_min_interval_s:
-                logger.debug(
-                    "Introspection throttled",
-                    extra={
-                        "elapsed_seconds": elapsed,
-                        "throttle_min_interval_s": (
-                            self._introspection_config.throttle_min_interval_s
-                        ),
-                    },
-                )
-                return
-
-        # Apply jitter: Random delay to prevent thundering herd
-        jitter_ms = random.randint(0, self._introspection_config.jitter_max_ms)
-        if jitter_ms > 0:
-            logger.debug(
-                "Applying introspection jitter",
-                extra={"jitter_ms": jitter_ms},
-            )
-            await asyncio.sleep(jitter_ms / 1000.0)
-
-        # Publish introspection event
-        try:
-            await self._introspection_service.publish_introspection(
-                reason=EnumIntrospectionReason.STARTUP,
+        handler = HandlerRuntimeIntrospectionStartup()
+        result = await handler.handle(
+            ModelRuntimeIntrospectionStartupRequest(
                 correlation_id=correlation_id,
-            )
-
-            # Record time for throttle tracking immediately after publish
-            self._last_introspection_time = time.monotonic()
-
-            logger.info(
-                "Startup introspection published",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "jitter_ms": jitter_ms,
-                },
-            )
-
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-            # Log warning but don't fail startup - introspection is optional
-            logger.warning(
-                "Failed to publish startup introspection",
-                extra={
-                    "error": str(e),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return
-
-        # Start heartbeat task for periodic liveness announcements
-        # Separate try block: heartbeat failure shouldn't affect throttle tracking
-        try:
-            await self._introspection_service.start_heartbeat_task()
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "Failed to start heartbeat task",
-                extra={
-                    "error": str(e),
-                    "correlation_id": str(correlation_id),
-                },
+                announcements=self._node_announcements,
+                last_introspection_time=self._last_introspection_time,
+            ),
+            service=self._introspection_service,
+            config=self._introspection_config,
+            event_bus=self._event_bus,
+            build_events=HandlerRegistrationFromAnnouncement.build_events,
+        )
+        self._last_introspection_time = result.last_introspection_time
+        if result.published:
+            await handler.start_heartbeat(
+                correlation_id,
+                service=self._introspection_service,
+                config=self._introspection_config,
             )
 
     # =========================================================================

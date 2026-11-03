@@ -34,10 +34,70 @@ requirements:
       - id: AC4
         statement: >-
           AC4: bootstrap starts plugin consumers before it calls subscribe_wired_contract_topics
+  - id: req-omn18087-roster-partition
+    statement: The boot interleave places every contract in the auto-wiring report exactly once.
+    acceptance:
+      - id: AC6
+        statement: >-
+          AC6: every contract in the auto-wiring report is attempted at boot or reported excluded (DEMAND_DEFERRED among them) exactly once, and a contract dropped from the deferred report, or reported in both sets, is named by the check
+  - id: req-omn18087-bounded-boot
+    statement: The boot-to-ready bound is declared in the runtime policy contract and a boot past it names its blockers.
+    acceptance:
+      - id: AC7
+        statement: >-
+          AC7: runtime_policy.contract.yaml declares main's boot-to-ready bound, the compose file renders it into the process, and a boot past it logs its blockers at ERROR without lowering the gate; failed probes are logged and retried, and late readiness is recorded with within_bound=False
+      - id: AC8
+        statement: >-
+          AC8: a boot past the bound names each required topic that holds no partition, and a required topic with no partition is never dropped from the required set to make the check pass
+  - id: req-omn18087-contract-owned-limits
+    statement: The join limit, join priority and main's memory limit are declared in the runtime policy contract.
+    acceptance:
+      - id: AC9
+        statement: >-
+          AC9: the priority contracts declared in the runtime policy contract subscribe before every other contract, and a contract off the list never precedes one on it
+      - id: AC10
+        statement: >-
+          AC10: main's join limit and memory limit are rendered from runtime_policy.contract.yaml, and no compose file carries a literal ONEX_MAX_CONCURRENT_CONTRACT_ATTACH or a 1536M memory limit on main
+  - id: req-omn18087-no-shared-kernel-groups
+    statement: A process bound to contracts by node selection does not join the kernel consumer groups of the main runtime.
+    acceptance:
+      - id: AC11
+        statement: >-
+          AC11: a process whose ONEX_RUNTIME_NODE_SELECTION names a contract derives its kernel consumer groups (contract registry, plugins, savings, runtime-error triage and the host process) from a service name that carries the selection, so it shares no group with the main runtime under the same KAFKA_INSTANCE_ID, and an unselected process keeps its existing group names
+  - id: req-omn18087-prepr-slot-first-party-audit
+    statement: The pre-PR slot build passes the first-party audit for the branch under test, with siblings at dev-merge tags.
+    acceptance:
+      - id: AC12
+        statement: >-
+          AC12: the first-party audit accepts a branch-staged target only in the pre-PR slot context declared in first_party_sources.yaml, the same record fails with kind branch in the dev-lane context, and a sibling staged from a branch still fails on the slot
+  - id: req-omn18087-runtime-http-provider
+    statement: Runtime HTTP consumers materialize their transport through the runtime provider.
+    acceptance:
+      - id: AC13
+        statement: >-
+          AC13: the HTTP handler and tool adapter use ProviderHttpClient, complete requests over a real socket, close clients they own and leave a supplied adapter client open
+  - id: req-omn18087-runtime-account-paths
+    statement: Compose runtime account paths follow the configured runtime user.
+    acceptance:
+      - id: AC14
+        statement: >-
+          AC14: credential and workspace paths render under the same home for the default and an alternate runtime account, in the infra compose and service catalog
+  - id: req-omn18087-bounded-contract-attach
+    statement: The boot interleave attaches contracts concurrently up to the declared join limit and no further.
+    acceptance:
+      - id: AC15
+        statement: >-
+          AC15: with the declared max_concurrent_contract_attach above one, that many contracts are inside the broker join together and no more are, counted without a clock, and the priority contracts are the first wave
 evidence_requirements:
   - kind: tests
     description: "Boot subscription tests pass"
     command: "uv run pytest tests/unit/runtime/test_omn18087_recovering_bus_concurrent_subscribe.py tests/unit/runtime/auto_wiring/test_omn18087_boot_subscribes_only_topics_in_use.py -q --no-cov"
+  - kind: tests
+    description: "Boot roster, priority, bound and policy tests pass"
+    command: "uv run pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py tests/unit/docker -q --no-cov"
+  - kind: tests
+    description: "Kernel consumer group collision test passes"
+    command: "uv run pytest tests/unit/runtime/test_kernel_consumer_group_collision_omn18087.py -q --no-cov"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -79,6 +139,75 @@ dod_evidence:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/test_kernel.py -q --no-cov -k plugin_consumers_before_auto_wired_joins"
         cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac6-roster-partition
+    description: >-
+      The started and DEMAND_DEFERRED sets partition the roster. Fails at the merge base, which has no partition check; dropping one contract from the deferred report, or reporting one in both sets, fails the check and names it.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -k 'partition or roster or outside'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac7-ac8-bounded-boot
+    description: >-
+      The bound is read from the rendered policy, and a planted required topic with no partition keeps the boot past the bound, is named in the log, and stays in the required set. Fails at the merge base, which has no bound and no explanation.
+    source: manual
+    binds_ac: [AC7, AC8]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -k 'bound or unjoinable or partitions or required_set'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac9-priority
+    description: >-
+      Priority contracts take the first join slots and an unlisted contract never precedes a listed one. Fails at the merge base, which has no priority list.
+    source: manual
+    binds_ac: [AC9]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -k priority"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac10-contract-owned-limits
+    description: >-
+      Main's join limit, join priority, boot bound and memory limit render from the policy contract and the compose files hold no literal for them. Fails at the merge base, whose main memory limit is the literal 1536M.
+    source: manual
+    binds_ac: [AC10]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_omn18087_boot_bound_and_policy.py tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py tests/unit/docker/test_docker_performance.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac15-bounded-contract-attach
+    description: >-
+      Joins in flight reach the declared limit and never pass it, and the priority contracts enter the first wave. Fails when the attach semaphore is serial (limit 2 and 3 never reached) and when it is unbounded (limit 1, 2 and 3 exceeded).
+    source: manual
+    binds_ac: [AC15]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_omn18087_bounded_contract_attach.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac11-no-shared-kernel-groups
+    description: >-
+      The writer's and the main runtime's kernel consumer groups are disjoint under one instance id, bootstrap hands the host process and the plugin consumers a service name that carries the node selection, and an unselected process keeps its group names. Fails at the merge base, where bootstrap hands a node-bound process the same service name as the main runtime and the model has no consumer_service.
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel_consumer_group_collision_omn18087.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/event_bus/test_kernel_group_ownership_omn18087.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel.py -q --no-cov -k selection_scoped_service"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac12-prepr-slot-first-party-audit
+    description: >-
+      The same branch-staged target record passes in the declared pre-PR slot context and fails with kind branch in the dev-lane context, and a sibling staged from a branch fails on the slot. The test module does not exist at the merge base.
+    source: manual
+    binds_ac: [AC12]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_first_party_slot_context_omn21928.py -q --no-cov -k 'first_party_slot_context_negative_control or sibling_branch_still_fails_on_slot'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn18087-deploy-probe
     description: >-
       Post-deploy probe: the running dev runtime imports the demand source and reports the in_use boot split in its log. It reads the runtime container after the deploy agent rolls it, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion; AC2 stays bound by dod-omn18087-ac2-ac3-in-use-boot-set.
@@ -91,3 +220,45 @@ dod_evidence:
       - check_type: command
         check_value: >-
           bash -o pipefail -c 'docker logs ${RUNTIME_CONTAINER:-omninode-runtime} 2>&1 | grep -F "Boot subscription split:" > /dev/null'
+  - id: dod-omn18087-deploy-readback
+    description: >-
+      Post-deploy readback on the running runtime after the deploy agent rolls it: the roster partition line is logged, the runtime reached ready inside the declared bound, and the container's memory limit is the contract's 3072M. It reads the runtime container, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion; AC6, AC7 and AC10 stay bound by their test entries.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'docker logs ${RUNTIME_CONTAINER:-omninode-runtime} 2>&1 | grep -F "Boot roster partition: roster=" > /dev/null'
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'docker logs ${RUNTIME_CONTAINER:-omninode-runtime} 2>&1 | grep -E "Runtime ready [0-9.]+ s after process start, bound=600 s within_bound=True" > /dev/null'
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'test "$(docker inspect -f "{{.HostConfig.Memory}}" ${RUNTIME_CONTAINER:-omninode-runtime})" = 3221225472'
+  - id: dod-omn18087-deploy-http-provider-readback
+    description: >-
+      Hosted-runner deploy check: the runtime HTTP handler and tool adapter use the runtime HTTP provider over loopback sockets; owned clients close and supplied clients stay open. No lane container or credential is required. The fix parent constructs raw clients without calling the runtime provider.
+    source: manual
+    binds_ac: [AC13]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn18087_runtime_http_readback.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-deploy-runtime-account-paths
+    description: >-
+      Hosted-runner deploy render check: the catalog generator and docker compose config render the real runtime account paths for the default and an alternate user, including main's credential HOME and workspace root. It starts no container and needs no daemon or lane credentials. The fix parent lacks main's account environment.
+    source: manual
+    binds_ac: [AC14]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_omn18087_runtime_user_home.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-deploy-boot-watch-readback
+    description: >-
+      Hosted-runner deploy check: start RuntimeHostProcess with the in-memory bus and HTTP handler, read its ServiceHealth endpoint over loopback, and hold a supplemental probe unready past the declared bound. The endpoint stays 503 until that probe becomes ready, then returns 200 while the watch records within_bound=False and exactly one bound error. The fix parent cannot observe late readiness after the bound. Unit checks also plant transient and persistent probe errors and verify cancellation and task failure observation.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn18087_boot_watch_readback.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"

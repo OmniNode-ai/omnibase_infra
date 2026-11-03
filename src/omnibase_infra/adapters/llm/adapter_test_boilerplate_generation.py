@@ -57,6 +57,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models.outbound_timeouts import load_outbound_timeouts as _t
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -72,12 +73,9 @@ from omnibase_spi.contracts.delegation.contract_delegation_attribution import (
 
 logger = logging.getLogger(__name__)
 
+
 # Prompt version -- bump when system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
-
-# Default model identifier sent to the Coder-14B endpoint.
-# Must match the model ID returned by /v1/models (full HuggingFace path).
-_DEFAULT_MODEL: str = "Qwen/Qwen3-14B-AWQ"
 
 # Default maximum tokens for the test boilerplate response.
 _DEFAULT_MAX_TOKENS: int = 2_048
@@ -85,12 +83,6 @@ _DEFAULT_MAX_TOKENS: int = 2_048
 # Default temperature -- low for deterministic, structured code generation.
 _DEFAULT_TEMPERATURE: float = 0.1
 
-# Per-request timeout in seconds.  Qwen3-14B is a fast coding model;
-# 90 s gives headroom for a 2 048-token completion without exceeding the
-# transport cap of 180 s.
-# IMPORTANT: Must not exceed TransportHolderLlmHttp(max_timeout_seconds=180.0).
-# If you raise this value, update the transport cap in __init__ accordingly.
-_DEFAULT_TIMEOUT_SECONDS: float = 90.0
 
 # Delegation confidence: test generation is a well-defined coding task.
 _DELEGATION_CONFIDENCE: float = 0.92
@@ -202,7 +194,7 @@ class AdapterTestBoilerplateGeneration:
         handler_category: ``EFFECT`` -- performs external I/O (HTTP call).
 
     Example:
-        >>> adapter = AdapterTestBoilerplateGeneration()
+        >>> adapter = AdapterTestBoilerplateGeneration(model=routed_model)
         >>> result = await adapter.generate(
         ...     task_type="test_module",
         ...     source="class MyService:\\n    def run(self) -> bool:\\n        ...",
@@ -214,7 +206,8 @@ class AdapterTestBoilerplateGeneration:
     def __init__(
         self,
         base_url: str | None = None,
-        model: str = _DEFAULT_MODEL,
+        *,
+        model: str,
         max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = _DEFAULT_TEMPERATURE,
         api_key: str | None = None,
@@ -225,7 +218,7 @@ class AdapterTestBoilerplateGeneration:
             base_url: Base URL of the Coder-14B endpoint.  Defaults to the
                 ``LLM_CODER_FAST_URL`` environment variable, falling back to
                 ``http://localhost:8001``.
-            model: Model identifier string sent in inference requests.
+            model: Model identifier from the model-routing policy.
             max_tokens: Maximum tokens for the test boilerplate completion.
             temperature: Sampling temperature (lower = more deterministic).
             api_key: Optional Bearer token for authenticated endpoints.
@@ -281,8 +274,8 @@ class AdapterTestBoilerplateGeneration:
         self._api_key: str | None = api_key
 
         self._transport = TransportHolderLlmHttp(
-            target_name="qwen3-14b-test-boilerplate",
-            max_timeout_seconds=180.0,
+            target_name=f"{model}-test-boilerplate",
+            max_timeout_seconds=_t().llm_long_form_max_seconds,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
 
@@ -394,7 +387,7 @@ class AdapterTestBoilerplateGeneration:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             api_key=self._api_key,
-            timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+            timeout_seconds=_t().llm_request_seconds,
         )
 
         # --- Call LLM ---
@@ -465,13 +458,13 @@ class AdapterTestBoilerplateGeneration:
 
         1. **Async context manager** (recommended)::
 
-               async with AdapterTestBoilerplateGeneration() as adapter:
+               async with AdapterTestBoilerplateGeneration(model=routed_model) as adapter:
                    result = await adapter.generate(task_type="test_module", source=src)
                # close() is called automatically on __aexit__
 
         2. **Explicit try/finally**::
 
-               adapter = AdapterTestBoilerplateGeneration()
+               adapter = AdapterTestBoilerplateGeneration(model=routed_model)
                try:
                    result = await adapter.generate(task_type="test_module", source=src)
                finally:

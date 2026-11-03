@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from uuid import UUID
 
 import yaml
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_registry_api_effect.models import (
+    ModelRegistryApiRequest,
     ModelRegistryApiResponse,
 )
 
@@ -60,19 +60,21 @@ class HandlerRegistryApiGetWidgetMapping:
         """Return the behavioral classification: EFFECT (external I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, request: object, correlation_id: UUID) -> object:
+    async def handle(
+        self, request: ModelRegistryApiRequest
+    ) -> ModelRegistryApiResponse:
         """Handle get_widget_mapping operation.
 
         Reads and parses the widget_mapping.yaml file. Returns an error
         response if the file is missing or malformed rather than raising.
 
         Args:
-            request: Ignored for this operation.
-            correlation_id: Distributed tracing identifier.
+            request: Typed registry API request with a correlation ID.
 
         Returns:
             ModelRegistryApiResponse with parsed widget mapping in ``data``.
         """
+        correlation_id = request.correlation_id
         try:
             with self._mapping_path.open() as fh:
                 mapping = yaml.safe_load(fh) or {}

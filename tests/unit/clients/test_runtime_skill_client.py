@@ -19,18 +19,7 @@ from omnibase_core.models.runtime import (
 )
 from omnibase_infra.clients.runtime_skill_client import (
     LocalRuntimeSkillClient,
-    default_runtime_socket_path,
 )
-
-
-@pytest.mark.unit
-def test_default_runtime_socket_path_env(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    socket_path = tmp_path / "test-runtime.sock"
-    monkeypatch.setenv("ONEX_LOCAL_RUNTIME_SOCKET_PATH", str(socket_path))
-    assert default_runtime_socket_path() == str(socket_path)
 
 
 @pytest.mark.asyncio

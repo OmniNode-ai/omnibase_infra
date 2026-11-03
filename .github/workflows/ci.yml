@@ -106,7 +106,6 @@ env:
       && 'false'
       || 'true'
     }}
-  OMNI_CI_ENV_ROOT: "/home/runner/.cache/omni/ci-envs"
   # uv resolves several pinned git dependencies during CI.  The self-hosted
   # runner pool has intermittent HTTP/2 stream resets against GitHub; force git
   # subprocesses spawned by uv onto HTTP/1.1 so dependency installs are stable.
@@ -332,6 +331,10 @@ jobs:
       # OMN-20910: paired with the review-voter-model-from-overlay pre-commit hook.
       - name: Review voter model comes from the overlay (OMN-20910)
         run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -n 0 --no-cov -p no:randomly
+
+      # OMN-22275: paired with the hostile-review-agent-accept pre-commit hook.
+      - name: Hostile Review accepts an agent receipt (OMN-22275)
+        run: uv run --frozen pytest tests/ci/test_hostile_review_agent_accept_omn22275.py tests/ci/test_hostile_review_agent_accept_step_shape_omn22275.py tests/ci/test_ci_summary_external_sweep_agent_accept_omn22275.py -q -n 0 --no-cov -p no:randomly
 
       # OMN-17678: same focused suite as the pre-commit transport gate.
       - name: Linear transport consolidation regression (OMN-17678)
@@ -614,6 +617,49 @@ jobs:
         # checked here, with the root project's mypy, because that is where
         # this repository declares type scope.
         run: uv run mypy src/omnibase_infra scripts/deploy-agent/deploy_agent
+
+      # The jobs here install from uv.lock, so a dependency range that admits a
+      # newer major than the lock pins is never exercised by them. These steps
+      # build the pull request's own wheel, install it into a clean virtual
+      # environment WITHOUT the lock (mcp resolves to the highest version the
+      # declared range admits, as it does for a PyPI install) and build the
+      # streamable HTTP MCP application with one registered tool, so the tool
+      # registration path runs against the resolved SDK. On a commit that
+      # imports a module the resolved SDK no longer ships, the last step fails
+      # with ImportError.
+      - name: Build wheel for MCP resolution check
+        run: uv build --wheel --out-dir "$RUNNER_TEMP/dist"
+
+      - name: Install wheel into a clean environment without the lock
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/clean-venv"
+          uv pip install --python "$RUNNER_TEMP/clean-venv/bin/python" "$RUNNER_TEMP"/dist/*.whl
+          "$RUNNER_TEMP/clean-venv/bin/python" -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
+
+      - name: Create the MCP application from the installed wheel
+        # Run from outside the checkout so the installed wheel, not ./src, is imported.
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/clean-venv/bin/python" - <<'PY'
+          from omnibase_infra.handlers.mcp.transport_streamable_http import (
+              TransportMCPStreamableHttp,
+          )
+
+
+          class _SmokeTool:
+              """Minimal tool definition so registration runs against the resolved SDK."""
+
+              name = "mcp_resolution_smoke"
+              description = "Registers one tool through the installed MCP SDK."
+              parameters: list[object] = []
+
+
+          app = TransportMCPStreamableHttp().create_app(
+              tools=[_SmokeTool()], tool_executor=lambda name, arguments: None
+          )
+          assert app is not None
+          print("create_app returned", type(app).__name__)
+          PY
 
   # ===========================================================================
   # Shape-gate detectors that run on every PR (OMN-20298). Each job below has
@@ -1328,22 +1374,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+
       # Full tree, not the diff: a denylisted identifier reaching dev by ANY route
       # (a rebase carrying it in, as happened on omnimarket#2241) must red the PR,
-      # not just one that edits the offending line. Stdlib-only, so no uv setup.
+      # not just one that edits the offending line. The scanner is omnibase_core's
+      # (OMN-21939), at the same rev as the exposed-identifier-gate pre-commit hook;
+      # this repo supplies only the denylist.
       - name: Scan the working tree for denylisted identifiers
         run: |
           echo "================================================================"
           echo "Exposed Identifier Gate (OMN-17320)"
           echo "================================================================"
-          python3 scripts/validation/check_exposed_identifiers.py \
-            --mode blocking --scope all
-
-      - name: Report the cross-repo parity fingerprint
-        if: always()
-        run: |
-          echo "omnibase_infra copy:"
-          python3 scripts/validation/check_exposed_identifiers.py --print-fingerprint
+          uvx pre-commit@4.5.1 run exposed-identifier-gate --all-files
 
   # Pin reachability -- every cross-repo pin (workflow `uses:`/`with:` refs,
   # pyproject [tool.uv.sources] revs, uv.lock git revs) must name a commit
@@ -3641,6 +3687,50 @@ jobs:
             --allowlist .onex_ratchets/noncanonical_class_allowlist.yaml \
             src/omnibase_infra
 
+  # OMN-21891 (one-runtime plan task T1): every service of every lane's compose files is the
+  # runtime, a declared dependency, a one-shot or a baselined entry, and the runtime runs one
+  # replica (config/validation/stack_shape.yaml, judged by omnibase_core's stack-shape
+  # validator). Unconditional: no path filter, no needs, no if. A PR that only adds a
+  # baseline entry is judged too, against the merge base, where the baseline may not grow.
+  # A red job fails CI Summary through its default-deny sweep. DO NOT rename this job: the
+  # display name is the check-run context a branch-protection change would name.
+  stack-shape:
+    name: Stack Shape (OMN-21891)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      - name: Judge every lane's compose files against the allowlist
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            STACK_SHAPE_BASE_REF="$(git merge-base "$base" HEAD)"
+          else
+            echo "no base revision on this event; the baseline is judged against HEAD"
+            STACK_SHAPE_BASE_REF=HEAD
+          fi
+          export STACK_SHAPE_BASE_REF
+          uv sync --frozen
+          uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -n 0 -p no:cacheprovider
+
   # OMN-15378 AC3: scripts/deploy-agent's own pytest root (201 tests) ran in a
   # SEPARATELY-TRIGGERED workflow, so the CI Summary poller — which reads
   # `actions/runs/${RUN_ID}/jobs` for its own run only — structurally could not
@@ -4207,8 +4297,6 @@ jobs:
     name: Canonical File Shape (OMN-20304)
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     timeout-minutes: 15
-    env:
-      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261029151319-6e0a5eee541a"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4222,6 +4310,19 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: "0.8.3"
+      # OMN-21538: the core tag has one home, the omnibase_core block of
+      # .pre-commit-config.yaml that holds the canonical-file-shape hook.
+      - name: Read the core pin from .pre-commit-config.yaml
+        run: |
+          set -eu
+          spec="$(uv run --no-project --with pyyaml python -c '
+          import yaml
+          config = yaml.safe_load(open(".pre-commit-config.yaml"))
+          blocks = [r for r in config["repos"] if any(h["id"] == "canonical-file-shape" for h in r["hooks"])]
+          assert len(blocks) == 1, blocks
+          print("omnibase-core @ git+" + blocks[0]["repo"] + "@" + blocks[0]["rev"])
+          ')"
+          echo "CANONICAL_FILE_SHAPE_CORE=${spec}" >> "$GITHUB_ENV"
       - name: Positive control (planted bad sample refused, clean sample accepted)
         run: |
           set -u
@@ -4251,7 +4352,7 @@ jobs:
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          set -u
+          set -euo pipefail
           base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
             base="$(git merge-base "$base" HEAD)"
@@ -4372,7 +4473,7 @@ jobs:
           MQ_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          set -u
+          set -euo pipefail
           base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
           args=(--repo omnibase_infra --visibility public)
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
@@ -4382,6 +4483,75 @@ jobs:
           fi
           uv run --no-project --with "$RUNNER_PLACEMENT_CORE" \
             python -m omnibase_core.handlers.handler_public_runner_placement_cli "${args[@]}"
+
+  # OMN-21538: omnibase_core's generic validators run in CI as the hook ids of
+  # .pre-commit-config.yaml over the files a change touches, so this job and the local hooks
+  # name one core dev-merge tag (read from the config, never typed here) and cannot
+  # drift. Each baseline is per file, shrink-only, target zero. Unconditional: no
+  # needs/if; GitHub-hosted by literal. The CI Summary sweep fails when it fails.
+  core-validators:
+    name: Core Validators (OMN-21538)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      # The literals are split through printf so this workflow file holds none of
+      # the defects it plants. check-no-io-outside-effects and handler-di-gate have no
+      # planted control: their findings depend on a node or handler module's place in
+      # the package, which a single planted file at the root does not reproduce.
+      - name: Positive control (planted defects refused)
+        run: |
+          set -euo pipefail
+          printf 'import sqlite3\n\nCONNECTION = sqlite3.connect(":memory:")\n' > zz_planted_sqlite3.py
+          printf 'ROOT = "/%s/planted/project"\n' Users > zz_planted_local_path.py
+          printf 'TOPIC = "%s.evt.planted.thing.v1"\n' onex > zz_planted_topic.py
+          printf 'MODEL = "%s-%s-opus-20240229"\n' claude 3 > zz_planted_model_config.py
+          for pair in check-no-raw-sqlite3:zz_planted_sqlite3.py \
+            check-local-paths-compute:zz_planted_local_path.py \
+            check-hardcoded-topic-compute:zz_planted_topic.py \
+            check-hardcoded-model-config-compute:zz_planted_model_config.py; do
+            hook="${pair%%:*}"
+            planted="${pair#*:}"
+            if uvx pre-commit@4.5.1 run "$hook" --files "$planted"; then
+              echo "POSITIVE CONTROL FAILED: $hook accepted $planted"
+              exit 1
+            fi
+            echo "positive control: $hook refused $planted"
+          done
+          rm zz_planted_sqlite3.py zz_planted_local_path.py zz_planted_topic.py \
+            zz_planted_model_config.py
+      # check-no-raw-sqlite3, check-local-paths-compute, check-hardcoded-topic-compute
+      # and check-no-io-outside-effects have no baseline, and the two baselines omit
+      # the files that findings F44 to F47 name, so each hook judges the files this
+      # change touches, the same set the pre-commit hooks see.
+      - name: Run the core validators over the files this change touches
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="HEAD^"
+          fi
+          from_ref="$(git merge-base "$base" HEAD)"
+          for hook in check-no-raw-sqlite3 check-local-paths-compute \
+            check-hardcoded-topic-compute check-hardcoded-model-config-compute \
+            check-no-io-outside-effects handler-di-gate; do
+            uvx pre-commit@4.5.1 run "$hook" --from-ref "$from_ref" --to-ref HEAD
+          done
 
   ci-summary:
     name: CI Summary
@@ -6242,9 +6412,9 @@ jobs:
         run: |
           if [ -n "$GITHUB_BASE_REF" ]; then
             git fetch origin "$GITHUB_BASE_REF" --no-tags --depth=1
-            FILES=$(git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD -- '*.py' '*.md' | tr '\n' ' ')
+            FILES=$(git diff --name-only --diff-filter=d "origin/$GITHUB_BASE_REF"...HEAD -- '*.py' '*.md' | tr '\n' ' ')
           else
-            FILES=$(git diff --name-only HEAD~1 -- '*.py' '*.md' 2>/dev/null | tr '\n' ' ')
+            FILES=$(git diff --name-only --diff-filter=d HEAD~1 -- '*.py' '*.md' 2>/dev/null | tr '\n' ' ')
           fi
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
         env:
@@ -6254,4 +6424,5 @@ jobs:
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
           if [ -z "$CHANGED_FILES" ]; then exit 0; fi
-          echo "$CHANGED_FILES" | tr ' ' '\n' | xargs python scripts/validation/check_ai_slop.py --strict
+          # The check-ai-slop hook carries --strict in omnibase_core's manifest.
+          echo "$CHANGED_FILES" | tr ' ' '\n' | xargs uvx pre-commit@4.5.1 run check-ai-slop --files

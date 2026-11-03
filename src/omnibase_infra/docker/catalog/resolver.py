@@ -98,33 +98,16 @@ def _load_manifest(path: Path) -> CatalogManifest:
 
     ulimits: dict[str, ULimit] = {}
     for name, limit in (raw.get("ulimits") or {}).items():
-        ulimits[str(name)] = ULimit(
-            soft=int(limit["soft"]),
-            hard=int(limit["hard"]),
-        )
+        ulimits[str(name)] = ULimit(soft=int(limit["soft"]), hard=int(limit["hard"]))
 
     optional_directory_bind_mounts: list[ModelOptionalDirectoryBindMount] = []
     for mount in raw.get("optional_directory_bind_mounts", []):
-        if not isinstance(mount, dict):
-            raise ValueError("optional_directory_bind_mounts entries must be mappings")
-        source_env = mount.get("source_env")
-        container_path = mount.get("container_path")
-        read_only = mount.get("read_only", True)
-        if not isinstance(source_env, str) or not isinstance(container_path, str):
-            raise ValueError(
-                "optional directory bind mount source_env and container_path must be strings"
+        try:
+            optional_directory_bind_mounts.append(
+                ModelOptionalDirectoryBindMount(**mount)
             )
-        if not isinstance(read_only, bool):
-            raise ValueError(
-                "optional directory bind mount read_only must be a boolean"
-            )
-        optional_directory_bind_mounts.append(
-            ModelOptionalDirectoryBindMount(
-                source_env=source_env,
-                container_path=container_path,
-                read_only=read_only,
-            )
-        )
+        except (TypeError, AttributeError) as exc:
+            raise ValueError(f"invalid optional directory bind mount: {exc}") from exc
 
     return CatalogManifest(
         name=raw["name"],

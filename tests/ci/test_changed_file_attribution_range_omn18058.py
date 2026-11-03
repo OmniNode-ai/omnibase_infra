@@ -22,17 +22,26 @@ Sites pinned by this module:
 * ``scripts/hooks/prepush_smart_tests.sh`` -- the OMN-13973 governed selector's
   ``BASE_SHA`` range (structural ratchet; the shell hook is not importable).
 * ``scripts/validate-kafka-schema-handshake.py`` -- ``_changed_module_prefixes``.
-* ``scripts/check_release_identity.py`` -- ``_collect_changed_files``.
+* ``omnibase_core`` ``NodeReleaseIdentityGatherEffect`` -- the core runtime behind
+  the ``check-release-identity`` hook, which replaced the local script.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
+from omnibase_core.models.nodes.release_identity_check.model_release_identity_gather_input import (
+    ModelReleaseIdentityGatherInput,
+)
+from omnibase_core.nodes.node_release_identity_gather_effect.handler import (
+    NodeReleaseIdentityGatherEffect,
+)
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from scripts.ci.check_deploy_scope_dod import (
     FAIL_NO_EVIDENCE,
     FAIL_NO_TICKET,
@@ -58,6 +67,7 @@ def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
+        env=scrub_git_location_env(os.environ),
         capture_output=True,
         text=True,
     )
@@ -92,8 +102,16 @@ def _build_stale_base_repo(
     """
     origin = tmp_path / "origin.git"
     work = tmp_path / "work"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(origin)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    subprocess.run(
+        ["git", "init", "-q", str(work)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
     _git(work, "config", "user.email", "omn18058@example.invalid")
     _git(work, "config", "user.name", "omn18058 fixture")
     _git(work, "config", "commit.gpgsign", "false")
@@ -235,35 +253,40 @@ def test_kafka_schema_handshake_range_is_merge_base_anchored() -> None:
 
 
 @pytest.mark.unit
-def test_release_identity_empty_branch_diff_does_not_fall_back_to_a_peers_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_core_release_identity_empty_branch_diff_does_not_fall_back_to_a_peers_files(
+    tmp_path: Path,
 ) -> None:
-    """The empty-three-dot fallback must stay merge-base anchored.
+    """Core's release-identity gatherer must stay merge-base anchored.
 
-    When the branch has no commits of its own, the branch changed nothing. The old
-    two-dot fallback reported the PEER's ``src/`` landings instead, which arms the
-    release-identity version gate against a branch that touched no packaged source
-    at all.
+    Replaces the deleted local ``_collect_changed_files`` regression: a branch with
+    no commits of its own changed nothing, so the gatherer must not report the
+    PEER's ``src/`` landings, which would arm the version gate against a branch that
+    touched no packaged source.
     """
-    identity = _load_module(
-        "_omn18058_release_identity", REPO_ROOT / "scripts/check_release_identity.py"
-    )
     repo = _build_stale_base_repo(tmp_path, branch_commits=False)
-    # Positive control: the three-dot set really is empty here, so the fallback
-    # branch under test is the one that executes, and the two-dot form on this
-    # same fixture DOES surface the peer's file.
-    assert _git(repo, "diff", "--name-only", "origin/dev...HEAD").strip() == ""
+    _write(repo, "pyproject.toml", '[project]\nname = "x"\nversion = "1.0.1"\n')
+    _git(repo, "add", "pyproject.toml")
+    _git(repo, "commit", "-q", "-m", "chore: declare a version")
+    _git(repo, "tag", "v1.0.0")
+    # Positive control: the three-dot set is only the version file, and the two-dot
+    # form on this same fixture DOES surface the peer's file.
+    assert _git(repo, "diff", "--name-only", "origin/dev...HEAD").split() == [
+        "pyproject.toml"
+    ]
     assert _PEER_DEPLOY_SCOPED in _two_dot(repo, "origin/dev")
 
-    # ``_git`` runs with ``cwd=_REPO_ROOT``; point it at the fixture so the test
-    # exercises the fixture's history rather than this checkout's.
-    monkeypatch.setattr(identity, "_REPO_ROOT", repo)
-    assert identity._collect_changed_files("origin/dev", []) == ()
+    facts = NodeReleaseIdentityGatherEffect().handle(
+        ModelReleaseIdentityGatherInput(repo_root=str(repo), base="origin/dev")
+    )
+    assert facts.changed_files == ("pyproject.toml",)
+    assert _PEER_DEPLOY_SCOPED not in (facts.changed_files or ())
 
-    # And the fallback still sees this branch's own UNCOMMITTED edit.
-    (repo / "src" / "omnibase_infra").mkdir(parents=True, exist_ok=True)
+    # And the gatherer still sees this branch's own UNCOMMITTED edit.
     (repo / "docs" / "base.md").write_text("locally edited\n", encoding="utf-8")
-    assert identity._collect_changed_files("origin/dev", []) == ("docs/base.md",)
+    facts = NodeReleaseIdentityGatherEffect().handle(
+        ModelReleaseIdentityGatherInput(repo_root=str(repo), base="origin/dev")
+    )
+    assert facts.changed_files == ("pyproject.toml", "docs/base.md")
 
 
 @pytest.mark.unit

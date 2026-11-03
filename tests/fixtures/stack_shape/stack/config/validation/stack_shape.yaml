@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-21891: a small stack in the real data file's format, for the checker tests.
+runtime:
+  services: [omninode-runtime]
+  max_replicas: 1
+dependencies: [postgres, redpanda]
+one_shots: [forward-migration, "*-topics"]
+compose_files: docker/docker-compose*.yml
+not_a_stack:
+  - docker/docker-compose.unrelated.yml
+baseline:
+  - service: legacy-consumer
+    files: 1
+    ticket: OMN-21288
+  - service: "*-image"
+    files: 2
+    ticket: OMN-21288

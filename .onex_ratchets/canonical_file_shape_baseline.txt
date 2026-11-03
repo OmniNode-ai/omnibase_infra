@@ -100,7 +100,6 @@ scripts/check_placeholder_topics.sh
 scripts/check_prod_promotion_lineage.py
 scripts/check_reconciler_movement_proof.py
 scripts/check_reconciler_privilege.py
-scripts/check_release_identity.py
 scripts/check_required_env_vars.py
 scripts/check_runtime_image_identity.py
 scripts/check_schema_fingerprint.py
@@ -461,10 +460,8 @@ scripts/validate_handler_contracts.py
 scripts/validate_no_direct_env.py
 scripts/validate_pr_contracts.py
 scripts/validation/__init__.py
-scripts/validation/check_ai_slop.py
 scripts/validation/check_claudemd_references.py
 scripts/validation/check_cli_registry_vocabulary.py
-scripts/validation/check_exposed_identifiers.py
 scripts/validation/check_kafka_no_hardcoded_fallback.sh
 scripts/validation/check_migration_class.py
 scripts/validation/check_migration_conflicts.py
@@ -490,7 +487,6 @@ scripts/validation/validate_markdown_links.py
 scripts/validation/validate_model_dump_json_mode.py
 scripts/validation/validate_naming.py
 scripts/validation/validate_precommit_fail_loud.py
-scripts/validation/validate_precommit_interpreter.py
 scripts/validation/validate_precommit_pin_parity.py
 scripts/validation/validate_test_removal_gate.py
 scripts/validation/validate_test_root_collection.py
@@ -846,7 +842,6 @@ src/omnibase_infra/lab_proof/enum_lab_proof_profile_status.py
 src/omnibase_infra/lab_proof/enum_lab_proof_step_id.py
 src/omnibase_infra/lab_proof/enum_lab_proof_step_phase.py
 src/omnibase_infra/lab_proof/lab_proof_profile_registry.py
-src/omnibase_infra/lab_proof/model_lab_proof_bundle_policy.py
 src/omnibase_infra/lab_proof/model_lab_proof_check_result.py
 src/omnibase_infra/lab_proof/model_lab_proof_companion_rule.py
 src/omnibase_infra/lab_proof/model_lab_proof_excluded_repo.py
@@ -1044,8 +1039,6 @@ src/omnibase_infra/registry/models/__init__.py
 src/omnibase_infra/registry/models/model_artifact_registry.py
 src/omnibase_infra/registry/models/model_artifact_registry_entry.py
 src/omnibase_infra/registry/models/model_source_trigger.py
-src/omnibase_infra/resources/__init__.py
-src/omnibase_infra/resources/handler_resource_manager.py
 src/omnibase_infra/runtime/__init__.py
 src/omnibase_infra/runtime/_enum_coercion.py
 src/omnibase_infra/runtime/action_authorization_claim/__init__.py
@@ -1880,7 +1873,6 @@ src/omnibase_infra/verification/models/model_contract_verification_report.py
 src/omnibase_infra/verification/orchestrator.py
 src/omnibase_infra/verification/probes/__init__.py
 src/omnibase_infra/verification/probes/migration_schema_contract.py
-src/omnibase_infra/verification/probes/probe_handler_execution.py
 src/omnibase_infra/verification/probes/probe_projection.py
 src/omnibase_infra/verification/probes/probe_publication.py
 src/omnibase_infra/verification/probes/probe_schema_validator.py

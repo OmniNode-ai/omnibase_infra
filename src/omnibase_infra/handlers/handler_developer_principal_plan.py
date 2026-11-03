@@ -123,6 +123,16 @@ def _declaration(text: str, documents: Mapping[str, str]) -> PlannedDeclaration:
     if not isinstance(grants_raw, list) or not grants_raw:
         raise DeclarationRefusedError("grants must be a non-empty list")
     grants = tuple(_grant(i, g) for i, g in enumerate(grants_raw))
+    # The plan has no trusted overlay, so machine grants are validated and bound
+    # into the declaration digest but never selected for a developer request.
+    if "machine_grants_from" in doc:
+        if lane != "dev":
+            raise DeclarationRefusedError("machine additions are dev-only")
+        rows, derived = _derived_grants(doc["machine_grants_from"], documents, lane)
+        machine_grants = tuple(_grant(i, row) for i, row in enumerate(rows))
+        if not machine_grants:
+            raise DeclarationRefusedError("machine grants must be non-empty")
+        digest.update(derived)
     scoped = doc.get("principal_grants_from", {})
     if not isinstance(scoped, dict):
         raise DeclarationRefusedError("principal_grants_from must be a mapping")
@@ -231,7 +241,7 @@ def _derived_grants(
             "operations": sorted(operations),
         }
         if _PLACEHOLDER in name:
-            grant["create_topic"] = "write" in operations
+            grant["create_topic"] = bool({"read", "write"} & operations)
         grants.append(grant)
     return grants, text.encode("utf-8")
 

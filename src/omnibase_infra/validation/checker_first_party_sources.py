@@ -18,13 +18,27 @@ local tree) and names every package whose source is not a dev-merge tag:
 * ``tag-mismatch``   a tag whose twelve hex digits are not the installed commit
 * ``absent``         a package this build requires and did not install
 
+A build runs the audit in a named build context declared in the policy data
+(OMN-21928). The dev lane's context accepts nothing but a dev-merge tag. The
+context of a pre-PR slot also accepts the TARGET package (the one installed
+from the build context) staged from a branch, because a slot builds the
+unmerged branch under test; a vendored sibling needs a dev-merge tag in every
+context. The deploy agent's build of a declared open pull request (OMN-21928) runs
+in a context that accepts the target only when a declaration names the target
+repository and the exact commit staged; ``build_context_for_lane`` gives every
+other lane the default context.
+
 Two entry points, both usable without importing the rest of ``omnibase_infra``
 (load the file by path where the package is not installed):
 
     stamp(staging_record, expected_refs, build_context)
         write the dev-merge tag each staged tree is checked out at into the record
-    run_audit(staging_record, require=..., record_into=...)
+    run_audit(staging_record, require=..., record_into=..., context=...)
         classify the installed environment; return 1 on any finding
+
+The pre-PR slot entrypoint also uses ``newest_dev_merge_tag_of`` (the tag and
+commit a sibling is staged at) and ``write_slot_staging_record`` (the record that
+binds the target to the branch and commit under test).
 
 It reads only the standard library plus PyYAML, which the image already has.
 """
@@ -38,7 +52,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -55,6 +69,9 @@ KIND_UNBOUND = "unbound"
 KIND_TAG_MISMATCH = "tag-mismatch"
 KIND_ABSENT = "absent"
 
+# The kinds a build context may accept for the target. A release, an exact version,
+# an unbound install, a tag mismatch and an absent package are never acceptable.
+_TARGET_RELAXABLE_KINDS = frozenset({KIND_BRANCH, KIND_SHA})
 _SHA = re.compile(r"^[0-9a-f]{7,40}$")
 # Dots belong to one suffix segment. Only '+' and '-' separate later segments,
 # so a run of dots cannot be partitioned between nested repetitions.
@@ -71,10 +88,30 @@ class FirstPartyPackage:
 
 
 @dataclass(frozen=True)
+class BuildContext:
+    """A named build context: the kinds beyond a dev-merge tag the target may be."""
+
+    name: str
+    target_accepts: tuple[str, ...]
+    requires_declared_pr: bool = False
+
+
+@dataclass(frozen=True)
 class FirstPartyContract:
     policy: str
     tag_pattern: re.Pattern[str]
     packages: tuple[FirstPartyPackage, ...]
+    default_context: str
+    pre_pr_slot_context: str
+    open_pr_context: str
+    open_pr_lanes: tuple[str, ...]
+    contexts: tuple[BuildContext, ...]
+
+    def context(self, name: str) -> BuildContext:
+        for context in self.contexts:
+            if context.name == name:
+                return context
+        raise KeyError(name)
 
     def package(self, distribution: str) -> FirstPartyPackage:
         wanted = normalize(distribution)
@@ -96,10 +133,12 @@ class InstalledSource:
     commit: str = ""
     install_url: str = ""
     detail: str = ""
+    accepted_in: str = ""
+    declared_pr: str = ""
 
     @property
     def ok(self) -> bool:
-        return self.kind == KIND_DEV_MERGE_TAG
+        return self.kind == KIND_DEV_MERGE_TAG or bool(self.accepted_in)
 
     def to_dict(self) -> dict[str, str]:
         return {key: str(value) for key, value in asdict(self).items()}
@@ -107,6 +146,33 @@ class InstalledSource:
 
 def normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+@dataclass(frozen=True)
+class DeclaredPr:
+    """The open pull request a build declares: ``<repo>#<number>@<head sha>``."""
+
+    repo: str
+    number: int
+    head_sha: str
+
+    def render(self) -> str:
+        return f"{self.repo}#{self.number}@{self.head_sha}"
+
+
+_DECLARED_PR = re.compile(r"^([a-z][a-z0-9_]*)#([1-9][0-9]*)@([0-9a-f]{40})$")
+
+
+def parse_declared_pr(text: str) -> DeclaredPr | None:
+    """The declaration ``text`` spells; ``None`` for empty text, ``ValueError`` otherwise."""
+    if not text:
+        return None
+    match = _DECLARED_PR.match(text)
+    if match is None:
+        raise ValueError(
+            f"declared pull request {text!r} is not <repo>#<number>@<40-hex head sha>"
+        )
+    return DeclaredPr(match[1], int(match[2]), match[3])
 
 
 def load_contract(path: Path = CONTRACT_PATH) -> FirstPartyContract:
@@ -121,11 +187,47 @@ def load_contract(path: Path = CONTRACT_PATH) -> FirstPartyContract:
         )
         for item in raw["packages"]
     )
-    return FirstPartyContract(
+    contexts = tuple(
+        BuildContext(
+            name=str(item["name"]),
+            target_accepts=tuple(str(kind) for kind in item["target_accepts"]),
+            requires_declared_pr=bool(item.get("requires_declared_pr", False)),
+        )
+        for item in raw["build_contexts"]
+    )
+    contract = FirstPartyContract(
         policy=str(raw["policy"]),
         tag_pattern=re.compile(str(raw["tag_pattern"])),
         packages=packages,
+        default_context=str(raw["default_context"]),
+        pre_pr_slot_context=str(raw["pre_pr_slot_context"]),
+        open_pr_context=str(raw["open_pr_context"]),
+        open_pr_lanes=tuple(str(lane) for lane in raw["open_pr_lanes"]),
+        contexts=contexts,
     )
+    names = [context.name for context in contexts]
+    if len(set(names)) != len(names):
+        raise ValueError(f"{path}: build_contexts repeats a name: {names}")
+    for declared in (
+        contract.default_context,
+        contract.pre_pr_slot_context,
+        contract.open_pr_context,
+    ):
+        if declared not in names:
+            raise ValueError(f"{path}: context {declared!r} is not in build_contexts")
+    if not contract.context(contract.open_pr_context).requires_declared_pr:
+        raise ValueError(
+            f"{path}: open_pr_context {contract.open_pr_context!r} must set "
+            "requires_declared_pr, or any branch would build in it undeclared"
+        )
+    for context in contexts:
+        unsupported = set(context.target_accepts) - _TARGET_RELAXABLE_KINDS
+        if unsupported:
+            raise ValueError(
+                f"{path}: context {context.name!r} accepts {sorted(unsupported)} "
+                f"for the target; only {sorted(_TARGET_RELAXABLE_KINDS)} can be relaxed"
+            )
+    return contract
 
 
 def newest_dev_merge_tag(names: Iterable[str], contract: FirstPartyContract) -> str:
@@ -250,10 +352,18 @@ def audit_environment(
     *,
     search_paths: Sequence[str] | None = None,
     required: Iterable[str] = (),
+    context: str | None = None,
+    declared_pr: DeclaredPr | None = None,
 ) -> list[InstalledSource]:
     """One ``InstalledSource`` per first-party distribution found, plus an
     ``absent`` row for each ``required`` distribution that is not installed.
+
+    ``context`` names the build context the audit runs in (the policy's
+    ``default_context`` when ``None``); an unknown name raises ``KeyError``. A context
+    that sets ``requires_declared_pr`` accepts the target only when ``declared_pr``
+    names the target's repository and the exact commit that was staged.
     """
+    build_context = contract.context(context or contract.default_context)
     dists: dict[str, importlib.metadata.Distribution] = {}
     found_dists = (
         importlib.metadata.distributions()
@@ -280,8 +390,88 @@ def audit_environment(
                     )
                 )
             continue
-        found.append(classify_distribution(package, installed, staging, contract))
+        source = classify_distribution(package, installed, staging, contract)
+        if (
+            package.install == "build-context"
+            and not source.ok
+            and source.kind in build_context.target_accepts
+        ):
+            source = _accept_target(source, build_context, declared_pr)
+        found.append(source)
     return found
+
+
+def _accept_target(
+    source: InstalledSource,
+    build_context: BuildContext,
+    declared_pr: DeclaredPr | None,
+) -> InstalledSource:
+    """``source`` accepted in ``build_context``, or unchanged where a declaration is required and absent."""
+    if not build_context.requires_declared_pr:
+        return replace(source, accepted_in=build_context.name)
+    if declared_pr is None:
+        return replace(
+            source,
+            detail=f"{source.detail}; the {build_context.name} build context "
+            "needs a declared open pull request and none was given",
+        )
+    if declared_pr.repo != source.repo or declared_pr.head_sha != source.commit:
+        return replace(
+            source,
+            detail=f"{source.detail}; the declared pull request "
+            f"{declared_pr.render()} does not name {source.repo} at "
+            f"{source.commit[:12] or '-'}",
+        )
+    return replace(
+        source, accepted_in=build_context.name, declared_pr=declared_pr.render()
+    )
+
+
+def build_context_for_lane(
+    lane: str,
+    declared_pr: str = "",
+    *,
+    contract_path: Path = CONTRACT_PATH,
+) -> tuple[str, str]:
+    """(build context, declaration) the audit of a ``lane`` build runs with.
+
+    A lane without a declaration, and every lane the policy does not name in
+    ``open_pr_lanes``, gets the default context. A declaration on a lane outside
+    ``open_pr_lanes`` is refused with ``ValueError``: the stability, judge,
+    collaborator and prod paths never build a branch.
+    """
+    contract = load_contract(contract_path)
+    declaration = parse_declared_pr(declared_pr)
+    if declaration is None:
+        return contract.default_context, ""
+    if lane not in contract.open_pr_lanes:
+        raise ValueError(
+            f"lane {lane!r} cannot build a declared open pull request "
+            f"{declaration.render()}; only {sorted(contract.open_pr_lanes)} can"
+        )
+    return contract.open_pr_context, declaration.render()
+
+
+def audit_build_args(
+    lane: str, declared_pr: str = "", *, contract_path: Path = CONTRACT_PATH
+) -> list[str]:
+    """The build arguments that name a ``lane`` build's audit context.
+
+    Empty for a build that declares no open pull request, so its command and its
+    audit (the default context) are unchanged. A declaration on a lane the policy
+    does not name in ``open_pr_lanes`` is refused with ``ValueError``.
+    """
+    context, declared = build_context_for_lane(
+        lane, declared_pr, contract_path=contract_path
+    )
+    if not declared:
+        return []
+    return [
+        "--build-arg",
+        f"FIRST_PARTY_BUILD_CONTEXT={context}",
+        "--build-arg",
+        f"FIRST_PARTY_DECLARED_PR={declared}",
+    ]
 
 
 def violations(sources: Iterable[InstalledSource]) -> list[InstalledSource]:
@@ -290,7 +480,12 @@ def violations(sources: Iterable[InstalledSource]) -> list[InstalledSource]:
 
 def describe(source: InstalledSource) -> str:
     where = source.tag or source.commit[:12] or source.version or "-"
-    return f"{source.distribution}: {source.kind} ({where}) {source.detail}".rstrip()
+    line = f"{source.distribution}: {source.kind} ({where}) {source.detail}".rstrip()
+    if source.accepted_in:
+        line += f" [accepted in the {source.accepted_in} build context]"
+    if source.declared_pr:
+        line += f" [declared open pull request {source.declared_pr}]"
+    return line
 
 
 def _git(tree: Path, *args: str) -> str:
@@ -302,6 +497,75 @@ def _git(tree: Path, *args: str) -> str:
         check=False,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def newest_dev_merge_tag_of(
+    tree: Path, contract: FirstPartyContract
+) -> tuple[str, str]:
+    """(tag, commit) of the newest dev-merge tag of the repository at ``tree``.
+
+    Read from the object store only: nothing is checked out, so a shared clone is
+    not touched. Raises ``ValueError`` when the repository has no dev-merge tag or
+    when the tag names a commit other than the one its twelve hex digits spell.
+    """
+    tag = newest_dev_merge_tag(
+        _git(tree, "tag", "--list", DEV_TAG_REFSPEC).split(), contract
+    )
+    match = contract.tag_pattern.match(tag)
+    if match is None:
+        raise ValueError(f"{tree}: no dev-merge tag to stage")
+    commit = _git(tree, "rev-parse", f"refs/tags/{tag}^{{commit}}")
+    if not commit.startswith(match["sha12"]):
+        raise ValueError(
+            f"{tree}: tag {tag} names {match['sha12']} but resolves to {commit}"
+        )
+    return tag, commit
+
+
+def write_slot_staging_record(
+    out: Path,
+    *,
+    target_commit: str,
+    target_branch: str,
+    siblings: Mapping[str, tuple[str, str]],
+    contract_path: Path = CONTRACT_PATH,
+) -> dict[str, object]:
+    """The staging record of a pre-PR slot build, written to ``out``.
+
+    Each sibling is recorded at the dev-merge tag it is staged at (``siblings``
+    maps repo to (tag, commit)); the target is recorded at the commit and branch
+    under test with no tag, so the audit classifies it ``branch`` and accepts it
+    only in a build context that the policy data declares for that. The target
+    repository is the policy's ``install: build-context`` package, whatever the
+    worktree directory is called.
+    """
+    contract = load_contract(contract_path)
+    target_repo = next(
+        package.repo
+        for package in contract.packages
+        if package.install == "build-context"
+    )
+    record: dict[str, object] = {
+        "siblings": {
+            repo: {
+                "vcs_ref": commit,
+                "vcs_dirty": False,
+                "vcs_branch": "HEAD",
+                "dev_merge_tag": tag,
+            }
+            for repo, (tag, commit) in siblings.items()
+        },
+        "build_context": {
+            target_repo: {
+                "vcs_ref": target_commit,
+                "vcs_dirty": False,
+                "vcs_branch": target_branch,
+                "dev_merge_tag": "",
+            }
+        },
+    }
+    out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    return record
 
 
 def _build_context_record(
@@ -352,6 +616,8 @@ def run_audit(
     record_into: Path | None = None,
     search_paths: Sequence[str] | None = None,
     contract_path: Path = CONTRACT_PATH,
+    context: str | None = None,
+    declared_pr: str = "",
 ) -> int:
     """Audit the installed environment; print one line per package; 1 on a finding.
 
@@ -359,16 +625,30 @@ def run_audit(
     carries the record under ``per_repo_vcs_provenance``), so a running container
     is audited with ``staging_record=/app/build-provenance.json``. With
     ``record_into`` the classification is written into that build-provenance.json.
+    ``context`` is the build context the audit runs in; ``None`` or an empty
+    string is the policy's default (dev-lane) context. ``declared_pr`` is the
+    ``<repo>#<number>@<head sha>`` text of the open pull request the build declares;
+    a context that requires one accepts the target only at that exact head.
     """
     contract = load_contract(contract_path)
     staging = json.loads(staging_record.read_text(encoding="utf-8"))
     staging = staging.get("per_repo_vcs_provenance", staging)
+    context_name = context or contract.default_context
     sources = audit_environment(
-        contract, staging, search_paths=search_paths, required=require
+        contract,
+        staging,
+        search_paths=search_paths,
+        required=require,
+        context=context_name,
+        declared_pr=parse_declared_pr(declared_pr),
     )
     if record_into is not None:
         manifest = json.loads(record_into.read_text(encoding="utf-8"))
         manifest["first_party_sources"] = [source.to_dict() for source in sources]
+        manifest["first_party_build_context"] = context_name
+        accepted_pr = next((s.declared_pr for s in sources if s.declared_pr), "")
+        if accepted_pr:
+            manifest["first_party_declared_pr"] = accepted_pr
         manifest.setdefault("per_repo_vcs_provenance", {})["build_context"] = (
             staging.get("build_context", {})
         )
@@ -379,6 +659,7 @@ def run_audit(
     bad = violations(sources)
     if bad:
         sys.stderr.write(
-            f"{len(bad)} first-party package(s) not resolved from a dev-merge tag\n"
+            f"{len(bad)} first-party package(s) not resolved from a dev-merge tag "
+            f"(build context {context_name})\n"
         )
     return 1 if bad else 0

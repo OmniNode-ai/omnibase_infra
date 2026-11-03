@@ -134,8 +134,16 @@
 # This is a shared developer-lane client prefix, not isolation between machines:
 # principals may join each other's receipt groups and read the shared reply topics.
 # The handler's correlation filter selects responses; it is not an ACL boundary.
-# Runtime command-consumer groups use separate prefixes. Per-principal receipt
-# isolation requires changing the client's group IDs and reply topic routing too.
+# Runtime command-consumer groups use separate prefixes.
+# PER-PRINCIPAL REPLY TOPICS (OMN-22103): the three replies are also bound as
+# `...-for-{principal}.v1` topics. The hook's compaction command names these topics
+# and the compaction orchestrator answers on them, so a principal's package, prepared
+# and fallback replies are read from topics only that principal holds READ on (the
+# issuer resolves `{principal}` per principal, and an ACL on a literal topic matches
+# that name only). The issuer creates each such topic for its principal: the broker
+# does not auto-create topics. The three shared consume bindings above stay until the
+# omnimarket switch is proven live on the dev lane; removing them is that follow-up.
+# Machine-only writes live in machine-principal-bindings.yaml (OMN-21622).
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -212,6 +220,18 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-package.v1, direction: consume, consumer_group: receipt-mode-client.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-prepared.v1, direction: consume, consumer_group: receipt-mode-client.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-fallback.v1, direction: consume, consumer_group: receipt-mode-client.call}
+  - broker: dev
+    physical_topic: onex.cmd.omniintelligence.context-compaction-package-for-{principal}.v1
+    direction: consume
+    consumer_group: receipt-mode-client.call
+  - broker: dev
+    physical_topic: onex.evt.omnimarket.context-compaction-prepared-for-{principal}.v1
+    direction: consume
+    consumer_group: receipt-mode-client.call
+  - broker: dev
+    physical_topic: onex.evt.omnimarket.context-compaction-fallback-for-{principal}.v1
+    direction: consume
+    consumer_group: receipt-mode-client.call
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}

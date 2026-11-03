@@ -9,16 +9,17 @@ refuses a prose check value. ``scripts/ci/check_deploy_scope_dod.py`` (the
 existing ``prepush-deploy-scope-dod`` hook) now refuses both before the push.
 
 The presence tests drive a real git repository, because the leg reads the
-pushed HEAD commit and not the working tree. The shape tests call the released
-verifier at the version the repo-evidence caller pins, the same guard the
-hosted job runs.
+pushed HEAD commit and not the working tree. The prerequisite tests call the
+verifier installed from the omnimarket dev-merge tag the repo-evidence caller passes
+as ``verifier-tag``, the same
+``contract_prerequisite`` onex scm pr-create runs (OMN-21642).
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -30,18 +31,17 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
     strip_git_location_env,
 )
 from scripts.ci.check_deploy_scope_dod import (
-    FAIL_CHECK_NOT_A_COMMAND,
+    FAIL_CONTRACT_REFUSED,
     FAIL_NO_CONTRACT,
     NOTICE_NO_TICKET_CITED,
     PASS_CONTRACTS,
     cited_tickets,
     classify_ticket_contracts,
-    command_checks,
+    install_verifier,
     pinned_verifier_judge,
     read_head_contract,
-    read_verifier_version,
+    read_verifier_tag,
     resolve_branch_subjects,
-    verifier_shape_argv,
 )
 
 pytestmark = pytest.mark.unit
@@ -102,19 +102,19 @@ def _contract(check_value: str) -> str:
     )
 
 
-def _never_judge(values: Sequence[str]) -> list[str | None]:
-    raise AssertionError(f"the shape guard must not run here: {list(values)}")
+def _never_judge(contracts: Mapping[str, str]) -> dict[str, str | None]:
+    raise AssertionError(f"the prerequisite must not run here: {sorted(contracts)}")
 
 
-def _accept_all(values: Sequence[str]) -> list[str | None]:
-    return [None for _ in values]
+def _accept_all(contracts: Mapping[str, str]) -> dict[str, str | None]:
+    return dict.fromkeys(contracts)
 
 
 @pytest.fixture(scope="module")
 def released_judge(tmp_path_factory: pytest.TempPathFactory):
-    """The released verifier's guard, at the pin the repo-evidence caller uses."""
+    """The verifier's guard, at the tag the repo-evidence caller passes."""
     return pinned_verifier_judge(
-        read_verifier_version(REPO_ROOT), tmp_path_factory.mktemp("judge-cwd")
+        read_verifier_tag(REPO_ROOT), tmp_path_factory.mktemp("judge-cwd")
     )
 
 
@@ -231,36 +231,31 @@ def _never_read(ticket: str) -> str | None:
     raise AssertionError(f"no contract should be read: {ticket}")
 
 
-def test_command_checks_select_what_the_verifier_shape_guards() -> None:
-    text = yaml.safe_dump(
-        {
-            "dod_evidence": [
-                {
-                    "id": "dod-a",
-                    "checks": [
-                        {"check_type": "command", "command": "git log -1"},
-                        {"check_type": "test_passes", "check_value": _COMMAND},
-                        {"check_type": "file_exists", "check_value": "README.md"},
-                    ],
-                }
-            ]
-        }
-    )
-
-    assert command_checks(text) == [("dod-a", "git log -1"), ("dod-a", _COMMAND)]
-
-
-def test_the_shape_guard_is_the_released_verifier_at_the_callers_pin() -> None:
+def test_the_prerequisite_runs_in_the_verifier_installed_from_the_callers_tag() -> None:
     caller = yaml.safe_load(_CALLER.read_text(encoding="utf-8"))
-    pinned = caller["jobs"]["repo-evidence"]["with"]["verifier-version"]
+    with_block = caller["jobs"]["repo-evidence"]["with"]
+    tag = with_block["verifier-tag"]
 
-    argv = verifier_shape_argv(read_verifier_version(REPO_ROOT))
+    assert "verifier-version" not in with_block
+    assert read_verifier_tag(REPO_ROOT) == tag
+    python = install_verifier(tag)
 
-    assert f"omnimarket=={pinned}" in argv
-    assert any(
-        "from omnimarket.nodes.node_dod_verify.services.evidence_collector "
-        "import _invalid_check_value_reason" in arg
-        for arg in argv
+    assert python.parent.parent.parent.name == tag
+    assert python.is_file()
+    assert (
+        subprocess.run(
+            [
+                str(python),
+                "-I",
+                "-c",
+                "from omnimarket.nodes.node_dod_verify.services.contract_prerequisite "
+                "import contract_prerequisite",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
     )
 
 
@@ -271,14 +266,12 @@ def test_a_prose_check_value_is_refused_and_the_check_named(
         ["OMN-99001"], lambda _t: _contract(_PROSE), released_judge
     )
 
-    assert decision.outcome == FAIL_CHECK_NOT_A_COMMAND
+    assert decision.outcome == FAIL_CONTRACT_REFUSED
     assert decision.exit_code == 1
     assert len(decision.findings) == 1
-    finding = decision.findings[0]
-    assert finding.startswith(
-        "contracts/OMN-99001.yaml dod_evidence dod-ac2: INVALID_CHECK_VALUE_NOT_A_COMMAND: "
+    assert decision.findings[0].startswith(
+        "contracts/OMN-99001.yaml: INVALID_CHECK_VALUE_NOT_A_COMMAND: "
     )
-    assert repr(_PROSE) in finding
 
 
 def test_a_command_shaped_contract_passes_the_released_guard(released_judge) -> None:

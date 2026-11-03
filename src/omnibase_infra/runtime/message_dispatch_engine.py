@@ -166,9 +166,8 @@ from omnibase_infra.errors import (
     ProjectionNotMaterializedError,
     ProtocolConfigurationError,
 )
-from omnibase_infra.models.bindings import (
-    ModelOperationBindingsSubcontract,
-)
+from omnibase_infra.handlers.dispatch_span import traced_dispatch
+from omnibase_infra.models.bindings import ModelOperationBindingsSubcontract
 from omnibase_infra.models.dispatch.model_debug_trace_snapshot import (
     ModelDebugTraceSnapshot,
 )
@@ -1178,6 +1177,7 @@ class MessageDispatchEngine:
         ctx = ModelDispatchLogContext.model_validate(kwargs)
         return ctx.to_dict()
 
+    @traced_dispatch
     async def dispatch(
         self,
         topic: str,
@@ -1240,7 +1240,6 @@ class MessageDispatchEngine:
                 error_code=EnumCoreErrorCode.INVALID_STATE,
             )
 
-        # Validate inputs
         if not topic or not topic.strip():
             raise ModelOnexError(
                 message="Topic cannot be empty or whitespace.",
@@ -1275,7 +1274,6 @@ class MessageDispatchEngine:
                     error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
                 )
 
-        # Start timing
         start_time = time.perf_counter()
         dispatch_id = uuid4()
         started_at = datetime.now(UTC)
@@ -1950,7 +1948,7 @@ class MessageDispatchEngine:
         Args:
             topic: The full topic name from which the envelope was consumed.
                 Used for routing and logging context.
-                Example: "onex.evt.node.introspected.v1"  # onex-topic-allow: pending contract auto-wiring
+                Example: the node introspection event topic.
             envelope: The deserialized event envelope containing the payload.
                 The payload type varies by topic/event type.
             tx: Database transaction/connection context. Typed as ``object``
