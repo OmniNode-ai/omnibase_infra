@@ -12,6 +12,9 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.application_database import SUPPORTED_TOPOLOGY_PROFILES
+from omnibase_infra.topology.table_grant_derivation import (
+    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -22,6 +25,17 @@ _TABLES = (
     "brief_quality_vs_outcome",
     "subagent_waste",
 )
+
+
+@pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
+def test_shipped_work_question_declarations_resolve_together(profile: str) -> None:
+    tables = tuple(
+        declaration.table
+        for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        if declaration.table.name in _TABLES
+    )
+    _resolve_projection_database_target(tables, load_topology_profile(profile))
+    assert sorted(table.name for table in tables) == sorted(_TABLES)
 
 
 @pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))

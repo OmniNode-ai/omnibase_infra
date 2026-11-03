@@ -109,3 +109,10 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/topology/test_work_questions_runtime_grants.py tests/unit/migrations/test_omn22320_work_questions_vendor.py -q --no-cov -p no:cacheprovider
         cwd: .
+  - id: dod-omn22258-work-questions-unique-declarations
+    description: The shipped work-question declarations resolve together through the runtime projection validator in every supported topology profile. The hosted-runner probe requires no live service and rejects duplicate or missing declarations for the five tables.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/topology/test_work_questions_runtime_grants.py -q --no-cov -p no:cacheprovider -k shipped_work_question
+        cwd: .
