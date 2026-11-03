@@ -413,6 +413,15 @@ dod_evidence:
         check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_recreate_retires_hook_events_writer_omn21288.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC11]
+  - id: dod-omn21288-ac11-deploy-set-reader-control
+    description: >-
+      The check that no deploy set names the writer reads each set with a positive control (omninode-runtime, tenant-projection-writer, context-audit-consumer must be read as members, so an empty parse cannot pass the absence check), and the set reader drops inline as well as whole-line comments. The reader test fails against the previous reader, which returned the writer name from an inline comment as a member.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q --no-cov -k "array_reader or no_deploy_set"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC11]
 context:
   remaining_after_this_change: "AC2 end state remains pending the remaining baselined workload folds; the stack-shape data and baseline are unchanged in this revision."
   tenant_fold_proof: "The live fold readings are post-merge through the deploy agent. This revision's unit and broker proofs do not deploy dev."

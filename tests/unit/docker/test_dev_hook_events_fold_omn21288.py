@@ -55,14 +55,25 @@ def _services(overlay: Path) -> dict[str, dict[str, object]]:
 
 
 def _array(text: str, name: str) -> list[str]:
+    """Members of ``readonly name=( ... )``; a ``#`` comment, whole-line or inline, is no member."""
     match = re.search(rf"^readonly {name}=\((.*?)\)$", text, re.M | re.S)
     assert match, name
     return [
         token
         for line in match.group(1).splitlines()
-        for token in line.split()
-        if not line.strip().startswith("#")
+        for token in line.split("#", 1)[0].split()
     ]
+
+
+def test_array_reader_skips_whole_line_and_inline_comments() -> None:
+    text = (
+        "readonly SAMPLE=(\n"
+        f"    # {WRITER} named in prose only\n"
+        f"    tenant-projection-writer  # unlike {WRITER}\n"
+        "    onex-api\n"
+        ")\n"
+    )
+    assert _array(text, "SAMPLE") == ["tenant-projection-writer", "onex-api"]
 
 
 def test_dev_lane_overlay_neither_starts_the_writer_nor_excludes_the_node() -> None:
@@ -89,12 +100,16 @@ def test_dev_main_runtime_keeps_the_instance_id_the_writer_shared() -> None:
 
 def test_no_deploy_set_starts_or_builds_the_writer() -> None:
     deploy = DEPLOY.read_text(encoding="utf-8")
-    for name in (
-        "RUNTIME_SERVICES",
-        "DEV_LANE_ONLY_RUNTIME_SERVICES",
-        "DEV_LANE_EXTRA_BROKER_CLIENTS",
+    # Positive control: each set is read with a member it really carries, so an
+    # empty parse cannot pass the absence check below.
+    for name, member in (
+        ("RUNTIME_SERVICES", "omninode-runtime"),
+        ("DEV_LANE_ONLY_RUNTIME_SERVICES", "tenant-projection-writer"),
+        ("DEV_LANE_EXTRA_BROKER_CLIENTS", "context-audit-consumer"),
     ):
-        assert WRITER not in _array(deploy, name), name
+        members = _array(deploy, name)
+        assert member in members, name
+        assert WRITER not in members, name
     assert WRITER not in REFRESH.read_text(encoding="utf-8")
     events = (ROOT / "scripts/deploy-agent/deploy_agent/events.py").read_text()
     assert WRITER not in events
