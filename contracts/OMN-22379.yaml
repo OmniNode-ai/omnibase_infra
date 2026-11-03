@@ -58,3 +58,13 @@ dod_evidence:
           uv run --project scripts/deploy-agent python -c "import omnibase_infra.handlers.handler_runtime_listener_holder, omnibase_infra.handlers.handler_runtime_listener_broker_server"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn22379-deploy-gate-probe
+    description: >-
+      Deploy probe: the pinned Python image parses the committed broker handler and finds the HandlerRuntimeListenerBroker class, the single owner of the detach verdicts. A tree without the module fails this check at the mount, before any parse. Nothing is installed or restarted on any host by this change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          docker run --rm -v "$PWD/src/omnibase_infra/handlers/handler_runtime_listener_broker.py:/m.py:ro" python:3.12-slim@sha256:dd29372629eeba2dd003fd9e9d35a5b8236c44727875a0364254b5127af88e65 python -c "import ast; names = {c.name for c in ast.parse(open('/m.py').read()).body if isinstance(c, ast.ClassDef)}; assert 'HandlerRuntimeListenerBroker' in names, names"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
