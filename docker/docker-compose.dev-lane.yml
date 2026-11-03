@@ -1319,7 +1319,7 @@ services:
   projection-tenant-registry-writer:
     build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-tenant-registry-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${DEV_RUNTIME_MAIN_PROJECTION_TENANT_REGISTRY_WRITER_RUNTIME_PROFILE:-runtime}", "${DEV_RUNTIME_MAIN_PROJECTION_TENANT_REGISTRY_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -1491,7 +1491,7 @@ services:
   projection-registration-writer:
     build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-registration-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${DEV_RUNTIME_MAIN_PROJECTION_REGISTRATION_WRITER_RUNTIME_PROFILE:-runtime}", "${DEV_RUNTIME_MAIN_PROJECTION_REGISTRATION_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -1553,7 +1553,7 @@ services:
   projection-savings-writer:
     build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-savings-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${DEV_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_RUNTIME_PROFILE:-runtime}", "${DEV_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -1604,7 +1604,7 @@ services:
   projection-tenant-credentials-writer:
     build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-tenant-credentials-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${DEV_RUNTIME_MAIN_PROJECTION_TENANT_CREDENTIALS_WRITER_RUNTIME_PROFILE:-runtime}", "${DEV_RUNTIME_MAIN_PROJECTION_TENANT_CREDENTIALS_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -1655,7 +1655,7 @@ services:
   projection-live-events-writer:
     build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-live-events-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${DEV_RUNTIME_MAIN_PROJECTION_LIVE_EVENTS_WRITER_RUNTIME_PROFILE:-runtime}", "${DEV_RUNTIME_MAIN_PROJECTION_LIVE_EVENTS_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
