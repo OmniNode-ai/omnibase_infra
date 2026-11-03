@@ -50,6 +50,6 @@ dod_evidence:
       - check_type: command
         check_value: >-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.cost-estimator-web.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys, yaml; d = yaml.safe_load(sys.stdin); assert list(d["services"]) == ["cost-estimator-web"]; s = d["services"]["cost-estimator-web"]; assert s["ports"][0].startswith("${COST_ESTIMATOR_BIND_ADDR:?"); e = s["environment"]; assert e["ESTIMATOR_GATE_PASSWORD"] == "${ESTIMATOR_GATE_PASSWORD:-}"; assert e["FEATURE_ESTIMATOR_GATE_ENABLED"] == "${FEATURE_ESTIMATOR_GATE_ENABLED:-true}"'
-        cwd: .
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC22162001
