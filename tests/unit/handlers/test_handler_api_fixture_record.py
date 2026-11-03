@@ -659,3 +659,25 @@ def test_scope_prefix_must_be_a_reaper_covered_throwaway_name(
     assert not result.success
     assert result.error_code == "recording_precondition_failed"
     assert len(recording["state"]["calls"]) == before
+
+
+def test_each_request_uses_a_fresh_connection(recording, monkeypatch) -> None:
+    # A route that raises inside the service answers 500 and closes its
+    # connection; a pooled keep-alive connection then fails the NEXT request
+    # with a protocol error and aborts the whole recording (seen on a pre-PR
+    # slot). The recorder therefore keeps no idle connection between requests.
+    import omnibase_infra.handlers.handler_api_fixture_record as module
+
+    seen: list[object] = []
+    real = module.httpx.AsyncClient
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("limits"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", spy)
+    assert run_capture(recording).success
+    assert seen, "the recorder opened no HTTP client"
+    assert all(
+        limits is not None and limits.max_keepalive_connections == 0 for limits in seen
+    )

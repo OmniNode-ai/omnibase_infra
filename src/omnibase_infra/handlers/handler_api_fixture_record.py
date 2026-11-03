@@ -684,8 +684,14 @@ class HandlerApiFixtureRecord:
         after: dict[str, int] = {}
         cleanup_ok = True
         capture_ok = False
+        # No idle keep-alive connection: a route that fails inside the service
+        # answers 500 and closes its connection, which would otherwise break the
+        # next request on the pooled connection and abort the recording.
         async with httpx.AsyncClient(
-            timeout=overlay.timeout_seconds, follow_redirects=False, trust_env=False
+            timeout=overlay.timeout_seconds,
+            follow_redirects=False,
+            trust_env=False,
+            limits=httpx.Limits(max_keepalive_connections=0),
         ) as client:
             # A missing baseline stops before the first mutation.
             before = await _counts(client, overlay, variables)
