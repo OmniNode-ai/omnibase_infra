@@ -10,13 +10,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.handlers.census_oneshot_effect import collector
 from omnibase_infra.models.model_census_oneshot_policy import ModelCensusOneshotPolicy
 from omnibase_infra.models.model_census_oneshot_request import ModelCensusOneshotRequest
 from omnibase_infra.models.model_census_oneshot_result import ModelCensusOneshotResult
 from omnibase_infra.models.model_oneshot_grade import ModelOneshotGrade
 from omnibase_infra.models.model_oneshot_observation import ModelOneshotObservation
 from omnibase_infra.models.model_pending_oneshot import ModelPendingOneshot
-from omnibase_infra.nodes.node_census_oneshot_effect import collector
 
 
 def load_policy(path: Path) -> ModelCensusOneshotPolicy:
