@@ -17,6 +17,8 @@ import os
 import time
 from pathlib import Path
 
+import yaml
+
 from omnibase_infra.handlers.placement import (
     HandlerPlacementEtcd,
     HandlerPlacementRuntime,
@@ -24,7 +26,14 @@ from omnibase_infra.handlers.placement import (
     ModelPlacementReplayEvent,
     fold_projection_from_offsets,
 )
+from omnibase_infra.nodes.node_placement_runtime_effect.registry.registry_infra_placement_runtime import (
+    RegistryInfraPlacementRuntime,
+)
 
+CONTRACT = (
+    Path(__file__).resolve().parents[4]
+    / "src/omnibase_infra/nodes/node_placement_runtime_effect/contract.yaml"
+)
 NODE = "node_placement_probe_reducer"
 CHECKPOINT_EVERY = 7
 
@@ -131,9 +140,11 @@ async def main() -> None:
     args = parser.parse_args()
     node = ProbeNode(args.runtime_id, args.out, args.store, args.topic)
     adapter = HandlerPlacementEtcd(args.endpoint)
-    runtime = HandlerPlacementRuntime(
+    settings = RegistryInfraPlacementRuntime.settings_from_contract(
+        yaml.safe_load(CONTRACT.read_text()), "inmemory"
+    )
+    runtime = RegistryInfraPlacementRuntime(adapter=adapter, settings=settings).build(
         runtime_id=args.runtime_id,
-        adapter=adapter,
         nodes={
             NODE: (
                 ModelPlacementPolicy(
