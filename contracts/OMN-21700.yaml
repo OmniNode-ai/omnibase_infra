@@ -152,3 +152,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn21700-review-regressions
+    description: >-
+      Named onboarding policies reject non-interactive or unknown policies; projection requests validate callable fields and copy caller rows; the validation and scope contracts load without duplicate descriptor keys, and the executor terminal topic matches its published topic declarations.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run pytest tests/unit/nodes/test_review_regressions_omn21700.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
