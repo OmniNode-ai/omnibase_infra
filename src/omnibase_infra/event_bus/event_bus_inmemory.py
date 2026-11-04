@@ -2,45 +2,27 @@
 # SPDX-License-Identifier: MIT
 """Thin infra adapter over the canonical core in-memory event bus.
 
-The single canonical ``EventBusInmemory`` transport lives in
-``omnibase_core.event_bus.event_bus_inmemory`` (OMN-7062/OMN-7077). The
-861-line infra duplicate that previously lived here has been deleted
-(OMN-13419) so there is exactly one in-memory transport implementation.
+The single in-memory transport lives in
+``omnibase_core.event_bus.event_bus_inmemory`` (OMN-7062, OMN-7077, OMN-13419).
+This module subclasses it, inheriting its state (history, lock, offsets,
+subscriber registry, circuit-breaker accounting), and re-expresses only what
+the infra runtime and ``ProtocolEventBusLike`` need that the pinned core does
+not provide:
 
-This module is a *thin* adapter, NOT a second implementation. It subclasses
-the core bus, inheriting all of its state management (deque history, async
-lock, topic offsets, subscriber registry, per-subscriber circuit-breaker
-accounting). It re-expresses only the surface that the infra runtime and
-``ProtocolEventBusLike`` genuinely require and that the pinned core release
-does not yet provide:
+1. Infra-typed messages: ``publish`` builds and delivers the infra
+   ``ModelEventMessage`` / ``ModelEventHeaders`` (``schema_version: str``).
+2. Infra error taxonomy: ``InfraUnavailableError`` and
+   ``ProtocolConfigurationError`` in place of ``ModelOnexError``.
+3. Dict-shaped ``health_check()`` read by ``RuntimeHostProcess`` and
+   ``ServiceRuntimeHealthMonitor``.
+4. ``get_consumer_groups()`` from ``ProtocolEventBusLike``.
+5. ``declare_consume_concurrency()``: records the contract-declared bound for
+   wiring and readback; dispatch stays inline.
+6. ``subscribe`` returns a ``ModelSubscriptionHandle`` with pause, drain and
+   stop (OMN-21229), as ``EventBusKafka`` does.
 
-1. Infra-typed messages — the canonical core bus builds
-   ``omnibase_core`` ``ModelEventMessage``/``ModelEventHeaders`` whose
-   ``schema_version`` is a ``ModelSemVer``; the infra runtime, Kafka bus, node
-   handlers, and 50+ tests are typed against the infra
-   ``ModelEventMessage`` whose ``schema_version`` is a ``str``. The adapter
-   overrides ``publish`` to build and deliver the infra message types so every
-   downstream consumer receives exactly the model it always has (one boundary
-   instead of coercion scattered across every handler/projection).
-2. Infra error taxonomy — the infra kernel, dispatchers, and error-handling
-   tests are typed against ``InfraUnavailableError`` /
-   ``ProtocolConfigurationError`` (the core bus raises ``ModelOnexError``).
-3. Dict-shaped ``health_check()`` — ``RuntimeHostProcess.health_check()`` and
-   ``ServiceRuntimeHealthMonitor`` read ``health["started"]`` /
-   ``health["subscriber_count"]`` etc.; the core bus returns a
-   ``TypedDictEventBusHealth`` with only ``healthy``/``connected``/``status``.
-4. ``get_consumer_groups()`` — part of ``ProtocolEventBusLike`` (alongside
-   ``EventBusKafka``) and consumed by ``ServiceRuntimeHealthMonitor``; absent
-   on the pinned core bus.
-5. ``declare_consume_concurrency()`` — records the contract-declared upper
-   bound per topic/group for runtime wiring and readback. Inline dispatch
-   stays unchanged; recording a bound does not enable concurrent dispatch.
-
-Everything else — ``subscribe``/``unsubscribe``, history, offsets, lifecycle,
-the circuit-breaker manager methods — is inherited unchanged from the core
-bus. When the core ``ModelEventHeaders``/``ModelEventMessage`` model shape,
-``health_check`` shape, and ``get_consumer_groups`` land in a released core
-version, this adapter collapses to a bare re-export and can be deleted.
+Everything else is inherited unchanged. Once the core models land in a
+released core version this adapter collapses to a re-export and can be deleted.
 
 Protocol Compatibility:
     ProtocolEventBus / ProtocolEventBusLike via duck typing.
@@ -85,6 +67,12 @@ from omnibase_infra.handlers.inmemory_transactional_producer import (
     open_transactional_producer,
 )
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.event_bus.model_subscription_gate import (
+    ModelSubscriptionGate,
+)
+from omnibase_infra.models.event_bus.model_subscription_handle import (
+    ModelSubscriptionHandle,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_node_identity import (
@@ -173,32 +161,43 @@ class EventBusInmemory(_CoreEventBusInmemory):
         group_id: str | None = None,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
         required_for_readiness: bool = False,
-    ) -> Callable[[], Awaitable[None]]:
-        """Subscribe with infra-typed identity/enum/callback.
+    ) -> ModelSubscriptionHandle:
+        """Subscribe with infra-typed identity, returning a lifecycle handle.
 
-        Re-declares the inherited core ``subscribe`` with the infra
-        ``ModelNodeIdentity`` / ``EnumConsumerGroupPurpose`` / infra-message
-        callback so infra call sites type-check. The core implementation only
-        reads ``identity`` attributes and ``purpose.value`` and stores the
-        callback opaquely, so delegation is behavior-preserving (OMN-13419).
+        The callback is wrapped in a ``ModelSubscriptionGate`` so the handle
+        can pause delivery and drain the callback a publisher is inside
+        (OMN-21229).
         """
-        return await super().subscribe(
+        gate = ModelSubscriptionGate()
+        unsubscribe = await super().subscribe(
             topic,
             cast("_CoreProtocolNodeIdentity | None", node_identity),
             cast(
                 "Callable[[_CoreModelEventMessage], Awaitable[None]] | None",
-                on_message,
+                None if on_message is None else gate.wrap(on_message),
             ),
             group_id=group_id,
             purpose=cast("_CoreEnumConsumerGroupPurpose", purpose),
             required_for_readiness=required_for_readiness,
         )
 
+        async def pause() -> None:
+            gate.pause()
+
+        return ModelSubscriptionHandle.bind(
+            topic=topic,
+            consumer_group=group_id or "",
+            subscription_key=uuid4().hex,
+            pause=pause,
+            drain=gate.drain,
+            stop=unsubscribe,
+        )
+
     async def subscribe_ungrouped(
         self,
         topic: str,
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
-    ) -> Callable[[], Awaitable[None]]:
+    ) -> ModelSubscriptionHandle:
         """Read ``topic`` from now on in a subscription of its own (OMN-17427).
 
         The same operation as ``EventBusKafka.subscribe_ungrouped``: a one-shot

@@ -43,7 +43,10 @@ dependencies = [
     # `node_done_write_receipt_gate_compute` through its packaged contract and
     # imports its public request and decision models. A resolve below this
     # floor lacks that contract-backed gate surface.
-    "omnibase-core>=0.47.58,<0.48.0",
+    # OMN-21924: FLOOR raised to 0.47.62. node_architecture_validator imports
+    # `omnibase_core.validation.checker_stack_shape` and `validator_stack_shape`
+    # at module import, and 0.47.62 is the first release that ships them.
+    "omnibase-core>=0.47.62,<0.48.0",
     "omnibase-spi>=0.23.12,<0.24.0",
     # ============================================================================
     # External Dependency Security Guidance
@@ -672,6 +675,7 @@ node_invariant_evaluate_compute = "omnibase_infra.nodes.node_invariant_evaluate_
 node_kafka_replay_compute = "omnibase_infra.nodes.node_kafka_replay_compute"
 node_lab_proof_plan_compute = "omnibase_infra.nodes.node_lab_proof_plan_compute"
 node_lab_proof_run_effect = "omnibase_infra.nodes.node_lab_proof_run_effect"
+node_lane_entry_point_census_effect = "omnibase_infra.nodes.node_lane_entry_point_census_effect"
 node_ledger_projection_compute = "omnibase_infra.nodes.node_ledger_projection_compute"
 node_ledger_write_effect = "omnibase_infra.nodes.node_ledger_write_effect"
 node_llm_completion_effect = "omnibase_infra.nodes.node_llm_completion_effect"

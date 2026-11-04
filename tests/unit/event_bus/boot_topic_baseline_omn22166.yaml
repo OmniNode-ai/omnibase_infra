@@ -23,5 +23,6 @@ dev_after_t28:
 repo_slice:
   # OMN-22158 raised this by 2: node_api_fixture_record_effect is meant to add
   # its command and terminal topics (api-fixture-record, api-fixture-recorded).
-  measured_at_sha: 5a24730eb763184d3ba15dea6cdd557f8f110cae
-  max_specs: 211
+  measured_at_sha: 05c5e773d1a5f6af158998282cf878fee4b6c38e
+  # OMN-21923 adds the census command and result topics (2 more specs).
+  max_specs: 215

@@ -32,6 +32,27 @@
 repos:
   - repo: local
     hooks:
+      - id: lane-entry-point-census-fixture
+        name: Census reports planted entry points by name (OMN-21923)
+        entry: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_handler_lane_entry_point_census.py -q --no-cov
+        language: system
+        files: ^(deploy/lane-census/runtime-entry-points\.yaml|src/omnibase_infra/(handlers/handler_lane_entry_point_census\.py|models/lane_entry_point_census/.*|nodes/node_lane_entry_point_census_effect/.*)|tests/unit/nodes/node_lane_entry_point_census_effect/.*|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: lane-entry-point-census-dev-recording
+        name: Census rebuilds the dev numbers from inspection (OMN-21923)
+        entry: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_dev_lane_recorded_census.py -q --no-cov
+        language: system
+        files: ^(deploy/lane-census/runtime-entry-points\.yaml|src/omnibase_infra/(handlers/handler_lane_entry_point_census\.py|models/lane_entry_point_census/.*|nodes/node_lane_entry_point_census_effect/.*)|tests/unit/nodes/node_lane_entry_point_census_effect/.*|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: lane-entry-point-census-bus
+        name: Census dispatches through the runtime bus (OMN-21923)
+        entry: uv run --frozen pytest tests/integration/runtime/test_lane_entry_point_census_omn21923.py -m "not kafka" -q --no-cov
+        language: system
+        files: ^(deploy/lane-census/runtime-entry-points\.yaml|src/omnibase_infra/(handlers/handler_lane_entry_point_census\.py|models/lane_entry_point_census/.*|nodes/node_lane_entry_point_census_effect/.*)|tests/(unit/nodes/node_lane_entry_point_census_effect/.*|integration/runtime/test_lane_entry_point_census_omn21923\.py)|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-19998: a ticket contract loads through the strict loader at commit, so
       # a merge that keeps both sides' description and command under one
       # `- kind: tests` item is refused before CI. The same test runs in the CI
@@ -2193,9 +2214,9 @@ repos:
       # per-file plant loop (judges the tree once per compose file) runs in the CI job only.
       - id: stack-shape
         name: Check every compose service is the runtime, a dependency, a one-shot or baselined
-        entry: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k "not every_compose_file"
+        entry: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py tests/unit/docker/test_allowed_commands.py -q --no-cov -k "not every_compose_file"
         language: system
-        files: ^(docker/docker-compose[^/]*\.yml|docker/catalog/.*\.ya?ml|config/validation/stack_shape\.yaml|tests/(unit/validation/test_checker_stack_shape\.py|fixtures/stack_shape/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(docker/docker-compose[^/]*\.yml|docker/catalog/.*\.ya?ml|config/validation/stack_shape\.yaml|pyproject\.toml|uv\.lock|src/omnibase_infra/nodes/node_architecture_validator/.*|tests/(unit/validation/test_checker_stack_shape\.py|unit/docker/test_allowed_commands\.py|fixtures/stack_shape/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: dev-tenant-projection-fold
