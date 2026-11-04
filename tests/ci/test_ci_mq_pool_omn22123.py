@@ -101,5 +101,6 @@ def test_the_merge_queue_pools_move_no_other_class_count() -> None:
     config = load_runner_fleet_config(FLEET)
     for host_name, (_, _, action) in POOLS.items():
         host = next(h for h in config.hosts if h.host == host_name)
+        assert host.declared_count("merge-queue") == COUNT
         assert host.declared_count("action") == action
         assert host.declared_count("verify") == 0
