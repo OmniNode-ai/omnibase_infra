@@ -19,6 +19,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: Each of the four runner services in both merge-queue compose files mounts the host /usr/share/zoneinfo at the same path in the container, read-only.
+  - id: req-lane-tmp-age-bound
+    statement: Lane scratch under the temporary directory is age bound by a tmpfiles rule file, so the root filesystem cannot refill with idle pytest trees and finished lane scratch.
+    acceptance:
+      - id: AC4
+        statement: deploy/disk-gc/onex-lane-tmp.tmpfiles.conf holds only age rules under the temporary directory, with pytest trees bound at 12h and the catch-all at 3d.
 evidence_requirements:
   - kind: tests
     description: The merge-queue pool declaration test and the existing pool and fleet tests pass.
@@ -60,4 +65,12 @@ dod_evidence:
       - check_type: command
         check_value: >-
           bash -o pipefail -c 'for p in hp051 hp053; do gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-${p}-ci-mq-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "${p}-ci-mq-runner-4" > /dev/null; done'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-lane-tmp-age-bound
+    description: The tmpfiles rule file holds only age rules under the temporary directory and bounds pytest trees tighter than the catch-all.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_lane_tmp_sweep.py -q --no-cov -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
