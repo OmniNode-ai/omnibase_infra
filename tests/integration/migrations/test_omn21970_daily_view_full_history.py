@@ -151,18 +151,20 @@ def cluster(ephemeral_postgres: EphemeralPostgres) -> EphemeralPostgres:
         cur.execute(ROLES)
         # omninode_internal is provisioned by omnibase_infra forward 098 on every lane; 0051 asserts it.
         cur.execute("CREATE SCHEMA IF NOT EXISTS omninode_internal")
-        for path in sorted(NODE.glob("*.sql")):
-            if path.name >= CURSOR.name:
-                break
-            if path.name in FENCED:
-                continue
-            # CONCURRENTLY cannot run in the transaction psycopg2 opens; a property of the driver.
-            cur.execute(
-                path.read_text(encoding="utf-8").replace(
-                    "CREATE INDEX CONCURRENTLY", "CREATE INDEX"
-                )
-            )
+    # The chain itself, file by file, exactly as the forward runner applies it.
+    for path in sorted(NODE.glob("*.sql")):
+        if path.name >= CURSOR.name:
+            break
+        if path.name not in FENCED:
+            _apply(ephemeral_postgres, path)
+    with ephemeral_postgres.connect() as conn, conn.cursor() as cur:
         cur.execute(WRITER_GRANT)
+        cur.execute(
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'delegation_events'"
+        )
+        (columns,) = cur.fetchone()
+    assert columns == 75, f"the chain through 0064 built {columns} columns, not 75"
     return ephemeral_postgres
 
 
