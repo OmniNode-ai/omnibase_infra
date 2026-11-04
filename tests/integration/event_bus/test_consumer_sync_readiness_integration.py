@@ -120,6 +120,12 @@ class _WedgedForeverConsumer:
     def seek(self, partition: TopicPartition, offset: int) -> None:
         return None
 
+    def pause(self, *partitions: TopicPartition) -> None:
+        return None
+
+    async def commit(self, offsets: Mapping[TopicPartition, int]) -> None:
+        return None
+
 
 class _CaughtUpConsumer(_WedgedForeverConsumer):
     """Quiet because there is nothing to consume. The positive control."""
