@@ -1,0 +1,58 @@
+schema_version: 1.0.0
+ticket_id: OMN-21923
+title: Each lane's census records every runtime-image container with its command, and a command outside the allowed list is reported by name as an entry point to remove (one-runtime plan task T24)
+summary: Adds a canonical declarative effect node, node_lane_entry_point_census_effect, handled by HandlerLaneEntryPointCensus. The policy data in deploy/lane-census/runtime-entry-points.yaml restricts allowed_commands to onex-runtime. pyproject.toml declares the node entry point. Inline policy and inspection inputs allow the bus to run without host-specific paths or a Docker client. Host-local inputs support a recorded inspect JSON file or read-only live Docker inspection. Ambiguous or missing policies and malformed inspections are refusals. The committed dev fixture retains minimal inspected fields and regenerates counts and the table through the actual census logic.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21923-t24-entry-point-census
+    statement: 'T24: the lane census records each runtime-image container with its command, and a command outside the declared allowed list reads as an entry point to remove.'
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every lane''s runtime-image containers list their command, and a command outside the allowed list reads as an entry point to remove -- falsifier: `uv run pytest` over a census fixture with one planted `python -m` container, which must be reported by name'
+      - id: AC2
+        statement: 'AC2: the dev numbers of the plan reproduce, 17 runtime-image containers with 4 on `onex-runtime` -- falsifier: the census run read-only against the dev lane on its host, with the command and the counts in the pull request body'
+evidence_requirements:
+  - kind: tests
+    description: Planted commands are reported by name, and the recorded dev inspection regenerates the plan numbers.
+    command: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_handler_lane_entry_point_census.py tests/unit/nodes/node_lane_entry_point_census_effect/test_dev_lane_recorded_census.py -q --no-cov
+  - kind: tests
+    description: The real runtime dispatcher and result applier run with the in-memory overlay and the service-backed CI Redpanda overlay. KAFKA_BOOTSTRAP_SERVERS names the dedicated proof broker.
+    command: uv run --frozen pytest tests/integration/runtime/test_lane_entry_point_census_omn21923.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21923-planted-entry-point
+    description: Run the fixture with the planted python -m container and require its name in the removal list and regenerated table. Exercise the contract through the runtime bus with an in-memory overlay. The service-backed integration job runs the same file against its Redpanda overlay. These tests fail at the parent, which has no census handler.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_handler_lane_entry_point_census.py tests/integration/runtime/test_lane_entry_point_census_omn21923.py -m "not kafka" -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn21923-dev-lane-numbers
+    description: Regenerate the dev table from the minimal inspected fields recorded by a read-only census on 2026-11-02. Require 17 runtime-image containers, 4 on onex-runtime and 13 other commands listed for removal. The PR body records the live command and counts. This fixture is historical read evidence, not proof that the branch is deployed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_dev_lane_recorded_census.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC2
+  - id: dod-omn21923-hosted-node-execution
+    description: Hosted-runner probe executes the checked-out node through the canonical onex node CLI against a recorded inspection. Missing handler code, an unreadable policy or a handler refusal returns nonzero. This runs with no private daemon or host access. It tests the evaluated source revision; post-merge dev deployment and deployed-revision integration evidence remain separate requirements.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PATH="$(uv run --frozen python -c 'import sys; print(sys.prefix)')/bin:$PATH" PYTHONPATH=src onex node node_lane_entry_point_census_effect --contract src/omnibase_infra/nodes/node_lane_entry_point_census_effect/contract.yaml --input tests/unit/nodes/node_lane_entry_point_census_effect/fixtures/fixture_request.json --state-root .onex_state/OMN-21923-node-probe --output receipt
+        cwd: .
+    binds_ac:
+      - AC1
+context:
+  runtime_node: node_lane_entry_point_census_effect; main profile; contract-declared command/result topics.
+  redpanda_proof: The service-integration-suites CI job supplies KAFKA_BOOTSTRAP_SERVERS and selects both profiles. No missing-broker skip is declared.
+  dev_integration: After merge the deploy agent must deploy the merged runtime revision and the node integration proof must pass against that revision. A branch census of existing dev containers is not evidence that this new node is deployed.
