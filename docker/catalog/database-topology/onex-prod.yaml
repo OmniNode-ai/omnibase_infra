@@ -264,7 +264,12 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - agent_actions
+              - agent_detection_failures
+              - agent_execution_logs
               - agent_routing_decisions
+              - agent_status_events
+              - agent_transformation_events
               - capability_scores
               - context_roi_scores
               - delegation_budget_applied_events
@@ -290,6 +295,7 @@ databases:
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - provider_quota_state
+              - router_performance_metrics
               - run_trace
               - savings_estimates
               - skill_execution_snapshots
@@ -455,5 +461,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 94d8ab46ab5616caa6e73775da3e3bf217099f152b382a882229fd3033f2d522
+  sha256: 26d3cbf7bc9033be032aed51f4859538266cd2904e25c17e7de617bb56794c1c
 topology_instance: onex-prod

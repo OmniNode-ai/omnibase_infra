@@ -28,9 +28,12 @@ Shape, as a TOP-LEVEL key in the node's ``contract.yaml``::
 
 A retired group whose id is not ``{env}.<service>.<node>.consume.<version>`` (a
 consumer that set its own ``KAFKA_CONSUMER_GROUP``) is named by its literal id
-through the optional ``from_group_id`` (OMN-21932)::
+through ``from_group_id`` (OMN-21932), which may stand alone in place of the
+three segments (OMN-21920)::
 
+    consumer_group_handover:
       from_group_id: agent-observability-postgres
+      from_auto_offset_reset: earliest
 
 The source group is derived with the same ``compute_consumer_group_id`` and the
 runtime's own environment, so one declaration serves every lane whose retired
@@ -49,9 +52,9 @@ unrecognised top-level key cannot break parsing.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.models import ModelNodeIdentity
@@ -65,14 +68,14 @@ class ModelConsumerGroupHandover(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    from_service: str = Field(
-        ..., min_length=1, description="Service segment of the retired group."
+    from_service: str | None = Field(
+        default=None, min_length=1, description="Service segment of the retired group."
     )
-    from_node: str = Field(
-        ..., min_length=1, description="Node segment of the retired group."
+    from_node: str | None = Field(
+        default=None, min_length=1, description="Node segment of the retired group."
     )
-    from_version: str = Field(
-        ..., min_length=1, description="Version segment of the retired group."
+    from_version: str | None = Field(
+        default=None, min_length=1, description="Version segment of the retired group."
     )
     from_auto_offset_reset: Literal["earliest", "latest"] = Field(
         ...,
@@ -87,6 +90,8 @@ class ModelConsumerGroupHandover(BaseModel):
         default=None,
         min_length=1,
         strict=True,
+        # At least one character that is not a dot, so "." and ".." are refused.
+        pattern=r"^\.*[A-Za-z0-9_-][A-Za-z0-9._-]*$",
         description=(
             "The retired consumer group's literal id, for a group the derived "
             "name cannot express. Returned verbatim by ``source_group`` in every "
@@ -95,15 +100,19 @@ class ModelConsumerGroupHandover(BaseModel):
         ),
     )
 
-    @field_validator("from_group_id")
-    @classmethod
-    def _group_id_is_trimmed(cls, value: str | None) -> str | None:
-        if value is not None and value != value.strip():
+    @model_validator(mode="after")
+    def _segments_complete_or_group_id(self) -> Self:
+        """Service, node and version are all declared, or ``from_group_id`` is."""
+        segments = (self.from_service, self.from_node, self.from_version)
+        if any(segment is None for segment in segments) and (
+            self.from_group_id is None
+            or any(segment is not None for segment in segments)
+        ):
             raise ValueError(
-                "from_group_id must not be blank or carry leading or trailing "
-                "whitespace"
+                "a handover declares all of from_service, from_node and "
+                "from_version, or from_group_id on its own"
             )
-        return value
+        return self
 
     def source_group(self, environment: str) -> str:
         """The retired consumer group in ``environment``.
@@ -113,6 +122,15 @@ class ModelConsumerGroupHandover(BaseModel):
         """
         if self.from_group_id is not None:
             return self.from_group_id
+        if (
+            self.from_service is None
+            or self.from_node is None
+            or self.from_version is None
+        ):
+            raise ValueError(
+                "a handover declares all of from_service, from_node and "
+                "from_version, or from_group_id"
+            )
         return compute_consumer_group_id(
             ModelNodeIdentity(
                 env=environment,
