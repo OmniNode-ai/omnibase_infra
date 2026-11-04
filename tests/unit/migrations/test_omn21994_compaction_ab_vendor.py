@@ -11,7 +11,9 @@ the digests pin the byte-for-byte copy of the reviewed bytes, and the
 proved through the same resolver the auto-wiring gate calls.
 
 The local 0002 repair adds the missing legacy constraints and UPDATE grant;
-0000/0001 retain their original digests and migration identities.
+0000/0001 retain their original digests and migration identities. The live-apply
+proof in tests/integration/migrations/test_compaction_ab_vendor_omn21994.py
+executes the chain on fresh and legacy tables, including invalid-data refusal.
 """
 
 import hashlib

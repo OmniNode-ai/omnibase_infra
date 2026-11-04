@@ -3,21 +3,10 @@
 
 """Derive ``object_type: TABLE`` grants from node contract ``db_io.db_tables``.
 
-OMN-15656. The OMN-15418 privilege validator
-(:func:`omnibase_infra.runtime.auto_wiring.handler_wiring._require_projection_binding_privileges`)
-requires an explicit per-table grant before a projection handler may wire. The
-checked-in topology instances declared none, so every contract-declared table
-failed on every profile.
-
-This module is the *authoring* side of that contract: the grants are a
-projection of the node contracts that consume them, never a hand-maintained
-list. Contracts own ``schema``/``name``/``access``; the deployment topology owns
-which principal serves which schema domain. Nothing here invents a relation, and
-nothing here widens a privilege beyond what the validator demands.
-
-The derivation is deliberately total and fail-closed: a declaration this module
-cannot map to a topology principal is returned as a typed residual with a
-reason, never silently dropped.
+Node contracts own schema, name and access; topology owns the principal for
+that schema domain. Runtime admission requires an explicit grant for each table.
+Derivation returns unmappable declarations as typed residuals rather than
+silently dropping them.
 """
 
 from __future__ import annotations
@@ -243,6 +232,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     _vendored_read_write(
         "tenant_inference_credentials",
         "node_projection_tenant_credentials",
+        "0000_create_tenant_inference_credentials.sql",
         schema="public",
         access="write",
         role="credentials",
@@ -356,13 +346,15 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # vendored infra-first ahead of omnimarket#4277. Both carry the source
     # contract's read_write access and table-name role. Removable once the
     # pin advances past that pull request; the expiry module names both.
-    *(
-        _vendored_read_write(
-            t,
-            "node_llm_delegation_call_effect",
-            "0000_delegation_lab_job_execution.sql",
-        )
-        for t in ("delegation_lab_jobs", "delegation_lab_job_outbox")
+    _vendored_read_write(
+        "delegation_lab_jobs",
+        "node_llm_delegation_call_effect",
+        "0000_delegation_lab_job_execution.sql",
+    ),
+    _vendored_read_write(
+        "delegation_lab_job_outbox",
+        "node_llm_delegation_call_effect",
+        "0000_delegation_lab_job_execution.sql",
     ),
     #
     # OMN-19861: same infra-first window; this repo vendors
@@ -373,7 +365,10 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # node_projection_demo_readiness pull request merging and the pin advancing
     # past it; the expiry module names it.
     _vendored_read_write(
-        "demo_readiness_latest", "node_projection_demo_readiness", role="demo_readiness"
+        "demo_readiness_latest",
+        "node_projection_demo_readiness",
+        "0000_create_demo_readiness_latest.sql",
+        role="demo_readiness",
     ),
     # The four bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
@@ -436,6 +431,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     _vendored_read_write(
         "delegation_capability_cells",
         "node_projection_delegation_capability_map",
+        "0000_create_delegation_capability_cells.sql",
         schema="public",
     ),
     # OMN-19988: the same infra-first window; this repo vendors
@@ -478,12 +474,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             "subagent_waste",
         )
     ),
-    # OMN-21994: node_projection_compaction_ab/0000 creates the compaction A/B
-    # rows and per-build series tables ahead of the pinned omnimarket node
-    # contract, whose Event Chain Gate loads it against this topology; 0001
-    # grants omninode_runtime on both. Retired when the pin advances past the
-    # omnimarket node_projection_compaction_ab contract; the OMN-18863 expiry
-    # module names this bridge.
+    # OMN-21994: infra-first bridge until the pinned node contract owns both tables.
     *(
         _vendored_read_write(
             t, "node_projection_compaction_ab", "0000_create_compaction_ab.sql"
