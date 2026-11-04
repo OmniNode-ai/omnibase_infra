@@ -15,9 +15,11 @@ from typing import Any
 
 import pytest
 
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
+
 ROOT = Path(__file__).resolve().parents[3]
 HELPER = ROOT / "scripts/runtime_build/prepr_teardown_slot.py"
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 
 
 @pytest.fixture

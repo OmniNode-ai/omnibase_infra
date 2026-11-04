@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
 from tests.unit.scripts.test_prepr_runtime_pool_omn18893 import (
     CFG,
     DEV_FAILS,
@@ -22,7 +23,7 @@ from tests.unit.scripts.test_prepr_runtime_pool_omn18893 import (
     pool,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROVE = REPO_ROOT / "scripts" / "runtime_build" / "prepr_pool_prove.sh"
@@ -65,6 +66,15 @@ def test_clone_fetches_the_selected_ref_into_build_and_test_trees(
     remote.mkdir()
     _git(remote, "init", "-q", "--initial-branch=dev", env=env)
     (remote / "base.txt").write_text("dev\n", encoding="utf-8")
+    # The clone phase reads the vendored set from the tree under test (OMN-22153).
+    manifest = remote / "scripts/runtime_build/sibling_clone_manifest.sh"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        (REPO_ROOT / "scripts/runtime_build/sibling_clone_manifest.sh").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
     _git(remote, "add", ".", env=env)
     _git(remote, "commit", "-qm", "base", env=env)
     base = _git(remote, "rev-parse", "HEAD", env=env)
@@ -91,6 +101,7 @@ def test_clone_fetches_the_selected_ref_into_build_and_test_trees(
         "omnibase_compat",
         "omnibase_core",
         "omnibase_spi",
+        "omniintelligence",
     ):
         _git(
             remote,
@@ -106,6 +117,7 @@ def test_clone_fetches_the_selected_ref_into_build_and_test_trees(
     params = {
         "TAG": "local-tag-test",
         "W": str(work),
+        "CLONE_BASE_URL": "https://github.com/OmniNode-ai",
         f"{repo_var}_PR": "42",
         f"{repo_var}_HEAD": expected,
     }
