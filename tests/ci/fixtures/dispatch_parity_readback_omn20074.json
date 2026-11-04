@@ -28,9 +28,9 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 144
+        "omnibase_infra": 145
       },
-      "contracts_discovered": 165,
+      "contracts_discovered": 166,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 101,
       "probe_count": 1130,
@@ -38,6 +38,6 @@
       "registered_routes": 118,
       "type_scoped_dispatchers": 82
     },
-    "snapshot_sha256": "2b0104d9e350d6841770782199d5a0766b713f6611b890173203a747ac76a266"
+    "snapshot_sha256": "e34e4e29475c318ebd6a0b3c313c4b9a12f4e247fbd457f7b186380aae8bab23"
   }
 }
