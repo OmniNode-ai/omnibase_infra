@@ -160,6 +160,11 @@ requirements:
     acceptance:
       - id: AC33
         statement: 'AC33: onex node node_ci_live_contact_effect on a repository with a staged scripts/ci change exits 1 with a SkillRoutingError envelope whose message names a live-contact test and .github/live-contact-exception.md, and a staged non-tooling change exits 0 with no envelope -- falsifier: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q fails test_refused_ci_tooling_change_names_its_fix_in_the_envelope against the merge-base cli_node.py'
+  - id: req-omn19998-test-splits-warm-dod-verifier
+    statement: The CI test splits must install the verifier the repo-evidence caller pins in a step of their own before pytest starts, so the tests that call install_verifier find a whole cache entry and no longer pay a cold install inside the splits' 60 second pytest timeout.
+    acceptance:
+      - id: AC35
+        statement: 'AC35: the test-parallel job runs one step, with a timeout-minutes ceiling and no pytest, before both of its pytest steps, that installs the verifier at the caller tag through install_verifier and fails when the install fails -- falsifier: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0 fails at the merge base, where the step does not exist'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -239,6 +244,9 @@ evidence_requirements:
   - kind: tests
     description: The refusal-reason tests run the packaged node_ci_live_contact_effect through the onex node command on a temporary git repository with a staged change and read the printed envelope.
     command: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q
+  - kind: tests
+    description: The warm-up tests run the step body against a stand-in installer and read the test-parallel job's steps for the warm step and its place before both pytest steps.
+    command: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -666,3 +674,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC33
+  - id: dod-omn19998-ac35-test-splits-warm-dod-verifier
+    description: AC35 runs the warm step's own Python body against a stand-in installer for success and for a failing install, and reads ci.yml for the single warm step ahead of both pytest steps.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC35
