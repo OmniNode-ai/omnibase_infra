@@ -12,17 +12,12 @@ from __future__ import annotations
 import json
 import logging
 import re
-import subprocess
-import tempfile
-from collections.abc import Callable
-from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 
-import yaml
+from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
-from omnibase_core.utils.util_run_coro_sync import run_coro_sync
-from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_cost_estimator_build_config import (
     ModelCostEstimatorBuildConfig,
@@ -33,46 +28,42 @@ from omnibase_infra.models.model_cost_estimator_build_request import (
 from omnibase_infra.models.model_cost_estimator_build_result import (
     ModelCostEstimatorBuildResult,
 )
+from omnibase_infra.protocols.protocol_cost_estimator_build_io import (
+    ProtocolCostEstimatorBuildIO,
+)
 
 logger = logging.getLogger(__name__)
 SOURCE_LABEL = "ai.omninode.image.source-repo"
 REVISION_LABEL = "org.opencontainers.image.revision"
 
 
-def _checked(argv: list[str], timeout: int) -> str:
-    result = subprocess.run(
-        argv,
-        timeout=timeout,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=scrub_git_location_env(),
-    )
-    if result.returncode:
-        # Tool output can contain credentials; the failed operation is enough.
-        raise RuntimeError(f"estimator {argv[0]} {argv[1]} exited {result.returncode}")
-    return result.stdout.strip()
+def validated_image(image: str) -> str:
+    image = image.strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._/:-]*(?:@sha256:[a-f0-9]{64})?", image):
+        raise RuntimeError("estimator invalid COST_ESTIMATOR_WEB_IMAGE")
+    return image
 
 
-def _matches(image: str, repository: str, revision: str, timeout: int) -> bool:
-    result = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", image],
-        timeout=timeout,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode:
-        return False
-    try:
-        labels = json.loads(result.stdout)
-    except (ValueError, TypeError):
-        return False
-    return (
-        isinstance(labels, dict)
-        and labels.get(SOURCE_LABEL) == repository
-        and labels.get(REVISION_LABEL) == revision
-    )
+def validate_source(repository: str, url: str) -> None:
+    from urllib.parse import urlsplit
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", repository):
+        raise RuntimeError("estimator invalid COST_ESTIMATOR_WEB_SOURCE_REPOSITORY")
+    parsed = urlsplit(url)
+    # file URLs support host-local sources and the real-Git delivery fixture.
+    # Git's ext transport and option-like values are never accepted.
+    if (
+        parsed.scheme not in {"https", "ssh", "file"}
+        or not parsed.path
+        or any(c.isspace() for c in url)
+    ):
+        raise RuntimeError("estimator invalid COST_ESTIMATOR_WEB_SOURCE_URL")
+    if (
+        parsed.password
+        or (parsed.scheme == "https" and parsed.username)
+        or (parsed.scheme != "file" and not parsed.hostname)
+    ):
+        raise RuntimeError("estimator source URL must use the host credential helper")
 
 
 class HandlerCostEstimatorBuild:
@@ -80,6 +71,9 @@ class HandlerCostEstimatorBuild:
 
     def __init__(self, container: ModelONEXContainer) -> None:
         self._recipe = container.get_service(ModelCostEstimatorBuildConfig)
+        self._io = container.get_service(
+            cast("type[ProtocolCostEstimatorBuildIO]", ProtocolCostEstimatorBuildIO)
+        )
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -89,16 +83,52 @@ class HandlerCostEstimatorBuild:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
 
+    def _checked(self, argv: list[str], timeout: int) -> str:
+        result = self._io.run(argv, timeout)
+        if result is None:
+            raise RuntimeError(f"estimator {argv[0]} {argv[1]} failed")
+        return result
+
+    def _matching_id(
+        self, image: str, repository: str, revision: str, timeout: int
+    ) -> str | None:
+        output = self._io.run(
+            ["docker", "image", "inspect", "--format", "{{json .}}", "--", image],
+            timeout,
+            allow_failure=True,
+        )
+        try:
+            metadata = json.loads(output or "null")
+            if not isinstance(metadata, dict):
+                return None
+            config = metadata.get("Config")
+            if not isinstance(config, dict):
+                return None
+            labels = config.get("Labels")
+            identity = metadata.get("Id", "")
+        except (ValueError, TypeError):
+            return None
+        if (
+            isinstance(labels, dict)
+            and labels.get(SOURCE_LABEL) == repository
+            and labels.get(REVISION_LABEL) == revision
+            and isinstance(identity, str)
+            and re.fullmatch(r"sha256:[a-f0-9]{64}", identity)
+        ):
+            return str(identity)
+        return None
+
     def handle(
         self, request: ModelCostEstimatorBuildRequest
     ) -> ModelCostEstimatorBuildResult:
         if request.lane != "dev" or not request.enabled:
             return ModelCostEstimatorBuildResult(status="not-applicable")
         recipe = self._recipe
-        image = request.image or recipe.image
-        with tempfile.TemporaryDirectory(prefix="estimator-build-") as temporary:
-            source = str(Path(temporary) / "source")
-            _checked(
+        validate_source(recipe.repository, recipe.repository_url)
+        image = validated_image((request.image or "").strip() or recipe.image)
+        with self._io.workspace() as temporary:
+            source = temporary + "/source"
+            self._checked(
                 [
                     "git",
                     "clone",
@@ -107,23 +137,24 @@ class HandlerCostEstimatorBuild:
                     "--single-branch",
                     "--branch",
                     recipe.branch,
+                    "--",
                     recipe.repository_url,
                     source,
                 ],
                 recipe.clone_timeout_seconds,
             )
-            revision = _checked(
+            revision = self._checked(
                 ["git", "-C", source, "rev-parse", "HEAD"], recipe.read_timeout_seconds
             )
             if not re.fullmatch(r"[0-9a-f]{40}", revision):
                 raise RuntimeError("estimator source revision is not a full commit SHA")
-            if _matches(
+            if current := self._matching_id(
                 image, recipe.repository, revision, recipe.read_timeout_seconds
             ):
                 return ModelCostEstimatorBuildResult(
-                    status="current", image=image, revision=revision
+                    status="current", image=current, revision=revision
                 )
-            _checked(
+            identity = self._io.build_image(
                 [
                     "docker",
                     "build",
@@ -131,49 +162,48 @@ class HandlerCostEstimatorBuild:
                     f"{SOURCE_LABEL}={recipe.repository}",
                     "--label",
                     f"{REVISION_LABEL}={revision}",
+                    "--iidfile",
+                    temporary + "/image-id",
                     "--tag",
                     image,
                     source,
                 ],
                 recipe.build_timeout_seconds,
+                temporary + "/image-id",
             )
-            if not _matches(
-                image, recipe.repository, revision, recipe.read_timeout_seconds
+            if (
+                not re.fullmatch(r"sha256:[a-f0-9]{64}", identity)
+                or self._matching_id(
+                    identity, recipe.repository, revision, recipe.read_timeout_seconds
+                )
+                != identity
             ):
                 raise RuntimeError(
                     "estimator image revision readback differs from the source"
                 )
         logger.info("estimator image %s built at web revision %s", image, revision)
         return ModelCostEstimatorBuildResult(
-            status="built", image=image, revision=revision
+            status="built", image=identity, revision=revision
         )
 
 
 def dev_lane_build_settings(
-    execution: ModuleType, lane: str
+    execution: ModuleType, lane: str, declaration: dict[str, Any]
 ) -> tuple[ModelCostEstimatorBuildConfig, dict[str, str]] | None:
     """Validate declared settings before any image build or container mutation."""
     if lane != execution.EnumRuntimeLane.DEV:
         return None
     if "cost-estimator-web" in execution.lane_config_for(lane).disabled_services:
         return None
-    module_file = execution.__file__
-    if not module_file:
-        raise RuntimeError("estimator build requires the deploy agent source location")
-    contract = (
-        Path(module_file).resolve().parents[3]
-        / "src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml"
-    )
-    declaration = yaml.safe_load(contract.read_text(encoding="utf-8"))["config"][
-        "cost_estimator_build"
-    ]
-    build = declaration["build"]
+    build = dict(declaration["build"])
     source_configuration = declaration["source_configuration"]
     gate = declaration["gate"]
     environment = execution._compose_env()
     missing: list[str] = []
     for field in ("repository", "repository_url"):
-        name = build.pop(f"{field}_env")
+        name = build.pop(f"{field}_env", None)
+        if not isinstance(name, str) or not name:
+            raise RuntimeError(f"estimator contract requires {field}_env")
         value = environment.get(name, "").strip()
         if not value:
             missing.append(name)
@@ -196,59 +226,16 @@ def dev_lane_build_settings(
             + source_configuration["fragment_directory"]
             + "; gate secrets belong in the operator secret store"
         )
-    return ModelCostEstimatorBuildConfig.model_validate(build), environment
-
-
-def build_dev_lane_services(
-    execution: ModuleType,
-    build_images: Callable[..., None],
-    git_sha: str,
-    on_phase_update: Callable[..., None],
-    *,
-    build_source: str,
-    lane: str,
-    git_ref: str,
-) -> None:
-    """Validate first, then build dev images before the existing recreate."""
-    if lane != execution.EnumRuntimeLane.DEV:
-        return
-    settings = dev_lane_build_settings(execution, lane)
-    if execution.DEV_LANE_BUILD_SERVICES:
-        build_images(
-            execution.Scope.RUNTIME,
-            git_sha,
-            on_phase_update,
-            build_source=build_source,
-            runtime_lane=lane,
-            git_ref=git_ref,
-            compose_files=execution.lane_config_for(lane).compose_files,
-            services=execution.DEV_LANE_BUILD_SERVICES,
-            stage_workspace=False,
-        )
-    if settings is None:
-        return
-    recipe, environment = settings
-    container = ModelONEXContainer()
     try:
-        run_coro_sync(
-            container.service_registry.register_instance(
-                ModelCostEstimatorBuildConfig,
-                recipe,
-            )
-        )
-        run_coro_sync(
-            container.service_registry.register_instance(
-                HandlerCostEstimatorBuild,
-                HandlerCostEstimatorBuild(container),
-            )
-        )
-        handler = container.get_service(HandlerCostEstimatorBuild)
-        handler.handle(
-            ModelCostEstimatorBuildRequest(
-                lane="dev",
-                enabled=True,
-                image=environment.get("COST_ESTIMATOR_WEB_IMAGE"),
-            )
-        )
-    finally:
-        container.close()
+        recipe = ModelCostEstimatorBuildConfig.model_validate(build)
+    except ValidationError as error:
+        fields = ", ".join(str(item["loc"][0]) for item in error.errors())
+        raise RuntimeError(
+            f"estimator invalid build contract fields: {fields}"
+        ) from None
+    validate_source(recipe.repository, recipe.repository_url)
+    environment = dict(environment)
+    environment["COST_ESTIMATOR_WEB_IMAGE"] = validated_image(
+        environment.get("COST_ESTIMATOR_WEB_IMAGE", "").strip() or recipe.image
+    )
+    return recipe, environment

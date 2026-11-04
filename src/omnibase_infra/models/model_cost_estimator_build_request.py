@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 class ModelCostEstimatorBuildRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    operation: Literal["build"] = "build"
+    operation: Literal["build_estimator"] = "build_estimator"
     lane: str
     enabled: bool
     image: str | None = None

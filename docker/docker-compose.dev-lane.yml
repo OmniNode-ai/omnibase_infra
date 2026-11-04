@@ -2188,7 +2188,7 @@ services:
       FEATURE_ESTIMATOR_ENABLED: "true"
       # Infisical's materialized host env -> DEPLOY_AGENT_ENV_FILE -> the
       # agent's _compose_env() re-read -> compose -> the page's runtime gate.
-      # No password default; an absent value leaves the page gate closed.
+      # The agent refuses an enabled gate without a password before builds.
       FEATURE_ESTIMATOR_GATE_ENABLED: ${FEATURE_ESTIMATOR_GATE_ENABLED:-true}
       ESTIMATOR_GATE_PASSWORD: ${ESTIMATOR_GATE_PASSWORD:-}
       # A production build of the front end redirects any host it does not know

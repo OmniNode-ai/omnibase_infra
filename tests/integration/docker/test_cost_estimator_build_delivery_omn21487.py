@@ -31,6 +31,11 @@ from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_locat
 from omnibase_infra.handlers.handler_cost_estimator_build import (
     REVISION_LABEL,
     SOURCE_LABEL,
+)
+from omnibase_infra.models.model_cost_estimator_build_request import (
+    ModelCostEstimatorBuildRequest,
+)
+from omnibase_infra.nodes.node_setup_local_provision_effect.runtime_cost_estimator_build import (
     build_dev_lane_services,
 )
 
@@ -50,7 +55,10 @@ printf '%s\\n' "$*" >> "$state/calls.log"
 case "$1 $2" in
   "image inspect")
     [ -f "$state/labels.json" ] || exit 1
-    cat "$state/labels.json"
+    python3 - "$state/labels.json" <<'PY_INSPECT'
+import json, sys
+print(json.dumps({"Id": "sha256:" + "c" * 64, "Config": {"Labels": json.load(open(sys.argv[1]))}}))
+PY_INSPECT
     ;;
   "build "*)
     shift
@@ -63,6 +71,7 @@ for index, token in enumerate(argv):
         key, _, value = argv[index + 1].partition("=")
         labels[key] = value
 open(target, "w").write(json.dumps(labels))
+open(argv[argv.index("--iidfile") + 1], "w").write("sha256:" + "c" * 64)
 PY
     ;;
   *) exit 2 ;;
@@ -173,6 +182,12 @@ def test_shipped_contract_declares_the_recipe_the_delivery_reads() -> None:
     assert build["branch"] == "dev"
     assert build["repository_env"] == "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY"
     assert build["repository_url_env"] == "COST_ESTIMATOR_WEB_SOURCE_URL"
+    document = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))
+    operation = ModelCostEstimatorBuildRequest(lane="dev", enabled=True).operation
+    assert any(
+        binding["operation"] == operation
+        for binding in document["handler_routing"]["handlers"]
+    )
 
 
 def test_absent_image_is_built_and_stamped_with_the_web_head(

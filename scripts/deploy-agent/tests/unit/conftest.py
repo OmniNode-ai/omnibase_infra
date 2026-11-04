@@ -43,7 +43,9 @@ def _stub_cost_estimator_build_settings(
     """
     if request.node.get_closest_marker("cost_estimator_build") is not None:
         return
-    effect = executor_mod.load_dev_boot_guard("handler_cost_estimator_build")
+    effect = executor_mod.load_dev_boot_guard(
+        "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+    )
     monkeypatch.setattr(effect, "dev_lane_build_settings", lambda *args: None)
 
 

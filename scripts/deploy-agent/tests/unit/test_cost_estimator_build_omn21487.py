@@ -34,6 +34,7 @@ def delivery(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         sha=SHA,
         fail=None,
         stamp=True,
+        retag=False,
         env={
             "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
             "COST_ESTIMATOR_WEB_SOURCE_URL": SOURCE_URL,
@@ -46,7 +47,16 @@ def delivery(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         argv: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
         state.calls.append(argv)
-        if state.fail and state.fail in argv:
+        operation = (
+            "clone"
+            if argv[:2] == ["git", "clone"]
+            else "build"
+            if argv[:2] == ["docker", "build"]
+            else "rev-parse"
+            if argv[-2:] == ["rev-parse", "HEAD"]
+            else ""
+        )
+        if state.fail and state.fail == operation:
             return subprocess.CompletedProcess(
                 argv, 1, "sensitive output", "sensitive error"
             )
@@ -54,14 +64,30 @@ def delivery(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             return subprocess.CompletedProcess(argv, 0, state.sha + "\n", "")
         if argv[:3] == ["docker", "image", "inspect"]:
             return subprocess.CompletedProcess(
-                argv, int(state.labels is None), json.dumps(state.labels), ""
+                argv,
+                int(state.labels is None),
+                json.dumps(
+                    {
+                        "Id": "sha256:"
+                        + ("d" if state.retag and argv[-1] == IMAGE else "c") * 64,
+                        "Config": {"Labels": state.labels},
+                    }
+                ),
+                "",
             )
+        if argv[:2] == ["docker", "build"]:
+            from pathlib import Path
+
+            Path(argv[argv.index("--iidfile") + 1]).write_text("sha256:" + "c" * 64)
         if argv[:2] == ["docker", "build"] and state.stamp:
             state.labels = {SOURCE: SOURCE_REPOSITORY, REVISION: state.sha}
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(execution, "_run", run)
-    monkeypatch.setattr(subprocess, "run", run)
+    effect = execution.load_dev_boot_guard(
+        "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+    )
+    monkeypatch.setattr(effect, "subprocess", SimpleNamespace(run=run))
     monkeypatch.setattr(execution, "_compose_env", lambda: dict(state.env))
     monkeypatch.setattr(
         execution,
@@ -75,8 +101,10 @@ def delivery(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return state
 
 
-def build(state: SimpleNamespace, lane: EnumRuntimeLane = EnumRuntimeLane.DEV) -> None:
-    state.executor._build_dev_lane_only_services(
+def build(
+    state: SimpleNamespace, lane: EnumRuntimeLane = EnumRuntimeLane.DEV
+) -> dict[str, str]:
+    return state.executor._build_dev_lane_only_services(
         "c" * 40,
         lambda *args: None,
         build_source=BuildSource.WORKSPACE,
@@ -106,7 +134,8 @@ def test_missing_image_is_built_with_web_revision_before_recreate(
 
 def test_current_image_is_reused(delivery: SimpleNamespace) -> None:
     delivery.labels = {SOURCE: SOURCE_REPOSITORY, REVISION: SHA}
-    build(delivery)
+    environment = build(delivery)
+    assert environment["COST_ESTIMATOR_WEB_IMAGE"] == "sha256:" + "c" * 64
     assert not builds(delivery)
     assert any("rev-parse" in c for c in delivery.calls)
 
@@ -211,6 +240,10 @@ def test_runtime_rebuild_builds_before_recreate(
         )
     assert delivery.labels == {SOURCE: SOURCE_REPOSITORY, REVISION: SHA}
     recreate.assert_called_once()
+    assert (
+        recreate.call_args.kwargs["extra_env"]["COST_ESTIMATOR_WEB_IMAGE"]
+        == "sha256:" + "c" * 64
+    )
 
 
 def test_build_failure_prevents_runtime_recreate(
@@ -409,3 +442,105 @@ def test_declared_source_settings_flow_from_lane_overlay_without_host_bindings(
     environment = execution._compose_env()
     assert {name: environment[name] for name in source} == source
     assert environment["ESTIMATOR_GATE_PASSWORD"] == "synthetic-test-secret"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("COST_ESTIMATOR_WEB_SOURCE_URL", "--upload-pack=unsafe"),
+        ("COST_ESTIMATOR_WEB_SOURCE_URL", "ext::unsafe"),
+        ("COST_ESTIMATOR_WEB_SOURCE_URL", "https://user:secret@example.invalid/repo"),
+        ("COST_ESTIMATOR_WEB_SOURCE_REPOSITORY", "--unsafe"),
+        ("COST_ESTIMATOR_WEB_IMAGE", "--unsafe"),
+        ("COST_ESTIMATOR_WEB_IMAGE", "bad image"),
+    ],
+)
+def test_invalid_source_or_image_refuses_before_any_build(
+    delivery: SimpleNamespace,
+    name: str,
+    value: str,
+) -> None:
+    delivery.env[name] = value
+    with pytest.raises(RuntimeError, match="estimator") as error:
+        build(delivery)
+    assert "secret" not in str(error.value)
+    assert not delivery.calls
+    delivery.executor._compose_build.assert_not_called()
+
+
+def test_blank_image_override_uses_declared_default(delivery: SimpleNamespace) -> None:
+    delivery.env["COST_ESTIMATOR_WEB_IMAGE"] = "   "
+    build(delivery)
+    assert builds(delivery)[0][builds(delivery)[0].index("--tag") + 1] == IMAGE
+
+
+def test_failed_build_removes_checkout_and_skips_readback(
+    delivery: SimpleNamespace,
+) -> None:
+    from pathlib import Path
+
+    delivery.fail = "build"
+    with pytest.raises(RuntimeError, match="exited"):
+        build(delivery)
+    clone = next(argv for argv in delivery.calls if argv[:2] == ["git", "clone"])
+    assert not Path(clone[-1]).parent.exists()
+    assert delivery.calls[-1][:2] == ["docker", "build"]
+    delivery.executor._compose_build.assert_called_once()
+
+
+def test_rebuild_validates_one_settings_snapshot_under_build_lock(
+    delivery: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+
+    locked = False
+    calls = 0
+
+    @contextmanager
+    def hold(purpose: str):
+        nonlocal locked
+        locked = True
+        try:
+            yield
+        finally:
+            locked = False
+
+    def settings() -> dict[str, str]:
+        nonlocal calls
+        assert locked, "settings read before build lock"
+        calls += 1
+        assert calls == 1, "settings were reread"
+        return dict(delivery.env)
+
+    monkeypatch.setattr(execution, "_hold_build_context", hold)
+    monkeypatch.setattr(execution, "_compose_env", settings)
+    monkeypatch.setattr(delivery.executor, "_preflight_runtime_boot", Mock())
+    recreate = Mock(side_effect=RuntimeError("recreate reached"))
+    monkeypatch.setattr(delivery.executor, "_compose_up", recreate)
+    with pytest.raises(RuntimeError, match="recreate reached"):
+        delivery.executor.rebuild_scope(
+            Scope.RUNTIME,
+            [],
+            lambda *args: None,
+            lane=EnumRuntimeLane.DEV,
+            build_source=BuildSource.WORKSPACE,
+        )
+    assert calls == 1
+    assert (
+        recreate.call_args.kwargs["extra_env"]["ESTIMATOR_GATE_PASSWORD"]
+        == delivery.env["ESTIMATOR_GATE_PASSWORD"]
+    )
+
+
+def test_retag_during_build_keeps_the_verified_image_for_recreation(
+    delivery: SimpleNamespace,
+) -> None:
+    delivery.retag = True
+    environment = build(delivery)
+    assert environment["COST_ESTIMATOR_WEB_IMAGE"] == "sha256:" + "c" * 64
+    inspections = [
+        argv for argv in delivery.calls if argv[:3] == ["docker", "image", "inspect"]
+    ]
+    assert inspections[-1][-1] == environment["COST_ESTIMATOR_WEB_IMAGE"]
+    assert len(builds(delivery)) == 1

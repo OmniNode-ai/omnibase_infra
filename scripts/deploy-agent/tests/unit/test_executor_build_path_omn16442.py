@@ -263,7 +263,9 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: list[dict[str, object]] = []
-    effect = executor_mod.load_dev_boot_guard("handler_cost_estimator_build")
+    effect = executor_mod.load_dev_boot_guard(
+        "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+    )
     monkeypatch.setattr(
         effect.HandlerCostEstimatorBuild, "handle", lambda self, request: None
     )
