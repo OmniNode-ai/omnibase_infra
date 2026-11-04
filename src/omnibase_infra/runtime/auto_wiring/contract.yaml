@@ -7,7 +7,14 @@
 # This directory is not a node. It is the runtime's handler auto-wiring package:
 # it reads the process environment, the clock, contract files and the database
 # catalog in order to bind handlers to their node contracts at boot. That is
-# effect work by nature, and nothing here is a compute half.
+# effect work by nature. Lifecycle hooks invoke imported callables, discovery
+# reads contracts, and the database preflight queries the catalog; this boundary
+# describes the boot-time assembly package, not only handler_wiring.py.
+#
+# Scope: this package and descendants without a nearer contract. A nested
+# COMPUTE or REDUCER component must declare its own contract, which K4 uses
+# instead of this one. Sibling runtime packages do not inherit this declaration.
+# Keep this contract here: moving it to runtime/ would broaden that boundary.
 #
 # The check-no-io-outside-effects hook (OMN-21532, K4) judges a module against the
 # NEAREST contract.yaml above it. With no contract above this directory, its

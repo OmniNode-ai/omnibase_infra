@@ -755,7 +755,9 @@ requirements:
     statement: handler_wiring.py under src/omnibase_infra/runtime/auto_wiring/ passes the no-io-outside-effects hook because the directory declares the effect archetype.
     acceptance:
       - id: AC17427680001
-        statement: 'The auto-wiring directory contract declares node_type EFFECT_GENERIC and node_archetype effect, handler_wiring.py passes the no-io-outside-effects validator beside it, and a copy of the module with no contract above it fails -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q fails at the merge base because the contract file does not exist there'
+        statement: 'The auto-wiring directory contract declares node_type EFFECT_GENERIC and node_archetype effect, handler_wiring.py passes the no-io-outside-effects validator beside it, and a copy of the module passes with the local effect declaration and fails with the six expected I/O rule codes after that declaration is removed beneath an explicit compute boundary -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q fails at the merge base because the contract file does not exist there'
+      - id: AC17427680002
+        statement: The auto-wiring EFFECT boundary does not exempt a sibling COMPUTE component, and a nearer COMPUTE contract overrides it for a nested component; both refuse an environment read with env_read at its source line.
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -3422,10 +3424,26 @@ dod_evidence:
         cwd: .
     binds_ac: [AC17427650001]
   - id: dod-omn17427-auto-wiring-dir-effect-archetype
-    description: Runs the no-io-outside-effects validator on handler_wiring.py beside the directory contract, and on a copy of the same module with no contract above it. The contract file is new, so the test fails at the merge base.
+    description: Runs the no-io-outside-effects validator on handler_wiring.py beside the directory contract and on the same copy before and after removing its local effect declaration. An explicit compute boundary beneath an outer effect declaration isolates lookup; the negative control requires exactly the six I/O rule codes. The contract file is new, so the test fails at the merge base.
     source: manual
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427680001]
+  - id: dod-omn17427-auto-wiring-effect-boundary
+    description: Plants an environment read in sibling and nested compute components and requires the env_read diagnostic at the source line in both. The nested contract must override the auto-wiring EFFECT declaration.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q -k non_effect_components --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427680002]
+  - id: dod-omn17427-auto-wiring-effect-hosted-deploy
+    description: Hosted-runner deploy check reads the shipped runtime contract and wiring source and executes the paired EFFECT/COMPUTE controls plus sibling and nested isolation. Requires no containers, credentials, network or deployed lane; it does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427680001, AC17427680002]
