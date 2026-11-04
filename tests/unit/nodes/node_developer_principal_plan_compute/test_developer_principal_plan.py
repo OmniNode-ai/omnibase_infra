@@ -90,7 +90,7 @@ REFUSED: dict[str, Callable[[], dict[str, object]]] = {
     "unknown_operation": lambda: _with_grant(
         {
             "resource": "topic",
-            "name": "onex.evt.x.v1",
+            "name": yaml.safe_load(LOCAL_DECLARATION.read_text())["grants"][0]["name"],
             "pattern": "literal",
             "operations": ["alter"],
         }
@@ -119,8 +119,19 @@ REFUSED: dict[str, Callable[[], dict[str, object]]] = {
 assert len(REFUSED) == 9  # plus the lab file itself, accepted: the ten fixtures
 
 
-def _derived_texts() -> dict[str, str]:
-    return {path.name: path.read_text() for path in LAB.glob("*-derived-grants.json")}
+def _derived_texts(lane: str = "dev") -> dict[str, str]:
+    directory = LAB if lane == "dev" else LOCAL_DECLARATION.parent
+    return {
+        path.name: path.read_text() for path in directory.glob("*-derived-grants.json")
+    }
+
+
+def _issuer_base(path: Path, tmp_path: Path) -> Path:
+    doc = yaml.safe_load(path.read_text())
+    doc.pop("machine_grants_from", None)
+    target = tmp_path / "developer-principal-grants.yaml"
+    target.write_text(yaml.safe_dump(doc, sort_keys=False))
+    return target
 
 
 def _issuer_accepts(declaration: Path) -> lpi.Declaration | None:
@@ -140,7 +151,7 @@ def _plan(
     return HandlerDeveloperPrincipalPlan().handle(
         ModelDeveloperPrincipalPlanRequest(
             declaration_yaml=text,
-            derived_documents=_derived_texts(),
+            derived_documents=_derived_texts(str(yaml.safe_load(text)["lane"])),
             login=login,
             device=device,
             existing_principals=existing,
@@ -176,7 +187,12 @@ def _plan_grants(plan: ModelDeveloperPrincipalPlan) -> set[tuple[object, ...]]:
 @pytest.mark.parametrize(
     "declaration", [LAB_DECLARATION, LOCAL_DECLARATION], ids=["lab", "local"]
 )
-def test_parity_with_lab_issuer_on_an_accepted_declaration(declaration: Path) -> None:
+def test_parity_with_lab_issuer_on_an_accepted_declaration(
+    declaration: Path, tmp_path: Path
+) -> None:
+    # The local machine union is checked separately; lab issuer parity covers its base.
+    if declaration == LOCAL_DECLARATION:
+        declaration = _issuer_base(declaration, tmp_path)
     issued = _issuer_accepts(declaration)
     assert issued is not None
     plan = _plan(declaration.read_text())
@@ -195,7 +211,7 @@ def test_parity_with_lab_issuer_on_a_refused_declaration(
     text = yaml.safe_dump(REFUSED[fixture](), sort_keys=False)
     declaration = tmp_path / "developer-principal-grants.yaml"
     declaration.write_text(text)
-    for name, derived in _derived_texts().items():
+    for name, derived in _derived_texts(str(yaml.safe_load(text)["lane"])).items():
         (tmp_path / name).write_text(derived)
 
     assert _issuer_accepts(declaration) is None, f"the lab issuer accepts {fixture}"
@@ -237,14 +253,16 @@ def test_device_cap_collision_pair_plans_rotate_for_the_second() -> None:
     assert (second.decision, second.principal) == ("rotate", "dev-a-b-c")
 
 
-def test_device_cap_seventy_character_name_is_capped_with_its_digest() -> None:
+def test_device_cap_seventy_character_name_is_capped_with_its_digest(
+    tmp_path: Path,
+) -> None:
     login, device = "a" * 40 + "@omninode.ai", "d" * 25
     plan = _plan(LOCAL_DECLARATION.read_text(), login=login, device=device)
     uncapped = f"dev-{'a' * 40}-{'d' * 25}"
     assert len(uncapped) == 70
     assert len(plan.principal) == 63
     assert plan.principal.endswith(hashlib.sha256(uncapped.encode()).hexdigest()[:8])
-    declaration = lpi.load_declaration(LOCAL_DECLARATION)
+    declaration = lpi.load_declaration(_issuer_base(LOCAL_DECLARATION, tmp_path))
     assert plan.principal == lpi.principal_name(declaration, login, device)
 
 
@@ -440,3 +458,178 @@ def test_machine_supplement_is_bound_to_digest_but_never_a_developer_plan() -> N
     )
     assert missing.refusal_kind == "declaration"
     assert "derived document was not supplied" in missing.refusal
+
+
+# OMN-20825 AC6: local grants are the complete approved union.
+EXPECTED_LOCAL_BASE: set[tuple[str, str, str, tuple[str, ...], bool]] = {
+    (
+        "topic",
+        "onex.cmd.omnimarket.delegate-skill.v1",
+        "literal",
+        ("describe", "write"),
+        False,
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "literal",
+        ("describe", "read", "write"),
+        False,
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
+        "literal",
+        ("describe", "read", "write"),
+        False,
+    ),
+    (
+        "group",
+        "local.omnibase_core.runtime_local_",
+        "prefixed",
+        ("describe", "read"),
+        False,
+    ),
+    ("group", "*", "literal", ("describe",), False),
+}
+
+
+def _expected_local_machine_grants() -> set[
+    tuple[str, str, str, tuple[str, ...], bool]
+]:
+    bindings = yaml.safe_load((LAB / "machine-principal-bindings.yaml").read_text())[
+        "bindings"
+    ]
+    assert len(bindings) == 13
+    assert all(b["broker"] == "dev" and b["direction"] == "produce" for b in bindings)
+    return EXPECTED_LOCAL_BASE | {
+        ("topic", b["physical_topic"], "literal", ("describe", "write"), False)
+        for b in bindings
+    }
+
+
+def _local_machine_request() -> ModelDeveloperPrincipalPlanRequest:
+    local = _local()
+    local["machine_grants_from"] = "machine-principal-derived-grants.json"
+    doc = json.loads((LAB / "machine-principal-derived-grants.json").read_text())
+    for row in doc["grants"]:
+        row["broker"] = "local"
+    return ModelDeveloperPrincipalPlanRequest(
+        declaration_yaml=yaml.safe_dump(local, sort_keys=False),
+        derived_documents={"machine-principal-derived-grants.json": json.dumps(doc)},
+        login=LOGIN,
+        device="mac",
+    )
+
+
+def test_local_machine_supplement_whole_plan_matches_union() -> None:
+    request = _local_machine_request()
+    result = HandlerDeveloperPrincipalPlan().handle(request)
+    assert result.refusal_kind == ""
+    plan = result
+    expected = _expected_local_machine_grants()
+    assert _plan_grants(plan) == expected
+    assert len(plan.grants) == len(expected)
+    raw = {
+        (
+            g["resource"],
+            g["name"],
+            g["pattern"],
+            tuple(g["operations"]),
+            g.get("create_topic", False),
+        )
+        for g in _local()["grants"]
+    }
+    assert raw == EXPECTED_LOCAL_BASE
+
+
+def test_local_machine_supplement_shipped_document() -> None:
+    local = _local()
+    source = local["machine_grants_from"]
+    assert source == "machine-principal-derived-grants.json"
+    text = (LOCAL_DECLARATION.parent / source).read_text()
+    request = ModelDeveloperPrincipalPlanRequest(
+        declaration_yaml=LOCAL_DECLARATION.read_text(),
+        derived_documents={source: text},
+        login=LOGIN,
+        device="mac",
+    )
+    result = HandlerDeveloperPrincipalPlan().handle(request)
+    assert result.refusal_kind == "", result.refusal
+    assert result.decision == "create"
+    expected = _expected_local_machine_grants()
+    assert _plan_grants(result) == expected
+    assert len(result.grants) == len(expected)
+
+
+def test_local_machine_supplement_digest_binds_document() -> None:
+    request = _local_machine_request()
+    baseline = HandlerDeveloperPrincipalPlan().handle(request)
+    assert baseline.refusal_kind == ""
+    baseline_digest = baseline.declaration_digest
+    baseline_grants = _plan_grants(baseline)
+
+    doc = json.loads(request.derived_documents["machine-principal-derived-grants.json"])
+    doc_bytes = json.dumps(doc).encode() + b"\n"
+    request2 = request.model_copy(
+        update={
+            "derived_documents": {
+                "machine-principal-derived-grants.json": doc_bytes.decode()
+            }
+        }
+    )
+    result2 = HandlerDeveloperPrincipalPlan().handle(request2)
+    assert result2.refusal_kind == ""
+    assert result2.declaration_digest != baseline_digest
+    assert _plan_grants(result2) == baseline_grants
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing",
+        "empty",
+        "malformed",
+        "wrong_broker",
+        "invalid_operation",
+        "invalid_principal",
+    ],
+)
+def test_local_machine_supplement_invalid_documents(case: str) -> None:
+    request = _local_machine_request()
+    doc = json.loads((LAB / "machine-principal-derived-grants.json").read_text())
+    for row in doc["grants"]:
+        row["broker"] = "local"
+    if case == "missing":
+        documents: dict[str, str] = {}
+    elif case == "empty":
+        doc["grants"] = []
+        documents = {"machine-principal-derived-grants.json": json.dumps(doc)}
+    elif case == "malformed":
+        documents = {"machine-principal-derived-grants.json": "{"}
+    elif case == "wrong_broker":
+        doc["grants"][0]["broker"] = "dev"
+        documents = {"machine-principal-derived-grants.json": json.dumps(doc)}
+    elif case == "invalid_operation":
+        doc["grants"][0]["operation"] = "ALTER"
+        documents = {"machine-principal-derived-grants.json": json.dumps(doc)}
+    elif case == "invalid_principal":
+        doc["principal"] = "somebody"
+        documents = {"machine-principal-derived-grants.json": json.dumps(doc)}
+    else:
+        raise AssertionError(f"unknown case {case}")
+    req = request.model_copy(update={"derived_documents": documents})
+    result = HandlerDeveloperPrincipalPlan().handle(req)
+    assert result.refusal_kind == "declaration"
+
+
+@pytest.mark.parametrize("lane", ["prod", "stability"])
+def test_local_machine_supplement_other_lane_refused(lane: str) -> None:
+    request = _local_machine_request()
+    local = yaml.safe_load(request.declaration_yaml)
+    local["lane"] = lane
+    req = request.model_copy(
+        update={"declaration_yaml": yaml.safe_dump(local, sort_keys=False)}
+    )
+    result = HandlerDeveloperPrincipalPlan().handle(req)
+    assert result.refusal_kind == "declaration"

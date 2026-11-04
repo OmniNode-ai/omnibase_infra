@@ -1,0 +1,52 @@
+schema_version: 1.0.0
+ticket_id: OMN-20825
+title: Local developer mint includes machine supplement
+summary: Local grants base-plus-machine, dev unchanged, live mint remains pending OMN-20823.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20825-ac6
+    statement: local mint receives exactly base plus machine supplement.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: a developer login planned for the local broker (lane local, the plan `make mint-local` of [OMN-20823](<https://linear.app/omninode/issue/OMN-20823>) applies) holds, at mint time, the existing local grants of deploy/local/developer-principal-grants.yaml plus the machine supplement of deploy/lab/machine-principal-bindings.yaml re-derived for broker local, and no grant outside that union; the dev lane is unchanged; the change stays in the grant layer of omnibase_infra -- falsifier: `uv run pytest tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k local_machine_supplement -q` in omnibase_infra passes on the pre-change handler, or HandlerDeveloperPrincipalPlan.handle for a lane local declaration returns grants that differ in any way from the expected union.'
+evidence_requirements:
+  - kind: tests
+    description: planner grant derivation parity regression suite
+    command: uv run --frozen pytest tests/unit/nodes/node_developer_principal_plan_compute tests/unit/nodes/node_broker_grant_derive_compute tests/scripts/test_developer_principal_grants_parity.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20825-ac6-local-machine-union
+    description: the full local plan equals the unchanged base plus lab supplement re-derived for local, malformed documents refuse and digest binds bytes; the local declaration and generated document match lab bindings and canonical derivation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py tests/scripts/test_developer_principal_grants_parity.py -k local_machine_supplement -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn20825-ac6-dev-unchanged
+    description: dev machine supplement remains validated and bound to digest but never selected for developer requests.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k test_machine_supplement_is_bound_to_digest_but_never_a_developer_plan -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn20825-deploy-source
+    description: Published source blobs match HEAD and the local-plan fixture passes; this does not prove a live broker mint, and readiness still waits on OMN-20823 and live proof.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: command
+        check_value: bash -euo pipefail -c 'ref=$(git rev-parse HEAD); for path in src/omnibase_infra/handlers/handler_developer_principal_plan.py deploy/local/developer-principal-grants.yaml deploy/local/machine-principal-bindings.yaml deploy/local/machine-principal-derived-grants.json; do expected=$(git rev-parse "$ref:$path"); actual=$(gh api "repos/OmniNode-ai/omnibase_infra/contents/$path?ref=$ref" --jq .sha); test -n "$actual"; test "$actual" = "$expected"; done'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k local_machine_supplement_shipped_document -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
