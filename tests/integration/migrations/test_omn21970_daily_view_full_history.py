@@ -17,7 +17,8 @@ Failure modes, one test each:
   R5 control through the view itself: with only the newest 500 runs in the source, the same whole-history check
      fails, so R1 is not always-pass;
   R7 after a second apply, the writer role itself inserts from two concurrent transactions that commit in reverse
-     order: both succeed through the sequence GRANT 0065 carries, and every row gets a distinct cursor;
+     order: both succeed through the sequence GRANT 0065 carries, every row gets a distinct cursor, the sequence
+     stays owned by the column and the cursor index stays unique;
   R6 security_invoker: the dashboard role reads only its own tenant's days through the view, and nothing at all when
      app.tenant_id is unset (the policy fails closed).
 """
@@ -283,3 +284,15 @@ def test_r7_concurrent_writer_inserts_after_a_second_apply(
         with_cursor,
         distinct,
     )
+    with cluster.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT pg_get_serial_sequence('public.delegation_events', 'projection_cursor')"
+        )
+        (owned,) = cur.fetchone()
+        cur.execute(
+            "SELECT indisunique FROM pg_index "
+            "WHERE indexrelid = 'public.idx_delegation_events_projection_cursor'::regclass"
+        )
+        (unique,) = cur.fetchone()
+    assert owned == "public.delegation_events_projection_cursor_seq", owned
+    assert unique is True, "the cursor index must stay unique after a second apply"
