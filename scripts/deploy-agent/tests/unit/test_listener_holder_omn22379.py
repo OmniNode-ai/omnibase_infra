@@ -52,6 +52,37 @@ def _holder(environ: MutableMapping[str, str]) -> HandlerRuntimeListenerHolder:
     return HandlerRuntimeListenerHolder(ModelRuntimeListenerRegistry.assemble(environ))
 
 
+@pytest.mark.parametrize(
+    "node_name",
+    ["node_runtime_listener_holder_effect", "node_runtime_listener_broker_effect"],
+)
+@pytest.mark.parametrize("factory", [None, "builtins.dict"])
+def test_listener_holder_refuses_invalid_contract_io_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    node_name: str,
+    factory: str | None,
+) -> None:
+    """A missing or incompatible contract binding fails before any listener binds."""
+    from omnibase_infra.models import model_runtime_listener_registry as registry
+
+    load_contract = registry.load_and_validate_contract_yaml
+
+    def altered_contract(path: Path):
+        contract = load_contract(path)
+        if path.parent.name == node_name:
+            return contract.model_copy(
+                update={"raw": {**contract.raw, "config": {"io_factory": factory}}}
+            )
+        return contract
+
+    monkeypatch.setattr(registry, "load_and_validate_contract_yaml", altered_contract)
+    expected = ValueError if factory is None else TypeError
+    with pytest.raises(expected, match=node_name):
+        ModelRuntimeListenerRegistry.assemble({}, tmp_path / "broker.sock")
+    assert not (tmp_path / "broker.sock").exists()
+
+
 _UNIT = Path(__file__).resolve().parents[2] / "deploy" / "deploy-agent-dev.service"
 _SRC = str(Path(omnibase_infra.__file__).resolve().parent.parent)
 

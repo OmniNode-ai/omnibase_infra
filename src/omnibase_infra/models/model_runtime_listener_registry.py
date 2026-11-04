@@ -14,9 +14,11 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import MutableMapping
+from importlib import resources
 from pathlib import Path
 from typing import Self
 
+from dependency_injector import providers
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from omnibase_infra.models.model_runtime_listener_broker_port import (
@@ -48,6 +50,9 @@ from omnibase_infra.models.model_runtime_listener_process_port import (
 )
 from omnibase_infra.models.model_runtime_listener_session_table import (
     ModelRuntimeListenerSessionTable,
+)
+from omnibase_infra.runtime.contract_loaders.handler_routing_loader import (
+    load_and_validate_contract_yaml,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,11 +104,9 @@ class ModelRuntimeListenerRegistry(BaseModel):
             ModelRuntimeListenerEnvironment,
             ModelRuntimeListenerEnvironment(values=environ),
         )
-        from omnibase_infra.nodes.node_runtime_listener_holder_effect.runtime_listener_holder import (
-            holder_io,
+        services._register_io(
+            "node_runtime_listener_holder_effect", ModelRuntimeListenerHolderIo
         )
-
-        services.register(ModelRuntimeListenerHolderIo, holder_io(services))
         services.register(
             HandlerRuntimeListenerHolder, HandlerRuntimeListenerHolder(services)
         )
@@ -122,18 +125,37 @@ class ModelRuntimeListenerRegistry(BaseModel):
             from omnibase_infra.handlers.handler_runtime_listener_broker_server import (
                 HandlerRuntimeListenerBrokerServer,
             )
-            from omnibase_infra.nodes.node_runtime_listener_broker_effect.runtime_listener_broker import (
-                broker_server_io,
-            )
 
-            services.register(
-                ModelRuntimeListenerBrokerServerIo, broker_server_io(services)
+            services._register_io(
+                "node_runtime_listener_broker_effect",
+                ModelRuntimeListenerBrokerServerIo,
             )
             services.register(
                 HandlerRuntimeListenerBrokerServer,
                 HandlerRuntimeListenerBrokerServer(services),
             )
         return services
+
+    def _register_io[T](self, node_name: str, io_type: type[T]) -> None:
+        """Build a typed port from its owning node's contract-declared DI factory."""
+        contract_path = Path(
+            str(
+                resources.files("omnibase_infra").joinpath(
+                    "nodes", node_name, "contract.yaml"
+                )
+            )
+        )
+        contract = load_and_validate_contract_yaml(contract_path)
+        config = contract.raw.get("config")
+        if not isinstance(config, dict):
+            raise ValueError(f"{node_name} has no I/O factory configuration")
+        factory_ref = config.get("io_factory")
+        if not isinstance(factory_ref, str) or not factory_ref:
+            raise ValueError(f"{node_name} must declare config.io_factory")
+        instance: object = providers.Factory(factory_ref, container=self)()
+        if not isinstance(instance, io_type):
+            raise TypeError(f"{node_name} I/O factory must return {io_type.__name__}")
+        self.register(io_type, instance)
 
     @classmethod
     def start(cls, environ: MutableMapping[str, str] | None = None) -> Self | None:

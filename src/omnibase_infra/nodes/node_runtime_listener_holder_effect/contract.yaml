@@ -34,6 +34,8 @@ handler_routing:
       handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
     - operation: drop
       handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
+config:
+  io_factory: omnibase_infra.nodes.node_runtime_listener_holder_effect.runtime_listener_holder.holder_io
 capabilities:
   - name: runtime_listener.hold
     description: Hold the runtime host listeners across the deploy agent's restarts.

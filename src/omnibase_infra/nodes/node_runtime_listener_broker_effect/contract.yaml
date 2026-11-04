@@ -38,6 +38,8 @@ handler_routing:
       handler: {name: HandlerRuntimeListenerBroker, module: omnibase_infra.handlers.handler_runtime_listener_broker}
     - operation: serve
       handler: {name: HandlerRuntimeListenerBrokerServer, module: omnibase_infra.handlers.handler_runtime_listener_broker_server}
+config:
+  io_factory: omnibase_infra.nodes.node_runtime_listener_broker_effect.runtime_listener_broker.broker_server_io
 capabilities:
   - name: runtime_listener.broker
     description: Broker the held runtime host listeners to the runtimes of a pool with detach grants.
