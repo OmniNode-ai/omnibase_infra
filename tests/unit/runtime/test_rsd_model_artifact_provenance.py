@@ -10,7 +10,7 @@ import io
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Self, cast
+from typing import Any, Self, cast
 
 import pytest
 import yaml
@@ -474,7 +474,11 @@ def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
             raise AssertionError("loader must not stat before opening the descriptor")
         return original_stat(path, follow_symlinks=follow_symlinks)
 
-    def open_once(_path: Path, mode: str) -> _TrackingReader:
+    original_open = Path.open
+
+    def open_once(path: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if path != example_path:
+            return original_open(path, mode, *args, **kwargs)
         assert mode == "rb"
         return reader
 
