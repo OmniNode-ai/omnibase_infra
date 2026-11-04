@@ -23,6 +23,10 @@
 #                            Until the publish has written the include there, /reports/decision-quality/ answers
 #                            403 to everyone.
 #
+# The nginx.conf below is bind-mounted from the host's tree. The deploy-agent recreate
+# (node_standalone_compose_recreate_effect) writes it there from the requested git ref before it recreates
+# the service, because the node contract lists it under carried_files; a host copy is never edited by hand.
+#
 # Bring up (on the serving host, env file in place):
 #   docker compose --env-file <host env file> -f docker/docker-compose.factory-floor-web.yml up -d
 # Tear down:
