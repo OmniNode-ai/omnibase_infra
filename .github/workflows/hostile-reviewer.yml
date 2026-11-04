@@ -141,7 +141,10 @@ jobs:
 
       - name: Clean stale dependency clones
         working-directory: ${{ github.workspace }}
-        run: rm -rf ../omniintelligence ../omnibase_core_dep ../omnibase_compat ../ci-overlay
+        # OMN-22275: hostile-review-result.json is the reviewer's own output
+        # (REVIEW_JSON_PATH below); a file of that name committed to the pull
+        # request must never stand in for it when the gate-accept step reads it.
+        run: rm -rf ../omniintelligence ../omnibase_core_dep ../omnibase_compat ../omnimarket ../ci-overlay ./hostile-review-result.json
 
       # OMN-20923: the review voters are a deployment fact, supplied by an
       # overlay this repository does not carry. OMNI_CI_OVERLAY_REPO (an org
@@ -193,6 +196,8 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             config/onex/overlays/node_review_voters_overlay_compute
+            config/onex/overlays/agent_review_gate_accept
+            config/onex/overlays/review_agent_receipt_verify
           sparse-checkout-cone-mode: false
 
       - name: Place the CI overlay outside the workspace
@@ -261,6 +266,38 @@ jobs:
             sleep $((attempt * 10))
           done
           exit 1
+
+      # OMN-22275: the gate-accept node lives in omnimarket. It is read at
+      # omnimarket's newest dev-<UTC>-<sha12> tag, resolved at run time and
+      # logged, the way omniintelligence is above, and never from the pull
+      # request's checkout. This step NEVER fails the job: a review that passed
+      # must not turn red because a clone did not resolve, so an unresolved tag
+      # or clone leaves no directory behind, and the accept step below then
+      # leaves the voters' verdict standing.
+      - name: Clone omnimarket (gate-accept node)
+        working-directory: ${{ github.workspace }}
+        env:
+          OMNIMARKET_URL: ${{ github.server_url }}/${{ github.repository_owner }}/omnimarket.git
+        run: |
+          for attempt in {1..4}; do
+            rm -rf ../omnimarket
+            TAG="$(git ls-remote --tags --refs \
+              "$OMNIMARKET_URL" 'refs/tags/dev-*' \
+              | sed -n 's#^.*refs/tags/##p' \
+              | grep -E '^dev-[0-9]{14}-[0-9a-f]{12}$' | sort | tail -n 1 || true)"
+            if [ -n "$TAG" ] \
+              && git clone --filter=blob:none --no-checkout --branch "$TAG" \
+                "$OMNIMARKET_URL" ../omnimarket \
+              && git -C ../omnimarket checkout --quiet "refs/tags/${TAG}"; then
+              echo "omnimarket newest dev tag: ${TAG} -> $(git -C ../omnimarket rev-parse HEAD)"
+              exit 0
+            fi
+            echo "::warning::omnimarket newest dev tag unresolved or clone failed (attempt ${attempt}/4)"
+            sleep $((attempt * 10))
+          done
+          rm -rf ../omnimarket
+          echo "::warning::could not resolve and clone omnimarket's newest refs/tags/dev-* tag; the gate-accept step will leave the voters' verdict standing"
+          exit 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -668,8 +705,57 @@ jobs:
       # comment can explain itself; this last step is the single point that
       # turns anything other than `passed` into a job failure, which the
       # Hostile Review Gate below then reports.
-      - name: Enforce hostile-review verdict (no verdict is not a pass)
+      # OMN-22275: one node call and nothing else. The gate-accept node reads
+      # this attempt's reviewer result and the pull request's reviews, asks the
+      # verifier about each agent review receipt, and writes `decision`
+      # (unchanged, pass_agent or refuse), `reason` and `receipt_id` to this
+      # step's outputs and its summary line to the step summary. Only
+      # `pass_agent` skips the enforcement step below; on any other decision
+      # that step runs exactly as before. `if: always()` so a skipped or failed
+      # review step cannot hide the decision.
+      #
+      # The node runs from the omnimarket clone above (a dev tag, never the
+      # checkout under review) inside the omniintelligence environment the job
+      # already built, which carries the node's dependencies; a pull request
+      # cannot supply the code that accepts itself. A clone that does not carry
+      # the node yet, or a node that does not run, leaves the voters' verdict
+      # as it stands.
+      - name: Accept an agent review receipt in place of lost voters (OMN-22275)
+        id: accept
         if: always()
+        working-directory: ../omniintelligence
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACCEPT_SRC: ${{ github.workspace }}/../omnimarket/src
+          ONEX_SKILL_OVERLAY_ROOTS: ${{ github.workspace }}/../ci-overlay/config/onex/overlays
+          # OMN-22177: the receipt key the review step already carries, for the
+          # omniintelligence verifier node the accept node runs in a subprocess of
+          # ../omniintelligence when the agent_review_gate_accept overlay names
+          # verifier_endpoint subprocess:<path> (it does since omnimarket#4946). The
+          # step runs in ../omniintelligence with the node from the omnimarket dev
+          # tag, never code from the checkout under review.
+          LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+        run: |
+          if [ ! -d "$ACCEPT_SRC/omnimarket/nodes/node_agent_review_gate_accept_effect" ]; then
+            echo "::notice::the omnimarket clone carries no node_agent_review_gate_accept_effect (or was not cloned); the voters' verdict stands"
+            echo "decision=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            ACCEPT_EXIT=0
+            PYTHONPATH="$ACCEPT_SRC" uv run --no-sync python -m omnimarket.nodes.node_agent_review_gate_accept_effect.runtime_gate_accept \
+              --repository "${{ github.repository }}" \
+              --pull-request "${{ github.event.pull_request.number }}" \
+              --head-sha "${{ github.event.pull_request.head.sha }}" \
+              --voter-result-path "${{ github.workspace }}/hostile-review-result.json" \
+              --step-output-path "$GITHUB_OUTPUT" \
+              --step-summary-path "$GITHUB_STEP_SUMMARY" || ACCEPT_EXIT=$?
+            if [ "$ACCEPT_EXIT" -ne 0 ]; then
+              echo "::warning::gate accept did not run (exit $ACCEPT_EXIT); the voters' verdict stands"
+              echo "decision=unchanged" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Enforce hostile-review verdict (no verdict is not a pass)
+        if: always() && steps.accept.outputs.decision != 'pass_agent'
         env:
           REVIEW_VERDICT: ${{ steps.review.outputs.verdict || steps.preflight.outputs.verdict }}
           REVIEW_ERROR: ${{ steps.review.outputs.error || steps.preflight.outputs.error }}

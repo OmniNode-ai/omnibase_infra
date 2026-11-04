@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import json
 import logging
 import math
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -185,6 +186,81 @@ def _all_healthy(read_containers: Callable[[], list[ModelDevBootContainer]]) -> 
         return all(_healthy(c) for c in read_containers())
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         return False
+
+
+def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> set[str]:
+    """Retirement uses the same contract mapping as the compose gates.
+
+    A lane that folds nothing (any other dev instance) retires nothing. On the
+    lane that folds, the services main carries with no profile of its own
+    (``DEV_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded ones.
+    """
+    if not folded:
+        return set()
+    mapping = json.loads(policy.get("DEV_RUNTIME_MAIN_FOLDABLE_SERVICES", "{}"))
+    if (
+        not isinstance(mapping, dict)
+        or any(
+            not isinstance(role, str)
+            or not isinstance(service, str)
+            or not re.fullmatch(r"[a-z][a-z0-9-]*", service)
+            for role, service in mapping.items()
+        )
+        or len(set(mapping.values())) != len(mapping)
+    ):
+        raise RuntimeError("invalid dev foldable service mapping")
+    if missing := folded - mapping.keys():
+        raise RuntimeError(f"fold policy maps no service for {sorted(missing)}")
+    retired = {
+        service.strip()
+        for service in policy.get("DEV_RUNTIME_MAIN_RETIRED_SERVICES", "").split(",")
+        if service.strip()
+    }
+    if any(not re.fullmatch(r"[a-z][a-z0-9-]*", service) for service in retired):
+        raise RuntimeError("invalid dev retired service list")
+    return {*(mapping[profile] for profile in folded), *retired}
+
+
+def fold_compose_env(policy: Mapping[str, str], primary: bool) -> dict[str, str]:
+    """Keep compose activation aligned with retirement after all env overlays."""
+    selected = {}
+    for key, value in policy.items():
+        if key.startswith("DEV_RUNTIME_MAIN_"):
+            if key.endswith(("_RUNTIME_PROFILE", "_FULL_PROFILE")):
+                selected[key] = (
+                    value
+                    if primary
+                    else ("runtime" if key.endswith("_RUNTIME_PROFILE") else "full")
+                )
+            elif key.endswith(
+                ("_FOLDED_PROFILES", "_FOLDABLE_SERVICES", "_RETIRED_SERVICES")
+            ):
+                selected[key] = value
+    return selected
+
+
+def _folded_profiles(execution: ModuleType) -> tuple[str, ...]:
+    """The roles the dev overlay on disk folds into main (OMN-21288)."""
+    return tuple(sorted(execution.lane_folded_profiles(execution.EnumRuntimeLane.DEV)))
+
+
+def _refuse_cross_fold_pairing(point: ModelDevBootPoint, execution: ModuleType) -> None:
+    """An image is only ever restored under the overlay of its own fold generation.
+
+    A healthy family captured before the fold runs a main without the folded
+    writers' contracts; under the fold overlay their containers are retired
+    too, so nothing would project. Moving the image and the overlay together is
+    a rollback by revision, through a deploy of that git ref.
+    """
+    current = _folded_profiles(execution)
+    if tuple(sorted(point.folded_profiles)) != current:
+        raise DevBootFailedError(
+            f"retained revision {point.revision[:12]} ran with "
+            f"{len(point.folded_profiles)} folded profiles but the dev overlay "
+            f"folds {len(current)}: refusing to pair its image with this "
+            "overlay; roll back by revision (deploy the git ref whose overlay "
+            "matches)"
+        )
 
 
 class HandlerDevBootGuard:
@@ -411,6 +487,7 @@ class HandlerDevBootGuard:
             container_ids=tuple(sorted(c["Id"] for c in containers)),
             images=images,
             compose=compose,
+            folded_profiles=_folded_profiles(self.execution),
         )
         self.execution._atomic_write_private_json(
             self.snapshot_path, point.model_dump(mode="json")
@@ -430,11 +507,17 @@ class HandlerDevBootGuard:
         point = ModelDevBootPoint.model_validate_json(self.snapshot_path.read_text())
         if point.project != self.config.compose_project:
             raise DevBootFailedError("last healthy snapshot belongs to another project")
+        # A snapshot of another fold generation is held, not refused here: the
+        # fold change itself moves the config hash, so refusing left every
+        # forward deploy across a fold with no path at all. _restore still
+        # refuses the pairing, so a failed deploy records the incident and
+        # names the rollback by revision instead of restoring the old image.
         self.point.hold(point)
 
     def _restore(self) -> None:
         if self.point.current is None:
             raise DevBootFailedError("no last healthy dev revision")
+        _refuse_cross_fold_pairing(self.point.current, self.execution)
         for retained, image_id in self.point.current.images.items():
             self.execution._tag_image(image_id, retained)
         path = self.root / "recovery-compose.json"

@@ -46,6 +46,8 @@ class ModelDogfoodDelegationFaultRoute(BaseModel):
     backend_key: str = Field(min_length=1, alias="backend_id")
     endpoint_url: str = Field(min_length=1)
     expected_http_status: int
+    # The declared figure is the whole policy (OMN-21604): the consumer guard
+    # admits only a request asking for exactly this many seconds.
     requested_timeout_seconds: int = Field(ge=1)
     max_attempts: int = Field(ge=1)
     no_escalation: bool
@@ -54,8 +56,6 @@ class ModelDogfoodDelegationFaultRoute(BaseModel):
     def _validate_single_hop_fault_route(self) -> ModelDogfoodDelegationFaultRoute:
         if self.expected_http_status not in _ALLOWED_STATUSES:
             raise ValueError("dogfood fault route must return exactly HTTP 429 or 503")
-        if self.requested_timeout_seconds != 240:
-            raise ValueError("dogfood fault route timeout must be exactly 240 seconds")
         if self.max_attempts != 1 or not self.no_escalation:
             raise ValueError(
                 "dogfood fault route must be exactly one attempt with no escalation"

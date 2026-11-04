@@ -1,0 +1,1 @@
+ERROR omnibase_infra.runtime.auto_wiring.discovery DUPLICATE_REGISTRATION prevented: contract='node_package_announce_effect' first_owner='omnibase_infra' duplicate_package='omnimarket' entry_point='node_package_announce_effect'

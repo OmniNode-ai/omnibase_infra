@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# boot_topic_specs.yaml -- the DECLARED count of topic specs a runtime boot
+# provisions, per lane (OMN-21288, one-runtime plan T29).
+#
+# WHY IT IS DATA. Every dev runtime process builds its provisioning list from
+# contracts and creates all of it at boot (TopicProvisioner._build_topic_specs).
+# A contract that declares one more topic grows what every boot creates, and
+# nothing noticed. tests/unit/event_bus/test_topic_boot_baseline_omn21288.py
+# builds the real provisioning list and fails when it is longer than the
+# figure below; lowering the figure after a fold is an edit to this file.
+#
+# specs_per_boot / read_at / source: what the running dev image logged. This is
+#   the BEFORE reading for T28 (dev boots with no universe provision); T28
+#   records its after-figure here. The test does not build this list, because
+#   the image's installed packages and marketplace skill manifests are not in a
+#   unit-test environment.
+# repo_specs / repo_specs_measured_at: the same provisioning code over this
+#   repository's own contracts and standalone manifests, which is the list the
+#   test builds. Raise it only with a contract that is meant to add a topic, and
+#   say so in the change that raises it; a lower number is always welcome.
+#
+# Dev bus reading taken at the same time (read-only, from the broker's admin
+# metrics endpoint and docker stats, through the bus lab-run route):
+#   2026-11-01T23:44Z to 23:48Z  2564 topics, 2600 partitions, 1420 groups,
+#   1105 with no consumer, 1.71 GiB container memory.
+schema_version: "1"
+lanes:
+  dev:
+    specs_per_boot: 2300
+    read_at: "2026-11-01T23:29:24Z"
+    source: "boot log of the dev runtime container: topic provisioning (contract-first) - total: 2300, skill-manifest topics: 427"
+    # OMN-22158 raised repo_specs by 2: node_api_fixture_record_effect is meant
+    # to add its command and terminal topics (api-fixture-record, -recorded).
+    repo_specs: 217
+    repo_specs_measured_at: "bab5f913ade0ec0df5721df9e36e5991c960f3ce"

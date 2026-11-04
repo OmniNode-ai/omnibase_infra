@@ -181,6 +181,15 @@ hosts:
     runner_name_prefix: hp051-ci-runner
     expected_count: 4
     classes: [action-multiarch]
+    # OMN-22123 -- the reserved merge-queue pool. A merge_group job of a private repository asks for the label
+    # `omnibase-ci-mq`; the runners that carried it lived on another lab host that is in repair and the fleet declared none, so each job
+    # waited 14 to 60 minutes. Four runners on h051, labelled `omnibase-ci-mq` alone (no `omnibase-ci`, no
+    # `omnibase-ci-multiarch`), so only a merge_group job can take them. Class `merge-queue` counts toward no other
+    # class: it is not part of the `action` floor. Deployed with `deploy-runners.sh --host=h051 --pool=hp051-ci-mq-runner`.
+    pools:
+      - runner_name_prefix: hp051-ci-mq-runner
+        expected_count: 4
+        classes: [merge-queue]
   # h053 -- HP ProLiant Gen9 (hp-gen9), Xeon E5-2680 v4 Broadwell, 56 threads,
   # 125 GiB, amd64 WITH AVX2 (OMN-22111; RULING 2026-11-02T13:33:32Z under
   # OMN-17232). The general `omnibase-ci` runners leave the primary host here:
@@ -203,6 +212,15 @@ hosts:
     runner_name_prefix: hp053-ci-runner
     expected_count: 8
     classes: [action, action-multiarch]
+    # OMN-22123 -- the reserved merge-queue pool. A merge_group job of a private repository asks for the label
+    # `omnibase-ci-mq`; the runners that carried it lived on another lab host that is in repair and the fleet declared none, so each job
+    # waited 14 to 60 minutes. Four runners on h053, labelled `omnibase-ci-mq` alone (no `omnibase-ci`, no
+    # `omnibase-ci-multiarch`), so only a merge_group job can take them. Class `merge-queue` counts toward no other
+    # class: it is not part of the `action` floor. Deployed with `deploy-runners.sh --host=h053 --pool=hp053-ci-mq-runner`.
+    pools:
+      - runner_name_prefix: hp053-ci-mq-runner
+        expected_count: 4
+        classes: [merge-queue]
   # .200 -- Mac Studio M2 Ultra, arm64, always-on (OMN-19657, operator approval
   # ledger 2026-09-25T18:27:30Z, answering the open question at ledger
   # 2026-09-25T10:29:02Z). One verify runner, labelled host-200, for the

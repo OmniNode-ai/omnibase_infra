@@ -131,7 +131,7 @@ def _run_runtime_phase(lane: _Lane, **kwargs: Any) -> None:
         patch.object(executor_mod, "runtime_compose_up_budget", lambda *a: budget),
         patch.object(executor, "_ensure_runtime_migrations_ready"),
         patch.object(executor, "rerun_changed_oneshots", return_value=[]),
-        patch.object(executor, "_retire_folded_dev_tenant_projections"),
+        patch.object(executor, "_retire_folded_dev_services"),
     ):
         executor._compose_up(
             Phase.RUNTIME, Scope.RUNTIME, [], _noop, lane=EnumRuntimeLane.DEV, **kwargs
@@ -204,7 +204,10 @@ class TestRuntimePhaseRolling:
         lane = _fixture_lane()
         lane.current_image = NEW_IMAGE
         _run_runtime_phase(lane)
-        assert len(lane.recreated) == 19
+        # 19 containers in the recorded job; the hook-events writer is among them
+        # and OMN-21288 folded it into main, so the runtime scope no longer names it.
+        assert len(lane.recreated) == 18
+        assert "projection-claude-hook-events-writer" not in lane.recreated
         assert lane.max_starting == 1, "two runtimes were down at once"
         assert lane.largest_recreate == 1
         pairs = list(zip(lane.events[0::2], lane.events[1::2], strict=True))

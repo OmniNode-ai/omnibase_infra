@@ -2776,9 +2776,6 @@ entries:
     content_sha1: f0fa5f1317da482f8727dfdb991b1d0622e19e02
   - path: src/omnibase_infra/handlers/handler_graph.py
     family: O
-    content_sha1: 1b43c8222f9154db1f5114356231e8b2dbba9a77
-  - path: src/omnibase_infra/handlers/handler_graph.py
-    family: O
     content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33
   - path: src/omnibase_infra/handlers/handler_hotpatch_ledger_reconcile.py
     family: O
@@ -2800,22 +2797,7 @@ entries:
     content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33
   - path: src/omnibase_infra/handlers/handler_mcp.py
     family: O
-    content_sha1: 2da7a861bf9118b5823f2e85d0ba419331c651ae
-  - path: src/omnibase_infra/handlers/handler_mcp.py
-    family: O
-    content_sha1: 4a7f3708007c6a61677ac624e31c4e65eaeed241
-  - path: src/omnibase_infra/handlers/handler_mcp.py
-    family: O
-    content_sha1: 589a2207869a0935ca903e513fd7eae94276ad22
-  - path: src/omnibase_infra/handlers/handler_mcp.py
-    family: O
     content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33
-  - path: src/omnibase_infra/handlers/handler_mcp.py
-    family: O
-    content_sha1: cb95e4129249bcdb5c94ae1810573d07f25e3d50
-  - path: src/omnibase_infra/handlers/handler_qdrant.py
-    family: O
-    content_sha1: 1b43c8222f9154db1f5114356231e8b2dbba9a77
   - path: src/omnibase_infra/handlers/handler_qdrant.py
     family: O
     content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33

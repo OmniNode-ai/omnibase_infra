@@ -332,6 +332,10 @@ jobs:
       - name: Review voter model comes from the overlay (OMN-20910)
         run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -n 0 --no-cov -p no:randomly
 
+      # OMN-22275: paired with the hostile-review-agent-accept pre-commit hook.
+      - name: Hostile Review accepts an agent receipt (OMN-22275)
+        run: uv run --frozen pytest tests/ci/test_hostile_review_agent_accept_omn22275.py tests/ci/test_hostile_review_agent_accept_step_shape_omn22275.py tests/ci/test_ci_summary_external_sweep_agent_accept_omn22275.py -q -n 0 --no-cov -p no:randomly
+
       # OMN-17678: same focused suite as the pre-commit transport gate.
       - name: Linear transport consolidation regression (OMN-17678)
         run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
@@ -2619,6 +2623,30 @@ jobs:
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           "${HOME}/.local/bin/shellcheck" --version
 
+      # OMN-19998. tests/ci/test_ticket_contract_prepush_omn20870.py and
+      # test_ticket_contract_prerequisite_parity_omn21642.py run the verifier that
+      # the repo-evidence caller pins. On an empty runner cache that is a tag fetch
+      # and a Python 3.13 `uv sync`, longer than the 60 s `--timeout` of the pytest
+      # steps below. The signal killed the install's parent, the orphan kept writing,
+      # and the next test's `rm -rf` of the cache entry left venv/bin/python missing:
+      # nine open pull requests went red on 2026-11-03 in whichever split held those
+      # files. Installed here, outside pytest's clock, the cache entry is whole and
+      # each test returns at its installed marker. A failed install fails this step,
+      # not a test.
+      - name: Install the pinned DoD verifier before pytest times it (OMN-19998)
+        timeout-minutes: 15
+        run: |
+          uv run --frozen python - <<'PY'
+          from pathlib import Path
+
+          from scripts.ci.check_deploy_scope_dod import (
+              install_verifier,
+              read_verifier_tag,
+          )
+
+          print(install_verifier(read_verifier_tag(Path.cwd())))
+          PY
+
       - name: Verify lane-sync receipt refusal and stability refresh (OMN-19417)
         if: matrix.split == 1
         run: |
@@ -3726,6 +3754,8 @@ jobs:
           export STACK_SHAPE_BASE_REF
           uv sync --frozen
           uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -n 0 -p no:cacheprovider
+          # OMN-21924: command and console-script rules extend this same gate.
+          uv run --frozen pytest tests/unit/docker -q -k allowed_commands --no-cov -n 0 -p no:cacheprovider
 
   # OMN-15378 AC3: scripts/deploy-agent's own pytest root (201 tests) ran in a
   # SEPARATELY-TRIGGERED workflow, so the CI Summary poller — which reads

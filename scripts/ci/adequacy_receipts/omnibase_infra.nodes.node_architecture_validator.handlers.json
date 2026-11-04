@@ -1,0 +1,23 @@
+{
+  "branch_coverage_pct": 15.71,
+  "candidate_count": 5,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation",
+  "handler_module_sha256": "sha256:099b5ea3c763b6b2fe9b5be4ea95f13064973fcf6ea5cb154dda7840f23b929c",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_architecture_validator.handlers",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-11-03T08:02:38.669912+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 3,
+  "selected_input_hashes": [
+    "sha256:edad4f1d1cbbad69f25ef6bc8e01ddcd7274f19c70dd3ddf5cff6874ec2896a0",
+    "sha256:601289104c62a6ac6945e025f841e1f7fbe6684f09b4feb5ff253086fc0b772b",
+    "sha256:90e99bfead70b41e9494e83bb9d5f0960fc2186c5a131a59290b6fa93deab500"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21924 flips node_architecture_validator to canonical by adding handle(request), which delegates to validate_architecture and then, only when the request carries a stack-shape snapshot, applies the stack command rules. The validate_architecture body and the rule helpers it uses are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence for requests without a snapshot rests on that git-verbatim preservation plus the executed parity tests, which assert handle() returns exactly what validate_architecture returns over the scenario pool. The pool does not drive the stack-shape command branch; that branch is new in this change and is covered by tests/unit/docker/test_allowed_commands.py and tests/unit/validation/test_checker_stack_shape.py, not by a broad branch-coverage claim here.",
+    "uncovered_branch_count": 95
+  },
+  "volatile_mask": []
+}

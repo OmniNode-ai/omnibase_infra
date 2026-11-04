@@ -74,9 +74,16 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
+from omnibase_infra.models.dispatch.model_system_clock import (
+    SYSTEM_CLOCK,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
     extract_envelope_fields,
 )
+from omnibase_infra.protocols.protocol_clock import ProtocolClock
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.utils import sanitize_error_message
 
@@ -128,17 +135,25 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         >>> result = await dispatcher.handle(envelope)
     """
 
-    def __init__(self, handler: HandlerRuntimeTick) -> None:
+    def __init__(
+        self,
+        handler: HandlerRuntimeTick,
+        clock: ProtocolClock = SYSTEM_CLOCK,
+    ) -> None:
         """Initialize dispatcher with wrapped handler and circuit breaker.
 
         Args:
             handler: HandlerRuntimeTick instance to delegate to.
+            clock: Clock the dispatcher reads time through, and hands to the
+                handler request. Defaults to the system clock; tests pass a
+                fixed clock.
 
         Circuit Breaker:
             Initialized with KAFKA transport settings per dispatcher_resilience.md:
             - threshold=3: Open after 3 consecutive failures
             - reset_timeout=20.0: 20 seconds before testing recovery
         """
+        self._clock = clock
         self._handler = handler
 
         # Initialize circuit breaker using mixin pattern
@@ -217,7 +232,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         Raises:
             InfraUnavailableError: If circuit breaker is OPEN.
         """
-        started_at = datetime.now(UTC)
+        started_at = self._clock.now()
 
         correlation_id, raw_payload = extract_envelope_fields(envelope)
 
@@ -256,24 +271,24 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             assert isinstance(payload, ModelRuntimeTick)
 
             # Get current time for handler
-            now = datetime.now(UTC)
+            now = self._clock.now()
 
-            # Create envelope for handler (ProtocolMessageHandler signature)
-            handler_envelope: ModelEventEnvelope[ModelRuntimeTick] = ModelEventEnvelope(
-                envelope_id=uuid4(),
-                payload=payload,
-                envelope_timestamp=now,
-                correlation_id=correlation_id,
-                source_tool=self.dispatcher_id,
-                tenant_id=None,
+            # Create the typed request for the handler (clock reading and input id injected)
+            handler_request: ModelInjectedRequest[ModelRuntimeTick] = (
+                ModelInjectedRequest(
+                    event=payload,
+                    now=now,
+                    input_id=uuid4(),
+                    correlation_id=correlation_id,
+                    clock=self._clock,
+                )
             )
-
             # Delegate to wrapped handler
-            handler_output = await self._handler.handle(handler_envelope)
+            handler_output = await self._handler.handle(handler_request)
             output_events = list(handler_output.events)
             output_intents = handler_output.intents
 
-            completed_at = datetime.now(UTC)
+            completed_at = self._clock.now()
             duration_ms = (completed_at - started_at).total_seconds() * 1000
 
             # Record success for circuit breaker (coroutine-safe)
@@ -307,7 +322,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         except ValidationError as e:
             # ValidationError indicates malformed message payload - not a handler error
             # Return INVALID_MESSAGE to route to DLQ without retry
-            completed_at = datetime.now(UTC)
+            completed_at = self._clock.now()
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             sanitized_error = sanitize_error_message(e)
 
@@ -340,7 +355,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             raise
 
         except Exception as e:  # noqa: BLE001 — boundary: catch-all for resilience
-            completed_at = datetime.now(UTC)
+            completed_at = self._clock.now()
             duration_ms = (completed_at - started_at).total_seconds() * 1000
             sanitized_error = sanitize_error_message(e)
 

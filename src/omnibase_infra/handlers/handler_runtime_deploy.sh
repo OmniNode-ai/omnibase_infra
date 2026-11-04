@@ -249,12 +249,8 @@ readonly RUNTIME_SERVICES=(
 # START the carrier on a lane that never opted into it, defeating the compose
 # profile that keeps it inert there. Membership here scopes the restart to the
 # two lanes whose overlays put it in the `runtime` compose profile.
-# OMN-19513 adds projection-claude-hook-events-writer for the same reason as
-# the carrier: declared in the base compose file, started only by the dev lane
-# overlay that moves it into the `runtime` profile.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     tenant-projection-writer
-    projection-claude-hook-events-writer
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
@@ -356,12 +352,24 @@ resolve_lane_folded_services() {
         [effects]=runtime-effects
         [workers]=runtime-worker
         [tenant-projection]=tenant-projection-writer
+        [projection-writer-live-events]=projection-live-events-writer
+        [projection-writer-registration]=projection-registration-writer
+        [projection-writer-savings]=projection-savings-writer
+        [projection-writer-tenant-credentials]=projection-tenant-credentials-writer
+        [projection-writer-tenant-registry]=projection-tenant-registry-writer
     )
     LANE_FOLDED_SERVICES=()
     # Each folding lane is selected by its declared project and policy.
     local folded_profiles=""
+    # OMN-21288: services whose node main runs with no profile of its own (the
+    # claude hook-events projection). Their container of the previous revision
+    # is retired with the folded ones, from the same policy (the dev branch below
+    # seeds LANE_FOLDED_SERVICES with them), so the node's
+    # consumer group has one owner at a time; main's KAFKA_INSTANCE_ID is the
+    # group id the retired writer used, so main resumes from its offsets.
     if [[ -n "${DEV_COMPOSE_PROJECT:-}" && "${compose_project}" == "${DEV_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}"
+        IFS=',' read -r -a LANE_FOLDED_SERVICES <<< "${DEV_RUNTIME_MAIN_RETIRED_SERVICES:-}"
     elif [[ -n "${STABILITY_TEST_COMPOSE_PROJECT:-}" \
         && "${compose_project}" == "${STABILITY_TEST_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:-}"
@@ -3812,16 +3820,11 @@ restart_services() {
     # OMN-21288: retire folded roles before main claims their host ports.
     # A scoped worker restart must leave effects serving until main is replaced.
     local -a retired_containers=()
-    local folded_service container_ids svc
-    local restarting_main=false
-    for svc in "${lane_services[@]}"; do
-        if [[ "${svc}" == omninode-runtime ]]; then
-            restarting_main=true
-        fi
-    done
+    local folded_service container_ids
     resolve_lane_folded_services "${compose_project}" || return 1
+    # Only a recreate of main takes over the folded roles.
+    [[ " ${lane_services[*]} " == *" omninode-runtime "* ]] || LANE_FOLDED_SERVICES=()
     for folded_service in "${LANE_FOLDED_SERVICES[@]}"; do
-        [[ "${restarting_main}" == true ]] || continue
         container_ids="$(docker ps -aq \
             --filter "label=com.docker.compose.project=${compose_project}" \
             --filter "label=com.docker.compose.service=${folded_service}")" || return 1

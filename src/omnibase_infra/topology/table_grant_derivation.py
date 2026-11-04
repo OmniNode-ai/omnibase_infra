@@ -207,15 +207,16 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
 
 def _vendored_read_write(
     table: str,
-    node_dir: str,
-    create_file: str,
+    node_dir: str | None = None,
+    create_file: str | None = None,
     *,
     node: str | None = None,
     schema: str = "omninode_internal",
     access: Literal["read", "write", "read_write"] = "read_write",
+    role: str | None = None,
 ) -> ContractTableDeclaration:
-    """A vendored relation whose role is named for the table."""
-    migration = f"docker/migrations/forward/nodes/{node_dir}/{create_file}"
+    """A vendored relation whose role, node dir and create file follow the table."""
+    migration = f"docker/migrations/forward/nodes/{node_dir or f'node_projection_{table}'}/{create_file or f'0000_create_{table}.sql'}"
     return ContractTableDeclaration(
         node=node or f"legacy_migration:{table}",
         contract_path=Path(migration),
@@ -225,7 +226,7 @@ def _vendored_read_write(
             schema=schema,
             migration=migration,
             access=access,
-            role=table,
+            role=role or table,
         ),
     )
 
@@ -239,24 +240,20 @@ def _vendored_read_write(
 # generated YAML: ``--check`` continues to prove every shipped instance and
 # rendered catalog against one auditable derivation source.
 LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    ContractTableDeclaration(
-        node="legacy_migration:tenant_inference_credentials",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-            "0000_create_tenant_inference_credentials.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="tenant_inference_credentials",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-                "0000_create_tenant_inference_credentials.sql"
-            ),
-            access="write",
-            role="credentials",
-        ),
+    _vendored_read_write(
+        "tenant_inference_credentials",
+        "node_projection_tenant_credentials",
+        "0000_create_tenant_inference_credentials.sql",
+        schema="public",
+        access="write",
+        role="credentials",
     ),
+    # OMN-18159: the four delegation aggregate read views (model_routing,
+    # quality_gate, summary, token_usage) that sat here were deleted once the
+    # omnimarket contract pin c7cd6a481 declared all four in
+    # node_projection_delegation's db_io, the follow-up their own comment
+    # named; the regeneration wrote nothing, which is the proof the contract
+    # derives what the entries used to.
     # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
     # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
     # request its own comment named. The expiry module went red on the bot pull
@@ -359,63 +356,65 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # INSERT, UPDATE. Retired by the omnimarket OMN-19861
     # node_projection_demo_readiness pull request merging and the pin advancing
     # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:demo_readiness_latest",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-            "0000_create_demo_readiness_latest.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="demo_readiness_latest",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-                "0000_create_demo_readiness_latest.sql"
-            ),
-            access="read_write",
-            role="demo_readiness",
-        ),
-    ),
-    # OMN-21115: activation ingestion precedes the omnimarket contract pin.
-    # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
-    # when node_context_install_confirm_trigger_effect reaches the pin.
     _vendored_read_write(
-        "compaction_activations",
-        "node_context_install_confirm_trigger_effect",
-        "0000_create_compaction_activations.sql",
+        "demo_readiness_latest",
+        "node_projection_demo_readiness",
+        "0000_create_demo_readiness_latest.sql",
+        role="demo_readiness",
     ),
-    # OMN-17427: the delegation budget readings precede the omnimarket contract
-    # pin. The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
-    # when node_projection_delegation_budget_readings reaches the pin.
-    _vendored_read_write(
-        "delegation_budget_readings",
-        "node_projection_delegation_budget_readings",
-        "0000_create_delegation_budget_readings.sql",
+    # The four bridges below share one shape: 0000_create_<table>.sql under the
+    # node directory named beside it, or under node_projection_<table>.
+    *(
+        _vendored_read_write(t, d)
+        for t, d in (
+            # OMN-21115: activation ingestion precedes the omnimarket contract pin.
+            # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
+            # when node_context_install_confirm_trigger_effect reaches the pin.
+            ("compaction_activations", "node_context_install_confirm_trigger_effect"),
+            # OMN-17427: the delegation budget readings precede the omnimarket contract
+            # pin. The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
+            # when node_projection_delegation_budget_readings reaches the pin.
+            ("delegation_budget_readings", None),
+            # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
+            # omnimarket node contract, as compaction_receipts below. 0001 grants
+            # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
+            # USAGE. The ownership declaration names access read_write, role
+            # compaction_current_context. Retired when the
+            # node_projection_compaction_current_context contract merges and the
+            # omnimarket pin advances past it; the OMN-18863 expiry module names this
+            # bridge.
+            ("compaction_current_context", None),
+            # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
+            # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
+            # UPDATE plus schema and cursor sequence USAGE. The ownership declaration
+            # names access read_write, role compaction_receipts. Retired when the
+            # node_projection_compaction_receipts contract merges and the omnimarket
+            # pin advances past it; the OMN-18863 expiry module names this bridge.
+            ("compaction_receipts", None),
+        )
     ),
-    # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
-    # omnimarket node contract, as compaction_receipts below. 0001 grants
-    # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
-    # USAGE. The ownership declaration names access read_write, role
-    # compaction_current_context. Retired when the
-    # node_projection_compaction_current_context contract merges and the
-    # omnimarket pin advances past it; the OMN-18863 expiry module names this
-    # bridge.
-    _vendored_read_write(
-        "compaction_current_context",
-        "node_projection_compaction_current_context",
-        "0000_create_compaction_current_context.sql",
-    ),
-    # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
-    # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
-    # UPDATE plus schema and cursor sequence USAGE. The ownership declaration
-    # names access read_write, role compaction_receipts. Retired when the
-    # node_projection_compaction_receipts contract merges and the omnimarket
-    # pin advances past it; the OMN-18863 expiry module names this bridge.
-    _vendored_read_write(
-        "compaction_receipts",
-        "node_projection_compaction_receipts",
-        "0000_create_compaction_receipts.sql",
+    # OMN-21920: infra vendors node_projection_agent_actions/0000-0001 ahead of the
+    # omnimarket node contract that declares the six agent_* relations the retired
+    # agent-actions consumer wrote. The source contract declares each relation for
+    # write in the public schema of the application database; 0001 grants
+    # tenant_projection_writer SELECT, INSERT, UPDATE on all six. Retired when
+    # node_projection_agent_actions merges in omnimarket and the pin advances past
+    # it; the OMN-18863 expiry module names these bridges.
+    *(
+        _vendored_read_write(
+            table,
+            "node_projection_agent_actions",
+            "0000_create_agent_observability_tables.sql",
+            schema="public",
+        )
+        for table in (
+            "agent_actions",
+            "agent_transformation_events",
+            "router_performance_metrics",
+            "agent_detection_failures",
+            "agent_execution_logs",
+            "agent_status_events",
+        )
     ),
     # OMN-20169: infra vendors delegation_capability_cells before omnimarket#4380
     # lands its node contract (head 677d2941ff7e). This bridge expires once the
@@ -447,9 +446,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # node_projection_local_identity contract merges and the pin advances past
     # it; the expiry module names it.
     *(
-        _vendored_read_write(
-            t, f"node_projection_{t}", f"0000_create_{t}.sql", schema="public"
-        )
+        _vendored_read_write(t, schema="public")
         for t in ("local_environment", "local_alerts", "local_identity")
     ),
     # OMN-21970: the same infra-first window. This repo vendors
@@ -459,23 +456,30 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # whose relation no release grants. 0066 grants tenant_projection_writer
     # SELECT. Retired when that contract merges and the pin advances past it; the
     # expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_daily",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/"
-            "0066_delegation_daily_view.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_daily",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/"
-                "0066_delegation_daily_view.sql"
-            ),
-            access="read",
-            role="aggregate_daily",
-        ),
+    _vendored_read_write(
+        "projection_delegation_daily",
+        "node_projection_delegation",
+        "0066_delegation_daily_view.sql",
+        schema="public",
+        access="read",
+        role="aggregate_daily",
+    ),
+    # OMN-22320: node_projection_work_questions/0000 creates five
+    # omninode_internal tables ahead of the omnimarket writer's contract and
+    # 0001 grants omninode_runtime SELECT, INSERT, UPDATE on each. Retired
+    # when the omnimarket work-question writer contract merges and the pin
+    # advances past it; the OMN-18863 expiry module names this bridge.
+    *(
+        _vendored_read_write(
+            t, "node_projection_work_questions", "0000_create_work_questions.sql"
+        )
+        for t in (
+            "work_outcome_units",
+            "orchestration_style_outcomes",
+            "lane_drift_and_stalls",
+            "brief_quality_vs_outcome",
+            "subagent_waste",
+        )
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
@@ -495,22 +499,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # What guards them instead is the pairing: both views are granted by the
     # same statement block in one migration, so declaring one and not the other
     # is the defect, and a test asserts they are declared together.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_savings",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_savings",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_savings/"
-                "089_savings_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_delegation_savings",
-        ),
+    _vendored_read_write(
+        "projection_delegation_savings",
+        "node_projection_savings",
+        "089_savings_aggregate_views_per_tenant.sql",
+        schema="public",
+        access="read",
+        role="aggregate_delegation_savings",
     ),
     # OMN-17426: the savings overview READ VIEW follows the same temporary
     # supplemental-declaration path as OMN-18159 above. Infra vendors migration
@@ -518,22 +513,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # merge until this infra PR gives the tenant projection reader an explicit
     # grant. The source contract declaration makes this redundant once the pin
     # advances; until then, the vendored migration is the local authority.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_cost_savings_overview",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_cost_savings_overview",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_savings/"
-                "089_savings_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_savings_overview",
-        ),
+    _vendored_read_write(
+        "projection_cost_savings_overview",
+        "node_projection_savings",
+        "089_savings_aggregate_views_per_tenant.sql",
+        schema="public",
+        access="read",
+        role="aggregate_savings_overview",
     ),
     # OMN-17886 AC2 step 1: three omninode_internal relations whose owner is an
     # omnibase_infra node that writes with direct SQL rather than through the

@@ -40,9 +40,11 @@ PROFILE_VARIABLE = "RUNTIME_PROFILE"
 LANE_SCOPED_PROFILES = frozenset({"main", "effects"})
 #: The compose profile no bring-up requests (docker-compose.infra.yml). A
 #: service whose merged profiles are exactly this is declared and never started
-#: on the stack, so it owns no contract there and needs no lane (OMN-19513: the
-#: claude hook-events writer, started only by the primary dev lane).
+#: on the stack, so it owns no contract there and needs no lane.
 INERT_CARRIER_PROFILE = "profile-carrier-optin"
+#: The dev fold overlay gates the retired hook-events writer under this profile:
+#: its node runs inside main, so the carrier owns no contract (OMN-21288).
+FOLDED_NODE_CARRIER_PROFILE = "folded-hook-events"
 
 _VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|:\?|\?|-)([^{}]*))?\}")
 
@@ -84,10 +86,7 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.dev-tenant-fold.yml",
         ),
         lane="compose-dev",
-        # OMN-19513: the claude hook-events writer is a main-profile runtime
-        # that only this lane starts.
-        lane_naming_services=_LANE_NAMING_SERVICES
-        | {"projection-claude-hook-events-writer"},
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "dev-105": _Stack(
         files=(
@@ -242,6 +241,7 @@ def _merged_lane_scoped_environments(stack: _Stack) -> dict[str, dict[str, str]]
         for name, env in merged.items()
         if env.get(PROFILE_VARIABLE) in LANE_SCOPED_PROFILES
         and profiles.get(name) != [INERT_CARRIER_PROFILE]
+        and profiles.get(name) != [FOLDED_NODE_CARRIER_PROFILE]
     }
 
 

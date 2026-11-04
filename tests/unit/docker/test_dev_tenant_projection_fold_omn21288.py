@@ -16,6 +16,9 @@ from omnibase_core.models.validation.model_stack_shape_data import (
 )
 from omnibase_core.validation.checker_stack_shape import check_compose
 from omnibase_core.validation.validator_stack_shape import ValidatorStackShape
+from omnibase_infra.runtime.auto_wiring.profile_ownership import (
+    runtime_profile_owns_contract,
+)
 from scripts.render_runtime_policy_env import format_dotenv, load_contract, render_env
 from tests.helpers.lane_overlay_fixtures import load_compose
 
@@ -65,6 +68,12 @@ def dev_stack_services() -> dict[str, dict]:
             if env:
                 base["environment"] = env
             merged[name] = base
+    policy = render_env(load_contract())
+    for service in merged.values():
+        service["profiles"] = [
+            re.sub(r"\$\{([^:}]+):-([^}]+)\}", lambda m: policy.get(m[1], m[2]), p)
+            for p in service.get("profiles", [])
+        ]
     return {
         name: service
         for name, service in merged.items()
@@ -188,3 +197,178 @@ def test_fold_overlay_always_triggers_the_stack_gate() -> None:
     ]
     assert len(hooks) == 1
     assert re.search(hooks[0]["files"], str(OVERLAY.relative_to(ROOT)))
+
+
+# ---------------------------------------------------------------------------
+# OMN-21288: the five projection writers that dispatch in-process
+# ---------------------------------------------------------------------------
+# omnimarket#4492 routes these contracts to handler_runtime_writer classes
+# (onex_runtime_inprocess_dispatch), so main runs them as nodes once it owns
+# their profiles. Runtime profile -> the dev-lane service that ran it alone.
+RUNTIME_WRITERS = {
+    "projection-writer-live-events": "projection-live-events-writer",
+    "projection-writer-registration": "projection-registration-writer",
+    "projection-writer-savings": "projection-savings-writer",
+    "projection-writer-tenant-credentials": "projection-tenant-credentials-writer",
+    "projection-writer-tenant-registry": "projection-tenant-registry-writer",
+}
+# The contract names those profiles own, as omnimarket declares them.
+RUNTIME_WRITER_CONTRACTS = {
+    "projection-writer-live-events": "projection_live_events",
+    "projection-writer-registration": "projection_registration",
+    "projection-writer-savings": "projection_savings",
+    "projection-writer-tenant-credentials": "projection_tenant_credentials",
+    "projection-writer-tenant-registry": "projection_tenant_registry",
+}
+HANDLER = ROOT / "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
+
+
+def _overlay_gates() -> dict[str, str]:
+    """Service -> the single folded profile the fold overlay gates it under."""
+    document = yaml.compose(OVERLAY.read_text())
+    assert isinstance(document, yaml.MappingNode)
+    services = next(value for key, value in document.value if key.value == "services")
+    gates: dict[str, str] = {}
+    for key, service in services.value:
+        assert isinstance(service, yaml.MappingNode)
+        for field, value in service.value:
+            if field.value == "profiles":
+                assert value.tag == "!override", key.value
+                items = [item.value for item in value.value]
+                assert len(items) == 1 and items[0].startswith("folded-"), key.value
+                gates[key.value] = items[0].removeprefix("folded-")
+    return gates
+
+
+def _handler_profile_map() -> dict[str, str]:
+    body = re.search(
+        r"local -A folded_profile_services=\((.*?)\n    \)", HANDLER.read_text(), re.S
+    )
+    assert body
+    return dict(re.findall(r"\[([\w-]+)\]=([\w-]+)", body.group(1)))
+
+
+def test_policy_folds_the_runtime_writers_on_primary_dev_only() -> None:
+    policy = load_contract()
+    folded = policy.profiles["dev"].processes["main"].folded_profiles
+    assert set(RUNTIME_WRITERS) <= set(folded)
+    for name, profile in policy.profiles.items():
+        if name == "dev":
+            continue
+        for process in profile.processes.values():
+            assert not set(RUNTIME_WRITERS) & set(process.folded_profiles), name
+    rendered = render_env(policy)[FOLDED_KEY].split(",")
+    assert set(RUNTIME_WRITERS) <= set(rendered)
+
+
+def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
+    policy = load_contract()
+    process = policy.profiles["dev"].processes["main"]
+    rendered = render_env(policy)
+    assert process.foldable_services == {
+        "tenant-projection": SERVICE,
+        **RUNTIME_WRITERS,
+    }
+    # The hook-events writer has no runtime profile: the policy retires it by name.
+    assert process.retired_services == ("projection-claude-hook-events-writer",)
+    assert _overlay_gates() == {
+        SERVICE: "tenant-projection",
+        "projection-claude-hook-events-writer": "hook-events",
+    }
+    definitions = load_compose(DEV_COMPOSE_FILES[1])["services"]
+    for profile, service in RUNTIME_WRITERS.items():
+        assert service not in load_compose(OVERLAY)["services"]
+        key = f"DEV_RUNTIME_MAIN_{service.upper().replace('-', '_')}"
+        assert definitions[service]["profiles"] == [
+            f"${{{key}_RUNTIME_PROFILE:-runtime}}",
+            f"${{{key}_FULL_PROFILE:-full}}",
+        ]
+        assert rendered[f"{key}_RUNTIME_PROFILE"] == f"folded-{profile}-runtime"
+        assert rendered[f"{key}_FULL_PROFILE"] == f"folded-{profile}-full"
+        assert service not in dev_stack_services()
+    assert "projection-delegation-writer" in dev_stack_services()
+    # Retired by name (retired_services), not folded by profile: the fold
+    # overlay's gate keeps the inert carrier out of every bring-up.
+    assert "projection-claude-hook-events-writer" not in dev_stack_services()
+
+
+def test_deploy_handler_retires_exactly_the_policy_services() -> None:
+    handler = _handler_profile_map()
+    mapping = load_contract().profiles["dev"].processes["main"].foldable_services
+    assert handler == {
+        **mapping,
+        "effects": "runtime-effects",
+        "workers": "runtime-worker",
+    }
+
+
+def test_rollback_policy_restores_both_writer_profiles() -> None:
+    policy = load_contract()
+    process = policy.profiles["dev"].processes["main"]
+    rolled_back = process.model_copy(update={"folded_profiles": ("tenant-projection",)})
+    dev = policy.profiles["dev"].model_copy(
+        update={"processes": {**policy.profiles["dev"].processes, "main": rolled_back}}
+    )
+    rendered = render_env(
+        policy.model_copy(update={"profiles": {**policy.profiles, "dev": dev}})
+    )
+    for service in RUNTIME_WRITERS.values():
+        key = f"DEV_RUNTIME_MAIN_{service.upper().replace('-', '_')}"
+        assert rendered[f"{key}_RUNTIME_PROFILE"] == "runtime"
+        assert rendered[f"{key}_FULL_PROFILE"] == "full"
+
+
+@pytest.mark.parametrize("project", ["omnibase-infra", "omnibase-infra-dev-other"])
+def test_shell_compose_policy_scopes_the_writer_gates(project: str) -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'source "{ROOT}/scripts/runtime_build/compose_files.sh"\n'
+            "resolve_lane_overlay_filename() { :; }\n"
+            f'resolve_compose_file_args args "{ROOT}" "{project}"\n'
+            'printf "%s" "$DEV_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_RUNTIME_PROFILE,$DEV_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_FULL_PROFILE"',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == (
+        "folded-projection-writer-savings-runtime,folded-projection-writer-savings-full"
+        if project == "omnibase-infra"
+        else "runtime,full"
+    )
+
+
+@pytest.mark.parametrize("profile", sorted(RUNTIME_WRITER_CONTRACTS))
+def test_folded_writer_contract_attaches_to_main_only_when_folded(profile: str) -> None:
+    """Main owns the writer's contract under the committed fold, and not without it."""
+    contract = {
+        "name": RUNTIME_WRITER_CONTRACTS[profile],
+        "runtime_profiles": [profile],
+    }
+    folded = render_env(load_contract())[FOLDED_KEY]
+    assert runtime_profile_owns_contract(
+        contract, "main", environ={"ONEX_RUNTIME_FOLDED_PROFILES": folded}
+    )
+    assert not runtime_profile_owns_contract(contract, "main", environ={})
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        {"unknown-role": "projection-savings-writer"},
+        {"projection-writer-savings": "../writer"},
+        {
+            "projection-writer-savings": "writer",
+            "projection-writer-registration": "writer",
+        },
+    ],
+)
+def test_invalid_fold_service_contract_is_refused(mapping: dict[str, str]) -> None:
+    from pydantic import ValidationError
+
+    from omnibase_infra.models.model_runtime_fold_policy import ModelRuntimeFoldPolicy
+
+    with pytest.raises(ValidationError):
+        ModelRuntimeFoldPolicy(foldable_services=mapping)

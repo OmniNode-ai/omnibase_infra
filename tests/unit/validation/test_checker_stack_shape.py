@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 """OMN-21891: every compose service is the runtime, a dependency, a one-shot or a baselined entry.
 
-The checker and its contract are omnibase_core's ``ValidatorStackShape``; the rule values are the
-data file ``config/validation/stack_shape.yaml``. That file names no lane and no compose file: the
-compose files are found by the glob it holds, and its baseline is grouped per service. The core
+The shape checker and its contract are omnibase_core's ``ValidatorStackShape``; the rule values
+are ``config/validation/stack_shape.yaml``. Its glob finds stack files and its baseline is grouped
+per service. The existing architecture-validation node extends this same gate with command and
+console-script rules, using T1's compose parser. A command-only source covers the external forwarder. The core
 validator reads a literal compose file list per lane, so :func:`effective_data` expands the data
 file against the tree into that format (one lane per compose file) before the validator runs.
 This file runs the validator
@@ -22,11 +23,13 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import importlib.metadata
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -44,6 +47,15 @@ from omnibase_core.validation.checker_stack_shape import (
 from omnibase_core.validation.validator_stack_shape import ValidatorStackShape
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
+)
+from omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation import (
+    HandlerArchitectureValidation,
+)
+from omnibase_infra.nodes.node_architecture_validator.models.model_architecture_validation_request import (
+    ModelArchitectureValidationRequest,
+)
+from omnibase_infra.nodes.node_architecture_validator.models.model_stack_shape_snapshot import (
+    ModelStackShapeSnapshot,
 )
 
 pytestmark = pytest.mark.unit
@@ -175,6 +187,40 @@ def effective_data(
         entries.extend(
             {"file": file, "service": name, "ticket": ticket} for file, name in hits
         )
+    kept = data.get("kept_outside_runtime") or []
+    assert isinstance(kept, list)
+    for item in kept:
+        service = str(item["service"])
+        ticket = str(item.get("ticket") or "")
+        if not str(item.get("reason") or "").strip():
+            issues.append(
+                _issue(
+                    _DATA,
+                    f"kept service {service} carries no reason: name the second bus connection "
+                    "or failure domain the runtime does not provide.",
+                )
+            )
+        for file in item["files"]:
+            declared = services.get(file)
+            if (
+                declared is None
+            ):  # not judged as a stack (not_a_stack): read the file itself
+                path = root / file
+                declared = (
+                    _services_of(path.read_text(encoding="utf-8"))
+                    if path.is_file()
+                    else {}
+                )
+            if service not in declared:
+                issues.append(
+                    _issue(
+                        _DATA,
+                        f"kept service {service} names {file}, which declares no service "
+                        f"{service}: delete the entry or correct its files.",
+                    )
+                )
+            elif file in services:
+                entries.append({"file": file, "service": service, "ticket": ticket})
     effective = {
         "runtime": runtime,
         "dependencies": _strings(data, "dependencies"),
@@ -225,7 +271,62 @@ def _judge(
         path = Path(tmp) / "stack_shape.yaml"
         path.write_text(effective, encoding="utf-8")
         result = ValidatorStackShape(root=root, data_path=str(path)).validate(path)
-    return issues + tuple(result.issues) + _growth(root, text, base_ref)
+    data = _data(text)
+    files = sorted(
+        set(_judged(root, data)) | set(_strings(data, "command_only_compose_files"))
+    )
+    source = {file: (root / file).read_text(encoding="utf-8") for file in files}
+    base_source = (
+        {
+            file: original
+            for file in files
+            if (original := _git_show(root, base_ref, Path(file))) is not None
+        }
+        if base_ref
+        else {}
+    )
+    scripts: dict[str, dict[str, str]] = {}
+    if (root / "pyproject.toml").is_file():
+        manifest = tomllib.loads((root / "pyproject.toml").read_text())
+        scripts[manifest["project"]["name"]] = manifest["project"].get("scripts", {})
+        inventory = data.get("console_scripts", {})
+        patterns = _strings(data, "console_script_package_patterns")
+        names = {str(name).replace("_", "-").lower(): str(name) for name in inventory}
+        for distribution in importlib.metadata.distributions():
+            name = distribution.metadata["Name"].replace("_", "-").lower()
+            if not _matches(name, patterns):
+                continue
+            package = names.get(name, name)
+            if package not in scripts:
+                scripts[package] = {
+                    e.name: e.value
+                    for e in distribution.entry_points
+                    if e.group == "console_scripts"
+                }
+    command_result = HandlerArchitectureValidation().handle(
+        ModelArchitectureValidationRequest(
+            stack_shape=ModelStackShapeSnapshot(
+                policy_yaml=text,
+                compose_files=source,
+                base_policy_yaml=_git_show(root, base_ref, _DATA) if base_ref else None,
+                base_compose_files=base_source,
+                package_scripts=scripts,
+            )
+        )
+    )
+    command_issues = tuple(
+        ModelValidationIssue(
+            severity=_RULES[RULE_BASELINE].severity,
+            message=v.message,
+            code=v.rule_id,
+            file_path=Path(v.location or _DATA),
+            rule_name=v.rule_id,
+        )
+        for v in command_result.violations
+    )
+    return (
+        issues + tuple(result.issues) + _growth(root, text, base_ref) + command_issues
+    )
 
 
 def _text(issues: tuple[ModelValidationIssue, ...]) -> str:
@@ -519,6 +620,132 @@ def test_real_run_reads_the_stack_it_judges() -> None:
     )
     refused = _text(_judge(_REPO, text=shrunk))
     assert f"service {victim['service']} in docker/" in refused
+
+
+# -- OMN-22162: the cost estimator page on the report host is not a lane's stack ----------------
+
+_REPORT_HOST_COMPOSE = "docker/docker-compose.cost-estimator-web.yml"
+_REPORT_HOST_ENTRY = f"  - {_REPORT_HOST_COMPOSE}\n"
+
+
+def test_report_host_page_file_is_declared_not_a_stack_and_is_not_judged() -> None:
+    """The report host's compose file is named under not_a_stack; the dev lane's copy stays judged."""
+    data = _data(_real_text())
+    assert _REPORT_HOST_COMPOSE in _strings(data, "not_a_stack")
+    judged = _judged(_REPO, data)
+    assert _REPORT_HOST_COMPOSE not in judged
+    assert "docker/docker-compose.dev-lane.yml" in judged
+    assert (_REPO / _REPORT_HOST_COMPOSE).is_file()
+    # the dev lane's cost-estimator-web keeps its one baseline file until it leaves that file
+    assert _budgets(_real_text())["cost-estimator-web"] == 1
+
+
+def test_report_host_page_file_judged_as_a_stack_is_refused() -> None:
+    """RED control: without the not_a_stack entry the same tree is refused for a second declaration."""
+    text = _real_text()
+    assert _REPORT_HOST_ENTRY in text
+    refused = _text(_judge(_REPO, text=text.replace(_REPORT_HOST_ENTRY, "", 1)))
+    assert "service cost-estimator-web is declared in 2 compose files" in refused
+    assert _REPORT_HOST_COMPOSE in refused
+    assert _judge(_REPO, text=text) == ()
+
+
+# -- OMN-22393 (T26): the lane-mirror forwarder is kept outside the runtime, with its reason -------
+
+_FORWARDER = "gateway-forwarder"
+_FORWARDER_COMPOSE = "docker/docker-compose.gateway.yml"
+_KEPT_FIXTURE = (
+    "kept_outside_runtime:\n"
+    "  - service: fixture-bridge\n"
+    "    files:\n"
+    "      - docker/docker-compose.overlay.yml\n"
+    "    ticket: OMN-22393\n"
+    "    reason: a second bus connection the fixture runtime does not hold\n"
+)
+_BRIDGE = (
+    "  fixture-bridge:\n    image: example/runtime:tag\n    restart: unless-stopped\n"
+)
+
+
+def _kept(text: str) -> dict[str, Mapping[str, object]]:
+    items = _data(text).get("kept_outside_runtime") or []
+    assert isinstance(items, list)
+    return {str(i["service"]): i for i in items}
+
+
+def test_forwarder_decision_is_recorded_with_its_reason() -> None:
+    """AC1: the allowlist entry names the forwarder and the second bus connection or failure domain."""
+    entry = _kept(_real_text()).get(_FORWARDER)
+    assert entry is not None, f"{_DATA} records no decision for {_FORWARDER}"
+    reason = str(entry.get("reason") or "").strip()
+    assert reason, "the forwarder entry carries an empty reason"
+    assert "second bus connection" in reason or "failure domain" in reason, reason
+    assert entry.get("ticket") == "OMN-22393"
+    assert entry.get("files") == [_FORWARDER_COMPOSE]
+
+
+def test_every_kept_entry_names_a_service_its_files_declare() -> None:
+    """The entry is about a real service: each listed file declares it."""
+    kept = _kept(_real_text())
+    assert kept, "the data file records no kept service"
+    for service, entry in kept.items():
+        files = entry["files"]
+        assert isinstance(files, list) and files, service
+        for file in files:
+            declared = _services_of((_REPO / str(file)).read_text(encoding="utf-8"))
+            assert service in declared, f"{file} declares no service {service}"
+
+
+def test_forwarder_is_absent_from_every_judged_dev_compose_file() -> None:
+    """AC2: the dev file set holds no forwarder service and judges clean; the edge file is the one home."""
+    data = _data(_real_text())
+    holders = [
+        f
+        for f in _judged(_REPO, data)
+        if _FORWARDER in _services_of((_REPO / f).read_text(encoding="utf-8"))
+    ]
+    assert holders == []
+    assert _FORWARDER_COMPOSE in _strings(data, "not_a_stack")
+    assert _judge(_REPO) == ()
+
+
+def test_kept_entry_with_an_empty_reason_fails() -> None:
+    """AC1 falsifier: blanking the reason of the real forwarder entry is refused."""
+    data = _data(_real_text())
+    kept = data["kept_outside_runtime"]
+    assert isinstance(kept, list)
+    blanked = yaml.safe_dump(
+        {
+            **data,
+            "kept_outside_runtime": [
+                {**i, "reason": "  "} if i["service"] == _FORWARDER else i for i in kept
+            ],
+        }
+    )
+    refused = _text(_judge(_REPO, text=blanked))
+    assert f"kept service {_FORWARDER} carries no reason" in refused
+
+
+def test_kept_service_is_allowed_only_in_the_files_its_entry_names(
+    tmp_path: Path,
+) -> None:
+    """A kept service passes in its named file and is refused by name in any other judged file."""
+    root = _stack(tmp_path)
+    data = root / _DATA
+    data.write_text(data.read_text(encoding="utf-8") + _KEPT_FIXTURE, encoding="utf-8")
+    # control: no listed file declares it yet, so the entry is stale
+    assert "declares no service fixture-bridge" in _text(_judge(root))
+    _plant(root / _OVERLAY, _BRIDGE)
+    assert _judge(root) == ()
+    _plant(root / _INFRA, _BRIDGE)
+    assert f"service fixture-bridge in {_INFRA}" in _text(_judge(root))
+
+
+def test_kept_service_without_an_entry_is_refused(tmp_path: Path) -> None:
+    """Control: the same service with no kept entry is refused by name."""
+    root = _stack(tmp_path)
+    _plant(root / _OVERLAY, _BRIDGE)
+    assert f"service fixture-bridge in {_OVERLAY}" in _text(_judge(root))
 
 
 # -- the wiring: the hook and the unconditional CI job -------------------------------------------

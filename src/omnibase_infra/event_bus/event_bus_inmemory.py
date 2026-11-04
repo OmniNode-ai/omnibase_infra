@@ -2,45 +2,27 @@
 # SPDX-License-Identifier: MIT
 """Thin infra adapter over the canonical core in-memory event bus.
 
-The single canonical ``EventBusInmemory`` transport lives in
-``omnibase_core.event_bus.event_bus_inmemory`` (OMN-7062/OMN-7077). The
-861-line infra duplicate that previously lived here has been deleted
-(OMN-13419) so there is exactly one in-memory transport implementation.
+The single in-memory transport lives in
+``omnibase_core.event_bus.event_bus_inmemory`` (OMN-7062, OMN-7077, OMN-13419).
+This module subclasses it, inheriting its state (history, lock, offsets,
+subscriber registry, circuit-breaker accounting), and re-expresses only what
+the infra runtime and ``ProtocolEventBusLike`` need that the pinned core does
+not provide:
 
-This module is a *thin* adapter, NOT a second implementation. It subclasses
-the core bus, inheriting all of its state management (deque history, async
-lock, topic offsets, subscriber registry, per-subscriber circuit-breaker
-accounting). It re-expresses only the surface that the infra runtime and
-``ProtocolEventBusLike`` genuinely require and that the pinned core release
-does not yet provide:
+1. Infra-typed messages: ``publish`` builds and delivers the infra
+   ``ModelEventMessage`` / ``ModelEventHeaders`` (``schema_version: str``).
+2. Infra error taxonomy: ``InfraUnavailableError`` and
+   ``ProtocolConfigurationError`` in place of ``ModelOnexError``.
+3. Dict-shaped ``health_check()`` read by ``RuntimeHostProcess`` and
+   ``ServiceRuntimeHealthMonitor``.
+4. ``get_consumer_groups()`` from ``ProtocolEventBusLike``.
+5. ``declare_consume_concurrency()``: records the contract-declared bound for
+   wiring and readback; dispatch stays inline.
+6. ``subscribe`` returns a ``ModelSubscriptionHandle`` with pause, drain and
+   stop (OMN-21229), as ``EventBusKafka`` does.
 
-1. Infra-typed messages — the canonical core bus builds
-   ``omnibase_core`` ``ModelEventMessage``/``ModelEventHeaders`` whose
-   ``schema_version`` is a ``ModelSemVer``; the infra runtime, Kafka bus, node
-   handlers, and 50+ tests are typed against the infra
-   ``ModelEventMessage`` whose ``schema_version`` is a ``str``. The adapter
-   overrides ``publish`` to build and deliver the infra message types so every
-   downstream consumer receives exactly the model it always has (one boundary
-   instead of coercion scattered across every handler/projection).
-2. Infra error taxonomy — the infra kernel, dispatchers, and error-handling
-   tests are typed against ``InfraUnavailableError`` /
-   ``ProtocolConfigurationError`` (the core bus raises ``ModelOnexError``).
-3. Dict-shaped ``health_check()`` — ``RuntimeHostProcess.health_check()`` and
-   ``ServiceRuntimeHealthMonitor`` read ``health["started"]`` /
-   ``health["subscriber_count"]`` etc.; the core bus returns a
-   ``TypedDictEventBusHealth`` with only ``healthy``/``connected``/``status``.
-4. ``get_consumer_groups()`` — part of ``ProtocolEventBusLike`` (alongside
-   ``EventBusKafka``) and consumed by ``ServiceRuntimeHealthMonitor``; absent
-   on the pinned core bus.
-5. ``declare_consume_concurrency()`` — records the contract-declared upper
-   bound per topic/group for runtime wiring and readback. Inline dispatch
-   stays unchanged; recording a bound does not enable concurrent dispatch.
-
-Everything else — ``subscribe``/``unsubscribe``, history, offsets, lifecycle,
-the circuit-breaker manager methods — is inherited unchanged from the core
-bus. When the core ``ModelEventHeaders``/``ModelEventMessage`` model shape,
-``health_check`` shape, and ``get_consumer_groups`` land in a released core
-version, this adapter collapses to a bare re-export and can be deleted.
+Everything else is inherited unchanged. Once the core models land in a
+released core version this adapter collapses to a re-export and can be deleted.
 
 Protocol Compatibility:
     ProtocolEventBus / ProtocolEventBusLike via duck typing.
@@ -50,7 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
@@ -78,7 +60,19 @@ from omnibase_infra.event_bus.models import (
     ModelEventMessage,
     ModelPublishReceipt,
 )
+from omnibase_infra.handlers.inmemory_bus_publish import PublishEntry, publish_batch
+from omnibase_infra.handlers.inmemory_transactional_producer import (
+    InmemoryTransactionalEpochs,
+    InmemoryTransactionalProducer,
+    open_transactional_producer,
+)
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.event_bus.model_subscription_gate import (
+    ModelSubscriptionGate,
+)
+from omnibase_infra.models.event_bus.model_subscription_handle import (
+    ModelSubscriptionHandle,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.event_bus.protocol_node_identity import (
@@ -126,6 +120,7 @@ class EventBusInmemory(_CoreEventBusInmemory):
             circuit_breaker_threshold=circuit_breaker_threshold,
         )
         self._consume_concurrency: dict[tuple[str, str], int] = {}
+        self._transactional = InmemoryTransactionalEpochs()
 
     def declare_consume_concurrency(
         self,
@@ -166,32 +161,43 @@ class EventBusInmemory(_CoreEventBusInmemory):
         group_id: str | None = None,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
         required_for_readiness: bool = False,
-    ) -> Callable[[], Awaitable[None]]:
-        """Subscribe with infra-typed identity/enum/callback.
+    ) -> ModelSubscriptionHandle:
+        """Subscribe with infra-typed identity, returning a lifecycle handle.
 
-        Re-declares the inherited core ``subscribe`` with the infra
-        ``ModelNodeIdentity`` / ``EnumConsumerGroupPurpose`` / infra-message
-        callback so infra call sites type-check. The core implementation only
-        reads ``identity`` attributes and ``purpose.value`` and stores the
-        callback opaquely, so delegation is behavior-preserving (OMN-13419).
+        The callback is wrapped in a ``ModelSubscriptionGate`` so the handle
+        can pause delivery and drain the callback a publisher is inside
+        (OMN-21229).
         """
-        return await super().subscribe(
+        gate = ModelSubscriptionGate()
+        unsubscribe = await super().subscribe(
             topic,
             cast("_CoreProtocolNodeIdentity | None", node_identity),
             cast(
                 "Callable[[_CoreModelEventMessage], Awaitable[None]] | None",
-                on_message,
+                None if on_message is None else gate.wrap(on_message),
             ),
             group_id=group_id,
             purpose=cast("_CoreEnumConsumerGroupPurpose", purpose),
             required_for_readiness=required_for_readiness,
         )
 
+        async def pause() -> None:
+            gate.pause()
+
+        return ModelSubscriptionHandle.bind(
+            topic=topic,
+            consumer_group=group_id or "",
+            subscription_key=uuid4().hex,
+            pause=pause,
+            drain=gate.drain,
+            stop=unsubscribe,
+        )
+
     async def subscribe_ungrouped(
         self,
         topic: str,
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
-    ) -> Callable[[], Awaitable[None]]:
+    ) -> ModelSubscriptionHandle:
         """Read ``topic`` from now on in a subscription of its own (OMN-17427).
 
         The same operation as ``EventBusKafka.subscribe_ungrouped``: a one-shot
@@ -236,100 +242,32 @@ class EventBusInmemory(_CoreEventBusInmemory):
         subscriber's failure is a delivery problem, not a produce problem, and
         conflating them would make the in-memory proof diverge from Kafka.
         """
-        if not self._started:
-            context = ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.INMEMORY,
-                operation="publish",
-                target_name=f"event_bus.{self._environment}",
-                correlation_id=(
-                    headers.correlation_id if headers is not None else uuid4()
-                ),
-            )
-            raise InfraUnavailableError(
-                "Event bus not started. Call start() first.",
-                context=context,
-                topic=topic,
-            )
+        return (await self.publish_atomic([(topic, key, value, headers)]))[0]
 
-        if headers is None:
-            headers = ModelEventHeaders(
-                source=f"{self._environment}.{self._group}",
-                event_type=topic,
-                timestamp=datetime.now(UTC),
-            )
+    async def publish_atomic(
+        self,
+        entries: Sequence[PublishEntry],
+        *,
+        precondition: Callable[[], None] | None = None,
+    ) -> tuple[ModelPublishReceipt, ...]:
+        """Append every entry in one lock hold, then deliver (OMN-21228).
 
-        async with self._lock:
-            offset = self._topic_offsets[topic]
-            self._topic_offsets[topic] = offset + 1
+        ``precondition`` runs inside that lock hold and may raise to refuse the
+        whole batch; nothing is appended or delivered then. See
+        ``omnibase_infra.handlers.inmemory_bus_publish``.
+        """
+        return await publish_batch(self, entries, precondition)
 
-            message = ModelEventMessage(
-                topic=topic,
-                key=key,
-                value=value,
-                headers=headers,
-                offset=str(offset),
-                partition=0,
-            )
-            # OMN-13419: the inherited core deque is typed for the core
-            # ModelEventMessage; the adapter intentionally stores the infra-typed
-            # message (same structural shape, str schema_version) so consumers
-            # receive the infra model. Drops to a re-export once core aligns.
-            self._event_history.append(message)  # type: ignore[arg-type]
-            subscribers = list(self._subscribers.get(topic, []))
-            receipt = ModelPublishReceipt(
-                topic=topic,
-                partition=0,
-                offset=offset,
-                cluster=f"inmemory.{self._environment}",
-                produced_at=datetime.now(UTC),
-                transport=EnumInfraTransportType.INMEMORY,
-                idempotency_key=headers.idempotency_key,
-            )
-
-        # Deliver outside the lock; mirror the inherited circuit-breaker policy.
-        for group_id, callback in subscribers:
-            failure_key = (topic, group_id)
-
-            async with self._lock:
-                failure_count = self._subscriber_failures.get(failure_key, 0)
-
-            if failure_count >= self._max_consecutive_failures:
-                logger.warning(
-                    "Subscriber circuit breaker open - skipping callback",
-                    extra={
-                        "topic": topic,
-                        "group_id": group_id,
-                        "consecutive_failures": failure_count,
-                        "correlation_id": str(headers.correlation_id),
-                    },
-                )
-                continue
-
-            try:
-                # Callback typed for core ModelEventMessage; infra-typed
-                # message is structurally identical (OMN-13419).
-                await callback(message)  # type: ignore[arg-type]
-                async with self._lock:
-                    if failure_key in self._subscriber_failures:
-                        del self._subscriber_failures[failure_key]
-            except Exception as e:
-                async with self._lock:
-                    self._subscriber_failures[failure_key] = (
-                        self._subscriber_failures.get(failure_key, 0) + 1
-                    )
-                    current_failure_count = self._subscriber_failures[failure_key]
-                logger.exception(
-                    "Subscriber callback failed",
-                    extra={
-                        "topic": topic,
-                        "group_id": group_id,
-                        "error": str(e),
-                        "consecutive_failures": current_failure_count,
-                        "correlation_id": str(headers.correlation_id),
-                    },
-                )
-
-        return receipt
+    async def transactional_producer(
+        self, transactional_id: str
+    ) -> InmemoryTransactionalProducer:
+        """Open a producer under ``transactional_id``, fencing any older one (OMN-21228)."""
+        return open_transactional_producer(
+            self.publish_atomic,
+            self._transactional,
+            transactional_id,
+            started=self._started,
+        )
 
     async def publish_envelope(
         self,
