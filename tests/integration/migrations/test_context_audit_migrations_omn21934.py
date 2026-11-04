@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -118,3 +119,90 @@ def test_unexpected_sequence_refuses_before_any_table_grant(
             "'public.context_audit_events', 'SELECT,INSERT,UPDATE')"
         )
         assert cursor.fetchone() == (False,)
+
+
+@pytest.mark.parametrize(
+    ("drift", "message"),
+    [
+        ("integer_id", "id must be BIGINT"),
+        ("missing_default", "id must generate values from its owned sequence"),
+        ("constant_default", "id must generate values from its owned sequence"),
+        ("wrong_key_type", "event_key must be TEXT"),
+        ("duplicate_keys", "duplicate non-NULL event_key values"),
+    ],
+)
+def test_incompatible_existing_shape_refuses_before_index_creation(
+    ephemeral_postgres: EphemeralPostgres, drift: str, message: str
+) -> None:
+    pg = ephemeral_postgres
+    created = pg.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CREATE))
+    assert created.returncode == 0, created.stderr
+    with pg.connect() as connection, connection.cursor() as cursor:
+        cursor.execute("DROP INDEX public.ux_context_audit_events_event_key")
+        if drift == "integer_id":
+            cursor.execute(
+                "ALTER TABLE public.context_audit_events ALTER COLUMN id TYPE INTEGER"
+            )
+        elif drift == "missing_default":
+            cursor.execute(
+                "ALTER TABLE public.context_audit_events ALTER COLUMN id DROP DEFAULT"
+            )
+        elif drift == "constant_default":
+            cursor.execute(
+                "ALTER TABLE public.context_audit_events ALTER COLUMN id SET DEFAULT 1"
+            )
+        elif drift == "wrong_key_type":
+            cursor.execute(
+                "ALTER TABLE public.context_audit_events ALTER COLUMN event_key TYPE INTEGER USING NULL"
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO public.context_audit_events "
+                "(task_id, correlation_id, event_type, enforcement_level, event_key) "
+                "VALUES ('one', 'c', 'audit', 'warn', 'duplicate'), "
+                "('two', 'c', 'audit', 'warn', 'duplicate')"
+            )
+    refused = pg.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CREATE))
+    assert refused.returncode != 0
+    assert message in refused.stderr
+    with pg.connect() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('public.ux_context_audit_events_event_key')")
+        assert cursor.fetchone() == (None,)
+        if drift == "duplicate_keys":
+            cursor.execute("SELECT count(*) FROM public.context_audit_events")
+            assert cursor.fetchone() == (2,)
+
+
+def test_busy_table_refuses_with_bounded_lock_wait(
+    ephemeral_postgres: EphemeralPostgres,
+) -> None:
+    pg = ephemeral_postgres
+    created = pg.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CREATE))
+    assert created.returncode == 0, created.stderr
+    with pg.connect() as connection, connection.cursor() as cursor:
+        cursor.execute("LOCK TABLE public.context_audit_events IN ACCESS SHARE MODE")
+        # Without the migration's timeout this call waits for the lock held by
+        # this connection. The client timeout keeps a broken regression bounded.
+        refused = subprocess.run(
+            [
+                "psql",
+                "-h",
+                pg.socket_dir,
+                "-p",
+                str(pg.port),
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-f",
+                str(_CREATE),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=12,
+        )
+        assert refused.returncode != 0
+        assert "lock timeout" in refused.stderr
