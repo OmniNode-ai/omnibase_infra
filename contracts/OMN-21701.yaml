@@ -37,7 +37,7 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_delta_metrics_effect/test_handle_typed_request_omn21536.py tests/unit/nodes/node_merge_gate_effect/test_handle_typed_request_omn21536.py tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py tests/unit/nodes/node_decision_store_effect/test_handle_typed_request_omn21536.py tests/unit/nodes/node_chain_retrieval_effect/test_handle_typed_request_omn21536.py tests/integration/nodes/test_typed_request_handlers_effects_omn21536.py -q -n 0 -p no:cacheprovider --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_delta_metrics_effect src/omnibase_infra/nodes/node_merge_gate_effect src/omnibase_infra/nodes/node_delta_bundle_effect src/omnibase_infra/nodes/node_decision_store_effect src/omnibase_infra/nodes/node_chain_retrieval_effect --report-json /dev/null
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_delta_metrics_effect src/omnibase_infra/nodes/node_merge_gate_effect src/omnibase_infra/nodes/node_delta_bundle_effect src/omnibase_infra/nodes/node_decision_store_effect src/omnibase_infra/nodes/node_chain_retrieval_effect --report-json /tmp/omn21701-ac1-handler-shape.json
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21701-ac2-own-contract
     description: >-
@@ -46,7 +46,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: test -f contracts/OMN-21701.yaml && ! grep -q -E 'node_(delta_metrics|merge_gate|delta_bundle|decision_store|chain_retrieval)_effect' contracts/OMN-21536.yaml && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_delta_metrics_effect src/omnibase_infra/nodes/node_merge_gate_effect src/omnibase_infra/nodes/node_delta_bundle_effect src/omnibase_infra/nodes/node_decision_store_effect src/omnibase_infra/nodes/node_chain_retrieval_effect --report-json /dev/null
+        check_value: test -f contracts/OMN-21701.yaml && ! grep -q -E 'node_(delta_metrics|merge_gate|delta_bundle|decision_store|chain_retrieval)_effect' contracts/OMN-21536.yaml && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_delta_metrics_effect src/omnibase_infra/nodes/node_merge_gate_effect src/omnibase_infra/nodes/node_delta_bundle_effect src/omnibase_infra/nodes/node_decision_store_effect src/omnibase_infra/nodes/node_chain_retrieval_effect --report-json /tmp/omn21701-ac2-handler-shape.json
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21701-deploy-handle-signature
     description: >-
