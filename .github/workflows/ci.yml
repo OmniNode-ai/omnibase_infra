@@ -3754,6 +3754,8 @@ jobs:
           export STACK_SHAPE_BASE_REF
           uv sync --frozen
           uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -n 0 -p no:cacheprovider
+          # OMN-21924: command and console-script rules extend this same gate.
+          uv run --frozen pytest tests/unit/docker -q -k allowed_commands --no-cov -n 0 -p no:cacheprovider
 
   # OMN-15378 AC3: scripts/deploy-agent's own pytest root (201 tests) ran in a
   # SEPARATELY-TRIGGERED workflow, so the CI Summary poller — which reads
