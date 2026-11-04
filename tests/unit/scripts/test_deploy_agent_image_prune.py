@@ -14,15 +14,15 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_infra.handlers.deploy_agent_image_prune_effect.effect import (
+    read_prune_policy,
+)
 from omnibase_infra.handlers.handler_deploy_agent_image_prune import (
     HandlerDeployAgentImagePrune,
     build_plan,
 )
 from omnibase_infra.models.model_deploy_agent_image_prune_request import (
     ModelDeployAgentImagePruneRequest,
-)
-from omnibase_infra.nodes.node_deploy_agent_image_prune_effect.effect import (
-    read_prune_policy,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -323,7 +323,7 @@ def test_inventory_must_account_for_every_listed_image(
 def test_image_and_container_inspection_are_batched(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from omnibase_infra.nodes.node_deploy_agent_image_prune_effect import effect
+    from omnibase_infra.handlers.deploy_agent_image_prune_effect import effect
 
     policy = read_prune_policy(CONTRACT).model_copy(update={"inspect_batch_size": 2})
     image_ids = ["sha256:" + char * 64 for char in "abcde"]
@@ -350,7 +350,7 @@ def test_image_and_container_inspection_are_batched(
         raise AssertionError(args)
 
     monkeypatch.setattr(effect, "_docker", docker)
-    result = effect._prune(execute=True, policy=policy)
+    result = effect._prune(execute=True, policy=policy, planner=build_plan)
     assert result.success
     assert result.remove_image_ids == ()
     assert [call[2:] for call in calls if call[:2] == ("image", "inspect")] == [
@@ -368,7 +368,7 @@ def test_image_and_container_inspection_are_batched(
 def test_docker_timeout_refuses_prune(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess
 
-    from omnibase_infra.nodes.node_deploy_agent_image_prune_effect import effect
+    from omnibase_infra.handlers.deploy_agent_image_prune_effect import effect
 
     calls: list[list[str]] = []
 
@@ -391,7 +391,7 @@ def test_docker_timeout_refuses_prune(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_installer_failure_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    from omnibase_infra.nodes.node_deploy_agent_image_prune_effect import effect
+    from omnibase_infra.handlers.deploy_agent_image_prune_effect import effect
 
     repo = tmp_path / ("bad\npath" if failure == "newline" else "branch")
     source = repo / "scripts/deploy-agent/deploy"

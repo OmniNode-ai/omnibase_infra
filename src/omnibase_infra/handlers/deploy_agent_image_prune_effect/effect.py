@@ -10,16 +10,17 @@ could instead untag an image retained for rollback after the inventory read.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 
 import yaml
 
-from omnibase_infra.handlers.handler_deploy_agent_image_prune import build_plan
 from omnibase_infra.models.model_deploy_agent_image_prune_policy import (
     ModelDeployAgentImagePrunePolicy,
 )
@@ -29,6 +30,11 @@ from omnibase_infra.models.model_deploy_agent_image_prune_request import (
 from omnibase_infra.models.model_deploy_agent_image_prune_result import (
     ModelDeployAgentImagePruneResult,
 )
+
+PlanBuilder = Callable[
+    [list[dict[str, object]], set[str], ModelDeployAgentImagePrunePolicy, datetime],
+    ModelDeployAgentImagePruneResult,
+]
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +57,7 @@ def _docker(*args: str, policy: ModelDeployAgentImagePrunePolicy) -> str:
 
 
 def _prune(
-    *, execute: bool, policy: ModelDeployAgentImagePrunePolicy
+    *, execute: bool, policy: ModelDeployAgentImagePrunePolicy, planner: PlanBuilder
 ) -> ModelDeployAgentImagePruneResult:
     docker = partial(_docker, policy=policy)
     # Use the one source-label predicate declared by this node contract.
@@ -86,7 +92,7 @@ def _prune(
             )
         images.extend(inspected)
     now = datetime.now(UTC)
-    plan = build_plan(images, set(), policy=policy, now=now)
+    plan = planner(images, set(), policy, now)
     # No eligible image means no deletion; container inventory cannot add
     # a removal candidate. Avoid an unnecessary host-wide scan in that case.
     if plan.remove_image_ids:
@@ -106,7 +112,7 @@ def _prune(
                     "Docker container inspection returned an incomplete inventory"
                 )
             inuse.update(references)
-        plan = build_plan(images, inuse, policy=policy, now=now)
+        plan = planner(images, inuse, policy, now)
     logger.info(
         "Deploy agent image prune plan (bytes are nominal): %s",
         plan.model_dump_json(),
@@ -126,7 +132,11 @@ def _prune(
 
 
 def _install(
-    repository: str, *, policy: ModelDeployAgentImagePrunePolicy, policy_path: Path
+    repository: str,
+    *,
+    policy: ModelDeployAgentImagePrunePolicy,
+    policy_path: Path,
+    planner: PlanBuilder,
 ) -> ModelDeployAgentImagePruneResult:
     repo = Path(repository).resolve()
     if "\n" in str(repo):
@@ -158,26 +168,39 @@ def _install(
             check=True,
             timeout=policy.docker_timeout_seconds,
         )
+    planner_source = inspect.getsourcefile(planner)
+    if planner_source is None:
+        raise ValueError(
+            "Retention planner source is unavailable for installation readback"
+        )
     revision = hashlib.sha256(
         b"".join(units.values())
         + policy_path.read_bytes()
         + Path(__file__).read_bytes()
-        + Path(build_plan.__code__.co_filename).read_bytes()
+        + Path(planner_source).read_bytes()
     ).hexdigest()
     return ModelDeployAgentImagePruneResult(success=True, installed_revision=revision)
 
 
 def run_request(
     request: ModelDeployAgentImagePruneRequest,
+    planner: PlanBuilder,
 ) -> ModelDeployAgentImagePruneResult:
     """Read policy and run host I/O within the owning effect package."""
     try:
         policy_path = Path(request.policy_path)
         policy = read_prune_policy(policy_path)
         if request.operation == "deploy_agent.images.install":
-            return _install(request.repository, policy=policy, policy_path=policy_path)
+            return _install(
+                request.repository,
+                policy=policy,
+                policy_path=policy_path,
+                planner=planner,
+            )
         return _prune(
-            execute=request.operation == "deploy_agent.images.prune", policy=policy
+            execute=request.operation == "deploy_agent.images.prune",
+            policy=policy,
+            planner=planner,
         )
     except (
         OSError,

@@ -27,7 +27,6 @@ from omnibase_infra.models.model_deploy_agent_image_prune_result import (
 def build_plan(
     images: list[dict[str, object]],
     inuse: set[str],
-    *,
     policy: ModelDeployAgentImagePrunePolicy,
     now: datetime,
 ) -> ModelDeployAgentImagePruneResult:
@@ -96,8 +95,8 @@ class HandlerDeployAgentImagePrune:
         self, request: ModelDeployAgentImagePruneRequest
     ) -> ModelDeployAgentImagePruneResult:
         # Import at dispatch time: the effect boundary uses the pure planner above.
-        from omnibase_infra.nodes.node_deploy_agent_image_prune_effect.effect import (
+        from omnibase_infra.handlers.deploy_agent_image_prune_effect.effect import (
             run_request,
         )
 
-        return await asyncio.to_thread(run_request, request)
+        return await asyncio.to_thread(run_request, request, build_plan)
