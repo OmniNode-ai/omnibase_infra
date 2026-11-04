@@ -109,6 +109,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_activations": "omnimarket OMN-21115 (node_context_install_confirm_trigger_effect)",
     "compaction_current_context": "omnimarket OMN-21090 (node_projection_compaction_current_context)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
+    "context_audit_events": "omnimarket OMN-21934 (node_projection_context_audit)",
     "agent_actions": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_transformation_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "router_performance_metrics": "omnimarket OMN-21920 (node_projection_agent_actions)",

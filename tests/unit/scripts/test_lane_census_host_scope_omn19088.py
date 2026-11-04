@@ -23,8 +23,15 @@ What these tests pin:
   silent clean).
 
 OMN-20934: the lab's manifest is private config, so these run over the neutral
-manifest (two hosts, three lanes). Which lab hosts carry which lanes is a fact
-about the lab, checked where its manifest lives.
+manifest (three lanes).
+
+OMN-22152: where each lane may run is no longer the manifest's. The lab host
+registry (each host, the names it reports, the lanes it may host) is overlay
+data of the lane census node, read from the ``registry:`` key of the file
+``LANE_CENSUS_REGISTRY`` names. These tests run over a neutral registry (two
+hosts) and prove the manifest's own ``hosts:`` block and per-lane ``hosts:``
+lists are not read. Which lab hosts carry which lanes is a fact about the lab,
+checked where its registry lives.
 """
 
 from __future__ import annotations
@@ -39,7 +46,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
+from omnibase_infra.models.lane_census import ModelLaneCensusRegistry
 from tests.helpers.lane_census_fixtures import (
     NEUTRAL_CONFIG_ROOT,
     NEUTRAL_HOST_ID,
@@ -49,6 +58,7 @@ from tests.helpers.lane_census_fixtures import (
     NEUTRAL_OPTIONAL_LANE,
     NEUTRAL_OTHER_HOST_LANE,
     NEUTRAL_OTHER_HOSTNAME,
+    NEUTRAL_REGISTRY,
 )
 
 pytestmark = pytest.mark.unit
@@ -70,6 +80,8 @@ def _load_planner() -> Any:
 
 PLAN = _load_planner()
 MANIFEST = PLAN.load_manifest(NEUTRAL_MANIFEST)
+REGISTRY = PLAN.load_registry(NEUTRAL_REGISTRY)
+_ROWS = yaml.safe_load(NEUTRAL_REGISTRY.read_text(encoding="utf-8"))["registry"]
 
 _HOST_A = NEUTRAL_HOSTNAME
 _HOST_B = NEUTRAL_OTHER_HOSTNAME
@@ -140,58 +152,146 @@ def _runtime(lane: str) -> str:
     )
 
 
-# --- the manifest declares where every lane runs ---------------------------------
+# --- the registry declares where every lane may run -----------------------------
 
 
-def test_every_lane_declares_at_least_one_registered_host() -> None:
-    registry = MANIFEST["hosts"]
-    assert registry, "the manifest declares no hosts"
-    for lane, spec in MANIFEST["lanes"].items():
-        hosts = spec.get("hosts")
-        assert isinstance(hosts, list), f"lane {lane!r} declares no hosts list"
-        assert hosts, f"lane {lane!r} declares an empty hosts list"
-        for host_id in hosts:
-            assert host_id in registry, (
-                f"lane {lane!r} names host {host_id!r}, which the hosts registry "
-                "does not declare"
-            )
+def _registry_with(*, host: str = _HOST_B_ID, **change: Any) -> Any:
+    """The neutral registry with one host's row changed."""
+    rows = copy.deepcopy(_ROWS)
+    next(row for row in rows if row["name"] == host).update(change)
+    return ModelLaneCensusRegistry.from_rows(rows)
 
 
-def test_the_manifest_validates() -> None:
-    PLAN.validate_hosts(MANIFEST)
+def _registry_of(*extra: dict[str, Any]) -> Any:
+    """The neutral registry with ``extra`` rows added."""
+    return ModelLaneCensusRegistry.from_rows([*copy.deepcopy(_ROWS), *extra])
+
+
+def test_every_manifest_lane_is_listed_by_a_registry_host() -> None:
+    assert REGISTRY.hosts, "the registry declares no hosts"
+    listed = {lane for row in _ROWS for lane in row["lanes"]}
+    assert listed == set(MANIFEST["lanes"])
+
+
+def test_the_manifest_carries_no_hosts_declaration() -> None:
+    """The manifest declares lanes and services only; placement is the registry's."""
+    assert "hosts" not in MANIFEST
+    assert all("hosts" not in spec for spec in MANIFEST["lanes"].values())
+
+
+def test_the_registry_validates() -> None:
+    PLAN.validate_hosts(MANIFEST, REGISTRY)
 
 
 def test_an_alias_claimed_by_two_hosts_is_refused() -> None:
-    manifest = copy.deepcopy(MANIFEST)
-    manifest["hosts"][_HOST_B_ID]["aliases"].append(_HOST_A)
+    registry = _registry_with(aliases=[_HOST_B, _HOST_A])
     with pytest.raises(PLAN.HostDeclarationError, match=_HOST_A):
-        PLAN.validate_hosts(manifest)
+        PLAN.validate_hosts(MANIFEST, registry)
 
 
-def test_the_docker_desktop_daemon_name_is_refused_as_an_alias() -> None:
-    """Every Docker Desktop host reports the daemon name ``docker-desktop``.
+def test_an_alias_that_is_another_hosts_name_is_refused() -> None:
+    registry = _registry_with(aliases=[NEUTRAL_HOST_ID])
+    with pytest.raises(PLAN.HostDeclarationError, match=NEUTRAL_HOST_ID):
+        PLAN.validate_hosts(MANIFEST, registry)
+
+
+def test_the_desktop_daemon_name_is_refused_as_an_alias() -> None:
+    """Every desktop-engine host reports the daemon name ``docker-desktop``.
 
     That name identifies no host; declaring it would attribute one host's
     census to another.
     """
-    manifest = copy.deepcopy(MANIFEST)
-    manifest["hosts"][_HOST_B_ID]["aliases"].append("docker-desktop")
+    registry = _registry_with(aliases=["docker-desktop"])
     with pytest.raises(PLAN.HostDeclarationError, match="docker-desktop"):
-        PLAN.validate_hosts(manifest)
+        PLAN.validate_hosts(MANIFEST, registry)
 
 
-def test_a_lane_without_hosts_is_refused() -> None:
-    manifest = copy.deepcopy(MANIFEST)
-    del manifest["lanes"][NEUTRAL_OTHER_HOST_LANE]["hosts"]
+def test_an_empty_host_name_is_refused() -> None:
+    registry = _registry_with(name="  ")
+    with pytest.raises(PLAN.HostDeclarationError, match="empty name"):
+        PLAN.validate_hosts(MANIFEST, registry)
+
+
+def test_an_empty_alias_is_refused() -> None:
+    registry = _registry_with(aliases=[""])
+    with pytest.raises(PLAN.HostDeclarationError, match="empty name"):
+        PLAN.validate_hosts(MANIFEST, registry)
+
+
+def test_a_host_declared_twice_is_refused() -> None:
+    registry = _registry_of({"name": _HOST_B_ID, "aliases": [], "lanes": []})
+    with pytest.raises(PLAN.HostDeclarationError, match=_HOST_B_ID):
+        PLAN.validate_hosts(MANIFEST, registry)
+
+
+def test_a_manifest_lane_no_registry_host_lists_is_refused() -> None:
+    """A lane no host lists would be evaluated nowhere: a silent clean."""
+    registry = _registry_with(lanes=[])
     with pytest.raises(PLAN.HostDeclarationError, match=NEUTRAL_OTHER_HOST_LANE):
-        PLAN.validate_hosts(manifest)
+        PLAN.validate_hosts(MANIFEST, registry)
 
 
-def test_a_lane_naming_an_unregistered_host_is_refused() -> None:
-    manifest = copy.deepcopy(MANIFEST)
-    manifest["lanes"][NEUTRAL_OTHER_HOST_LANE]["hosts"] = ["host-999"]
-    with pytest.raises(PLAN.HostDeclarationError, match="host-999"):
-        PLAN.validate_hosts(manifest)
+def test_a_registry_lane_the_manifest_lacks_is_refused() -> None:
+    registry = _registry_with(lanes=[NEUTRAL_OTHER_HOST_LANE, "lane-999"])
+    with pytest.raises(PLAN.HostDeclarationError, match="lane-999"):
+        PLAN.validate_hosts(MANIFEST, registry)
+
+
+def test_a_lane_listed_by_two_hosts_is_accepted() -> None:
+    registry = _registry_with(lanes=[NEUTRAL_OTHER_HOST_LANE, NEUTRAL_LANE])
+    PLAN.validate_hosts(MANIFEST, registry)
+    plan = PLAN.build_plan(_lane_on(NEUTRAL_LANE, _HOST_B), MANIFEST, registry)
+    assert NEUTRAL_LANE in plan["lanes_checked"]
+
+
+def test_a_registry_host_that_hosts_no_lane_is_valid() -> None:
+    """A census host that carries no lane: every lane is not-applicable, no refusal."""
+    registry = _registry_of({"name": "host-c", "aliases": ["box-c"], "lanes": []})
+    PLAN.validate_hosts(MANIFEST, registry)
+    plan = PLAN.build_plan(_envelope("box-c", [], []), MANIFEST, registry)
+    assert plan["host"] == "host-c"
+    assert plan["lanes_checked"] == []
+    assert set(plan["lanes_not_applicable"]) == set(MANIFEST["lanes"])
+    assert plan["findings"] == []
+    assert plan["has_drift"] is False
+
+
+# --- the plan is the registry's, not the manifest's -----------------------------
+
+
+def test_the_manifests_own_hosts_declaration_is_not_read() -> None:
+    """The old block, present and contradicting the registry, changes nothing."""
+    legacy = copy.deepcopy(MANIFEST)
+    legacy["hosts"] = {"legacy-host": {"aliases": [_HOST_A]}}
+    for spec in legacy["lanes"].values():
+        spec["hosts"] = ["legacy-host"]
+    envelope = _lane_on(NEUTRAL_LANE, _HOST_A)
+    assert PLAN.build_plan(envelope, legacy, REGISTRY) == PLAN.build_plan(
+        envelope, MANIFEST, REGISTRY
+    )
+    assert PLAN.resolve_host(_HOST_A, legacy, REGISTRY) == NEUTRAL_HOST_ID
+
+
+_GOLDEN = json.loads(
+    (NEUTRAL_REGISTRY.parents[1] / "golden_plans_omn22152.json").read_text(
+        encoding="utf-8"
+    )
+)
+
+
+@pytest.mark.parametrize("case", sorted(_GOLDEN["cases"]))
+def test_a_host_listing_the_lanes_it_had_gets_the_byte_identical_plan(
+    case: str,
+) -> None:
+    """The golden plans come from the planner that read the manifest's hosts.
+
+    Same manifest lanes, same inventory, each host listing the lanes the
+    manifest used to place on it: the new planner prints the same bytes.
+    """
+    golden = _GOLDEN["cases"][case]
+    plan = PLAN.build_plan(golden["envelope"], MANIFEST, REGISTRY)
+    assert json.dumps(plan) == json.dumps(golden["plan"])
+    assert plan["findings"] or case == "host-b", "positive control: host-a is drifted"
 
 
 # --- host resolution ------------------------------------------------------------
@@ -208,18 +308,18 @@ def test_a_lane_naming_an_unregistered_host_is_refused() -> None:
     ],
 )
 def test_a_declared_host_resolves(raw: str, expected: str) -> None:
-    assert PLAN.resolve_host(raw, MANIFEST) == expected
+    assert PLAN.resolve_host(raw, MANIFEST, REGISTRY) == expected
 
 
 @pytest.mark.parametrize("raw", ["", "docker-desktop", "some-new-box", "localhost"])
 def test_an_undeclared_host_is_refused(raw: str) -> None:
     with pytest.raises(PLAN.HostDeclarationError):
-        PLAN.resolve_host(raw, MANIFEST)
+        PLAN.resolve_host(raw, MANIFEST, REGISTRY)
 
 
 def test_an_envelope_without_a_host_is_refused() -> None:
     with pytest.raises(PLAN.HostDeclarationError, match="host"):
-        PLAN.build_plan(_envelope(None, [], []), MANIFEST)
+        PLAN.build_plan(_envelope(None, [], []), MANIFEST, REGISTRY)
 
 
 # --- AC-1: evaluate only the lanes declared for this host -----------------------
@@ -227,7 +327,9 @@ def test_an_envelope_without_a_host_is_refused() -> None:
 
 def test_a_host_reports_only_its_own_lane() -> None:
     """The ticket's measurement, replayed: the other host's lanes are not absent."""
-    plan = PLAN.build_plan(_lane_on(NEUTRAL_OTHER_HOST_LANE, _HOST_B), MANIFEST)
+    plan = PLAN.build_plan(
+        _lane_on(NEUTRAL_OTHER_HOST_LANE, _HOST_B), MANIFEST, REGISTRY
+    )
     assert plan["host"] == _HOST_B_ID
     assert plan["lanes_checked"] == [NEUTRAL_OTHER_HOST_LANE]
     assert set(plan["lanes_not_applicable"]) == _LANES_A
@@ -236,7 +338,7 @@ def test_a_host_reports_only_its_own_lane() -> None:
 
 
 def test_checked_and_not_applicable_partition_the_manifest() -> None:
-    plan = PLAN.build_plan(_lane_on(NEUTRAL_LANE, _HOST_A), MANIFEST)
+    plan = PLAN.build_plan(_lane_on(NEUTRAL_LANE, _HOST_A), MANIFEST, REGISTRY)
     checked = set(plan["lanes_checked"])
     not_applicable = set(plan["lanes_not_applicable"])
     assert checked.isdisjoint(not_applicable)
@@ -249,8 +351,8 @@ def test_two_hosts_each_return_findings_only_for_their_own_lanes() -> None:
     Both inventories are EMPTY, the harshest input: every declared service is
     absent. Each run files its findings against its own lanes only.
     """
-    plan_a = PLAN.build_plan(_envelope(_HOST_A, [], []), MANIFEST)
-    plan_b = PLAN.build_plan(_envelope(_HOST_B, [], []), MANIFEST)
+    plan_a = PLAN.build_plan(_envelope(_HOST_A, [], []), MANIFEST, REGISTRY)
+    plan_b = PLAN.build_plan(_envelope(_HOST_B, [], []), MANIFEST, REGISTRY)
 
     lanes_a = {f["lane"] for f in plan_a["findings"]}
     assert lanes_a, "positive control: an empty inventory on host A must be drift"
@@ -269,6 +371,7 @@ def test_a_stopped_container_in_a_declared_lane_is_still_critical() -> None:
     plan = PLAN.build_plan(
         _envelope(_HOST_A, rows, [MANIFEST["lanes"][NEUTRAL_LANE]["network"]]),
         MANIFEST,
+        REGISTRY,
     )
     absent = [
         f
@@ -281,7 +384,9 @@ def test_a_stopped_container_in_a_declared_lane_is_still_critical() -> None:
 
 
 def test_a_requested_lane_off_this_host_is_not_applicable() -> None:
-    plan = PLAN.build_plan(_envelope(_HOST_B, [], [], lane=NEUTRAL_LANE), MANIFEST)
+    plan = PLAN.build_plan(
+        _envelope(_HOST_B, [], [], lane=NEUTRAL_LANE), MANIFEST, REGISTRY
+    )
     assert plan["lanes_checked"] == []
     assert plan["lanes_not_applicable"] == [NEUTRAL_LANE]
     assert plan["findings"] == []
@@ -301,6 +406,7 @@ def test_a_lane_running_on_an_undeclared_host_is_named() -> None:
             lane=lane,
         ),
         MANIFEST,
+        REGISTRY,
     )
     assert plan["lanes_not_applicable"] == [lane]
     undeclared = [f for f in plan["findings"] if f["kind"] == "lane_on_undeclared_host"]
@@ -315,16 +421,16 @@ def test_a_lane_running_on_an_undeclared_host_is_named() -> None:
 
 def test_the_finding_clears_when_the_declaration_is_corrected() -> None:
     lane = NEUTRAL_OTHER_HOST_LANE
-    manifest = copy.deepcopy(MANIFEST)
-    manifest["lanes"][lane]["hosts"].append(NEUTRAL_HOST_ID)
+    registry = _registry_with(host=NEUTRAL_HOST_ID, lanes=[*_LANES_A, lane])
     plan = PLAN.build_plan(
         _envelope(
             _HOST_A,
             _healthy_lane_rows(lane),
-            [manifest["lanes"][lane]["network"]],
+            [MANIFEST["lanes"][lane]["network"]],
             lane=lane,
         ),
-        manifest,
+        MANIFEST,
+        registry,
     )
     assert plan["lanes_checked"] == [lane]
     assert plan["lanes_not_applicable"] == []
@@ -341,7 +447,7 @@ def test_an_undeclared_lane_is_recognised_by_its_compose_project_alone() -> None
             ]
         },
     )
-    plan = PLAN.build_plan(_envelope(_HOST_B, [row], []), MANIFEST)
+    plan = PLAN.build_plan(_envelope(_HOST_B, [row], []), MANIFEST, REGISTRY)
     found = [
         f
         for f in plan["findings"]
@@ -362,18 +468,30 @@ def test_an_exited_leftover_is_not_a_lane_running_there() -> None:
             },
         )
     ]
-    plan = PLAN.build_plan(_envelope(_HOST_A, rows, [], lane=lane), MANIFEST)
+    plan = PLAN.build_plan(_envelope(_HOST_A, rows, [], lane=lane), MANIFEST, REGISTRY)
     assert plan["findings"] == []
 
 
 # --- the shell driver refuses an undeclared host --------------------------------
 
+_ENGINE_CALLED = "engine-called.marker"
 
-def _run_driver(tmp_path: Path, hostname: str) -> subprocess.CompletedProcess[str]:
+
+def _run_driver(
+    tmp_path: Path,
+    hostname: str,
+    *,
+    registry: Path | None = NEUTRAL_REGISTRY,
+) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    marker = tmp_path / _ENGINE_CALLED
     for name, body in (
-        ("docker", 'case "$*" in *"ps -a"*) : ;; *"network ls"*) : ;; esac; exit 0'),
+        (
+            "docker",
+            f'echo "$*" >> "{marker}"; '
+            'case "$*" in *"ps -a"*) : ;; *"network ls"*) : ;; esac; exit 0',
+        ),
         ("rpk", "exit 0"),
         ("hostname", f'echo "{hostname}"'),
     ):
@@ -388,6 +506,10 @@ def _run_driver(tmp_path: Path, hostname: str) -> subprocess.CompletedProcess[st
     env.pop("LANE_MANIFEST", None)
     env.pop("KAFKA_BOOTSTRAP_SERVERS", None)
     env.pop("LANE_CENSUS_HOST", None)
+    env.pop("LANE_CENSUS_REGISTRY", None)
+    env.pop("ONEX_SKILL_OVERLAY_ROOTS", None)
+    if registry is not None:
+        env["LANE_CENSUS_REGISTRY"] = str(registry)
     return subprocess.run(
         ["bash", str(_SCRIPT), "--json", "--dry-run"],
         capture_output=True,
@@ -398,12 +520,13 @@ def _run_driver(tmp_path: Path, hostname: str) -> subprocess.CompletedProcess[st
     )
 
 
-def test_the_driver_exits_5_on_a_host_the_manifest_does_not_declare(
+def test_the_driver_exits_5_on_a_host_the_registry_does_not_declare(
     tmp_path: Path,
 ) -> None:
     proc = _run_driver(tmp_path, "docker-desktop")
     assert proc.returncode == 5, (proc.returncode, proc.stderr)
     assert "docker-desktop" in proc.stderr
+    assert "LANE_CENSUS_REGISTRY" in proc.stderr or "registry" in proc.stderr
     assert proc.stdout.strip() == "", "no plan may be emitted for an undeclared host"
 
 
@@ -416,16 +539,60 @@ def test_the_driver_scopes_to_the_host_it_runs_on(tmp_path: Path) -> None:
     assert sorted(plan["lanes_checked"]) == sorted(_LANES_B)
 
 
+def test_the_driver_exits_3_before_the_engine_is_read_with_no_registry(
+    tmp_path: Path,
+) -> None:
+    """An unset LANE_CENSUS_REGISTRY stops the census before any engine read."""
+    proc = _run_driver(tmp_path, _HOST_A, registry=None)
+    assert proc.returncode == 3, (proc.returncode, proc.stderr)
+    assert "LANE_CENSUS_REGISTRY" in proc.stderr
+    assert "registry path" in proc.stderr
+    assert proc.stdout.strip() == ""
+    assert not (tmp_path / _ENGINE_CALLED).exists(), "the engine was read"
+
+
+def test_the_driver_exits_3_before_the_engine_is_read_with_a_missing_file(
+    tmp_path: Path,
+) -> None:
+    proc = _run_driver(tmp_path, _HOST_A, registry=tmp_path / "absent" / "overlay.yaml")
+    assert proc.returncode == 3, (proc.returncode, proc.stderr)
+    assert "LANE_CENSUS_REGISTRY" in proc.stderr
+    assert not (tmp_path / _ENGINE_CALLED).exists(), "the engine was read"
+
+
+def test_the_driver_on_a_registry_host_with_no_lane_lists_every_lane_not_applicable(
+    tmp_path: Path,
+) -> None:
+    """A host the registry declares with `lanes: []` runs the census and reads clean."""
+    overlay = tmp_path / "overlay.yaml"
+    rows = [*_ROWS, {"name": "host-c", "aliases": ["box-c"], "lanes": []}]
+    overlay.write_text(yaml.safe_dump({"registry": rows}), encoding="utf-8")
+    proc = _run_driver(tmp_path, "box-c", registry=overlay)
+    assert proc.returncode in (0, 30), (proc.returncode, proc.stderr)
+    plan = json.loads(proc.stdout.splitlines()[0])
+    assert plan["host"] == "host-c"
+    assert plan["lanes_checked"] == []
+    assert set(plan["lanes_not_applicable"]) == set(MANIFEST["lanes"])
+    assert plan["findings"] == []
+
+
 # --- the planner run on its own, as the manifest's hand recipe runs it ----------
 
 
 def _run_planner(
-    host: str, *, config_root: Path | None
+    host: str,
+    *,
+    config_root: Path | None,
+    registry: Path | str | None = NEUTRAL_REGISTRY,
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["LANE_CENSUS_HOST"] = host
     env.pop("LANE_MANIFEST", None)
     env.pop("OMNI_HOME", None)
+    env.pop("LANE_CENSUS_REGISTRY", None)
+    env.pop("ONEX_SKILL_OVERLAY_ROOTS", None)
+    if registry is not None:
+        env["LANE_CENSUS_REGISTRY"] = str(registry)
     if config_root is None:
         env.pop("ONEX_WORKSPACE_CONFIG_ROOT", None)
     else:
@@ -463,3 +630,85 @@ def test_the_planner_exits_3_with_no_manifest_to_read(tmp_path: Path) -> None:
     empty = _run_planner(_HOST_B, config_root=tmp_path)
     assert empty.returncode == 3
     assert "does not exist" in empty.stderr
+
+
+def test_the_planner_exits_3_with_no_registry_to_read() -> None:
+    """OMN-22152: the registry comes from LANE_CENSUS_REGISTRY and nowhere else."""
+    proc = _run_planner(_HOST_B, config_root=NEUTRAL_CONFIG_ROOT, registry=None)
+    assert proc.returncode == PLAN.EXIT_NOT_CONFIGURED == 3
+    assert "LANE_CENSUS_REGISTRY" in proc.stderr
+    assert "registry path" in proc.stderr
+    assert proc.stdout == ""
+
+
+def test_the_planner_exits_3_with_a_registry_file_that_is_missing(
+    tmp_path: Path,
+) -> None:
+    proc = _run_planner(
+        _HOST_B,
+        config_root=NEUTRAL_CONFIG_ROOT,
+        registry=tmp_path / "absent.yaml",
+    )
+    assert proc.returncode == 3
+    assert "LANE_CENSUS_REGISTRY" in proc.stderr
+    assert "No such file" in proc.stderr
+    assert proc.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("document", "reason"),
+    [
+        ("registry: [unclosed\n", "while parsing"),
+        ("- just\n- a list\n", "mapping"),
+        ("hosts: {host-a: {}}\n", "registry"),
+        ("registry: {}\n", "list"),
+        ("registry: []\n", "no host"),
+        ("registry: [just-a-name]\n", "mapping"),
+        ("registry:\n  - {name: host-a, aliases: [], lane: [x]}\n", "lane"),
+        ("registry:\n  - {name: host-a, lanes: []}\n", "aliases"),
+        ("registry:\n  - {name: host-a, aliases: box-a, lanes: []}\n", "aliases"),
+        ("registry:\n  - {name: host-a, aliases: [], lanes: dogfood}\n", "lanes"),
+        ("registry:\n  - {name: 7, aliases: [], lanes: []}\n", "name"),
+    ],
+)
+def test_the_planner_exits_3_with_an_invalid_registry_file(
+    tmp_path: Path, document: str, reason: str
+) -> None:
+    overlay = tmp_path / "overlay.yaml"
+    overlay.write_text(document, encoding="utf-8")
+    proc = _run_planner(_HOST_B, config_root=NEUTRAL_CONFIG_ROOT, registry=overlay)
+    assert proc.returncode == 3, (proc.returncode, proc.stderr)
+    assert "LANE_CENSUS_REGISTRY" in proc.stderr
+    assert reason in proc.stderr
+    assert proc.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "registry",
+    [
+        [
+            {"name": "host-a", "aliases": ["box-a"], "lanes": ["dogfood", "dev"]},
+            {"name": "host-b", "aliases": ["box-a"], "lanes": ["principal-issuer"]},
+        ],
+        [{"name": "host-a", "aliases": ["box-a"], "lanes": ["dogfood", "dev"]}],
+        [
+            {
+                "name": "host-a",
+                "aliases": ["box-a"],
+                "lanes": ["dogfood", "dev", "lane-999"],
+            },
+            {"name": "host-b", "aliases": ["box-b"], "lanes": ["principal-issuer"]},
+        ],
+    ],
+    ids=["claimed-twice", "manifest-lane-unlisted", "registry-lane-unknown"],
+)
+def test_the_planner_refuses_a_registry_that_breaks_an_invariant(
+    tmp_path: Path, registry: list[dict[str, Any]]
+) -> None:
+    """The invariants hold on the file path the collector runs: no plan, exit 3."""
+    overlay = tmp_path / "overlay.yaml"
+    overlay.write_text(yaml.safe_dump({"registry": registry}), encoding="utf-8")
+    proc = _run_planner(_HOST_B, config_root=NEUTRAL_CONFIG_ROOT, registry=overlay)
+    assert proc.returncode == PLAN.EXIT_NOT_CONFIGURED == 3, proc.stderr
+    assert "LANE_CENSUS_REGISTRY" in proc.stderr
+    assert proc.stdout == ""
