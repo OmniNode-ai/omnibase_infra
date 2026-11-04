@@ -998,6 +998,31 @@ def clear(root: Path, slot: int, token: str) -> None:
         path.unlink()
 
 
+def exit_notice(root: Path, slot: int, token: str) -> str:
+    """Say when the reaper may remove a slot whose standalone bring-up exits.
+
+    A standalone bring-up's lease stops heartbeating when the bring-up exits,
+    so the slot is reapable from the recorded expiry on. The READY line alone
+    read as if the slot stayed up until teardown, and a lane exercising it
+    past the expiry lost the slot to the reaper (friction class 449).
+    """
+    with locked(record_path(root, slot).with_suffix(".guard"), wait=True):
+        record = read_record(root, slot)
+    if record["token"] != token:
+        raise LeaseRefusedError("the slot lease belongs to another run")
+    expires = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record["expires"]))
+    ttl = round(record["expires"] - record["heartbeat"])
+    return (
+        f"slot {slot} is held only by this standalone bring-up's lease "
+        f"({record['holder']}); it stops heartbeating when this command exits, "
+        f"and the reaper removes the slot once the lease expires at {expires} "
+        f"({ttl}s after its last heartbeat). To exercise the slot for longer, "
+        f"run bring-up, exercise and teardown as one command: "
+        f"python3 scripts/runtime_build/prepr_teardown_slot.py run --slot {slot} "
+        f"--holder <lane> -- bash <proof.sh>"
+    )
+
+
 def authorize_teardown(root: Path, slot: int, token: str) -> None:
     with locked(record_path(root, slot).with_suffix(".guard"), wait=True):
         if not record_path(root, slot).exists():
@@ -1169,7 +1194,7 @@ def lease_main(argv: list[str] | None = None) -> int:
     run.add_argument("--ttl", type=float, default=LEASE_DEFAULT_TTL)
     run.add_argument("--interval", type=float, default=LEASE_DEFAULT_INTERVAL)
     run.add_argument("command", nargs=argparse.REMAINDER)
-    for name in ("check", "clear", "authorize-teardown"):
+    for name in ("check", "clear", "authorize-teardown", "exit-notice"):
         cmd = sub.add_parser(name)
         cmd.add_argument(
             "--slot", type=int, choices=sorted(policy.SLOTS), required=True
@@ -1208,8 +1233,11 @@ def lease_main(argv: list[str] | None = None) -> int:
             if not 0 < args.interval < args.ttl or not math.isfinite(args.ttl):
                 parser.error("require 0 < interval < finite ttl")
             return run_command(args)
-        if args.action in ("check", "clear", "authorize-teardown"):
+        if args.action in ("check", "clear", "authorize-teardown", "exit-notice"):
             token = os.environ.get("ONEX_PREPR_LEASE_TOKEN", "")
+            if args.action == "exit-notice":
+                sys.stdout.write(exit_notice(state_root(), args.slot, token) + "\n")
+                return 0
             {
                 "check": check_owner,
                 "clear": clear,
@@ -1252,6 +1280,7 @@ def main(argv: list[str] | None = None) -> int:
         "check",
         "clear",
         "authorize-teardown",
+        "exit-notice",
         "reap",
         "install-reaper",
     ):

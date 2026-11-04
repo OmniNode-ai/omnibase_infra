@@ -352,7 +352,7 @@ fi
 # through the helper with the same token. Plan-only never writes a lease.
 LEASE_PY="${SCRIPT_DIR}/prepr_teardown_slot.py"
 if [[ -z "${ONEX_PREPR_LEASE_TOKEN:-}" ]]; then
-    exec "${PY}" "${LEASE_PY}" run --slot "${SLOT}" \
+    ONEX_PREPR_STANDALONE=1 exec "${PY}" "${LEASE_PY}" run --slot "${SLOT}" \
         --holder "standalone-${BASHPID}" --staging-root "${STAGING_ROOT}" \
         -- bash "$0" "${ORIGINAL_ARGS[@]}"
 fi
@@ -1031,4 +1031,13 @@ mkdir -p "$(dirname "${DESCRIPTOR_OUT}")"
 
 log "slot ${SLOT} is READY. Descriptor: ${DESCRIPTOR_OUT}"
 log "when the proof is done, destroy it: scripts/runtime_build/prepr_teardown_slot.sh --slot ${SLOT} --reason <text>"
+# A standalone lease stops heartbeating when this exits; say when the reaper
+# may remove the slot, so an exercise past that is not a surprise (class 449).
+if [[ "${ONEX_PREPR_STANDALONE:-}" == "1" ]]; then
+    if notice="$("${PY}" "${LEASE_PY}" exit-notice --slot "${SLOT}")"; then
+        log "WARNING: ${notice}"
+    else
+        log "WARNING: slot ${SLOT} is held only by this standalone bring-up's lease, which expires five minutes after this command exits; the lease expiry could not be read."
+    fi
+fi
 cat "${DESCRIPTOR_OUT}"
