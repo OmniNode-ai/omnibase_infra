@@ -47,6 +47,9 @@ RUNTIME_WRITERS = {
     "projection-writer-tenant-credentials": "projection-tenant-credentials-writer",
     "projection-writer-tenant-registry": "projection-tenant-registry-writer",
 }
+# The hook-events writer has no runtime profile of its own: main runs its node by
+# default, so the policy retires it by service name (``retired_services``).
+HOOK_EVENTS_WRITER = "projection-claude-hook-events-writer"
 
 
 def test_primary_dev_disables_the_tenant_carrier_only(
@@ -88,12 +91,12 @@ def test_committed_policy_disables_every_folded_writer() -> None:
         {
             "tenant-projection-writer",
             *RUNTIME_WRITERS.values(),
+            HOOK_EVENTS_WRITER,
             *DEV_LANE_GATEWAY_SERVICES,
         }
     )
-    # The two writers that still run their own consume loop keep their containers.
+    # The writer that still runs its own consume loop keeps its container.
     assert "projection-delegation-writer" not in config.disabled_services
-    assert "projection-claude-hook-events-writer" not in config.disabled_services
 
 
 def test_folded_profile_without_a_gated_service_is_refused(
@@ -152,23 +155,46 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         return
     censused = [c[-1] for c in calls if c[1] == "ps"]
     assert censused == [
+        f"label=com.docker.compose.service={HOOK_EVENTS_WRITER}",
         "label=com.docker.compose.service=projection-savings-writer",
         "label=com.docker.compose.service=tenant-projection-writer",
     ]
     if failure is None:
         ids = [
+            f"{HOOK_EVENTS_WRITER}-a",
+            f"{HOOK_EVENTS_WRITER}-b",
             "projection-savings-writer-a",
             "projection-savings-writer-b",
             "tenant-projection-writer-a",
             "tenant-projection-writer-b",
         ]
-        assert calls[2] == ["docker", "stop", "--time", "30", *ids]
-        assert calls[3] == ["docker", "rm", *ids]
+        assert calls[3] == ["docker", "stop", "--time", "30", *ids]
+        assert calls[4] == ["docker", "rm", *ids]
 
 
 def test_retirement_is_inert_on_other_lanes() -> None:
     with patch("deploy_agent.executor._run") as run:
         DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
+    run.assert_not_called()
+    assert HOOK_EVENTS_WRITER not in (
+        lane_config_for(EnumRuntimeLane.STABILITY_TEST).disabled_services
+    )
+
+
+def test_other_dev_instance_does_not_retire_the_hook_events_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control: the primary instance retires it; any other instance folds nothing."""
+    assert HOOK_EVENTS_WRITER in lane_config_for(EnumRuntimeLane.DEV).disabled_services
+    monkeypatch.setattr(
+        "deploy_agent.executor.active_dev_instance",
+        lambda: f"{DEFAULT_DEV_INSTANCE}-other",
+    )
+    assert HOOK_EVENTS_WRITER not in (
+        lane_config_for(EnumRuntimeLane.DEV).disabled_services
+    )
+    with patch("deploy_agent.executor._run") as run:
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.DEV)
     run.assert_not_called()
 
 
@@ -236,7 +262,11 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
             lambda *args: None,
             lane=EnumRuntimeLane.DEV,
         )
-    retired = {"tenant-projection-writer", *RUNTIME_WRITERS.values()}
+    retired = {
+        "tenant-projection-writer",
+        *RUNTIME_WRITERS.values(),
+        HOOK_EVENTS_WRITER,
+    }
     census = len(retired)
     compose_calls = calls[census + 2 :]
     assert [c[1] for c in calls[: census + 2]] == [*["ps"] * census, "stop", "rm"]

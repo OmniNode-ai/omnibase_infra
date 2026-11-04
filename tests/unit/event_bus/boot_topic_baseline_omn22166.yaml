@@ -21,5 +21,8 @@ dev_after_t28:
   broker_topics: 0
   specs_per_boot: 0
 repo_slice:
-  measured_at_sha: 500a9d04a79bbffb36c764744c66121604fb7a0c
-  max_specs: 209
+  # OMN-22158 raised this by 2: node_api_fixture_record_effect is meant to add
+  # its command and terminal topics (api-fixture-record, api-fixture-recorded).
+  measured_at_sha: 05c5e773d1a5f6af158998282cf878fee4b6c38e
+  # OMN-21923 adds the census command and result topics (2 more specs).
+  max_specs: 215

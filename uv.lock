@@ -8,10 +8,7 @@ resolution-markers = [
 ]
 
 [manifest]
-overrides = [
-    { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-spi", specifier = "==0.23.12" },
-]
+overrides = [{ name = "omnibase-spi", specifier = ">=0.23.12,<0.24.0" }]
 
 [[package]]
 name = "a2a-sdk"
@@ -2403,22 +2400,9 @@ wheels = [
 ]
 
 [[package]]
-name = "omnibase-compat"
-version = "0.5.7"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4e/ed/5f8539c5866817cef7e8b5643bc74b2e3b6106b16bf7f8d2e62c819286b9/omnibase_compat-0.5.7.tar.gz", hash = "sha256:391728f09dd4c70d4897ef7e0bac98fdbdc03c4a19d597abb2316c9a00856aa1", size = 355825, upload-time = "2026-09-03T18:26:26.779Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/5e/14541bc8865b0c4bad3ecf83ca2d8625d14df10104200a22038e15c0fd16/omnibase_compat-0.5.7-py3-none-any.whl", hash = "sha256:11c9930df19c34789e6e69f7e2f9d0575261f651b3fc1231e151344da9b7963f", size = 129631, upload-time = "2026-09-03T18:26:25.814Z" },
-]
-
-[[package]]
 name = "omnibase-core"
-version = "0.47.62"
-source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261102080237-7e087d566f24#7e087d566f24448c4b9039e9d80d5ff33a36fd83" }
+version = "0.47.66"
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261103173624-74e0b0f12767#74e0b0f127670fd0d675b83ee9f4d3e1268cc630" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2461,7 +2445,6 @@ dependencies = [
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "neo4j" },
-    { name = "omnibase-compat" },
     { name = "omnibase-core" },
     { name = "omnibase-spi" },
     { name = "opentelemetry-api" },
@@ -2540,9 +2523,8 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0,<5.0.0" },
     { name = "mcp", specifier = ">=2.3.0,<3.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
-    { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261102080237-7e087d566f24" },
-    { name = "omnibase-spi", specifier = "==0.23.12" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261103173624-74e0b0f12767" },
+    { name = "omnibase-spi", specifier = ">=0.23.12,<0.24.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.66" },

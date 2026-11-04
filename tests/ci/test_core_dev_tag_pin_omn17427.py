@@ -16,11 +16,14 @@ from packaging.requirements import Requirement
 from scripts.ci.check_sibling_compatible_range import violations
 
 ROOT = Path(__file__).resolve().parents[2]
-TAG = "dev-20261102080237-7e087d566f24"
-COMMIT = "7e087d566f24448c4b9039e9d80d5ff33a36fd83"
-# The published floor stays where the moved node APIs need it; the lock moves on.
-VERSION = "0.47.58"
-LOCKED_VERSION = "0.47.62"
+TAG = "dev-20261103173624-74e0b0f12767"
+COMMIT = "74e0b0f127670fd0d675b83ee9f4d3e1268cc630"
+# The published floor is the release that first ships every core module the infra
+# nodes import (OMN-21924: node_architecture_validator); the lock tracks the dev tag.
+VERSION = "0.47.62"
+# The floor the retained core recording was made against; the recording is not remade.
+RECORDED_FLOOR = "0.47.58"
+LOCKED_VERSION = "0.47.66"
 GIT_URL = "https://github.com/OmniNode-ai/omnibase_core.git"
 
 
@@ -122,7 +125,9 @@ def test_recorded_core_validator_response_matches_the_pin(
     recorded = tomllib.loads(real["pyproject_toml"])
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert recorded["tool"]["uv"]["sources"] == manifest["tool"]["uv"]["sources"]
-    assert recorded["project"]["dependencies"] == [f"omnibase-core>={VERSION},<0.48.0"]
+    assert recorded["project"]["dependencies"] == [
+        f"omnibase-core>={RECORDED_FLOOR},<0.48.0"
+    ]
     lock = tomllib.loads((ROOT / "uv.lock").read_text())
     assert _locked_core_version_outside_range(recorded, lock) == []
     assert violations(manifest, "omnibase-core") == []

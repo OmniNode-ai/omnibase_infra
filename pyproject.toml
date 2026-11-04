@@ -43,10 +43,11 @@ dependencies = [
     # `node_done_write_receipt_gate_compute` through its packaged contract and
     # imports its public request and decision models. A resolve below this
     # floor lacks that contract-backed gate surface.
-    "omnibase-core>=0.47.58,<0.48.0",
-    "omnibase-spi==0.23.12",
-    # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
-    "omnibase-compat==0.5.7",
+    # OMN-21924: FLOOR raised to 0.47.62. node_architecture_validator imports
+    # `omnibase_core.validation.checker_stack_shape` and `validator_stack_shape`
+    # at module import, and 0.47.62 is the first release that ships them.
+    "omnibase-core>=0.47.62,<0.48.0",
+    "omnibase-spi>=0.23.12,<0.24.0",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -194,7 +195,6 @@ identity = "omnibase_infra.cli.cli_identity:identity_group"
 kafka = "omnibase_infra.cli.cli_kafka:kafka"
 ledger = "omnibase_infra.cli.cli_ledger:ledger_group"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
-occ = "omnibase_infra.cli.cli_occ:occ"
 profile = "omnibase_infra.cli.cli_profile:profile_group"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
@@ -263,14 +263,13 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-spi==0.23.12",
-    "omnibase-compat==0.5.7",
+    "omnibase-spi>=0.23.12,<0.24.0",
 ]
 
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261102080237-7e087d566f24" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261103173624-74e0b0f12767" }
 
 
 [tool.ruff]
@@ -606,6 +605,7 @@ exclude_lines = [
 ]
 
 [project.entry-points."onex.nodes"]
+node_api_fixture_record_effect = "omnibase_infra.nodes.node_api_fixture_record_effect"
 node_architecture_validator = "omnibase_infra.nodes.node_architecture_validator"
 node_artifact_change_detector_effect = "omnibase_infra.nodes.node_artifact_change_detector_effect"
 node_artifact_reconciliation_orchestrator = "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator"
@@ -675,6 +675,7 @@ node_invariant_evaluate_compute = "omnibase_infra.nodes.node_invariant_evaluate_
 node_kafka_replay_compute = "omnibase_infra.nodes.node_kafka_replay_compute"
 node_lab_proof_plan_compute = "omnibase_infra.nodes.node_lab_proof_plan_compute"
 node_lab_proof_run_effect = "omnibase_infra.nodes.node_lab_proof_run_effect"
+node_lane_entry_point_census_effect = "omnibase_infra.nodes.node_lane_entry_point_census_effect"
 node_ledger_projection_compute = "omnibase_infra.nodes.node_ledger_projection_compute"
 node_ledger_write_effect = "omnibase_infra.nodes.node_ledger_write_effect"
 node_llm_completion_effect = "omnibase_infra.nodes.node_llm_completion_effect"
@@ -691,6 +692,7 @@ node_model_router_compute = "omnibase_infra.nodes.node_model_router_compute"
 node_node_graph_reducer = "omnibase_infra.nodes.node_node_graph_reducer"
 node_onboarding_orchestrator = "omnibase_infra.nodes.node_onboarding_orchestrator"
 node_pattern_lifecycle_effect = "omnibase_infra.nodes.node_pattern_lifecycle_effect"
+node_placement_runtime_effect = "omnibase_infra.nodes.node_placement_runtime_effect"
 node_registration_orchestrator = "omnibase_infra.nodes.node_registration_orchestrator"
 node_registration_reducer = "omnibase_infra.nodes.node_registration_reducer"
 node_registration_storage_effect = "omnibase_infra.nodes.node_registration_storage_effect"

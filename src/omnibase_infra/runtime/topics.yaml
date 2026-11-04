@@ -35,8 +35,17 @@ topics:
   # OMN-17427: the generic node CLI publishes the composition request on its
   # local runtime bus; the packaged-contract regression reads its terminal result.
   - onex.cmd.platform.ticket-contract-compose.v1
+  # OMN-21923: the generic node CLI publishes the census request; the recorded
+  # dev-daemon probe exercised this path through RuntimeLocal's real adapter.
+  - onex.cmd.omnibase-infra.lane-entry-point-census.v1
+  # OMN-22158: the generic node CLI publishes the fixture recording request on
+  # its local runtime bus; the recorder's bus-profile test reads the terminal.
+  - onex.cmd.platform.api-fixture-record.v1
   # OMN-22002: omnibase_core publishes the validator run and triggered events
   # (node_validation_report_write_effect); the validation ledger projection node
   # consumes them, so they are declared as published outside this corpus.
   - onex.evt.platform.validator-run.v1
   - onex.evt.platform.validator-triggered.v1
+  # OMN-21924: the generic node CLI publishes the architecture-validation
+  # request through RuntimeLocal; the allowed-command tests exercise that bus path.
+  - onex.cmd.platform.architecture-validate.v1

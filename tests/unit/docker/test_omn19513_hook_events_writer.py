@@ -1,23 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19513: the claude hook-events projection has its own dev-lane writer.
+"""Rollback carrier bindings and lane isolation remain valid after the dev fold.
 
-``node_projection_claude_hook_events`` was auto-wired inside ``omninode-runtime``,
-whose boot joins about 560 consumer groups one at a time. Each restart left the
-projection unsubscribed for about 19 minutes (measured 2026-10-28). The fix is a
-dedicated container that boots over a manifest of that one contract, plus an
-exclusion on the main runtime so the node has exactly one consumer-group owner.
-
-The consumer group id carries the process's ``KAFKA_INSTANCE_ID``
-(``...consume.1.0.0.__i.runtime-main.__t.<topic>``), so the writer must share the
-main runtime's instance id for the committed offsets to carry over.
-
-These tests render YAML and start no container.
+The base compose and catalog retain the opt-in writer for rollback. These checks
+keep its node selection, offset identity, database and socket wiring covered,
+and keep derived lanes inert while primary dev runs the node inside main.
 """
 
 from __future__ import annotations
 
-import ast
 import re
 from pathlib import Path
 from typing import Any
@@ -87,61 +78,6 @@ def test_writer_keeps_its_own_kernel_group_and_publishes_no_introspection() -> N
 
     assert writer["ONEX_GROUP_ID"] != main["ONEX_GROUP_ID"]
     assert writer["OMNIINTELLIGENCE_PUBLISH_INTROSPECTION"] == "false"
-
-
-def test_dev_lane_starts_the_writer_and_main_excludes_the_same_node() -> None:
-    writer = _service("docker-compose.dev-lane.yml", WRITER)
-    main_env = _env("docker-compose.dev-lane.yml", MAIN)
-
-    assert writer["profiles"] == ["runtime", "full"]
-    assert main_env["ONEX_RUNTIME_NODE_EXCLUSION"] == NODE
-    assert (
-        main_env["ONEX_RUNTIME_NODE_EXCLUSION"]
-        == _env("docker-compose.infra.yml", WRITER)["ONEX_RUNTIME_NODE_SELECTION"]
-    )
-
-
-def test_dev_lane_writer_names_the_lane_the_node_is_scoped_to() -> None:
-    env = _env("docker-compose.dev-lane.yml", WRITER)
-    main_env = _env("docker-compose.dev-lane.yml", MAIN)
-
-    assert env["ONEX_RUNTIME_LANE"] == main_env["ONEX_RUNTIME_LANE"]
-    # Placement identity: the lane's one health speaker stays omninode-runtime.
-    assert env["ONEX_RUNTIME_LANE_HEALTH_SPEAKER"] == "false"
-    assert "ONEX_RUNTIME_LANE_HEALTH_SPEAKER" not in main_env
-    assert env["ONEX_WIRING_STRICT_MODE"] == "1"
-
-
-def test_catalog_writer_preserves_dev_lane_placement_and_broker_policy() -> None:
-    resolver = CatalogResolver(catalog_dir=str(DOCKER / "catalog"))
-    manifest = resolver._manifests[WRITER]
-    services = generate_compose(
-        ResolvedStack(manifests={WRITER: manifest}, required_env=set(), injected_env={})
-    )["services"]
-    assert isinstance(services, dict)
-    rendered = services[WRITER]
-    env = rendered["environment"]
-    overlay_env = _env("docker-compose.dev-lane.yml", WRITER)
-
-    for key in (
-        "ONEX_RUNTIME_LANE_HEALTH_SPEAKER",
-        "ONEX_WIRING_STRICT_MODE",
-        "KAFKA_SECURITY_PROTOCOL",
-        "KAFKA_SASL_MECHANISM",
-        "KAFKA_MAX_POLL_INTERVAL_MS",
-    ):
-        assert env.get(key) == overlay_env[key], key
-    # Public catalogs require the deployment's registered lane as input.
-    assert "ONEX_RUNTIME_LANE" in manifest.required_env
-    assert env["ONEX_RUNTIME_LANE"].startswith("${ONEX_RUNTIME_LANE:?")
-    for key in ("KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"):
-        # Bind the same operator secret; required-var messages may differ.
-        assert env[key].split(":?", 1)[0] == overlay_env[key].split(":?", 1)[0]
-        assert env[key].startswith("${DEV_KAFKA_SASL_")
-    assert "${ROLE_OMNIDASH_PASSWORD:?" in env["OMNIDASH_ANALYTICS_DB_URL"]
-    assert "OMNINODE_INTERNAL_DB_URL" in manifest.required_env
-    assert env["OMNINODE_INTERNAL_DB_URL"].startswith("${OMNINODE_INTERNAL_DB_URL:?")
-    assert rendered["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
 
 
 @pytest.mark.parametrize("source", ["compose", "catalog"])
@@ -246,60 +182,3 @@ def test_other_lanes_neither_start_the_writer_nor_exclude_the_node(
         env = (service or {}).get("environment") or {}
         if isinstance(env, dict):
             assert "ONEX_RUNTIME_NODE_EXCLUSION" not in env
-
-
-def _bash_array_members(path: Path, name: str) -> list[str]:
-    """Members of ``name=( ... )`` with comments stripped, so a name in prose is not one."""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    start = next(
-        index
-        for index, line in enumerate(lines)
-        if line.removeprefix("readonly ").startswith(f"{name}=(")
-    )
-    members: list[str] = []
-    for line in lines[start + 1 :]:
-        code = line.split("#", 1)[0].strip()
-        if code == ")":
-            return members
-        members.extend(code.split())
-    raise AssertionError(f"{name} in {path} is not closed")
-
-
-def _python_tuple_members(path: Path, name: str) -> list[str]:
-    """String members of the module-level tuple ``name``, read from the AST."""
-    for node in ast.parse(path.read_text(encoding="utf-8")).body:
-        if (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.target.id == name
-            and isinstance(node.value, ast.Tuple)
-        ):
-            return [
-                element.value
-                for element in node.value.elts
-                if isinstance(element, ast.Constant) and isinstance(element.value, str)
-            ]
-    raise AssertionError(f"{name} is not a module-level tuple in {path}")
-
-
-def test_the_writer_is_in_the_dev_lane_restart_scope() -> None:
-    refresh = _bash_array_members(
-        REPO_ROOT / "scripts/runtime_build/refresh_dev_lane.sh",
-        "REFRESH_BUILD_SERVICES",
-    )
-    deploy = _bash_array_members(
-        REPO_ROOT / "src/omnibase_infra/handlers/handler_runtime_deploy.sh",
-        "DEV_LANE_ONLY_RUNTIME_SERVICES",
-    )
-    events = _python_tuple_members(
-        REPO_ROOT / "scripts/deploy-agent/deploy_agent/events.py",
-        "DEV_LANE_ONLY_RUNTIME_SERVICES",
-    )
-
-    # Positive control: the parser finds the members the arrays already carry.
-    assert "tenant-projection-writer" in refresh
-    assert "tenant-projection-writer" in deploy
-    assert WRITER in refresh
-    assert WRITER in deploy
-    assert "tenant-projection-writer" in events
-    assert refresh.count(WRITER) == deploy.count(WRITER) == events.count(WRITER) == 1

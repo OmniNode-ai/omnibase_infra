@@ -174,7 +174,8 @@ env:
   PYTHON_VERSION: "3.12"
   # The sibling repos the workspace build stages. omnibase_core is staged FIRST
   # (Dockerfile workspace branch reinstalls dev-HEAD core before the others).
-  SIBLING_REPOS: "omnibase_core omnibase_compat omnimarket"
+  # OMN-22153: omniintelligence is staged too, at its newest dev-merge tag.
+  SIBLING_REPOS: "omnibase_core omnibase_compat omnimarket omniintelligence"
 
 jobs:
   build-workspace-candidate:
