@@ -126,6 +126,7 @@ def _deliver(
     """Run the dev-lane delivery the way the deploy agent calls it."""
     environment = (
         {
+            "ESTIMATOR_GATE_PASSWORD": "synthetic-test-secret",
             "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
             "COST_ESTIMATOR_WEB_SOURCE_URL": f"file://{web_source}",
         }
@@ -212,6 +213,7 @@ def test_unreachable_source_refuses_before_any_build(
         _deliver(
             web_source,
             settings={
+                "ESTIMATOR_GATE_PASSWORD": "synthetic-test-secret",
                 "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
                 "COST_ESTIMATOR_WEB_SOURCE_URL": f"file://{missing}",
             },
@@ -227,6 +229,7 @@ def test_missing_source_setting_refuses_before_any_engine_call(
         _deliver(
             web_source,
             settings={
+                "ESTIMATOR_GATE_PASSWORD": "synthetic-test-secret",
                 "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
             },
         )
@@ -242,3 +245,14 @@ def test_disabled_instance_does_no_estimator_work(
     _deliver(web_source, disabled=("cost-estimator-web",))
 
     assert not (engine / "calls.log").exists()
+
+
+def test_foreign_checkout_ignores_inherited_git_location(
+    web_source: Path, engine: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = _commit(web_source, "FROM scratch\n")
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "unrelated.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "unrelated"))
+    _deliver(web_source)
+    assert _labels(engine)[REVISION_LABEL] == expected
+    assert len(_builds(engine)) == 1

@@ -33,6 +33,16 @@ build:
   clone_timeout_seconds: 120
   read_timeout_seconds: 30
   build_timeout_seconds: 1800
+source_configuration:
+  home: deployment-overlay
+  fragment_schema: runtime_lane_env.v1
+  fragment_directory: deploy-overlays/runtime-lane-env/local
+  description: >-
+    The lane fragment owns COST_ESTIMATOR_WEB_SOURCE_REPOSITORY and COST_ESTIMATOR_WEB_SOURCE_URL. Neither is a secret; neither has a code default. The existing compose environment reads the fragment before builds. Missing settings are named before any image build.
+gate:
+  enabled_env: FEATURE_ESTIMATOR_GATE_ENABLED
+  default_enabled: true
+  password_env: ESTIMATOR_GATE_PASSWORD
 metadata:
   ticket: OMN-21487
   description: >-

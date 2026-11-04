@@ -1,0 +1,28 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 92 and seed 7909405034097134703 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/FallbackStoreOnce.tla
+Parsing file /tmp/tlc-13309038101434919570/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-13309038101434919570/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-13309038101434919570/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-13309038101434919570/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module FallbackStoreOnce
+Linting of module FallbackStoreOnce
+Starting... (2026-11-03 03:20:53)
+Implied-temporal checking--satisfiability problem has 4 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:20:53.
+Progress(4) at 2026-11-03 03:20:53: 16 states generated, 13 distinct states found, 0 states left on queue.
+Checking 4 branches of temporal properties for the complete state space with 52 total distinct states at (2026-11-03 03:20:53)
+Finished checking temporal properties in 00s at 2026-11-03 03:20:53
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 2.1E-18
+16 states generated, 13 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 4.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-11-03 03:20:53)

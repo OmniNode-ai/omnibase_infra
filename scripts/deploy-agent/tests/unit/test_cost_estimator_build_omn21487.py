@@ -16,7 +16,7 @@ from deploy_agent import executor as execution
 from deploy_agent.events import BuildSource, EnumRuntimeLane, Scope
 from deploy_agent.executor import DeployExecutor
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.cost_estimator_build]
 SHA = "a" * 40
 OLD_SHA = "b" * 40
 SOURCE = "ai.omninode.image.source-repo"
@@ -37,6 +37,7 @@ def delivery(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         env={
             "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
             "COST_ESTIMATOR_WEB_SOURCE_URL": SOURCE_URL,
+            "ESTIMATOR_GATE_PASSWORD": "synthetic-test-secret",
         },
         disabled=(),
     )
@@ -147,6 +148,7 @@ def test_source_identity_is_explicit_and_has_no_public_default(
     with pytest.raises(RuntimeError, match=name):
         build(delivery)
     assert not delivery.calls
+    delivery.executor._compose_build.assert_not_called()
 
 
 @pytest.mark.parametrize("lane", [EnumRuntimeLane.PROD, EnumRuntimeLane.STABILITY_TEST])
@@ -269,3 +271,141 @@ def test_compose_env_re_reads_the_materialized_gate_secret(
         execution._compose_env()["ESTIMATOR_GATE_PASSWORD"]
         == stored["ESTIMATOR_GATE_PASSWORD"]
     )
+
+
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY",
+        "COST_ESTIMATOR_WEB_SOURCE_URL",
+        "ESTIMATOR_GATE_PASSWORD",
+    ],
+)
+def test_missing_deploy_setting_refuses_before_any_image_build(
+    delivery: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    scope: Scope,
+    missing: str,
+) -> None:
+    del delivery.env[missing]
+    monkeypatch.setattr(execution, "_hold_build_context", lambda purpose: nullcontext())
+    recreate = Mock()
+    monkeypatch.setattr(delivery.executor, "_compose_up", recreate)
+    with pytest.raises(RuntimeError, match=missing):
+        delivery.executor.rebuild_scope(
+            scope,
+            [],
+            lambda *args: None,
+            lane=EnumRuntimeLane.DEV,
+            build_source=BuildSource.WORKSPACE,
+        )
+    delivery.executor._compose_build.assert_not_called()
+    recreate.assert_not_called()
+    assert not delivery.calls
+
+
+def test_all_missing_settings_are_named_together(delivery: SimpleNamespace) -> None:
+    delivery.env.clear()
+    with pytest.raises(RuntimeError) as error:
+        build(delivery)
+    for name in (
+        "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY",
+        "COST_ESTIMATOR_WEB_SOURCE_URL",
+        "ESTIMATOR_GATE_PASSWORD",
+    ):
+        assert name in str(error.value)
+    assert "runtime_lane_env.v1" in str(error.value)
+    delivery.executor._compose_build.assert_not_called()
+
+
+@pytest.mark.parametrize("password", ["", "   "])
+def test_enabled_gate_refuses_empty_secret(
+    delivery: SimpleNamespace, password: str
+) -> None:
+    delivery.env["ESTIMATOR_GATE_PASSWORD"] = password
+    with pytest.raises(RuntimeError, match="ESTIMATOR_GATE_PASSWORD"):
+        build(delivery)
+    delivery.executor._compose_build.assert_not_called()
+    assert not delivery.calls
+
+
+def test_disabled_page_needs_no_source_or_secret(delivery: SimpleNamespace) -> None:
+    delivery.disabled = ("cost-estimator-web",)
+    delivery.env.clear()
+    build(delivery)
+    assert not delivery.calls
+    delivery.executor._compose_build.assert_called_once()
+
+
+def test_overlay_schema_accepts_nonsecret_source_settings() -> None:
+    from deploy_agent.instance_lanes import parse_lane_env_fragment
+
+    source = {
+        "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
+        "COST_ESTIMATOR_WEB_SOURCE_URL": SOURCE_URL,
+    }
+    fragment = json.dumps(
+        {"schema_version": "runtime_lane_env.v1", "lane_id": "test-lane", "env": source}
+    )
+    assert (
+        parse_lane_env_fragment(fragment, lane_id="test-lane", source="fixture")
+        == source
+    )
+
+
+@pytest.mark.parametrize("enabled", ["", "off", "0", "typo"])
+def test_invalid_gate_switch_fails_closed(
+    delivery: SimpleNamespace, enabled: str
+) -> None:
+    delivery.env["FEATURE_ESTIMATOR_GATE_ENABLED"] = enabled
+    with pytest.raises(RuntimeError, match="FEATURE_ESTIMATOR_GATE_ENABLED"):
+        build(delivery)
+    delivery.executor._compose_build.assert_not_called()
+    assert not delivery.calls
+
+
+def test_explicitly_disabled_gate_needs_no_password(delivery: SimpleNamespace) -> None:
+    delivery.env["FEATURE_ESTIMATOR_GATE_ENABLED"] = "false"
+    del delivery.env["ESTIMATOR_GATE_PASSWORD"]
+    build(delivery)
+    assert len(builds(delivery)) == 1
+
+
+def test_declared_source_settings_flow_from_lane_overlay_without_host_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from deploy_agent.instance_lanes import parse_lane_env_fragment
+
+    source = {
+        "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
+        "COST_ESTIMATOR_WEB_SOURCE_URL": SOURCE_URL,
+    }
+    fragment = json.dumps(
+        {"schema_version": "runtime_lane_env.v1", "lane_id": "test-lane", "env": source}
+    )
+    monkeypatch.setattr(
+        execution,
+        "operator_store_overlay",
+        lambda: {"ESTIMATOR_GATE_PASSWORD": "synthetic-test-secret"},
+    )
+    monkeypatch.setattr(execution, "_load_runtime_policy_env", dict)
+    monkeypatch.setattr(execution, "resolve_lane_overlay_dir", lambda env: None)
+    monkeypatch.setattr(
+        execution,
+        "_lane_env_overlay",
+        lambda: parse_lane_env_fragment(
+            fragment, lane_id="test-lane", source="fixture"
+        ),
+    )
+    monkeypatch.setattr(execution, "_dev_broker_policy_env", lambda env: {})
+    monkeypatch.setattr(
+        execution,
+        "load_dev_boot_guard",
+        lambda: SimpleNamespace(fold_compose_env=lambda policy, is_default: {}),
+    )
+    for name in source:
+        monkeypatch.delenv(name, raising=False)
+    environment = execution._compose_env()
+    assert {name: environment[name] for name in source} == source
+    assert environment["ESTIMATOR_GATE_PASSWORD"] == "synthetic-test-secret"

@@ -4651,6 +4651,10 @@ class DeployExecutor:
         # OMN-18057: residue is per-rebuild, not per-process.
         self.reset_deploy_observations()
         self.declared_pr = declared_pr
+        if scope in (Scope.RUNTIME, Scope.FULL) and lane == EnumRuntimeLane.DEV:
+            load_dev_boot_guard("handler_cost_estimator_build").dev_lane_build_settings(
+                sys.modules[__name__], lane
+            )
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).

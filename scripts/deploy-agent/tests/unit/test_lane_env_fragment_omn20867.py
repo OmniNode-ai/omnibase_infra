@@ -15,6 +15,7 @@ overlay and the routing table, never in a test.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -36,6 +37,8 @@ from deploy_agent.instance_lanes import (
     read_lane_env_fragment,
 )
 from deploy_agent.routing import RoutingTableError
+
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 
 SCHEMA = "runtime_lane_env.v1"
 LANE = "compose-lane-a"
@@ -86,6 +89,7 @@ def _fragment(env: Mapping[str, object], **overrides: object) -> str:
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(
         ["git", "-C", str(repo), *args],
+        env=scrub_git_location_env(os.environ),
         check=True,
         capture_output=True,
         text=True,
@@ -120,7 +124,11 @@ def _fragment_path(lane_id: str = LANE) -> str:
 @pytest.mark.unit
 def test_schema_declares_exactly_the_act_switches_and_the_lane_class() -> None:
     assert {
-        SCHEMA: frozenset(NON_ACTING) | frozenset(LANE_CLASS)
+        SCHEMA: frozenset(NON_ACTING)
+        | frozenset(LANE_CLASS)
+        | frozenset(
+            {"COST_ESTIMATOR_WEB_SOURCE_REPOSITORY", "COST_ESTIMATOR_WEB_SOURCE_URL"}
+        )
     } == LANE_ENV_FRAGMENT_SCHEMA_KEYS
 
 
@@ -389,3 +397,18 @@ def test_refresh_overlays_the_fragment_after_the_operator_env() -> None:
     overlay = script.index("default_instance_lane_env_exports")
     deploy = script.index("=== Build + bring-up")
     assert operator < overlay < deploy
+
+
+@pytest.mark.unit
+def test_source_overlay_uses_its_own_ref_with_inherited_git_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = {
+        "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": "web-front-end",
+        "COST_ESTIMATOR_WEB_SOURCE_URL": "https://example.invalid/web-front-end.git",
+    }
+    clone = _overlay_clone(tmp_path, {_fragment_path(): _fragment(source)})
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "unrelated.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "unrelated"))
+    assert read_lane_env_fragment(clone, LANE) == source
+    assert discover_lane_overlay_clone(tmp_path) == clone

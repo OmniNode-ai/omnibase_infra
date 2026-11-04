@@ -91,6 +91,12 @@ requirements:
       - id: AC8
         statement: |-
           AC8: formal/consumer_group_handover models the fenced cutover (fence both sides, copy from the side that last ran), the reverse handover of a rollback and a second fold, with a crash between any two steps; the base model holds NoEventLost, NoDoubleEffect, NoDoubleProjection, FencedNoCommit and SecondFoldFresh, and each of the mutants reports the invariant it is named for -- falsifier: uv run --frozen pytest tests/formal/test_consumer_group_handover_model.py -q
+  - id: req-omn21288-ac11-hook-events-fold
+    statement: "One-runtime plan T7: the claude hook-events projection runs inside the dev main runtime and keeps its consumer group."
+    acceptance:
+      - id: AC11
+        statement: |-
+          AC11: the dev stack (base, dev-lane and fold overlays merged) renders no projection-claude-hook-events-writer and sets no ONEX_RUNTIME_NODE_EXCLUSION on main, the dev main runtime keeps KAFKA_INSTANCE_ID runtime-main (the value the writer shared, so the group id and committed offsets are unchanged), and the deploy handler retires a previous revision's writer container before main is recreated -- falsifier: uv run --frozen pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -438,6 +444,42 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/formal/test_consumer_group_handover_model.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC8]
+  - id: dod-omn21288-ac11-hook-events-fold
+    description: >-
+      Hosted-runner check of the compose and deploy definitions, executable retirement ordering and failure paths, and rollback discovery, database, socket and lane isolation: the dev lane overlay neither starts the writer nor excludes its node, the fold overlay gates the writer under a folded profile so the dev stack renders none, the dev main runtime keeps the instance id the writer shared, the restart and build sets omit the writer, the handler retires a previous revision's writer container with a stop and a remove (no volume removal) before the compose up that recreates main. The test file is new on this branch, so the run fails at the merge base. The live reading (newest claude_hook_events row within the bound across a redeploy, and the group resuming from its committed offsets) is PENDING a post-merge deploy through the deploy agent and is not claimed here; the change depends on the boot bound of omnibase_infra#5553.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_omn19513_hook_events_writer.py tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC11]
+  - id: dod-omn21288-ac11-deploy-agent-retirement
+    description: >-
+      The deploy agent retires the hook-events writer container of the previous revision from the same policy list the deploy handler reads (retired_services in the runtime policy contract): stop with a 30 s grace, then remove with volumes kept, only for the primary dev instance, failing loud on a failed census, stop or remove, and skipping any other dev instance and any non-dev lane. The extended test fails at the merge base, where the policy carries no retired services.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC11]
+  - id: dod-omn21288-ac11-deploy-agent-recreate-path
+    description: >-
+      The deploy agent's own runtime recreate (the real DeployExecutor._compose_up for the runtime scope, with the committed fold policy and no patch over the retire step) stops and removes a still-running previous-revision projection-claude-hook-events-writer container, volumes kept, before the compose up that recreates omninode-runtime, and never names the writer in a compose up. The first test fails with the deploy agent's executor.py from 88546cc4cd2e (the retire step covered only tenant-projection-writer, so the writer kept running and joined the runtime-main consumer group with a stale image) and passes on this branch. Hosted runner needs no Docker daemon, running lane or credentials.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_recreate_retires_hook_events_writer_omn21288.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC11]
+  - id: dod-omn21288-ac11-deploy-set-reader-control
+    description: >-
+      The check that no deploy set names the writer reads each set with a positive control (omninode-runtime, tenant-projection-writer, context-audit-consumer must be read as members, so an empty parse cannot pass the absence check), and the set reader drops inline as well as whole-line comments. The reader test fails against the previous reader, which returned the writer name from an inline comment as a member.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q --no-cov -k "array_reader or no_deploy_set"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC11]
 context:
   remaining_after_this_change: "AC2 end state remains pending the remaining baselined workload folds; the stack-shape data and baseline are unchanged in this revision."
   tenant_fold_proof: "The live fold readings are post-merge through the deploy agent. This revision's unit and broker proofs do not deploy dev."

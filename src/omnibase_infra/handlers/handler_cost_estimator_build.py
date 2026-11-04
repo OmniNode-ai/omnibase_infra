@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import tempfile
@@ -22,6 +23,7 @@ import yaml
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.utils.util_run_coro_sync import run_coro_sync
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_cost_estimator_build_config import (
     ModelCostEstimatorBuildConfig,
@@ -40,7 +42,12 @@ REVISION_LABEL = "org.opencontainers.image.revision"
 
 def _checked(argv: list[str], timeout: int) -> str:
     result = subprocess.run(
-        argv, timeout=timeout, capture_output=True, text=True, check=False
+        argv,
+        timeout=timeout,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=scrub_git_location_env(os.environ),
     )
     if result.returncode:
         # Tool output can contain credentials; the failed operation is enough.
@@ -143,6 +150,54 @@ class HandlerCostEstimatorBuild:
         )
 
 
+def dev_lane_build_settings(
+    execution: ModuleType, lane: str
+) -> tuple[ModelCostEstimatorBuildConfig, dict[str, str]] | None:
+    """Validate declared settings before any image build or container mutation."""
+    if lane != execution.EnumRuntimeLane.DEV:
+        return None
+    if "cost-estimator-web" in execution.lane_config_for(lane).disabled_services:
+        return None
+    module_file = execution.__file__
+    if not module_file:
+        raise RuntimeError("estimator build requires the deploy agent source location")
+    contract = (
+        Path(module_file).resolve().parents[3]
+        / "src/omnibase_infra/nodes/node_cost_estimator_build_effect/contract.yaml"
+    )
+    declaration = yaml.safe_load(contract.read_text(encoding="utf-8"))
+    build = declaration["build"]
+    source_configuration = declaration["source_configuration"]
+    gate = declaration["gate"]
+    environment = execution._compose_env()
+    missing: list[str] = []
+    for field in ("repository", "repository_url"):
+        name = build.pop(f"{field}_env")
+        value = environment.get(name, "").strip()
+        if not value:
+            missing.append(name)
+        build[field] = value
+    enabled = environment.get(gate["enabled_env"], str(gate["default_enabled"]))
+    if enabled.lower() not in ("true", "false"):
+        raise RuntimeError(f"estimator {gate['enabled_env']} must be true or false")
+    if (
+        enabled.lower() == "true"
+        and not environment.get(gate["password_env"], "").strip()
+    ):
+        missing.append(gate["password_env"])
+    if missing:
+        raise RuntimeError(
+            "estimator missing required settings: "
+            + ", ".join(missing)
+            + "; source settings belong in the deployment overlay "
+            + source_configuration["fragment_schema"]
+            + " fragment at "
+            + source_configuration["fragment_directory"]
+            + "; gate secrets belong in the operator secret store"
+        )
+    return ModelCostEstimatorBuildConfig.model_validate(build), environment
+
+
 def build_dev_lane_services(
     execution: ModuleType,
     build_images: Callable[..., None],
@@ -153,39 +208,25 @@ def build_dev_lane_services(
     lane: str,
     git_ref: str,
 ) -> None:
-    """Keep the existing dev image build, then deliver the foreign-source page."""
-    if lane != execution.EnumRuntimeLane.DEV or not execution.DEV_LANE_BUILD_SERVICES:
+    """Validate first, then build dev images before the existing recreate."""
+    if lane != execution.EnumRuntimeLane.DEV:
         return
-    build_images(
-        execution.Scope.RUNTIME,
-        git_sha,
-        on_phase_update,
-        build_source=build_source,
-        runtime_lane=lane,
-        git_ref=git_ref,
-        compose_files=execution.lane_config_for(lane).compose_files,
-        services=execution.DEV_LANE_BUILD_SERVICES,
-        stage_workspace=False,
-    )
-    config = execution.lane_config_for(lane)
-    if "cost-estimator-web" in config.disabled_services:
+    settings = dev_lane_build_settings(execution, lane)
+    if execution.DEV_LANE_BUILD_SERVICES:
+        build_images(
+            execution.Scope.RUNTIME,
+            git_sha,
+            on_phase_update,
+            build_source=build_source,
+            runtime_lane=lane,
+            git_ref=git_ref,
+            compose_files=execution.lane_config_for(lane).compose_files,
+            services=execution.DEV_LANE_BUILD_SERVICES,
+            stage_workspace=False,
+        )
+    if settings is None:
         return
-    module_file = execution.__file__
-    if not module_file:
-        raise RuntimeError("estimator build requires the deploy agent source location")
-    contract = (
-        Path(module_file).resolve().parents[3]
-        / "src/omnibase_infra/nodes/node_cost_estimator_build_effect/contract.yaml"
-    )
-    environment = execution._compose_env()
-    build = yaml.safe_load(contract.read_text(encoding="utf-8"))["build"]
-    for field in ("repository", "repository_url"):
-        name = build.pop(f"{field}_env")
-        value = environment.get(name, "").strip()
-        if not value:
-            raise RuntimeError(f"estimator source setting {name} is required")
-        build[field] = value
-    recipe = ModelCostEstimatorBuildConfig.model_validate(build)
+    recipe, environment = settings
     container = ModelONEXContainer()
     try:
         run_coro_sync(

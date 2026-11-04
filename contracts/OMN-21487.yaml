@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-21487
 title: The dev deploy agent builds the estimator page image before recreation
 summary: >-
-  Deploy-side portion only. The host build effect resolves the web dev head in an isolated checkout and builds its Dockerfile when the tagged image is absent, stale or unstamped. Source labels are verified before the existing recreate. The dev compose declaration passes the runtime gate settings from the host environment. The web repository owns the merge publisher; end-to-end merge delivery, credential materialization and serving-host readback remain live verification obligations and are not represented as unit-test evidence.
+  Deploy-side portion only. The host build effect resolves the web dev head in an isolated checkout and builds its Dockerfile when the tagged image is absent, stale or unstamped. Source labels are verified before the existing recreate. The dev compose declaration passes the runtime gate settings from the host environment. Nonsecret source settings have a declared home in the deployment overlay runtime_lane_env.v1 fragment; enabled gates require ESTIMATOR_GATE_PASSWORD from the operator secret store before any image build. The web repository owns the merge publisher; end-to-end merge delivery, credential materialization and serving-host readback remain live verification obligations and are not represented as unit-test evidence.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -33,7 +33,7 @@ dod_evidence:
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov -p no:randomly
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q
   - id: dod-omn21487-ac2-missing-image
     description: >-
       Deploy-agent build-boundary regression for AC2: an absent local image causes a build, source/build failures abort and mismatched labels refuse progress. All subprocesses are controlled; this hosted-runner check needs no Docker daemon, credential or lab host. Live image removal is not claimed.
@@ -41,7 +41,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov -p no:randomly
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q
   - id: dod-omn21487-ac1-ac2-delivery-integration
     description: >-
       Integration regression for AC1 and AC2: the shipped node contract supplies the build recipe, a real Git clone resolves the web head, an absent image is built and stamped, an unchanged head is reused, an advanced head rebuilds, and an unreachable source or missing source setting refuses before any engine call. Only the container engine is a stand-in executable; this is not a live build on a lab host.
@@ -50,6 +50,14 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/docker/test_cost_estimator_build_delivery_omn21487.py -q --no-cov -p no:randomly
+  - id: dod-omn21487-prebuild-settings
+    description: >-
+      Dev runtime and full deploys name every missing source setting and enabled-gate secret before any image build or recreate. Synthetic lane fragments carry both nonsecret source bindings with no host bindings, while disabled page instances require neither. No real secret is materialized and no live installation is claimed.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q -k 'missing_deploy_setting or all_missing_settings or empty_secret or overlay'
   - id: dod-omn21487-deploy-probe
     description: >-
       Deploy probe for the delivery change: read the build handler and the dev compose declaration from GitHub at the evaluated checkout's commit and require the estimator build entry point and the gate settings the compose passes through. This does not deploy a service or claim a lab host serves the page; the live build, password materialization and serving readback remain separate obligations. The probe fails on the merge base, which has neither the handler nor the setting.

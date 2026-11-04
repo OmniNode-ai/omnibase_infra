@@ -33,6 +33,21 @@ from deploy_agent import executor as executor_mod
 
 
 @pytest.fixture(autouse=True)
+def _stub_cost_estimator_build_settings(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unrelated deploy tests keep their existing image-build boundary.
+
+    The estimator suite opts in to source, gate and image delivery checks. Other
+    unit tests neither clone a foreign source nor require operator secrets.
+    """
+    if request.node.get_closest_marker("cost_estimator_build") is not None:
+        return
+    effect = executor_mod.load_dev_boot_guard("handler_cost_estimator_build")
+    monkeypatch.setattr(effect, "dev_lane_build_settings", lambda *args: None)
+
+
+@pytest.fixture(autouse=True)
 def _stub_dev_boot_guard(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
