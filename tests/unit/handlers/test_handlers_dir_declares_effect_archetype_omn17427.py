@@ -18,7 +18,7 @@ from omnibase_core.validation.validator_no_io_outside_effects import (
     ValidatorNoIoOutsideEffects,
 )
 
-_HANDLERS = Path("src/omnibase_infra/handlers")
+_HANDLERS = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra" / "handlers"
 _IO_HANDLER = _HANDLERS / "handler_http.py"
 
 

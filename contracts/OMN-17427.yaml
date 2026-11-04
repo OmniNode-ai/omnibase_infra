@@ -3438,7 +3438,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handlers_dir_declares_effect_archetype_omn17427.py -q --no-cov
-        cwd: .
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427670001]
   - id: dod-omn17427-c29-throttle-test-isolation
     description: The throttle-retry test fixture swaps the probe's own time reference, so a sleep from another thread is not recorded; the new test fails against the former global patch.
