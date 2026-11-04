@@ -16,6 +16,8 @@ Failure modes, one test each:
   R4 0065 applied a second time succeeds and leaves exactly one cursor sequence (the hostile review asked);
   R5 control through the view itself: with only the newest 500 runs in the source, the same whole-history check
      fails, so R1 is not always-pass;
+  R7 after a second apply, the writer role itself inserts from two concurrent transactions that commit in reverse
+     order: both succeed through the sequence GRANT 0065 carries, and every row gets a distinct cursor;
   R6 security_invoker: the dashboard role reads only its own tenant's days through the view, and nothing at all when
      app.tenant_id is unset (the policy fails closed).
 """
@@ -43,7 +45,7 @@ START = datetime(2026, 10, 1, tzinfo=UTC)
 
 # The columns 0065 and 0066 read, the roles their grants name, and the production tenant policy (0023, 0032).
 SCHEMA = """
-CREATE ROLE tenant_projection_writer;
+CREATE ROLE tenant_projection_writer LOGIN;
 CREATE ROLE app_dashboard LOGIN;
 CREATE TABLE public.delegation_events (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -56,6 +58,7 @@ CREATE TABLE public.delegation_events (
     tokens_output bigint
 );
 GRANT SELECT ON public.delegation_events TO app_dashboard;
+GRANT SELECT, INSERT ON public.delegation_events TO tenant_projection_writer;
 ALTER TABLE public.delegation_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.delegation_events FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON public.delegation_events
@@ -240,3 +243,43 @@ def test_r6_the_dashboard_reads_only_its_own_tenant(cluster: EphemeralPostgres) 
         own = cur.fetchall()
     assert unset == [], f"with no tenant set the policy must show nothing, saw {unset}"
     assert own == [(TENANT, 12)], f"tenant {TENANT} saw {own}"
+
+
+def test_r7_concurrent_writer_inserts_after_a_second_apply(
+    cluster: EphemeralPostgres,
+) -> None:
+    _seed(cluster, runs_per_day=3, days=2)
+    _apply(cluster, CURSOR)
+    _apply(cluster, CURSOR)
+    insert = (
+        "INSERT INTO public.delegation_events (tenant_id, written_at, terminal_ok, quality_gate_passed) "
+        "VALUES (%s, %s, true, true)"
+    )
+    first = cluster.connect(user="tenant_projection_writer")
+    second = cluster.connect(user="tenant_projection_writer")
+    try:
+        with first.cursor() as a, second.cursor() as b:
+            for cur in (a, b):
+                cur.execute("SELECT set_config('app.tenant_id', %s, false)", (TENANT,))
+            first.commit()
+            second.commit()
+            # Interleaved and still open: the first transaction takes the lower numbers but commits last.
+            for n in range(5):
+                a.execute(insert, (TENANT, START + timedelta(hours=1, minutes=n)))
+                b.execute(insert, (TENANT, START + timedelta(hours=2, minutes=n)))
+            second.commit()
+            first.commit()
+    finally:
+        first.close()
+        second.close()
+    with cluster.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*), count(projection_cursor), count(DISTINCT projection_cursor) "
+            "FROM public.delegation_events"
+        )
+        rows, with_cursor, distinct = cur.fetchone()
+    assert rows == 16 and with_cursor == 16 and distinct == 16, (
+        rows,
+        with_cursor,
+        distinct,
+    )
