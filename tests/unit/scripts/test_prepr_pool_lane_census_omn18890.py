@@ -44,6 +44,7 @@ asserted across a repo boundary.
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -98,10 +99,17 @@ def _load_module(path: Path, name: str) -> Any:
 PLAN = _load_module(_PLAN_PATH, "lane_census_plan")
 GENERATOR = _load_module(_GENERATOR_PATH, "generate_claude_lane_block")
 MANIFEST = (
-    PLAN.load_manifest(_MANIFEST_PATH)
-    if _MANIFEST_PATH.is_file()
-    else {"hosts": {}, "lanes": {}}
+    PLAN.load_manifest(_MANIFEST_PATH) if _MANIFEST_PATH.is_file() else {"lanes": {}}
 )
+# OMN-22152: which lanes the lab host may run is the host registry's, read from
+# the file LANE_CENSUS_REGISTRY names. Absent, the cases below fail loud on an
+# empty registry rather than read clean.
+REGISTRY = PLAN.load_registry() if os.environ.get("LANE_CENSUS_REGISTRY") else None
+
+
+def test_the_lab_registry_is_present() -> None:
+    """Without the registry every case below would fail on an empty host list."""
+    assert REGISTRY is not None, "LANE_CENSUS_REGISTRY is unset (OMN-22152)"
 
 
 def test_the_lab_manifest_is_present() -> None:
@@ -137,7 +145,7 @@ def _envelope(containers: list[dict[str, str]]) -> dict[str, Any]:
     }
     return {
         "lane": None,
-        # OMN-19088: the pool is declared for the lab host.
+        # OMN-19088: the pool is listed for the lab host.
         "host": "omninode-pc",
         "containers": [decoy, *containers],
         "networks": ["omnibase-infra-network", "omnibase-infra_default"],
@@ -167,7 +175,7 @@ def test_pool_slot_is_declared_with_its_project_and_network(lane: str) -> None:
 @pytest.mark.parametrize("lane", POOL_LANES)
 def test_absent_pool_slot_is_named_and_reports_zero_drift(lane: str) -> None:
     """The slot is visible to the census while absent, and is not drift."""
-    plan = PLAN.build_plan(_envelope([]), MANIFEST)
+    plan = PLAN.build_plan(_envelope([]), MANIFEST, REGISTRY)
     assert lane in plan["lanes_checked"], (
         f"lane {lane!r} must appear in lanes_checked even while absent — a slot "
         f"the census cannot name is a slot it cannot police"
@@ -192,7 +200,7 @@ def test_running_pool_slot_reports_its_inventory(lane: str) -> None:
     assert len(services) >= 2, "a slot must declare more than one service"
     first, *rest = services
 
-    plan = PLAN.build_plan(_envelope([_container(first["name"])]), MANIFEST)
+    plan = PLAN.build_plan(_envelope([_container(first["name"])]), MANIFEST, REGISTRY)
     findings = _findings_for(plan, lane)
     absent = {f["container"] for f in findings if f["kind"] == "container_absent"}
     assert absent == {s["name"] for s in rest}, (
@@ -334,7 +342,7 @@ def test_absent_pool_slot_is_reported_skipped_not_clean(lane: str) -> None:
     ``N running (census clean)``. The pool makes that the normal case, so the
     planner reports the skip and the generator reads it.
     """
-    plan = PLAN.build_plan(_envelope([]), MANIFEST)
+    plan = PLAN.build_plan(_envelope([]), MANIFEST, REGISTRY)
     assert lane in plan["lanes_skipped_optional_down"]
     assert set(plan["lanes_skipped_optional_down"]).issubset(
         set(plan["lanes_checked"])
@@ -363,7 +371,7 @@ def test_partially_up_pool_slot_is_not_reported_skipped(lane: str) -> None:
         for s in MANIFEST["lanes"][lane]["services"]
         if s.get("kind", "service") == "service"
     )
-    plan = PLAN.build_plan(_envelope([_container(first["name"])]), MANIFEST)
+    plan = PLAN.build_plan(_envelope([_container(first["name"])]), MANIFEST, REGISTRY)
     assert lane not in plan["lanes_skipped_optional_down"]
     assert _findings_for(plan, lane), "a partially-up slot must report drift"
 
