@@ -428,6 +428,10 @@ fi
 # lane is never a candidate -- the census is read for this lane only, and the
 # label is read again from the container itself immediately before the removal.
 LANE_CENSUS_PYTHON="${LANE_CENSUS_PYTHON:-python3}"
+# lane-census-check.sh reads the host registry from the file LANE_CENSUS_REGISTRY
+# names or, unset, from the lane census node's overlay under ONEX_SKILL_OVERLAY_ROOTS,
+# in this environment (OMN-22152): the refresh supplies nothing itself, and with
+# neither present the driver exits 3 before reading Docker.
 CENSUS_SCRIPT="${REPO_ROOT}/scripts/lane-census-check.sh"
 CENSUS_EXIT=0
 CENSUS_REMOVED=()
