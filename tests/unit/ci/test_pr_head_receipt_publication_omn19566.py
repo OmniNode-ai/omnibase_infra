@@ -28,8 +28,9 @@ from omnibase_infra.lab_proof.lab_proof_profile_registry import (
     profile_pin,
 )
 from scripts.ci import lab_pass_receipt as receipts
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REGISTRY = REPO_ROOT / "config" / "lab_proof_profiles.yaml"
