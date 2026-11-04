@@ -467,6 +467,8 @@ class DeployAgent:
         self.executor = DeployExecutor(migration_record_dir=STATE_DIR)
         self._state = "idle"
         self._shutdown = False
+        # OMN-22379: None until an install binds the runtime host listeners.
+        self._runtime_listeners: Any = None
         self._current_git_sha = ""
         self._skip_self_update = skip_self_update
         self._publish_cb = PublishCircuitBreaker()
@@ -683,14 +685,11 @@ class DeployAgent:
         return True
 
     def _await_settle_before_reexec(self) -> None:
-        """``on_before_reexec`` for every self-update boundary (OMN-19501).
+        """Drain the settle before an exec or a systemd restart.
 
-        ``self_update`` calls this immediately before it replaces the process
-        image, and only then. A re-exec kills every thread, so without the wait
-        an update would land in the middle of ``k3s ctr images import`` or of
-        the pin recreate, and the sha's onex-lab-k3s record would never be
-        written. The wait is paid only when a re-exec is actually about to
-        happen, which is what keeps it from re-serializing every slot.
+        Wait for the image import and pin recreate to record their results.
+        Descriptor remapping belongs to the executor's actual exec call: this
+        callback also runs before systemd restart, which can fail or return.
         """
         if self._settle_in_flight():
             logger.info(
@@ -754,10 +753,7 @@ class DeployAgent:
             self._kafka_config.bootstrap_servers,
             ",".join(sorted(lane.value for lane in self._allowed_lanes)),
         )
-        # OMN-19507. Stated here, after logging is configured, rather than in
-        # __init__, where both lines were emitted before basicConfig ran and
-        # reached no handler: the dev-200 agent's log had no instance line
-        # (dev-200-lane TERMINAL, omni_home ledger 2026-09-25T11:23:31Z).
+        # OMN-19507: log the routing identity after configuring logging.
         if self._router is not None:
             logger.info(
                 "Deploy agent routing instance: %s, consumer group %s, %d route(s), "
@@ -767,6 +763,17 @@ class DeployAgent:
                 len(self._router.table.routes),
                 self._router.table.default_instance,
             )
+        if os.environ.get("DEV_RUNTIME_HANDOVER_DIR") or (
+            os.environ.get("LISTEN_FDS")
+            and os.environ.get("LISTEN_PID") == str(os.getpid())
+        ):
+            from omnibase_infra.models.model_runtime_listener_registry import (
+                ModelRuntimeListenerRegistry,
+            )
+
+            self._runtime_listeners = ModelRuntimeListenerRegistry.start()
+            if self._runtime_listeners is not None:
+                self.executor.reexec = self._runtime_listeners.reexec
         gate = getattr(self, "_load_gate", None)
         logger.info(
             "Deploy agent load gate: %s",
@@ -1099,17 +1106,22 @@ class DeployAgent:
         the deploy completes on the version it started on, and the update fires
         here, at the next boundary.
         """
+        self._self_update_keeping_image(EnumSelfUpdateBoundary.POST_TERMINAL)
+
+    def _self_update_keeping_image(self, boundary: EnumSelfUpdateBoundary) -> None:
+        """Run one self-update boundary; a failure keeps the current image."""
         try:
             self.executor.self_update(
-                boundary=EnumSelfUpdateBoundary.POST_TERMINAL,
+                boundary=boundary,
                 skip=self._skip_self_update,
                 on_before_reexec=self._await_settle_before_reexec,
             )
         except Exception as e:  # noqa: BLE001
             logger.error(  # noqa: TRY400
-                "Self-update at the post-terminal boundary failed, "
+                "Self-update at the %s boundary failed, "
                 "staying on the current image: %s "
                 "friction_type=self_update_boundary_failed",
+                boundary.value,
                 e,
             )
 
@@ -1164,19 +1176,7 @@ class DeployAgent:
             )
             return
 
-        try:
-            self.executor.self_update(
-                boundary=EnumSelfUpdateBoundary.IDLE_HEARTBEAT,
-                skip=self._skip_self_update,
-                on_before_reexec=self._await_settle_before_reexec,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(  # noqa: TRY400
-                "Self-update at the idle boundary failed, "
-                "staying on the current image: %s "
-                "friction_type=self_update_boundary_failed",
-                e,
-            )
+        self._self_update_keeping_image(EnumSelfUpdateBoundary.IDLE_HEARTBEAT)
 
     def _branch_install_argv(self, command: str) -> list[str]:
         """The handler's argv; a merge probe gets each declared repository's clone and running ref."""

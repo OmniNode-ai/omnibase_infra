@@ -1,0 +1,79 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22379
+title: "T3 The deploy agent holds the runtime host listeners across its restarts and brokers them to runtimes with detach grants"
+summary: >-
+  Task T3 of the OMN-22151 stage-2 design (revision 4, section 3 and rule A6). The deploy agent binds the two runtime host listeners at the install, keeps them in its systemd file-descriptor store, remaps them onto descriptors 3 and 4 before a self-update re-exec and recovers them by name from LISTEN_FDS and LISTEN_FDNAMES after a restart. A unix-socket broker hands the listener to a runtime by SCM_RIGHTS, keeps the per-pool table of provisional and confirmed sessions and the handover flag, and answers detach requests granted, wait or alone. Everything is inert until an install binds. The logic is an omnibase_infra handler pair with models and two declarative nodes, because the file-shape ratchet refuses a new module in the agent's own package; the agent calls it from three wiring lines. No unit is installed or restarted on any host by this change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22379-ac1-listener-holder
+    statement: "A connection queued on a held listener is answered after the agent re-execs and after a systemd-style restart, because the agent recovers the listener by name."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: a test asserts a connection queued on the listener across an agent re-exec and across a systemd-style restart is answered after the agent recovers the listener by name -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -k listener_holder -q
+  - id: req-omn22379-ac2-listener-broker
+    statement: "The broker never grants a detach that leaves zero confirmed acceptors while a handover is in progress, and counts a provisional session for nothing."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: a test asserts the broker never grants a detach that leaves zero confirmed acceptors while a handover is in progress, and counts a provisional session for nothing -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -k listener_broker -q
+evidence_requirements:
+  - kind: tests
+    description: "The listener holder and broker tests."
+    command: |-
+      uv run --frozen pytest scripts/deploy-agent/tests/unit -k "listener_holder or listener_broker" -q -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22379-activation-owner
+    description: >-
+      A missing or foreign LISTEN_PID leaves the registry inert before contract loading and service assembly. The agent starts the registry only for its own activation; the matching-pid control exercises that startup path.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_listener_holder_omn22379.py -k "registry_ignores_foreign_activation or agent_only_starts" -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn22379-ac1-listener-holder
+    description: >-
+      Real sockets: a connection and its request are queued on the held listeners while no process accepts, the agent process re-execs with a real execv (same pid, descriptors remapped onto 3 and 4 in LISTEN_FDNAMES order) and answers it; a test double of systemd receives the FDSTORE=1 datagrams with the descriptors, the agent is killed, and a new process started with LISTEN_FDS, LISTEN_FDNAMES and its own LISTEN_PID answers the queued connections, with the stored order reversed to prove recovery is by name. A foreign LISTEN_PID and a descriptor that does not listen are refused. The dev unit carries the four keys.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -k listener_holder -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn22379-ac2-listener-broker
+    description: >-
+      The session table answers detach requests under one lock: over 1500 seeded random operation sequences no grant leaves zero confirmed acceptors and no verdict contradicts the handover flag, and a seeded mutant that counts a provisional session is caught by the same checker. The unix-socket server hands the listener over by SCM_RIGHTS, a session ends when its connection dies, and a client cannot send the agent-only operations.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -k listener_broker -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn22379-deploy-agent-imports-holder
+    description: >-
+      Post-deploy probe, run only by the local Done gate and binding no acceptance criterion: the deploy agent's own interpreter imports the listener holder and broker. This is the deploy fact for the install task (T7): it reads red until a train release carries the handlers and the agent's omnibase-infra floor is raised to it. Nothing is installed or restarted on any host by this change.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run --project scripts/deploy-agent python -c "import omnibase_infra.handlers.handler_runtime_listener_holder, omnibase_infra.handlers.handler_runtime_listener_broker_server"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn22379-deploy-gate-probe
+    description: >-
+      Deploy probe: the pinned Python image parses the committed broker handler and finds the HandlerRuntimeListenerBroker class, the single owner of the detach verdicts. A tree without the module fails this check at the mount, before any parse. Nothing is installed or restarted on any host by this change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          docker run --rm -v "$PWD/src/omnibase_infra/handlers/handler_runtime_listener_broker.py:/m.py:ro" python:3.12-slim@sha256:dd29372629eeba2dd003fd9e9d35a5b8236c44727875a0364254b5127af88e65 python -c "import ast; names = {c.name for c in ast.parse(open('/m.py').read()).body if isinstance(c, ast.ClassDef)}; assert 'HandlerRuntimeListenerBroker' in names, names"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

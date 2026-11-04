@@ -69,9 +69,25 @@
 #
 # The rest of the [Service] block is the base unit's, verbatim in intent:
 # canonical repo copy for both the working directory and the interpreter (the
-# OMN-13760 drift this repo already fixed once), no WatchdogSec (a rebuild is a
-# minutes-long synchronous subprocess that blocks the event loop; a liveness
-# watchdog cannot tell it apart from a hang), Type=simple, Restart=on-failure.
+# OMN-13760 drift this repo already fixed once), Type=simple, Restart=on-failure.
+# WatchdogSec is declared as 0 (a rebuild is a minutes-long synchronous
+# subprocess; a liveness watchdog cannot tell it apart from a hang). See the
+# LISTENER HOLDER block below.
+#
+# LISTENER HOLDER (OMN-22379, OMN-22151 design rev 4 section 3)
+#
+# The agent binds [::]:8085 and [::]:8086 once, at the first install, and keeps
+# them in this unit's file-descriptor store (sd_notify FDSTORE=1 FDNAME=
+# runtime-main / runtime-effects) so a listening socket outlives every agent
+# process. FileDescriptorStoreMax=4 holds the two listeners with spare room;
+# FileDescriptorStorePreserve=yes keeps the store
+# when the unit stops, so a restart hands the sockets back as LISTEN_FDS;
+# NotifyAccess=all lets a helper process of the agent send the FDSTORE message.
+# WatchdogSec=0 keeps the watchdog OFF until the install node (T6) pings
+# WATCHDOG=1 from the job step loop and sets a nonzero value: a nonzero value
+# with no pings would make systemd kill the agent. All of this is inert until an
+# install binds; without DEV_RUNTIME_HANDOVER_DIR or LISTEN_FDS the agent never
+# touches the listeners.
 
 #
 # TRACKING REF (declared, never inferred -- OMN-16442)
@@ -203,6 +219,10 @@ Environment=KAFKA_SASL_ENV_PREFIX=DEV_
 ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8098
 ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/deploy-agent-launch.sh
 Restart=on-failure
+FileDescriptorStoreMax=4
+FileDescriptorStorePreserve=yes
+NotifyAccess=all
+WatchdogSec=0
 # OMN-20410: on-failure counts a SIGTERM exit as clean. earlyoom SIGTERMed this
 # agent at 2026-10-03T16:09:11Z and systemd left the dev lane with no deploy
 # agent for three hours. An explicit `systemctl --user stop` still stops it.
