@@ -706,3 +706,10 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC36
+  - id: dod-omn19998-refresh-recovery-census
+    description: Replay the recorded dev recreate leftover through the refresh completion block, real census reader and Docker shim. Recovery removes only declared same-lane leftovers, preserves failure results and exit codes, and records remaining drift or unreadable inventory. Success controls retain the census exit code.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q
+        cwd: .
