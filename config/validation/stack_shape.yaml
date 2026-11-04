@@ -7,10 +7,10 @@
 # runtime, a dependency, a one-shot or a baseline entry, and the runtime service runs one
 # replica. Nothing else is allowed.
 #
-# No lane or compose file is named here. The compose files are found by the glob below, so a
+# The service-shape policy names no lane or compose file. The glob below finds them, so a
 # new docker/docker-compose*.yml is judged the day it appears; a file that is not a runtime
-# stack is listed under not_a_stack. A '*' in one_shots or in a baseline service is a
-# shell-style pattern over the service name (a one-shot pattern admits only a service that
+# stack is listed under not_a_stack. Command-only sources are declared separately below.
+# A '*' in one_shots or in a baseline service is a shell-style pattern over the service name (a one-shot pattern admits only a service that
 # declares restart: no).
 #
 # The baseline holds the services that predate the check and only shrinks. An entry names a
@@ -61,6 +61,639 @@ not_a_stack:
   - docker/docker-compose.pypi-cache.yml
   - docker/docker-compose.pypi-canary.yml
   - docker/docker-compose.runners*.yml
+# Commands extend the same gate. Exact argv fingerprints are SHA256 of compact,
+# ASCII JSON argv arrays; the full command and entrypoint remain in compose.
+# Service identities may use sha256:<SHA256 of the service name> to keep
+# deployment identifiers out of public policy. Matching remains exact.
+# Legacy command budgets share T1 service ownership and only shrink against base.
+allowed_commands:
+  - argv:
+      - onex-runtime
+    match: executable
+    field: command
+    services: []
+    reason: The one-runtime kernel carries all in-process nodes.
+  - argv:
+      - onex-gateway-forwarder
+    match: executable
+    field: command
+    services:
+      - gateway-forwarder
+    reason: T26 retains the standalone lane-mirror transport bridge between separately credentialed brokers.
+  - match: exact
+    field: command
+    services:
+      - omnibase-infra-memgraph
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 4cfefa8ef9d1026ccae46f2b8f3a3213be0c943209e15f39d107e8152420709a
+    command_hint: --storage-snapshot-retention-count=2 --storage-wal-enabled=true
+  - match: exact
+    field: command
+    services:
+      - cloud-migration
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 4b1c750b9cb6139ab4aa615e8dd8559a52d8248a3c86ec73769dc32d5062a89f
+    command_hint: bash /run-cloud-migrations.sh
+  - match: exact
+    field: command
+    services:
+      - postgres
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: bc5c6cf73d880b2c9643f9de43ad44d9d410368d8cab0a875c2f2da7ec041550
+    command_hint: postgres -c
+  - match: exact
+    field: command
+    services:
+      - postgres
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: cdb0f620c984f6353dfffc40b66777f6ab76f0d767cb9b1d95dddc4ba61f6426
+    command_hint: postgres -c
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: c105eab349fe02b6fd92c3ccbf27d07ff37a7865abdd03fbf99016e1650acf94
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 5545c7fa1b4102211dce43277d108b2a88e5226cc526fc3f853458416d89c1ce
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 0c6f4f9699cff9f4268ec1899b06282afc846105e847554e80cd690ac95fda46
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 397e9689ab6e6098613a04a5cc4e8b10cdabefabce56cdf4c3d574ce6e78e689
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 864d826c1adb55fa0918d75faab6ea570a438150526afb60ee7de476af467590
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: b174d6b2f9bdbbb9cb2950170f3974ad0640d010993d77f108f8b32ba8256f3d
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 269cc5b2f3153ee20eea48f4fe4bc1ce2f2126b7f5b1216983023c99aee79962
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: db3c96c7bf8d134eab5d242ee0f6c0ee2faadc6112ae7af47080a24fcf3333ac
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: a3c92f19f3755097cb0e89601d12be124258606fe8364d9f1c555a1835b29e93
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 782beab48dde30468c15d89991498eb69f04dd96795e1c94ce0c89615ee2f261
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 54bea6d24851f1e399776ec6a8832ba89915d84c156a98f3f25157ec9817e41c
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: b0ea28eb055b2092df79cc622219127c493dc1e12fa2dc6b0b1c069f19d15320
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 6ada4bde11df712dc6af2d3a60493dea22f3c9d8ea560cdd005c367c0458e8f2
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 1d97b8a4d6b494c115fca6dbd6aa5b0399186cf39dbabb97a8518a9bf57ea4d9
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
+      - redpanda-partition-cap
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: d43f3695f4086aa2e376f977945f7fc983373d3d2ad7b8c66133298951ee85b8
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - sha256:507bc462899da89b26b7c5a1fe0ddadda13b09bf89a240fb5cd47803c3014834
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: b7337e93a9277ddd070d844fae1e2d4292ed29bb50586a124ed13ad4e473340b
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - sha256:a68f0d940a7928215b337b317984550c1f9130959159eddef27abe436e59a419
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 979eee4744015a8db66ebbf70e62e1aa8b44668750e7d3c378c0c2755d41e755
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - redpanda-sasl-enable
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: e3a2b10c6f1a4d35c677cd133b26f1f242689586efd400b0ea6e0f426a901a8e
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - sha256:88d12b21011ce6ecc6a5db72ec53c093a45f5026c119b974d02b0a7c93e9e143
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 43ffaed8dd05a5bc3dab140785a0403fb6b83b1e50b87640e894b355ee014722
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - redpanda-scram-user
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 605bb4fec55961b85941f3e4e8b665b40ec06633d4162e56a896fd086f6456a4
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - sha256:1311c9dd9bc027d732005196555d06fa3316d3ea1d7b743d40b40cdbd97e8e49
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 39ca48216317a8718f14bec9b22450c5b663c11da0e449eaa0cba1ff0007c8c4
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - redpanda-settings
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 4122953d35a331d29ce3c32557662ea8dc8b08ce9c625c65d565cc30343e627d
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - cloud-migration-files
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 67bba9c40c81202c8e024a6a0ed63431c65831ab236dcaa1a52b1d9d97157f2b
+    command_hint: sh -c
+  - match: exact
+    field: command
+    services:
+      - cloud-migration-files
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 6aed566bb2c67c75e70b58c79768e517e332dada53f02cbc4a521091d5a964dc
+    command_hint: sh -c
+  - match: exact
+    field: command
+    services:
+      - valkey
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 877d59a0b64e859b039fe56e04afa29a72f5df3a066d08b7f0d296cc116fdb93
+    command_hint: sh -c
+  - match: exact
+    field: command
+    services:
+      - valkey
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: ef6a0265decc33090aa4294a7a9c414e07bade4cd1446e3f1d3d30c4026ca46e
+    command_hint: sh -c
+  - match: exact
+    field: command
+    services:
+      - keycloak
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: b8537b96d3635503844f8b76d7ae3a242208eb644b8f5de5a3781b3cf31780c9
+    command_hint: start-dev --import-realm
+  - match: exact
+    field: command
+    services:
+      - valkey
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: a9eecf1659789755d692db2794f0e3741fade9b48e43054a934c31009c888cbb
+    command_hint: valkey-server --save
+  - match: exact
+    field: entrypoint
+    services:
+      - sha256:507bc462899da89b26b7c5a1fe0ddadda13b09bf89a240fb5cd47803c3014834
+      - sha256:a68f0d940a7928215b337b317984550c1f9130959159eddef27abe436e59a419
+      - sha256:88d12b21011ce6ecc6a5db72ec53c093a45f5026c119b974d02b0a7c93e9e143
+      - sha256:1311c9dd9bc027d732005196555d06fa3316d3ea1d7b743d40b40cdbd97e8e49
+      - redpanda-partition-cap
+      - redpanda-sasl-enable
+      - redpanda-scram-user
+      - redpanda-settings
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 538cf86ad1dd81e9749207d29a655500a42d3b90657e79a69da190d0b6da58d2
+    command_hint: /bin/sh -c
+  - match: exact
+    field: entrypoint
+    services:
+      - migration-gate
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 5530e6d45601261a96a7db593fcfb6233a28d2cff66289f1a3375bc9db9fca55
+    command_hint: sh -c
+  - match: exact
+    field: entrypoint
+    services:
+      - forward-migration
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 01dff756aa57b6bfa9a09ebf1237534e8661ce009ba18ce1402bb1bce0e27bac
+    command_hint: sh /run-forward-migrations.sh
+  - match: exact
+    field: entrypoint
+    services:
+      - intelligence-migration
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: f5e8ab099443189fa20f7f34cb25c34f9386961f2c2a87c843cec10298409865
+    command_hint: sh /run-intelligence-migrations.sh
+command_only_compose_files:
+  - docker/docker-compose.gateway.yml
+command_baseline:
+  - service: agent-actions-consumer
+    field: command
+    files: 1
+    argv_sha256: eb00763358e32e0836ea8e7c9f6c046aa339959397c95375c4876372230e5c1c
+    command_hint: python -m
+  - service: context-audit-consumer
+    field: command
+    files: 1
+    argv_sha256: 3d9de8cc45a4259aaf84fd39a77d662ed28f512575dec1f5c3d84f50440b0e4f
+    command_hint: python -m
+  - service: dogfood-delegation-fault-429
+    field: command
+    files: 1
+    argv_sha256: 8037eab7891f41b1f247d24e4227e9267b85dffef1a660b790db462187f4cfb9
+    command_hint: python /app/dogfood_delegation_fault_provider.py
+  - service: dogfood-delegation-fault-503
+    field: command
+    files: 1
+    argv_sha256: c89680a1c95ad0b0bd8e2a571a6a28930c64c4c0e68c382a2a2b1c47d2b18b25
+    command_hint: python /app/dogfood_delegation_fault_provider.py
+  - service: infra-routing-decisions-consumer
+    field: command
+    files: 1
+    argv_sha256: 00ad7d712962e4c395883d778505ef04524dda86a61ceaf293d61e8332659948
+    command_hint: python -m
+  - service: intelligence-api
+    field: command
+    files: 1
+    argv_sha256: b6b340a065b2ac1f0ab85864a12148dc1320ea9d86e5b57646b53c170a1ebd7f
+    command_hint: uvicorn omniintelligence.api.app:create_app
+  - service: omninode-contract-resolver
+    field: command
+    files: 1
+    argv_sha256: 317ee46f78dc98733d4e548f7bf7e5f2d2cf8995376cdc08b80b54b306ca8992
+    command_hint: uvicorn omnibase_infra.services.contract_resolver.launcher:app
+  - service: projection-api
+    field: command
+    files: 4
+    argv_sha256: bffcc1b47591b45ac48725e8889b97faf81737056a789ff9f64b931bfb028c80
+    command_hint: omnimarket-projection-api
+  - service: projection-delegation-writer
+    field: command
+    files: 3
+    argv_sha256: 6933f39f613d703a2927557115901a975a31f67ca086705e08c7af06fb33b364
+    command_hint: python -m
+  - service: projection-live-events-writer
+    field: command
+    files: 2
+    argv_sha256: 4794b87edb18b3051713be2a85abfeb92828c3fbd3f038084a2a049b0847ba13
+    command_hint: python -m
+  - service: projection-registration-writer
+    field: command
+    files: 2
+    argv_sha256: 9c209f891d6d2ddb012501eee334cee7ea72860c5a999777d40ea35a45ca3bba
+    command_hint: python -m
+  - service: projection-savings-writer
+    field: command
+    files: 2
+    argv_sha256: c2ac78a2a163829cbcd42fd6edbad7bb83aba1b16525fc6c49d6a58094ddf49d
+    command_hint: python -m
+  - service: projection-tenant-credentials-writer
+    field: command
+    files: 2
+    argv_sha256: 5a9e5758b38a0ab0a33a678594dc8cff7c84dc2e17b99cb16556f85fec024637
+    command_hint: python -m
+  - service: projection-tenant-registry-writer
+    field: command
+    files: 3
+    argv_sha256: f076cbd733c2f43f52d6c860cdb80b3fe33831bd8ce8739f7d213eb4bc5235a8
+    command_hint: python -m
+  - service: redpanda-topic-manager
+    field: command
+    files: 1
+    argv_sha256: 630073bd55a5491777e3c502b46a0d8e549981ec3b508b0cdbffeb7a511b16b0
+    command_hint: '-c '
+  - service: redpanda-topic-manager
+    field: entrypoint
+    files: 1
+    argv_sha256: 8fa8165b66d065c5fb103b09841e9394196c92af17df4c53c8a9f8b14fa36492
+    command_hint: /bin/bash
+  - service: skill-lifecycle-consumer
+    field: command
+    files: 1
+    argv_sha256: 562275519897ffe28f3a64c49e15258fecee17fdb147283de045022aa0df5046
+    command_hint: python -m
+console_script_package_patterns: ["omnibase-*", "omninode-*", "omnimarket"]
+console_scripts:
+  omnibase_core:
+    check-dependency-direction:
+      target: omnibase_core.nodes.node_dependency_direction_check_effect.runtime_dependency_direction_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-doc-content-scan-compute:
+      target: omnibase_core.validation.doc_content_scan.runtime_doc_content_scan:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-duplicate-registry-ids:
+      target: omnibase_core.nodes.node_duplicate_config_ids_check_compute.runtime_duplicate_config_ids_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-fsm-handler-drift:
+      target: omnibase_core.validators.fsm_handler_drift:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-github-token-env-reads:
+      target: omnibase_core.nodes.node_github_token_env_reads_check_compute.runtime_github_token_env_reads_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-hardcoded-topic-compute:
+      target: omnibase_core.nodes.node_hardcoded_topic_check_compute.runtime_hardcoded_topic_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-imperative-contracts:
+      target: omnibase_core.nodes.node_imperative_contract_guard_check_effect.runtime_imperative_contract_guard_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-invariant-analysis:
+      target: omnibase_core.nodes.node_validation_report_write_effect.runtime_invariant_analysis:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-local-paths:
+      target: omnibase_core.nodes.node_local_paths_check_compute.runtime_local_paths_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-local-paths-compute:
+      target: omnibase_core.nodes.node_local_paths_check_compute.runtime_local_paths_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-localhost-url-compute:
+      target: omnibase_core.validation.localhost_url.runtime_localhost_url:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-merge-queue-parity:
+      target: omnibase_core.nodes.node_merge_queue_parity_check_effect.runtime_merge_queue_parity_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-no-backward-compat:
+      target: omnibase_core.nodes.node_backward_compat_check_compute.runtime_backward_compat_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-no-dict-any:
+      target: omnibase_core.nodes.node_dict_any_check_compute.runtime_dict_any_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-no-faked-boundary:
+      target: omnibase_core.validation.no_faked_boundary.runtime_no_faked_boundary:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-pin-hygiene-compute:
+      target: omnibase_core.validation.pin_hygiene.runtime_pin_hygiene:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-private-ip-compute:
+      target: omnibase_core.nodes.node_private_ip_check_compute.runtime_private_ip_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-projection-exposure-drift:
+      target: omnibase_core.validators.projection_exposure_drift:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-todo-fixme-marker-compute:
+      target: omnibase_core.validation.todo_marker.runtime_todo_marker:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    omni-agent:
+      target: omnibase_core.cli.cli_commands:cli
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    omninode-runtime-host-dev:
+      target: omnibase_core.cli.cli_runtime_host:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex:
+      target: omnibase_core.cli.cli_commands:cli
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-demo-path-topic-gate:
+      target: omnibase_core.nodes.node_demo_path_topic_coherence_check_compute.runtime_demo_path_topic_coherence_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-validate-links:
+      target: omnibase_core.nodes.node_markdown_links_check_compute.runtime_markdown_links_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-validate-topics:
+      target: omnibase_core.nodes.node_topic_names_check_compute.runtime_topic_names_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-work-ledger:
+      target: omnibase_core.nodes.node_work_ledger_state_compute.runtime_work_ledger:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    resolve-private-vocabulary:
+      target: omnibase_core.nodes.node_source_file_gather_effect.runtime_private_vocabulary:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    validate-string-versions:
+      target: omnibase_core.validation.scripts.validate_string_versions:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+  omnibase_spi: {}
+  omnibase_compat: {}
+  omnibase_infra:
+    omni-infra:
+      target: omnibase_infra.cli.commands:cli
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-action-authorization-claim:
+      target: omnibase_infra.runtime.action_authorization_claim.cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-gateway-canary-probe:
+      target: omnibase_infra.runtime.gateway_canary_probe:main
+      status: run_by_lane
+      reason: Gateway healthcheck, docker/docker-compose.gateway.yml healthcheck.
+    onex-gateway-forwarder:
+      target: omnibase_infra.runtime.gateway_forwarder:main
+      status: run_by_lane
+      reason: Lane-mirror boundary forwarder, docker/docker-compose.gateway.yml command; retained by T26.
+    onex-git-hook-relay:
+      target: omnibase_infra.cli.git_hook_relay:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-infra-test:
+      target: omnibase_infra.cli.infra_test.cli:cli
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-linear-relay:
+      target: omnibase_infra.cli.linear_relay:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-runtime:
+      target: omnibase_infra.runtime.kernel:main
+      status: run_by_lane
+      reason: Runtime kernel, docker/Dockerfile.runtime CMD.
+    onex-status:
+      target: omnibase_infra.tui.__main__:run_status_tui
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    verify-container-manifest:
+      target: omnibase_infra.scripts.verify_container_manifest:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+  omninode-claude:
+    omniclaude-emit:
+      target: omniclaude.hooks.cli_emit:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    omni-patterns:
+      target: omniclaude.cli.patterns:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+  omninode-memory: {}
+  omninode-intelligence: {}
+  omnimarket:
+    onex-hourly-tick:
+      target: omnimarket.nodes.node_hourly_tick_effect.runtime_hourly_tick_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-host-thermal:
+      target: omnimarket.nodes.node_host_thermal_observe_effect.runtime_host_thermal_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-automation-liveness-check:
+      target: omnimarket.nodes.node_automation_liveness_overlay_check_effect.runtime_automation_liveness_overlay_check_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-patch-apply-dispatch:
+      target: omnimarket.nodes.node_patch_apply_dispatch_effect.runtime_patch_apply_dispatch_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-integration-test-runner:
+      target: omnimarket.nodes.node_integration_test_runner.cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-access-mode:
+      target: omnimarket.nodes.node_operator_access_mode_effect.runtime_operator_hook_cli:mode_main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-runtime-deploy:
+      target: omnimarket.nodes.node_runtime_deploy_effect.runtime_deploy_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-architecture-discovery:
+      target: omnimarket.nodes.node_architecture_discovery_orchestrator.runtime_architecture_discovery_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    ab-compare:
+      target: omnimarket.cli.cli_ab_compare:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    ab-compare-suite:
+      target: omnimarket.cli.cli_ab_compare_suite:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    delegation-cost-demo:
+      target: omnimarket.cli.cli_delegation_cost_demo:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-delegate:
+      target: omnimarket.adapters.claude_code.delegate:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-claude-code-hook:
+      target: omnimarket.nodes.node_claude_code_hook_adapter_effect.runtime_claude_code_hook_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    market-skills-demo:
+      target: omnimarket.cli.cli_market_skills_demo:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    omnimarket-validate-config:
+      target: omnimarket.cli.validate_config:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    omnimarket-projection-api:
+      target: omnimarket.projection.api_server:main
+      status: run_by_lane
+      reason: Legacy projection-api compose carrier, held under the shrinking service/command baseline.
+    onex-ledger-reconcile:
+      target: omnimarket.nodes.node_ledger_reconcile_orchestrator.__main__:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-secret-store-override:
+      target: omnimarket.nodes.node_lab_secret_store_override_effect.runtime_lab_secret_store_override_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-legacy-worktree-audit:
+      target: omnimarket.nodes.node_legacy_worktree_audit_effect.handlers.handler_legacy_worktree_audit:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-claude-pool-refill:
+      target: omnimarket.nodes.node_claude_pool_refill_effect.runtime_claude_pool_refill:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-branch-prune:
+      target: omnimarket.nodes.node_branch_prune_effect.runtime_branch_prune_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+    onex-handoff-check:
+      target: omnimarket.nodes.node_handoff_check_effect.runtime_handoff_check_cli:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
+console_script_sources:
+  omnibase_core: installed 0.47.62
+  omnibase_spi: installed 0.23.7
+  omnibase_compat: installed 0.5.7
+  omnibase_infra: installed 0.38.77
+  omninode-claude: declared 0.27.0
+  omninode-memory: wheel 0.18.9 sha256:16563f5a39814f4c9c4d11b2ca4faa7ea15f348db9600931a28f645ed2cf5414
+  omninode-intelligence: declared 0.25.2
+  omnimarket: declared 0.4.321
 baseline:
   - service: "*-infra-runtime-image"
     files: 3

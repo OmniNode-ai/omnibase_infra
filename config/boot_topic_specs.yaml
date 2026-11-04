@@ -31,5 +31,5 @@ lanes:
     specs_per_boot: 2300
     read_at: "2026-11-01T23:29:24Z"
     source: "boot log of the dev runtime container: topic provisioning (contract-first) - total: 2300, skill-manifest topics: 427"
-    repo_specs: 213
-    repo_specs_measured_at: "14f5e39e258cf6f117d4d23f55504022f9727272"
+    repo_specs: 215
+    repo_specs_measured_at: "df2a25fba8279371ae4044133a1f0b9f45fb2a85"

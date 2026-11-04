@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 """OMN-21891: every compose service is the runtime, a dependency, a one-shot or a baselined entry.
 
-The checker and its contract are omnibase_core's ``ValidatorStackShape``; the rule values are the
-data file ``config/validation/stack_shape.yaml``. That file names no lane and no compose file: the
-compose files are found by the glob it holds, and its baseline is grouped per service. The core
+The shape checker and its contract are omnibase_core's ``ValidatorStackShape``; the rule values
+are ``config/validation/stack_shape.yaml``. Its glob finds stack files and its baseline is grouped
+per service. The existing architecture-validation node extends this same gate with command and
+console-script rules, using T1's compose parser. A command-only source covers the external forwarder. The core
 validator reads a literal compose file list per lane, so :func:`effective_data` expands the data
 file against the tree into that format (one lane per compose file) before the validator runs.
 This file runs the validator
@@ -22,11 +23,13 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import importlib.metadata
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -44,6 +47,15 @@ from omnibase_core.validation.checker_stack_shape import (
 from omnibase_core.validation.validator_stack_shape import ValidatorStackShape
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
+)
+from omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation import (
+    HandlerArchitectureValidation,
+)
+from omnibase_infra.nodes.node_architecture_validator.models.model_architecture_validation_request import (
+    ModelArchitectureValidationRequest,
+)
+from omnibase_infra.nodes.node_architecture_validator.models.model_stack_shape_snapshot import (
+    ModelStackShapeSnapshot,
 )
 
 pytestmark = pytest.mark.unit
@@ -225,7 +237,62 @@ def _judge(
         path = Path(tmp) / "stack_shape.yaml"
         path.write_text(effective, encoding="utf-8")
         result = ValidatorStackShape(root=root, data_path=str(path)).validate(path)
-    return issues + tuple(result.issues) + _growth(root, text, base_ref)
+    data = _data(text)
+    files = sorted(
+        set(_judged(root, data)) | set(_strings(data, "command_only_compose_files"))
+    )
+    source = {file: (root / file).read_text(encoding="utf-8") for file in files}
+    base_source = (
+        {
+            file: original
+            for file in files
+            if (original := _git_show(root, base_ref, Path(file))) is not None
+        }
+        if base_ref
+        else {}
+    )
+    scripts: dict[str, dict[str, str]] = {}
+    if (root / "pyproject.toml").is_file():
+        manifest = tomllib.loads((root / "pyproject.toml").read_text())
+        scripts[manifest["project"]["name"]] = manifest["project"].get("scripts", {})
+        inventory = data.get("console_scripts", {})
+        patterns = _strings(data, "console_script_package_patterns")
+        names = {str(name).replace("_", "-").lower(): str(name) for name in inventory}
+        for distribution in importlib.metadata.distributions():
+            name = distribution.metadata["Name"].replace("_", "-").lower()
+            if not _matches(name, patterns):
+                continue
+            package = names.get(name, name)
+            if package not in scripts:
+                scripts[package] = {
+                    e.name: e.value
+                    for e in distribution.entry_points
+                    if e.group == "console_scripts"
+                }
+    command_result = HandlerArchitectureValidation().handle(
+        ModelArchitectureValidationRequest(
+            stack_shape=ModelStackShapeSnapshot(
+                policy_yaml=text,
+                compose_files=source,
+                base_policy_yaml=_git_show(root, base_ref, _DATA) if base_ref else None,
+                base_compose_files=base_source,
+                package_scripts=scripts,
+            )
+        )
+    )
+    command_issues = tuple(
+        ModelValidationIssue(
+            severity=_RULES[RULE_BASELINE].severity,
+            message=v.message,
+            code=v.rule_id,
+            file_path=Path(v.location or _DATA),
+            rule_name=v.rule_id,
+        )
+        for v in command_result.violations
+    )
+    return (
+        issues + tuple(result.issues) + _growth(root, text, base_ref) + command_issues
+    )
 
 
 def _text(issues: tuple[ModelValidationIssue, ...]) -> str:
