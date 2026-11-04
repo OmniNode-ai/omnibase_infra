@@ -5,7 +5,7 @@
 The dev lane's cost estimator image is built from a web source repository that
 this repository does not own. This module drives ``build_dev_lane_services``
 exactly as the deploy agent does: the build recipe comes from the shipped
-``node_cost_estimator_build_effect/contract.yaml`` on disk, the source identity
+``node_setup_local_provision_effect/contract.yaml`` on disk, the source identity
 comes from the deploy environment, and the handler clones a real Git repository
 and invokes a real ``docker`` executable found on ``PATH``.
 
@@ -37,7 +37,7 @@ from omnibase_infra.handlers.handler_cost_estimator_build import (
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 CONTRACT = (
     REPOSITORY_ROOT
-    / "src/omnibase_infra/nodes/node_cost_estimator_build_effect/contract.yaml"
+    / "src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml"
 )
 SOURCE_REPOSITORY = "web-front-end"
 
@@ -167,7 +167,9 @@ def _builds(engine: Path) -> list[str]:
 
 
 def test_shipped_contract_declares_the_recipe_the_delivery_reads() -> None:
-    build = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["build"]
+    build = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["config"][
+        "cost_estimator_build"
+    ]["build"]
     assert build["branch"] == "dev"
     assert build["repository_env"] == "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY"
     assert build["repository_url_env"] == "COST_ESTIMATOR_WEB_SOURCE_URL"

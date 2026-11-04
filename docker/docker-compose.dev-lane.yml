@@ -2141,7 +2141,7 @@ services:
   # service carries only the web front end's page and its thin /api/estimator/*
   # proxy to onex-api over the lane network.
   #
-  # The deploy agent's node_cost_estimator_build_effect builds the web dev head
+  # The deploy agent's local provisioning effect builds the web dev head
   # with its own Dockerfile before recreate (OMN-21487). A missing or stale
   # image is built automatically, stamped with source-repo and revision labels,
   # then read back; RT-6 certifies that foreign-source revision on the container.

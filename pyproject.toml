@@ -645,7 +645,6 @@ node_contract_registry_reducer = "omnibase_infra.nodes.node_contract_registry_re
 node_contract_resolver_bridge = "omnibase_infra.nodes.node_contract_resolver_bridge"
 node_contract_subscribe_preflight_effect = "omnibase_infra.nodes.node_contract_subscribe_preflight_effect"
 node_contract_validate_compute = "omnibase_infra.nodes.node_contract_validate_compute"
-node_cost_estimator_build_effect = "omnibase_infra.nodes.node_cost_estimator_build_effect"
 node_db_error_linear_effect = "omnibase_infra.nodes.node_db_error_linear_effect"
 node_decision_store_effect = "omnibase_infra.nodes.node_decision_store_effect"
 node_decision_store_query_compute = "omnibase_infra.nodes.node_decision_store_query_compute"

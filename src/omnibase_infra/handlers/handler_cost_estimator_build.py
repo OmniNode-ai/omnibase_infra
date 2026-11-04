@@ -162,9 +162,11 @@ def dev_lane_build_settings(
         raise RuntimeError("estimator build requires the deploy agent source location")
     contract = (
         Path(module_file).resolve().parents[3]
-        / "src/omnibase_infra/nodes/node_cost_estimator_build_effect/contract.yaml"
+        / "src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml"
     )
-    declaration = yaml.safe_load(contract.read_text(encoding="utf-8"))
+    declaration = yaml.safe_load(contract.read_text(encoding="utf-8"))["config"][
+        "cost_estimator_build"
+    ]
     build = declaration["build"]
     source_configuration = declaration["source_configuration"]
     gate = declaration["gate"]
