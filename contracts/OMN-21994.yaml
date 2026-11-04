@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21994
+title: Isolate the bounded provenance descriptor check from packaged contract reads
+summary: >-
+  Correct the Path.open mock in the bounded provenance descriptor test so it intercepts only the provenance path. Packaged identity contract reads retain the real implementation when the identity cache is cold. The bounded read, no-stat and inert model assertions remain enforced.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21994-provenance-check-isolation
+    statement: The bounded descriptor check must work without a warmed identity cache.
+    acceptance:
+      - id: AC-CI
+        statement: >-
+          The bounded descriptor test passes both alone in a fresh process and with the provenance tests, retaining its one 65537-byte read assertion and its rejection of a provenance-path stat.
+evidence_requirements:
+  - kind: tests
+    description: Run the descriptor test alone and then run its focused test file.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_rsd_model_artifact_provenance.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21994-provenance-cold-cache
+    description: The isolated test validates a bounded provenance read while loading the packaged identity contract on a cold cache.
+    source: manual
+    binds_ac:
+      - AC-CI
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_rsd_model_artifact_provenance.py::test_loader_uses_one_bounded_descriptor_read_without_stat_race -q --no-cov
+        cwd: .
+  - id: dod-omn21994-provenance-focused-file
+    description: The focused file retains validation, oversized input, canonical signing, and bounded descriptor assertions.
+    source: manual
+    binds_ac:
+      - AC-CI
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_rsd_model_artifact_provenance.py -q --no-cov
+        cwd: .
