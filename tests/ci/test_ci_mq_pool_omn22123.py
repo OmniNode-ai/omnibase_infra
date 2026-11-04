@@ -30,7 +30,7 @@ RESERVED = {"self-hosted", "omnibase-ci-mq", "linux", "x64", "arch-amd64"}
 # host -> (general pool prefix on that host, merge-queue pool prefix, action runners the host declared before OMN-22123)
 POOLS = {
     "h051": ("hp051-ci-runner", "hp051-ci-mq-runner", 0),
-    "h053": ("hp053-ci-runner", "hp053-ci-mq-runner", 8),
+    "h053": ("hp053-ci-runner", "hp053-ci-mq-runner", 5),
 }
 
 
