@@ -2811,6 +2811,16 @@ repos:
         require_serial: true
         files: ^(deploy/unit-drift-manifest\.yaml|scripts/deploy-agent/(deploy_agent/unit_drift\.py|tests/unit/test_unit_drift\.py|tests/unit/test_unit_installers_omn21288\.py|tests/unit/fixtures/unit_drift_dev201_omn21288\.json|deploy/.*\.service)|deploy/(disk-gc|systemd)/.*\.service|scripts/systemd/.*\.service|docker/runners/systemd/.*\.(service|timer)|deploy/disk-gc/install-host-maintenance\.sh|deploy/maintenance/omninode-host-maintenance-sync\.sh)$
         stages: [pre-commit]
+  - repo: local
+    hooks:
+      - id: deploy-agent-image-prune
+        name: Deploy agent image prune preserves rollback references (OMN-19998)
+        entry: uv run pytest tests/unit/scripts/test_deploy_agent_image_prune.py -q -n 0 --no-cov
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/(handlers/handler_deploy_agent_image_prune\.py|models/model_deploy_agent_image_prune_.*\.py|nodes/node_deploy_agent_image_prune_effect/.*)|scripts/deploy-agent/deploy/(deploy-agent-dev\.service|onex-deploy-agent-image-prune\.(service|timer))|deploy/unit-drift-manifest\.yaml|tests/unit/scripts/test_deploy_agent_image_prune\.py)$
+        stages: [pre-commit]
 default_install_hook_types: [pre-commit, pre-push, commit-msg]
 default_stages: [pre-commit]
 fail_fast: false

@@ -170,6 +170,11 @@ requirements:
     acceptance:
       - id: AC36
         statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
+  - id: req-omn19998-deploy-agent-image-prune
+    statement: The dev deploy agent declares an hourly image cleanup companion that preserves rollback references and removes only unreferenced runtime images older than 24 hours.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: the declared deploy-agent timer uses the contract-routed image cleanup node; dry-run prints its image ids and nominal bytes without deletion; execution uses Docker dangling-only prune with the same age cutoff and runtime source label, retaining tags, digests and running or stopped container references, refusing failed inventory and touching no containers, build cache or volumes -- falsifier: uv run pytest tests/unit/scripts/test_deploy_agent_image_prune.py -q -n 0 --no-cov fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -257,6 +262,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac37-image-prune-runtime-probe
+    description: Hosted-runner deployment artifact probe dispatches plan, prune and inventory refusal through the actual local runtime and the image-prune contract, with recorded Docker process boundaries.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_deploy_agent_image_prune.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC37
+  - id: dod-omn19998-ac37-deploy-agent-image-prune
+    description: AC37 exercises the contract-routed image cleanup handler with Docker and systemctl boundaries recorded, including inventory failure and the rollback retention table.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_agent_image_prune.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC37
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual

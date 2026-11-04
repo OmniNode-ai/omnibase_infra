@@ -6,8 +6,20 @@ units:
   - name: deploy-agent-dev.service
     tracked: scripts/deploy-agent/deploy/deploy-agent-dev.service
     installed: ~/.config/systemd/user/deploy-agent-dev.service
-    hosts:
+    hosts: &primary_deploy_host
       - omninode-pc
+  - name: onex-deploy-agent-image-prune.service
+    tracked: scripts/deploy-agent/deploy/onex-deploy-agent-image-prune.service
+    installed: ~/.config/systemd/user/onex-deploy-agent-image-prune.service
+    installer: scripts/onex
+    installer_args: [node, node_deploy_agent_image_prune_effect, --contract, src/omnibase_infra/handlers/deploy_agent_image_prune_effect/contract.yaml, --input, src/omnibase_infra/nodes/node_deploy_agent_image_prune_effect/install.json, --backend, event_bus=inmemory]
+    hosts: *primary_deploy_host
+  - name: onex-deploy-agent-image-prune.timer
+    tracked: scripts/deploy-agent/deploy/onex-deploy-agent-image-prune.timer
+    installed: ~/.config/systemd/user/onex-deploy-agent-image-prune.timer
+    installer: scripts/onex
+    installer_args: [node, node_deploy_agent_image_prune_effect, --contract, src/omnibase_infra/handlers/deploy_agent_image_prune_effect/contract.yaml, --input, src/omnibase_infra/nodes/node_deploy_agent_image_prune_effect/install.json, --backend, event_bus=inmemory]
+    hosts: *primary_deploy_host
   - name: deploy-agent.service
     tracked: scripts/deploy-agent/deploy/deploy-agent.service
     installed: ~/.config/systemd/user/deploy-agent.service
