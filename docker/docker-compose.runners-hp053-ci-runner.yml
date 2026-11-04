@@ -21,25 +21,34 @@
 #   - its own container, runner and volume names (hp053-ci-runner-N) and its own compose project
 #     (`-p hp053-ci-runner`), so nothing collides with another host's runner and the fleet probe can tell the hosts
 #     apart by prefix.
-#   - the pool sits in omnirunners.slice, installed from docker/runners/systemd/pools/hp053-ci-runner/. Sized from the
-#     reads of 2026-11-02 (56 threads, 125 GiB, about 66 GiB available with the lab-work units running, one root
-#     volume with 426 GB free): eight runners at 6 GiB are at most 48 GiB, under the slice's MemoryHigh of 56G, and
-#     CPUWeight 25 makes CI yield to the lab-work units that share the host.
+#   - the pool sits in omnirunners.slice, installed from docker/runners/systemd/pools/hp053-ci-runner/. OMN-19998 resized it
+#     on 2026-11-04 from reads taken that morning (56 threads, 125 GiB, 49 to 55 GiB available with the lab-work units
+#     running and the 64 GiB lab-run RAM pool at 61 GiB used, load 10 to 11, io pressure 0): SIX runners, not eight,
+#     at 7 GiB each (memswap equal, nothing swaps) are at most 42 GiB, under the slice's MemoryHigh of 42G and MemoryMax
+#     of 44G, which leave 5 to 11 GiB of the measured availability to the lanes whatever the runners do. Five CPUs each,
+#     30 of the 56 threads at most, and CPUWeight 25 makes CI yield to the lab-work units that share the host.
+#   - the job directories are in memory, not on the root volume (OMN-19998, operator RULING 2026-11-04T07:03:44Z: runners
+#     go on a memory drive, not spinning disk; the root volume of this host is a rotational disk, read 2026-11-04). See
+#     the x-runner-ram-dirs anchor. Why seven GiB and why six runners rather than eight: tmpfs pages are charged to the
+#     runner's own memory limit, and a shard holds 3.2 to 3.5 GiB of job workspace (read from the h051 merge-queue pool,
+#     2026-11-04) plus its processes, so eight runners at the old 6 GiB could not all run a shard at once without the
+#     slice killing one, and six at 7 GiB can.
+#   - the runner reads the host's /usr/share/zoneinfo read-only, as the merge-queue pools do: the image has no timezone
+#     database and a private repository's tests resolve `America/New_York`.
 #   - the pool has its own git mirror (OMN-14027 C2 on this host), the three units beside the slice, with the bare
 #     mirrors under /data/scratch/git-mirror. The pre-seed is fail-open: without the mirror a job cold-clones from
 #     github.com and passes. This host has no separate data volume; /data/scratch is a directory on the root volume.
+#     The mirror is optional and not installed by OMN-19998: the pool runs without it.
 #
 # DEPLOYING. From a machine with ssh to the host (ssh alias h053) and org-admin gh:
 #   scripts/deploy-runners.sh --host=h053 [--limit=N]
-# The slice and mirror units are not installed by that script for a host row (only for a `pools:` entry), so they and
-# the host directories are the host's one-time setup, the same as h051's (see its header for the commands):
-#   sudo install -m 0644 docker/runners/systemd/pools/hp053-ci-runner/{omnirunners.slice,omninode-git-mirror-daemon.service,omninode-git-mirror-refresh.service,omninode-git-mirror-refresh.timer} /etc/systemd/system/
-#   sudo install -d -o jonah -g jonah /data/scratch/git-mirror
-#   echo "OMNI_GIT_MIRROR_LISTEN=$(docker network inspect hp053-ci-runner_default -f '{{(index .IPAM.Config 0).Gateway}}')" | sudo tee /etc/default/omninode-git-mirror
-#   sudo systemctl daemon-reload && sudo systemctl enable --now omnirunners.slice omninode-git-mirror-refresh.timer omninode-git-mirror-daemon.service
-# Before the first recreate, on the host: create /data/scratch/runners/<N>/{work,tmp} and
-# /data/scratch/cache/runners/<N>/{pip,pre-commit,pnpm,ms-playwright,ci-envs,npm}, owned by uid 1001 (tmp mode 1777),
-# and put LOCAL_LLM_SHARED_SECRET, LLM_ENDPOINT_CIDR_ALLOWLIST, RUNNER_LAB_HOST_TABLE, GITHUB_ORG_URL and UV_HTTP_TIMEOUT in ~/.omnibase/runners/docker/.env (mode 600).
+# The slice and mirror units are not installed by that script for a host row (only for a `pools:` entry), so they are
+# the host's one-time setup, the same as h051's (see its header for the commands):
+#   sudo install -m 0644 docker/runners/systemd/pools/hp053-ci-runner/omnirunners.slice /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now omnirunners.slice
+# and, for the optional git mirror, the other three units, /data/scratch/git-mirror and /etc/default/omninode-git-mirror.
+# There are no job or cache directories to create: they are tmpfs mounts of each container. Before the first recreate,
+# on the host, put LOCAL_LLM_SHARED_SECRET, LLM_ENDPOINT_CIDR_ALLOWLIST, RUNNER_LAB_HOST_TABLE, GITHUB_ORG_URL and UV_HTTP_TIMEOUT in ~/.omnibase/runners/docker/.env (mode 600).
 # OMN-18829: the same host-owned declaration is read by native jobs and CI.
 # Two values the h051 file spells out are read from the host's docker/.env here, GITHUB_ORG_URL (the organisation URL
 # the runners register against) and UV_HTTP_TIMEOUT (the h051 pool's value is 600 seconds), because the hardcoded-config
@@ -47,6 +56,13 @@
 # Container paths use ${RUNNER_USER_HOME:-<runner image home>}, as docker-compose.runners.yml does, so no
 # machine path is spelled in this file (the local-path hook and the suppression ratchet both refuse one).
 # Refuse container creation when it is absent; never create an empty directory.
+x-runner-host-zoneinfo: &runner-host-zoneinfo
+  type: bind
+  source: /usr/share/zoneinfo
+  target: /usr/share/zoneinfo
+  read_only: true
+  bind:
+    create_host_path: false
 x-lab-host-table: &lab-host-table
   type: bind
   source: ${RUNNER_LAB_HOST_TABLE:?RUNNER_LAB_HOST_TABLE must name the host's lab host table file (runner host docker/.env)}
@@ -69,15 +85,31 @@ x-runner-lab-credentials: &runner-lab-credentials
   read_only: true
   bind:
     create_host_path: true
+# In-memory job directories, one list shared by the six runners (the service-level `tmpfs:` form, the only one that can
+# pass `exec`: Docker mounts a tmpfs noexec otherwise and the workspace holds the interpreters and compiled extensions
+# the jobs run). `size` is a ceiling and not a reservation; the real bound is the container's memory limit. The two job
+# directories are 16 and 12 GiB because the lane probe the repository's tests run refuses a volume with under 10 GiB free.
+x-runner-ram-dirs: &runner-ram-dirs
+  - ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work:exec,mode=1777,size=16g
+  - ${RUNNER_USER_HOME:-/home/runner}/tmp:exec,mode=1777,size=12g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pip:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.npm:exec,mode=1777,size=2g
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
-  mem_limit: 6g
-  # This is a per-container upper bound (RAM plus swap). The parent slice's 2G swap cap is shared by all four
-  # runners, so aggregate swap can never reach four times this allowance. The 96G/112G parent RAM bounds leave
-  # room for docker-socket job containers in the slice; the four runner containers themselves total at most 24G.
-  memswap_limit: 12g
-  cpus: "2.0"
+  mem_limit: 7g
+  # RAM plus swap, and equal to mem_limit, so the runner has no swap: its job directories are tmpfs mounts and must
+  # stay in memory. The slice's MemoryHigh of 42G and MemoryMax of 44G bound the six runners together (six times 7g).
+  memswap_limit: 7g
+  # Five CPUs, not the 2.0 of the other pools. Measured 2026-11-04 (OMN-19998): the Xeon E5-2680 v4 here ran a fixed
+  # single-thread Python benchmark in 0.71 s against 0.20 s on the primary host's Ryzen 9 9950X3D, so a shard that takes
+  # 8 minutes there wants about 3.5 times the core time, and on the h051 merge-queue pool a quota of 2.0 was throttled in
+  # 55 to 70 percent of its periods while 5.0 finished the same shard in 6m19. Six runners at 5.0 take 30 of the 56 threads.
+  cpus: "5.0"
   pids_limit: 4096
   cgroup_parent: omnirunners.slice
   environment: &runner-env
@@ -96,7 +128,7 @@ x-runner-base: &runner-base
     UV_CONCURRENT_BUILDS: "1"
     UV_CONCURRENT_INSTALLS: "1"
     UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:?UV_HTTP_TIMEOUT must be set (runner host docker/.env)}
-    # OMN-19998: the uv cache lives INSIDE the job-workspace mount (/data/scratch/runners/<N>/work),
+    # OMN-19998: the uv cache lives INSIDE the job-workspace mount (the in-memory _work directory),
     # so uv hardlinks wheel contents into a venv instead of copying them. See the header.
     UV_CACHE_DIR: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/.uv-cache
     TMPDIR: ${RUNNER_USER_HOME:-/home/runner}/tmp
@@ -127,20 +159,14 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp053-ci-runner-1
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/cache/runners/1/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/1/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/1/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/1/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/1/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/1/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/1/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/1/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-host-zoneinfo
       - hp053-ci-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-2:
     !!merge <<: *runner-base
@@ -149,20 +175,14 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp053-ci-runner-2
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/cache/runners/2/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/2/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/2/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/2/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/2/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/2/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/2/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/2/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-host-zoneinfo
       - hp053-ci-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-3:
     !!merge <<: *runner-base
@@ -171,20 +191,14 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp053-ci-runner-3
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/cache/runners/3/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/3/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/3/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/3/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/3/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/3/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/3/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/3/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-host-zoneinfo
       - hp053-ci-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-4:
     !!merge <<: *runner-base
@@ -193,20 +207,14 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp053-ci-runner-4
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/cache/runners/4/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/4/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/4/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/4/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/4/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/4/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/4/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/4/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-host-zoneinfo
       - hp053-ci-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-5:
     !!merge <<: *runner-base
@@ -215,20 +223,14 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp053-ci-runner-5
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/cache/runners/5/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/5/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/5/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/5/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/5/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/5/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/5/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/5/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-host-zoneinfo
       - hp053-ci-runner-5-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-6:
     !!merge <<: *runner-base
@@ -237,65 +239,15 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp053-ci-runner-6
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/cache/runners/6/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/6/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/6/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/6/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/6/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/6/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/6/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/6/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-host-zoneinfo
       - hp053-ci-runner-6-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  hp053-ci-runner-7:
-    !!merge <<: *runner-base
-    container_name: hp053-ci-runner-7
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: hp053-ci-runner-7
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - *runner-disk-admission-pause
-      - *runner-lab-credentials
-      - *lab-host-table
-      - /data/scratch/cache/runners/7/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/7/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/7/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/7/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/7/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/7/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/7/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/7/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
-      - hp053-ci-runner-7-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  hp053-ci-runner-8:
-    !!merge <<: *runner-base
-    container_name: hp053-ci-runner-8
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: hp053-ci-runner-8
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - *runner-disk-admission-pause
-      - *runner-lab-credentials
-      - *lab-host-table
-      - /data/scratch/cache/runners/8/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/8/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/8/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/8/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/8/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/8/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/8/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/8/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
-      - hp053-ci-runner-8-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
 volumes:
   hp053-ci-runner-1-creds:
     name: hp053-ci-runner-1-creds
@@ -309,7 +261,3 @@ volumes:
     name: hp053-ci-runner-5-creds
   hp053-ci-runner-6-creds:
     name: hp053-ci-runner-6-creds
-  hp053-ci-runner-7-creds:
-    name: hp053-ci-runner-7-creds
-  hp053-ci-runner-8-creds:
-    name: hp053-ci-runner-8-creds
