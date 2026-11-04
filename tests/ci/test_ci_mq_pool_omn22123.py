@@ -202,6 +202,18 @@ def test_every_in_memory_directory_allows_exec(host: str) -> None:
 
 
 @pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_the_cpu_quota_matches_the_slower_host_cores(host: str) -> None:
+    """A shard on h051 ran 15 to 19 minutes against 5 to 8 on the primary host with the same 2.0 quota.
+
+    The disk read idle, the runner cgroups were throttled in over half their periods, and the same test file ran 2.5 times
+    slower on the Ivy Bridge Xeon than on the primary host's Ryzen, so the pool is given more of the host's 80 threads.
+    """
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        assert float(service["cpus"]) >= 4.0, name
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
 def test_the_memory_limit_covers_the_tmpfs_ceilings_it_is_charged_for(
     host: str,
 ) -> None:

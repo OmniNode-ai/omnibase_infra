@@ -92,7 +92,12 @@ x-runner-base: &runner-base
   # stay in memory. The 96G/112G parent RAM bounds leave room for docker-socket job containers in the slice; the four
   # runner containers themselves total at most 40G.
   memswap_limit: 10g
-  cpus: "2.0"
+  # Five CPUs, not the 2.0 of the other pools. Measured 2026-11-04: the h051 CPU is an Ivy Bridge Xeon E5-4650 v2
+  # (2.4 GHz), and the same private-repository test file ran in 586 s on it against 229 s on the primary host's Ryzen 9
+  # 9950X3D, both under a 2.0 quota. With the work on the memory drive the disk reads idle (1 to 4 percent util), and the
+  # runner cgroups were throttled in 55 to 70 percent of their periods: a shard (four xdist workers and the subprocesses
+  # its tests start) wants more than two of these cores. Four runners at 5.0 take 20 of the host's 80 threads.
+  cpus: "5.0"
   pids_limit: 4096
   cgroup_parent: omnirunners.slice
   environment: &runner-env
