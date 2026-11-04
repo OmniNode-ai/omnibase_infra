@@ -71,7 +71,7 @@ def test_nullable_column_is_added_before_its_insert_default() -> None:
     )
 
 
-def test_runner_applies_it_last_and_directly_after_0005() -> None:
+def test_runner_applies_it_directly_after_0005() -> None:
     # The runner applies each node's files in `ls | sort` order; mirror it in C order.
     runner = (_ROOT / "scripts" / "run-forward-migrations.sh").read_text(
         encoding="utf-8"
@@ -80,6 +80,6 @@ def test_runner_applies_it_last_and_directly_after_0005() -> None:
     order = sorted((path.name for path in _VENDOR.glob("*.sql")), key=str.encode)
     prefixes = [name.split("_", 1)[0] for name in order]
     assert prefixes == [f"{n:04d}" for n in range(len(order))]
-    assert order[-1] == _INGESTED_AT
-    assert order[-2].startswith("0005_")
+    position = order.index(_INGESTED_AT)
+    assert order[position - 1].startswith("0005_")
     assert order.index(_SEQUENCE) < order.index(_INGESTED_AT)

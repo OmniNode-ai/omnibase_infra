@@ -124,6 +124,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "local_alerts": "omnimarket OMN-19991 (node_projection_local_alerts)",
     "local_identity": "omnimarket OMN-19986 (node_projection_local_identity)",
     "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
+    "ledger_line_citation": "omnimarket OMN-21947 (node_projection_work_ledger)",
     **dict.fromkeys(
         (
             "work_outcome_units",
