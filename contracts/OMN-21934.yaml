@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21934
 title: omnibase_infra grants tenant_projection_writer write on context_audit_events in every topology instance
 summary: >-
-  Declares one interim table-grant declaration for public.context_audit_events (the table the retired context-audit consumer wrote, created by migration 053) in the OMN-18863 expiry module's list, and regenerates the three topology instances and the nine rendered catalogs from it. tenant_projection_writer then holds SELECT, INSERT and UPDATE on the table, which the omnimarket node_projection_context_audit contract requires for its db_io entry. This is the infrastructure half of OMN-21934; the omnimarket node is proven against this branch.
+  Declares one interim table-grant declaration for public.context_audit_events in the OMN-18863 expiry module's list, and regenerates the three topology instances and the nine rendered catalogs from it. The bridge names the vendored node_projection_context_audit/0000_add_context_audit_event_key.sql migration that creates the application-database table. tenant_projection_writer holds SELECT, INSERT and UPDATE on the table, which the omnimarket node_projection_context_audit contract requires for its db_io entry. This is the infrastructure half of OMN-21934; the omnimarket node is proven against this branch.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -24,7 +24,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn21934-ac2-grants
-    description: tenant_projection_writer holds SELECT, INSERT and UPDATE on public.context_audit_events in the local, dev and prod topology instances and in every rendered catalog, and the bridge declaration names the existing migration 053. The tests fail at the merge base, which declares no such grant.
+    description: tenant_projection_writer holds SELECT, INSERT and UPDATE on public.context_audit_events in the local, dev and prod topology instances and in every rendered catalog, and the bridge declaration names the vendored application-database table migration. The tests fail at the merge base, which declares no such grant.
     source: manual
     binds_ac:
       - AC2

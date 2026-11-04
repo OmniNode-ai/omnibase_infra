@@ -378,19 +378,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
     ),
-    # OMN-21934: the context-audit projection node precedes the omnimarket
-    # contract pin. The table is created by the infra migration 053 (the
-    # retired context-audit consumer wrote it), so the declaration names that
-    # migration; node_projection_context_audit adds only its event_key column
-    # and unique index. The vendor delivers exactly SELECT/INSERT/UPDATE to
-    # tenant_projection_writer; expire this bridge when
-    # node_projection_context_audit reaches the pin. The OMN-18863 expiry
-    # module names this bridge.
-    _declared_table(
-        "legacy_migration:context_audit_events",
+    # OMN-21934: the vendored node migration creates this application-DB table;
+    # flat 053 belongs to the infra DB. Expire when the node reaches the pin.
+    _vendored_read_write(
         "context_audit_events",
-        "docker/migrations/forward/053_create_context_audit_events.sql",
-        role="context_audit_events",
+        "node_projection_context_audit",
+        "0000_add_context_audit_event_key.sql",
+        schema="public",
     ),
     # The four bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
