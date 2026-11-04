@@ -10,6 +10,9 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.registration.model_registration_snapshot_producer import (
     ModelRegistrationSnapshotProducer,
 )
+from omnibase_infra.nodes.node_event_bus_wiring_effect.adapter_registration_snapshot_producer import (
+    AdapterRegistrationSnapshotProducer,
+)
 from omnibase_infra.runtime.protocol_domain_plugin import ModelDomainPluginConfig
 
 
@@ -47,15 +50,8 @@ class HandlerRegistrationSnapshotPublisher:
         self, request: ModelDomainPluginConfig
     ) -> ModelRegistrationSnapshotProducer:
         """Construct the snapshot producer with the existing Kafka auth boundary."""
-        from aiokafka import AIOKafkaProducer
-
-        from omnibase_infra.event_bus.kafka_auth import (
-            build_aiokafka_auth_kwargs_from_env,
-        )
-
         return ModelRegistrationSnapshotProducer(
-            producer=AIOKafkaProducer(  # no-contract-check: effect handler owns the producer
-                bootstrap_servers=request.kafka_bootstrap_servers,
-                **build_aiokafka_auth_kwargs_from_env(),
+            producer=AdapterRegistrationSnapshotProducer.create(
+                request.kafka_bootstrap_servers
             )
         )

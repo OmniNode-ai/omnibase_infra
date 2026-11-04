@@ -4,12 +4,7 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-
-import asyncpg
-import yaml
-from asyncpg import Pool
 
 from omnibase_core.errors.error_service_resolution import ServiceResolutionError
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -24,14 +19,16 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 )
 from omnibase_infra.models.registration.model_registration_bootstrap_result import (
     ModelRegistrationBootstrapResult,
+    Pool,
+)
+from omnibase_infra.nodes.node_registration_bootstrap_effect.adapter_registration_bootstrap import (
+    AdapterRegistrationBootstrap,
 )
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
 )
 from omnibase_infra.runtime.overlay.contract_env_ref import expand_contract_env_refs
 from omnibase_infra.runtime.protocol_domain_plugin import ModelDomainPluginConfig
-
-logger = logging.getLogger(__name__)
 
 
 class HandlerRegistrationBootstrap:
@@ -78,20 +75,6 @@ class HandlerRegistrationBootstrap:
             )
         )
 
-    @staticmethod
-    def load_contract(path: Path) -> dict[str, object]:
-        """Load routing declarations with the same best-effort fallback as bootstrap."""
-        try:
-            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError) as exc:
-            logger.warning(
-                "Failed to load registration contract at %s: %s. Using empty topic router.",
-                path,
-                exc,
-            )
-            raw = {}
-        return raw if isinstance(raw, dict) else {}
-
     async def handle(
         self, request: ModelDomainPluginConfig
     ) -> ModelRegistrationBootstrapResult:
@@ -121,28 +104,18 @@ class HandlerRegistrationBootstrap:
                 context=pool_error_context,
             ) from exc
 
-        pool = await asyncpg.create_pool(  # no-contract-check: effect handler owns the pool
-            postgres_dsn,
-            min_size=2,
-            max_size=10,
-        )
+        pool = await AdapterRegistrationBootstrap.create_pool(postgres_dsn)
         return ModelRegistrationBootstrapResult(pool=pool)
 
     @staticmethod
     def read_schema(path: Path) -> str:
         """Read the schema file; the caller retains its existing failure policy."""
-        return path.read_text()
+        return AdapterRegistrationBootstrap.read_schema(path)
 
     @staticmethod
     def is_duplicate_schema_error(error: Exception) -> bool:
         """Classify the two database-driver errors bootstrap treats as idempotent."""
-        return isinstance(
-            error,
-            (
-                asyncpg.exceptions.DuplicateTableError,
-                asyncpg.exceptions.DuplicateObjectError,
-            ),
-        )
+        return AdapterRegistrationBootstrap.is_duplicate_schema_error(error)
 
 
 __all__ = ["HandlerRegistrationBootstrap", "Pool"]

@@ -225,16 +225,16 @@ def test_registration_contract_read_remains_best_effort(
     tmp_path: Path,
     content: str,
 ) -> None:
-    from omnibase_infra.handlers.handler_registration_bootstrap import (
-        HandlerRegistrationBootstrap,
+    from omnibase_infra.nodes.node_registration_bootstrap_effect.adapter_registration_bootstrap import (
+        AdapterRegistrationBootstrap,
     )
 
     path = tmp_path / "contract.yaml"
-    assert HandlerRegistrationBootstrap.load_contract(path) == {}
+    assert AdapterRegistrationBootstrap.load_contract(path) == {}
     path.write_text(content)
-    assert HandlerRegistrationBootstrap.load_contract(path) == {}
+    assert AdapterRegistrationBootstrap.load_contract(path) == {}
     path.write_text("published_events: []")
-    assert HandlerRegistrationBootstrap.load_contract(path) == {"published_events": []}
+    assert AdapterRegistrationBootstrap.load_contract(path) == {"published_events": []}
 
 
 @pytest.mark.unit
@@ -390,3 +390,20 @@ async def test_registration_effect_binding_respects_container_injection(
         assert first is instance
     else:
         assert isinstance(first, handler_cls)
+
+
+@pytest.mark.unit
+def test_registration_effect_files_pass_the_pinned_no_io_validator() -> None:
+    from omnibase_core.validation.validator_no_io_outside_effects import (
+        ValidatorNoIoOutsideEffects,
+    )
+
+    targets = [
+        ROOT / PLUGIN,
+        ROOT / "src/omnibase_infra/handlers/handler_registration_bootstrap.py",
+        ROOT / "src/omnibase_infra/handlers/handler_registration_snapshot_publisher.py",
+    ]
+    for node in ("node_registration_bootstrap_effect", "node_event_bus_wiring_effect"):
+        targets.extend((ROOT / "src/omnibase_infra/nodes" / node).rglob("*.py"))
+    result = ValidatorNoIoOutsideEffects(root=ROOT).validate(targets)
+    assert result.is_valid, result.issues
