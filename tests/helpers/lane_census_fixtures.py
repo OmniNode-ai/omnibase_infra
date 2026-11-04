@@ -25,6 +25,16 @@ NEUTRAL_CONFIG_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "lane_c
 NEUTRAL_CENSUS_DIR = NEUTRAL_CONFIG_ROOT / "config" / "lab" / "lane-census"
 NEUTRAL_MANIFEST = NEUTRAL_CENSUS_DIR / "lane-manifest.yaml"
 NEUTRAL_SNAPSHOT = NEUTRAL_CENSUS_DIR / "census-snapshot.json"
+#: The neutral registry overlay (OMN-22152): the file ``LANE_CENSUS_REGISTRY``
+#: names. It is not under the config root; the registry is the lane census
+#: node's overlay data, found through its own variable.
+NEUTRAL_REGISTRY = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "lane_census"
+    / "node_lane_census_effect"
+    / "overlay.yaml"
+)
 
 #: The required lane on :data:`NEUTRAL_HOSTNAME`, and its network.
 NEUTRAL_LANE = "dogfood"
@@ -41,8 +51,9 @@ NEUTRAL_OTHER_HOSTNAME = "box-b"
 
 
 def use_neutral_lane_census(monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point every census reader at the neutral pair; return the config root."""
+    """Point every census reader at the neutral set; return the config root."""
     monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(NEUTRAL_CONFIG_ROOT))
+    monkeypatch.setenv("LANE_CENSUS_REGISTRY", str(NEUTRAL_REGISTRY))
     monkeypatch.delenv("LANE_MANIFEST", raising=False)
     return NEUTRAL_CONFIG_ROOT
 
@@ -53,9 +64,9 @@ def generator_consistent_manifest(destination: Path) -> Path:
     ``generate_claude_lane_block.py`` keeps its port and boundary maps keyed by
     lane, and the drift checker reports every map entry the manifest does not
     declare. A manifest that checker accepts as clean therefore declares each
-    mapped lane. The stubs are read from the generator itself, declared for the
-    second host with no services, so the census on the first host neither
-    checks nor reports them. Writes the manifest to ``destination``.
+    mapped lane. The stubs are read from the generator itself and declare no
+    services, so the census checks nothing for them. Writes the manifest to
+    ``destination``.
     """
     import sys
 
@@ -68,9 +79,7 @@ def generator_consistent_manifest(destination: Path) -> Path:
 
     manifest = yaml.safe_load(NEUTRAL_MANIFEST.read_text(encoding="utf-8"))
     for lane in sorted(set(_LANE_PORT_MAP) | set(_LANE_BOUNDARY)):
-        manifest["lanes"].setdefault(
-            lane, {"optional": True, "hosts": ["host-b"], "services": []}
-        )
+        manifest["lanes"].setdefault(lane, {"optional": True, "services": []})
     destination.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
     return destination
 
@@ -104,8 +113,23 @@ LAB_MANIFEST = _lab_census_path("lane-manifest.yaml")
 LAB_SNAPSHOT = _lab_census_path("census-snapshot.json")
 
 
-def lanes_declared_on_host(manifest: dict[str, Any], host_id: str) -> list[str]:
-    """Every lane the manifest declares for ``host_id``, sorted."""
-    return sorted(
-        name for name, spec in manifest["lanes"].items() if host_id in spec["hosts"]
-    )
+def lanes_declared_on_host(registry: Any, host_id: str) -> list[str]:
+    """Every lane the registry lists for ``host_id``, sorted."""
+    return sorted(registry.lanes_of(host_id))
+
+
+def lab_registry() -> Any:
+    """The lab host registry, from the file ``LANE_CENSUS_REGISTRY`` names.
+
+    Private overlay data of the lane census node (OMN-22152), for the
+    ``lab_overlay`` tests only. Unset or invalid, reading it fails loud with the
+    planner's own not-configured error.
+    """
+    import sys
+
+    scripts = str(Path(__file__).resolve().parents[2] / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from lane_census_plan import load_registry
+
+    return load_registry()
