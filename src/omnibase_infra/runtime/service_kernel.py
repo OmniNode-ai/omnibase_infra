@@ -1761,6 +1761,7 @@ async def bootstrap() -> int:
     """
     # Lazy import to break circular dependency chain - see "Circular Import Note"
     # comment near line 98 for detailed explanation of the import cycle.
+    from omnibase_infra.handlers.mixin_shared_listener import HANDOVER_MOUNT
     from omnibase_infra.services.health_checker import (
         DEFAULT_HTTP_PORT,
         ServiceHealth,
@@ -1769,6 +1770,8 @@ async def bootstrap() -> int:
     # Initialize resources to None for cleanup guard in finally block
     runtime: RuntimeHostProcess | None = None
     health_server: ServiceHealth | None = None
+    # Retain the boot opt-in through shutdown, even if the mount disappears.
+    shared_listener_enabled = HANDOVER_MOUNT.is_dir()
     # Plugin system owns resource lifecycle (pools, publishers, dispatchers)
     plugin_registry: RegistryDomainPlugin | None = None
     registration_service: ServiceRegistration | None = None
@@ -4868,7 +4871,7 @@ async def bootstrap() -> int:
             """Handle shutdown signal with correlation tracking."""
             nonlocal shutdown_reason
             shutdown_reason = f"signal:{sig.name}"
-            if health_server is not None:  # OMN-22377 (A5): the latch comes first
+            if health_server is not None and shared_listener_enabled:
                 health_server.mark_stopping()
             logger.info(
                 "Received %s, initiating graceful shutdown... (correlation_id=%s)",
@@ -5396,9 +5399,8 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
-        # OMN-22377 (A5): stop accepting on the shared listener and answer what it
-        # already accepted BEFORE any teardown below can change readiness.
-        if health_server is not None:
+        # OMN-22377 (A5): drain before readiness teardown, only when opted in.
+        if health_server is not None and shared_listener_enabled:
             await health_server.drain_shared_listener()
 
         # Stop ServiceRuntimeHealthMonitor before tearing down runtime consumers.

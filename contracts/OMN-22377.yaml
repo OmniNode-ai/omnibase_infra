@@ -62,12 +62,12 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn22377-ac4-unmounted
     description: >-
-      Without the handover mount ServiceHealth builds no listener and the /ready body is unchanged; the runtime-startup tests pass.
+      Without the handover mount ServiceHealth builds no listener and the /ready body is unchanged; kernel bootstrap starts and stops normally. The unmounted-listener test is absent at the merge base, so this check fails there.
     source: manual
     binds_ac: [AC4]
     checks:
       - check_type: test_passes
-        check_value: "uv run pytest tests/unit/runtime -k startup -q --no-cov"
+        check_value: "uv run pytest tests/unit/services/test_shared_listener.py::test_shared_listener_unmounted_runtime_is_unchanged tests/unit/runtime/test_kernel.py::TestBootstrap::test_bootstrap_starts_and_stops_runtime -q --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn22377-deploy-gate-probe
     description: >-
