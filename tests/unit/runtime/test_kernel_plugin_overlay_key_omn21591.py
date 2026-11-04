@@ -27,13 +27,18 @@ _REQUIRED = f"${{{_KEY}:?runtime policy contract must set {_KEY}}}"
 _ANCHOR = re.compile(r"^x-[\w-]*runtime-env: &[\w-]+$")
 
 
-def _carriers() -> list[Path]:
-    """Every tracked compose or catalog file that sets the active package surface."""
+def _carriers(root: Path = _REPO) -> list[Path]:
+    """Every compose or catalog file under ``root`` that sets the active package surface."""
     paths = [
-        *sorted((_REPO / "docker" / "catalog" / "services").glob("*.yaml")),
-        *sorted((_REPO / "docker").glob("docker-compose.*.yml")),
+        *sorted((root / "docker" / "catalog" / "services").glob("*.yaml")),
+        *sorted((root / "docker").glob("docker-compose.*.yml")),
     ]
     return [p for p in paths if f"{_PACKAGES}: $" in p.read_text()]
+
+
+def _carriers_without_the_key(root: Path = _REPO) -> list[str]:
+    """The carrier files under ``root`` that do not require the key."""
+    return [p.name for p in _carriers(root) if _REQUIRED not in p.read_text()]
 
 
 def _anchor_block(lines: list[str], header_index: int) -> str:
@@ -46,20 +51,33 @@ def _anchor_block(lines: list[str], header_index: int) -> str:
     return "\n".join(block)
 
 
-def _runtime_env_anchors() -> dict[str, str]:
+def _runtime_env_anchors(root: Path = _REPO) -> dict[str, str]:
     """Every ``x-*runtime-env`` anchor block of a compose file, keyed ``file::anchor``.
 
     Read as text: the lane files use compose's ``!override`` tag, which
     ``yaml.safe_load`` rejects.
     """
     anchors: dict[str, str] = {}
-    for path in sorted((_REPO / "docker").glob("docker-compose.*.yml")):
+    for path in sorted((root / "docker").glob("docker-compose.*.yml")):
         lines = path.read_text().splitlines()
         for index, line in enumerate(lines):
             if _ANCHOR.match(line):
                 name = line.split(":")[0]
                 anchors[f"{path.name}::{name}"] = _anchor_block(lines, index)
     return anchors
+
+
+def _package_anchors(root: Path = _REPO) -> dict[str, str]:
+    """The runtime env anchors under ``root`` that set the package surface."""
+    return {
+        k: v for k, v in _runtime_env_anchors(root).items() if f"  {_PACKAGES}: $" in v
+    }
+
+
+def _anchors_without_the_key(root: Path = _REPO) -> list[str]:
+    """The package-setting anchors under ``root`` that do not carry the key."""
+    needle = f"  {_KEY}: {_REQUIRED}"
+    return sorted(k for k, v in _package_anchors(root).items() if needle not in v)
 
 
 def test_the_policy_contract_names_the_delegation_plugin_and_renders_it() -> None:
@@ -70,9 +88,8 @@ def test_the_policy_contract_names_the_delegation_plugin_and_renders_it() -> Non
 
 
 def test_every_runtime_that_sets_the_package_surface_requires_the_key() -> None:
-    carriers = _carriers()
-    assert len(carriers) >= 8, "the positive control: the carriers were found"
-    without = [p.name for p in carriers if _REQUIRED not in p.read_text()]
+    assert len(_carriers()) >= 8, "the positive control: the carriers were found"
+    without = _carriers_without_the_key()
     assert without == [], without
 
 
@@ -85,29 +102,52 @@ def test_every_lane_owned_runtime_env_anchor_that_sets_the_packages_has_the_key(
     env sets the package surface but not the key never registers the
     delegation plugin and logs no error.
     """
-    anchors = _runtime_env_anchors()
-    setting = {k: v for k, v in anchors.items() if f"  {_PACKAGES}: $" in v}
-    assert len(setting) >= 4, f"the positive control: {sorted(anchors)}"
-    needle = f"  {_KEY}: {_REQUIRED}"
-    without = sorted(k for k, v in setting.items() if needle not in v)
+    setting = _package_anchors()
+    assert len(setting) >= 4, f"the positive control: {sorted(_runtime_env_anchors())}"
+    without = _anchors_without_the_key()
     assert without == [], without
 
 
-def test_planted_violation_a_carrier_without_the_key_is_caught() -> None:
-    planted = f"  {_PACKAGES}: ${{{_PACKAGES}:?x}}\n"
-    assert _REQUIRED not in planted
+def _plant(root: Path, *, with_key: bool) -> None:
+    """Write one catalog service and one lane compose file that set the packages."""
+    key_line = f"  {_KEY}: {_REQUIRED}\n" if with_key else ""
+    services = root / "docker" / "catalog" / "services"
+    services.mkdir(parents=True)
+    (services / "planted.yaml").write_text(
+        f"hardcoded_env:\n  {_PACKAGES}: ${{{_PACKAGES}:?x}}\n{key_line}"
+    )
+    (root / "docker" / "docker-compose.planted.yml").write_text(
+        "x-planted-runtime-env: &planted\n"
+        f"  {_PACKAGES}: ${{{_PACKAGES}:?x}}\n{key_line}"
+        "services: {}\n"
+    )
 
 
-def test_planted_violation_an_anchor_without_the_key_is_caught() -> None:
-    planted = [
-        "x-planted-runtime-env: &planted",
-        f"  {_PACKAGES}: ${{{_PACKAGES}:?x}}",
-        "other: 1",
+def test_planted_violation_a_carrier_without_the_key_is_caught(
+    tmp_path: Path,
+) -> None:
+    _plant(tmp_path, with_key=False)
+    assert _carriers_without_the_key(tmp_path) == [
+        "planted.yaml",
+        "docker-compose.planted.yml",
     ]
-    assert _ANCHOR.match(planted[0])
-    block = _anchor_block(planted, 0)
-    assert f"  {_PACKAGES}: $" in block
-    assert f"  {_KEY}: {_REQUIRED}" not in block
+
+
+def test_planted_violation_an_anchor_without_the_key_is_caught(
+    tmp_path: Path,
+) -> None:
+    _plant(tmp_path, with_key=False)
+    assert _anchors_without_the_key(tmp_path) == [
+        "docker-compose.planted.yml::x-planted-runtime-env"
+    ]
+
+
+def test_planted_carrier_and_anchor_with_the_key_pass(tmp_path: Path) -> None:
+    _plant(tmp_path, with_key=True)
+    assert len(_carriers(tmp_path)) == 2
+    assert len(_package_anchors(tmp_path)) == 1
+    assert _carriers_without_the_key(tmp_path) == []
+    assert _anchors_without_the_key(tmp_path) == []
 
 
 def test_the_catalog_services_parse_with_the_key_in_hardcoded_env() -> None:
