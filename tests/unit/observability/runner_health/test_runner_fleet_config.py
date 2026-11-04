@@ -40,10 +40,10 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     # OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:66460) cut the
     # primary host's share 44 -> 10, so the declared total was 26. OMN-22111
     # declares h053's 8 `omnibase-ci` runners before the primary share is
-    # lowered (OMN-19998 resized it from 8 to 6), so it is 32 until `--retire-surplus` follows the proof.
+    # lowered (OMN-19998 resized it from 8 to 5), so it is 31 until `--retire-surplus` follows the proof.
     assert config.expected_count == 10
     assert config.burst_count == 10
-    assert config.declared_total("action") == 32
+    assert config.declared_total("action") == 31
 
 
 def test_runner_compose_matches_configured_count() -> None:

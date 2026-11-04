@@ -1738,12 +1738,12 @@ class TestFleetCanaryFunctional:
         so 16 healthy runners registered as ``omnipc2-ci-runner-N`` read as
         missing and the run failed at 44 of 60. Since OMN-19077 the declared
         pools are 10 on the primary host and 16 on the second, and 8 on h053
-        since OMN-22111 (6 since OMN-19998).
+        since OMN-22111 (5 since OMN-19998).
         """
         pools = _declared_action_pools()
-        assert sum(pools.values()) == 32, pools
+        assert sum(pools.values()) == 31, pools
         result = _run_canary(_multi_pool_payload(pools))
-        assert "expected=32 registered=32" in result.stdout, result.stdout
+        assert "expected=31 registered=31" in result.stdout, result.stdout
         assert "missing=0" in result.stdout, result.stdout
         assert result.returncode == 0, result.stderr
 
@@ -1763,7 +1763,7 @@ class TestFleetCanaryFunctional:
         pools = _declared_action_pools()
         extra = {**pools, "omnipc2-verify-runner": 1, "omninode-verify-runner": 3}
         result = _run_canary(_multi_pool_payload(extra))
-        assert "registered=32" in result.stdout, result.stdout
+        assert "registered=31" in result.stdout, result.stdout
 
     def test_canary_fails_on_incident_shape_fleet(self) -> None:
         """The exact 2026-07-03 incident shape: 11 online / 37 offline."""

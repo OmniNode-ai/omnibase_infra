@@ -3,8 +3,8 @@
 """OMN-19998: the h053 general pool keeps its job directories in memory and is sized from the host's measured memory.
 
 Operator RULING 2026-11-04T07:03:44Z: runners go on a memory drive, not spinning disk. h053's root volume is a rotational
-disk, and 49 to 55 GiB of its 125 GiB were available on 2026-11-04 with the lab-work units running, so the pool is six
-runners at 7 GiB (memswap equal, nothing swaps) under a slice that caps all six at 44 GiB.
+disk, and 49 to 55 GiB of its 125 GiB were available on 2026-11-04 with the lab-work units running, so the pool is five
+runners at 9 GiB (memswap equal, nothing swaps) under a slice that caps all five at 46 GiB.
 """
 
 from __future__ import annotations
@@ -70,11 +70,11 @@ def test_the_job_directories_leave_the_free_space_the_lane_probe_requires() -> N
 
 def test_the_limits_are_the_ones_the_host_memory_reads_allow() -> None:
     services = _services()
-    assert len(services) == 6
+    assert len(services) == 5
     for name, service in services.items():
-        assert service["mem_limit"] == service["memswap_limit"] == "7g", name
+        assert service["mem_limit"] == service["memswap_limit"] == "9g", name
         assert float(service["cpus"]) == 5.0, name
-    # Six runners at 7 GiB are 42 GiB: under the 49 GiB the host showed as its lowest available memory on 2026-11-04.
+    # Five runners at 9 GiB are 45 GiB: under the 49 GiB the host showed as its lowest available memory on 2026-11-04.
     assert (
         sum(_size_bytes_of_limit(s["mem_limit"]) for s in services.values()) <= 49 * GIB
     )

@@ -2,14 +2,14 @@
 Description=OmniNode CI runner pool on h053, the HP ProLiant Gen9 (OMN-22111, resized by OMN-19998)
 Before=slices.target
 
-# Six runners at 7 GiB with the job directories in memory (OMN-19998). MemorySwapMax is 0: the runners' tmpfs pages must
+# Five runners at 9 GiB with the job directories in memory (OMN-19998). MemorySwapMax is 0: the runners' tmpfs pages must
 # not reach the rotational root volume (operator RULING 2026-11-04T07:03:44Z), and each runner's memswap equals its memory.
-# Read 2026-11-04 on h053: 125 GiB, 49 to 55 GiB available with the lab-work units running, so the 44G ceiling leaves
-# 5 to 11 GiB to the lanes however the runners behave.
+# Read 2026-11-04 on h053: 125 GiB, 49 to 55 GiB available with the lab-work units running, so the 46G ceiling leaves
+# 3 to 15 GiB to the lanes however the runners behave.
 [Slice]
 MemoryAccounting=yes
-MemoryHigh=42G
-MemoryMax=44G
+MemoryHigh=45G
+MemoryMax=46G
 MemorySwapMax=0
 CPUAccounting=yes
 CPUWeight=25

@@ -27,7 +27,7 @@ POOLS = DOCKER / "runners" / "systemd" / "pools"
 FLEET = REPO_ROOT / "config" / "runner_fleet.yaml"
 H053 = "hp053-ci-runner"
 H051 = "hp051-ci-runner"
-COUNT = 6
+COUNT = 5
 # Hosts whose CPU lacks AVX2, read from /proc/cpuinfo (OMN-17232, 2026-11-02).
 NO_AVX2_PREFIXES = (H051,)
 # The runner image's home. h053 spells it as the primary compose file does, so no machine path is written.
@@ -170,8 +170,8 @@ def test_the_h053_service_blocks_are_the_h051_blocks_with_the_h053_names() -> No
         assert h053[key] == h051[key], key
     # OMN-19998: the limits are h053's own, from the reads of 2026-11-04 (see the compose header).
     assert (h053["mem_limit"], h053["memswap_limit"], h053["cpus"]) == (
-        "7g",
-        "7g",
+        "9g",
+        "9g",
         "5.0",
     )
     assert h053["group_add"] == h051["group_add"] == ["988"]

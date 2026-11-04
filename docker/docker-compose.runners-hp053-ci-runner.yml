@@ -23,16 +23,17 @@
 #     apart by prefix.
 #   - the pool sits in omnirunners.slice, installed from docker/runners/systemd/pools/hp053-ci-runner/. OMN-19998 resized it
 #     on 2026-11-04 from reads taken that morning (56 threads, 125 GiB, 49 to 55 GiB available with the lab-work units
-#     running and the 64 GiB lab-run RAM pool at 61 GiB used, load 10 to 11, io pressure 0): SIX runners, not eight,
-#     at 7 GiB each (memswap equal, nothing swaps) are at most 42 GiB, under the slice's MemoryHigh of 42G and MemoryMax
-#     of 44G, which leave 5 to 11 GiB of the measured availability to the lanes whatever the runners do. Five CPUs each,
-#     30 of the 56 threads at most, and CPUWeight 25 makes CI yield to the lab-work units that share the host.
+#     running and the 64 GiB lab-run RAM pool at 61 GiB used, load 10 to 11, io pressure 0): FIVE runners, not eight,
+#     at 9 GiB each (memswap equal, nothing swaps) are at most 45 GiB, under the slice's MemoryHigh of 45G and MemoryMax
+#     of 46G, which leave at least 3 GiB of the lowest measured availability to the lanes whatever the runners do. Five
+#     CPUs each, 25 of the 56 threads at most, and CPUWeight 25 makes CI yield to the lab-work units that share the host.
 #   - the job directories are in memory, not on the root volume (OMN-19998, operator RULING 2026-11-04T07:03:44Z: runners
 #     go on a memory drive, not spinning disk; the root volume of this host is a rotational disk, read 2026-11-04). See
-#     the x-runner-ram-dirs anchor. Why seven GiB and why six runners rather than eight: tmpfs pages are charged to the
-#     runner's own memory limit, and a shard holds 3.2 to 3.5 GiB of job workspace (read from the h051 merge-queue pool,
-#     2026-11-04) plus its processes, so eight runners at the old 6 GiB could not all run a shard at once without the
-#     slice killing one, and six at 7 GiB can.
+#     the x-runner-ram-dirs anchor. Why nine GiB and why five runners rather than eight: tmpfs pages are charged to the
+#     runner's own memory limit. Measured on this pool the first 20 minutes it ran (2026-11-04): a job of a private
+#     repository's tests held 6.3 GiB of tmpfs (workspace 4.7, TMPDIR 1.3) plus 0.7 GiB of processes, hit the 7 GiB limit
+#     and had seven processes OOM-killed, and the other five runners peaked at 5.2 to 6.5 GiB. So 7 GiB is too little, the
+#     slice cannot hold eight or six runners at the 9 GiB a job needs, and five can.
 #   - the runner reads the host's /usr/share/zoneinfo read-only, as the merge-queue pools do: the image has no timezone
 #     database and a private repository's tests resolve `America/New_York`.
 #   - the pool has its own git mirror (OMN-14027 C2 on this host), the three units beside the slice, with the bare
@@ -85,7 +86,7 @@ x-runner-lab-credentials: &runner-lab-credentials
   read_only: true
   bind:
     create_host_path: true
-# In-memory job directories, one list shared by the six runners (the service-level `tmpfs:` form, the only one that can
+# In-memory job directories, one list shared by the five runners (the service-level `tmpfs:` form, the only one that can
 # pass `exec`: Docker mounts a tmpfs noexec otherwise and the workspace holds the interpreters and compiled extensions
 # the jobs run). `size` is a ceiling and not a reservation; the real bound is the container's memory limit. The two job
 # directories are 16 and 12 GiB because the lane probe the repository's tests run refuses a volume with under 10 GiB free.
@@ -101,14 +102,14 @@ x-runner-ram-dirs: &runner-ram-dirs
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
-  mem_limit: 7g
+  mem_limit: 9g
   # RAM plus swap, and equal to mem_limit, so the runner has no swap: its job directories are tmpfs mounts and must
-  # stay in memory. The slice's MemoryHigh of 42G and MemoryMax of 44G bound the six runners together (six times 7g).
-  memswap_limit: 7g
+  # stay in memory. The slice's MemoryHigh of 45G and MemoryMax of 46G bound the five runners together (five times 9g).
+  memswap_limit: 9g
   # Five CPUs, not the 2.0 of the other pools. Measured 2026-11-04 (OMN-19998): the Xeon E5-2680 v4 here ran a fixed
   # single-thread Python benchmark in 0.71 s against 0.20 s on the primary host's Ryzen 9 9950X3D, so a shard that takes
   # 8 minutes there wants about 3.5 times the core time, and on the h051 merge-queue pool a quota of 2.0 was throttled in
-  # 55 to 70 percent of its periods while 5.0 finished the same shard in 6m19. Six runners at 5.0 take 30 of the 56 threads.
+  # 55 to 70 percent of its periods while 5.0 finished the same shard in 6m19. Five runners at 5.0 take 25 of the 56 threads.
   cpus: "5.0"
   pids_limit: 4096
   cgroup_parent: omnirunners.slice
@@ -232,22 +233,6 @@ services:
       - *lab-host-table
       - *runner-host-zoneinfo
       - hp053-ci-runner-5-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  hp053-ci-runner-6:
-    !!merge <<: *runner-base
-    container_name: hp053-ci-runner-6
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: hp053-ci-runner-6
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    tmpfs: *runner-ram-dirs
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - *runner-disk-admission-pause
-      - *runner-lab-credentials
-      - *lab-host-table
-      - *runner-host-zoneinfo
-      - hp053-ci-runner-6-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
 volumes:
   hp053-ci-runner-1-creds:
     name: hp053-ci-runner-1-creds
@@ -259,5 +244,3 @@ volumes:
     name: hp053-ci-runner-4-creds
   hp053-ci-runner-5-creds:
     name: hp053-ci-runner-5-creds
-  hp053-ci-runner-6-creds:
-    name: hp053-ci-runner-6-creds

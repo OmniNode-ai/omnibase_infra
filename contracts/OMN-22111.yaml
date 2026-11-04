@@ -8,10 +8,10 @@ interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-h053-general-pool
-    statement: h053 declares a pool of six general (eight until OMN-19998 sized it from the host's measured memory) omnibase-ci runners with its own compose file, slice and git mirror units, and no omnibase-ci runner can sit on a host without AVX2.
+    statement: h053 declares a pool of five general (eight until OMN-19998 sized it from the host's measured memory) omnibase-ci runners with its own compose file, slice and git mirror units, and no omnibase-ci runner can sit on a host without AVX2.
     acceptance:
       - id: AC1
-        statement: The fleet config declares h053 with the action and action-multiarch classes and six runners, the compose file names exactly those six runners with the general and opt-in labels and the h051 anchor's limits, and the pool slice bounds the whole pool.
+        statement: The fleet config declares h053 with the action and action-multiarch classes and five runners, the compose file names exactly those five runners with the general and opt-in labels and the h051 anchor's limits, and the pool slice bounds the whole pool.
       - id: AC3
         statement: Every h051 runner is declared without the omnibase-ci label and the fleet row declares no action class for h051, so a job of the private repository whose tests import the pedalboard wheel (it runs on omnibase-ci) cannot be assigned to a host that cannot import its pedalboard wheel.
 evidence_requirements:
@@ -24,7 +24,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-h053-pool-declared
-    description: The fleet config and the h053 compose file, slice and mirror units agree on the six general runners, their labels and limits.
+    description: The fleet config and the h053 compose file, slice and mirror units agree on the five general runners, their labels and limits.
     source: manual
     binds_ac: [AC1]
     checks:

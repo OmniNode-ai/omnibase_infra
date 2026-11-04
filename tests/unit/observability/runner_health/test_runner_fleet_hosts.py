@@ -55,7 +55,7 @@ EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
     # OMN-17232: the HP DL560 Gen8 (h051) pool, four `omnibase-ci-multiarch` runners.
     ("h051", "amd64", 4),
     # OMN-22111: the HP ProLiant Gen9 (h053), eight `omnibase-ci` runners on an AVX2 CPU.
-    ("h053", "amd64", 6),
+    ("h053", "amd64", 5),
 )
 
 
@@ -132,8 +132,8 @@ def test_declared_total_sums_only_the_hosts_carrying_that_class() -> None:
     # moved capacity between hosts; it did not change the declared total.
     # OMN-19077 then cut the primary host's share 44 -> 10, so 10 + 16.
     # OMN-22111 declares h053's 8 before the primary host's share is lowered, so 10 + 16 + 8;
-    # OMN-19998 sizes it to 6 from the host's measured memory, so 10 + 16 + 6.
-    assert config.declared_total("action") == 32
+    # OMN-19998 sizes it to 5 from the host's measured memory, so 10 + 16 + 5.
+    assert config.declared_total("action") == 31
     assert config.declared_total("customer-plane") == 3
     assert config.declared_total("verify") == 6
     # A class nothing declares is zero, not an error and not the whole fleet.
