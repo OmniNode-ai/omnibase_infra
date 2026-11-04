@@ -88,13 +88,13 @@ dod_evidence:
     binds_ac: [AC4]
   - id: dod-omn22291-ac5-boot-gate
     description: >-
-      The live half of AC5 needs a machine with a local stack and is SKIPPED, never passed, where there is none. What runs everywhere is the gate read: boot-catalog-local boots the laptop profile with make up-local and then requires status=healthy from each kernel's own /health body with a bounded deadline and an ::error:: on timeout -- which is the field the incident drove to unhealthy with every component green. That job's run on this change is the live proof.
+      Negative control that passes at the merge base by design, so it binds no criterion. It reads the gate: boot-catalog-local boots the laptop profile with make up-local and then requires status=healthy from each kernel's own /health body with a bounded deadline and an ::error:: on timeout -- which is the field the incident drove to unhealthy with every component green. The workflow is not changed by this change, so the read passes before and after; that job's run on this change is the live proof, and dod-omn22291-deploy-grading-surface binds AC5 to the fix itself.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/integration/test_up_local_reaches_healthy.py -q -rs
+        check_value: uv run pytest tests/integration/test_up_local_reaches_healthy.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC5]
+    binds_ac: []
   - id: dod-omn22291-omn18640-preserved
     description: >-
       The outage this class was built for must still be red. The OMN-18640 suites pass unchanged, including the group that wedges inside the rejoin cooldown staying out of sync, and the empty-assignment class now states its own premise in its data: an empty assignment with records waiting is a stall, and so is one whose group backlog could not be measured at all.
