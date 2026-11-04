@@ -18,6 +18,11 @@ requirements:
     acceptance:
       - id: AC2
         statement: "AC2: the scheduled workflow chain-canary-c28-consumer-flow.yml runs the probe on the lab runner selected through vars.LAB_PROBE_RUNS_ON_JSON against the dev lane and uploads its record -- falsifier: uv run --frozen pytest tests/ci/test_c28_consumer_flow_probe.py::test_the_workflow_runs_the_probe_beside_the_resolved_lane"
+  - id: req-omn19812-board-registration
+    statement: The beta board takes C28's proof state from the scheduled workflow, not from a hand readback.
+    acceptance:
+      - id: AC3
+        statement: "AC3: beta_board_data.py PROBES carries exactly one C28 entry naming that workflow, and READBACKS carries no C28 entry, its prose kept verbatim in EVIDENCE -- falsifier: uv run pytest tests/scripts/test_c28_consumer_flow_probe_registration.py"
 evidence_requirements:
   - kind: tests
     description: Focused unit and integration tests of the C28 docker target and full handler cover the booting lane, the never-booting bound and the unchanged unhealthy-lane bound.
@@ -114,6 +119,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn19812-ac3-board-registration
+    description: The ticket's own falsifier runs in the sibling board checkout, which the hosted runner does not have, so it is run by hand there and not bound as a hosted check; its registration test reads the board's PROBES, READBACKS and EVIDENCE tables and fails when the C28 PROBES entry, the missing READBACKS entry or the kept EVIDENCE prose is absent. The contract-shape test here fails at the merge base, where the contract declares no AC3, and passes here. At the sibling's origin/dev f16faf507e09 the falsifier gave 6 passed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_ac3_board_registration_omn19812.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
   - id: dod-omn19812-ac5-ac7-retired
     description: AC5, AC6 and AC7 were deleted from OMN-19812. This item retires the claims of the six items that bound them and keeps their regression tests running. Its contract-shape test fails at the merge base, where the contract still declares AC5 to AC7, and passes here; it is bound to AC1 only so the item carries a bound, falsifiable check.
     source: manual
