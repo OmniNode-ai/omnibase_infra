@@ -1,0 +1,50 @@
+{
+  "ticket": "OMN-22392",
+  "method": "redpanda admin GET /public_metrics inside the broker container on the lab docker host; series redpanda_kafka_consumer_group_consumers, one per group; zero-consumer = value 0. Group names scrubbed: per-call ids replaced by {hex8},{hex12},{hex32},{uuid}; the topic scope after .__t. replaced by {topic}. A private repository name inside a group name is replaced by {private_repo}.",
+  "buses": {
+    "dev": {
+      "broker_role": "dev lane broker",
+      "read_at": "2026-11-03T19:30:55Z",
+      "group_offset_retention_sec": 86400,
+      "groups_total": 413,
+      "zero_consumer_total": 29,
+      "zero_consumer_by_template": {
+        "pr-handoff-request.{hex12}.__t.{topic}": 9,
+        "local.omnimarket.work_ledger_append_client.consume.v1.{hex12}.__t.{topic}": 4,
+        "local.{private_repo}.host_drift_fleet.h201.{hex12}.__t.{topic}": 3,
+        "gateway-canary-probe-local-{hex32}": 2,
+        "local.omnibase_core.handlerdevheadmonitor_run_{hex12}.consume.v1.__t.{topic}": 2,
+        "local.omnibase_core.runtime_local_terminal_run_{hex12}.consume.v1.__t.{topic}": 2,
+        "local.{private_repo}.host_drift_sync.check.h105.__t.{topic}": 1,
+        "local.{private_repo}.host_drift_sync.fix.h105.__t.{topic}": 1,
+        "local.omnimarket-projections.live-events-writer.consume.v1": 1,
+        "local.omnimarket-projections.registration-writer.consume.v1": 1,
+        "local.omnimarket-projections.savings-writer.consume.v1": 1,
+        "local.omnimarket-projections.tenant-credentials-writer.consume.v1": 1,
+        "local.omnimarket-projections.tenant-registry-writer.consume.v1": 1
+      },
+      "instance_ids_in_names": {
+        "runtime-effects": 71,
+        "runtime-main": 249,
+        "runtime-worker": 4
+      }
+    },
+    "ci": {
+      "broker_role": "fleet CI broker",
+      "read_at": "2026-11-03T19:33:21Z",
+      "first_read_at": "2026-11-03T19:31:11Z",
+      "groups_new_between_reads": 0,
+      "group_offset_retention_sec": 604800,
+      "groups_total": 16009,
+      "zero_consumer_total": 15994,
+      "zero_consumer_by_template": {
+        "local.omnimarket.lab_work_client.consume.v1.{hex12}.t.__t.{topic}": 10667,
+        "local.omnimarket.lab_work_client.consume.v1.{hex12}.cap.__t.{topic}": 5324,
+        "local.omnimarket.node_canonical_clone_refresh_effect.consume.v1.h105.__t.{topic}": 1,
+        "local.omnimarket.node_lab_work_unit_effect.consume.v1.h105.__t.{topic}": 1,
+        "validator-runtime-lab-consumer.__t.{topic}": 1
+      },
+      "instance_ids_in_names": {}
+    }
+  }
+}
