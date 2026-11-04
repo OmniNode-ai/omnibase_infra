@@ -129,6 +129,12 @@ class _FakeKafkaConsumer:
     def seek(self, partition: TopicPartition, offset: int) -> None:
         self._position = offset
 
+    def pause(self, *partitions: TopicPartition) -> None:
+        return None
+
+    async def commit(self, offsets: Mapping[TopicPartition, int]) -> None:
+        return None
+
 
 @pytest.fixture(autouse=True)
 def _reset_instances() -> None:
