@@ -368,15 +368,18 @@ jobs:
             --clone . \
             --version "${VERSION}" >"${RUNNER_TEMP}/changelog-entry.md"
 
-          python3 - <<'PY'
-          import os, pathlib
-          entry = pathlib.Path(os.environ["RUNNER_TEMP"], "changelog-entry.md").read_text()
-          target = pathlib.Path("CHANGELOG.md")
-          existing = target.read_text() if target.exists() else ""
-          target.write_text(entry.rstrip("\n") + "\n\n" + existing)
-          PY
-
-          staged=(CHANGELOG.md)
+          # Where the block goes is the target repo's own docs policy, read from
+          # its .readme-only-docs.yaml (the file the readme-only-docs gate reads):
+          # a CHANGELOG.md prepend for a repo that allows one, root README.md plus
+          # the release-cut contract item and identity test for a README-only repo.
+          # Writing CHANGELOG.md unconditionally made every omnibase_core release
+          # PR red from the day dev deleted that file (OMN-17427).
+          notes=$(python3 "${GITHUB_WORKSPACE}/_train/scripts/ci/release_train.py" apply-release-notes \
+            --policy "${GITHUB_WORKSPACE}/_train/config/release_train_policy.yaml" \
+            --repo "${TARGET_REPO}" \
+            --clone . \
+            --entry-file "${RUNNER_TEMP}/changelog-entry.md")
+          read -r -d '' -a staged <<<"${notes}" || true
           if [ "${NEEDS_BUMP}" = "true" ]; then
             # The manifest and the lockfile move together: uv.lock records the
             # root package's own version, so a bump of pyproject.toml alone

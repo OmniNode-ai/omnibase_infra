@@ -751,6 +751,13 @@ requirements:
     acceptance:
       - id: AC17427650001
         statement: 'A sleep made outside the probe is not recorded by the test fixture, and the probe retry assertions still hold -- falsifier: uv run pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q fails at the merge base on test_a_sleep_outside_the_probe_is_not_recorded'
+  - id: req-omn17427-release-train-readme-only-notes
+    statement: The release train writes a release's notes where the target repo's documentation policy accepts them, so a README-only repo's release PR is not born red on a root CHANGELOG.md.
+    acceptance:
+      - id: AC17427700001
+        statement: 'For a repo carrying .readme-only-docs.yaml that does not except CHANGELOG.md, apply-release-notes puts the release block in root README.md above the newest release section, deletes a root CHANGELOG.md, and extends the release-cut contract and identity test the repository carries; a repo without the file keeps the CHANGELOG.md prepend -- falsifier: uv run pytest tests/scripts/test_release_train_readme_only_notes_omn17427.py -q -n 0 fails when the writer emits CHANGELOG.md for a README-only clone'
+      - id: AC17427700002
+        statement: 'The release-train-nightly cut job writes through the apply-release-notes subcommand and carries no inline CHANGELOG.md write -- falsifier: the workflow test in tests/scripts/test_release_train_readme_only_notes_omn17427.py fails on an inline CHANGELOG.md write'
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -971,6 +978,9 @@ evidence_requirements:
   - kind: tests
     description: Every baseline entry is matched against sha1 of the stripped lines of the file it names; a planted absent line and a missing file are each reported. At the merge base 37 entries are stale.
     command: uv run --frozen pytest tests/ci/test_model_config_baseline_no_stale_omn17427.py -n 0 -q --no-cov
+  - kind: tests
+    description: The release-notes target is read from the clone's .readme-only-docs.yaml; a README-only clone gets the block in README.md with the pinned identity test and dod_evidence item and no CHANGELOG.md, a changelog repo keeps the prepend, and the cut job calls the subcommand.
+    command: uv run --frozen pytest tests/scripts/test_release_train_readme_only_notes_omn17427.py -q -n 0 --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -3416,3 +3426,11 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q --no-cov
         cwd: .
     binds_ac: [AC17427650001]
+  - id: dod-omn17427-release-train-readme-only-notes
+    description: The release-notes target is read from the clone's .readme-only-docs.yaml; a README-only clone gets the block in README.md with the pinned identity test and dod_evidence item and no CHANGELOG.md, a changelog repo keeps the prepend, and the cut job calls the subcommand.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_release_train_readme_only_notes_omn17427.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427700001, AC17427700002]

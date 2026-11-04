@@ -1824,6 +1824,239 @@ def render_changelog_entry(
     return "\n".join(lines)
 
 
+README_ONLY_DOCS_FILE: Final = ".readme-only-docs.yaml"
+_CHANGELOG_PATH: Final = "CHANGELOG.md"
+_README_PATH: Final = "README.md"
+_RELEASE_CONTRACT_PATH: Final = "contracts/OMN-18595.yaml"
+_RELEASE_IDENTITY_TEST_PATH: Final = "tests/ci/test_release_cut_identity_omn18595.py"
+_ENTRY_HEADING: Final[re.Pattern[str]] = re.compile(
+    r"^## v(\d+\.\d+\.\d+) \((\d{4}-\d{2}-\d{2})\)$"
+)
+_ENTRY_SINCE: Final[re.Pattern[str]] = re.compile(r"^### Included Since (.+)$")
+_ENTRY_PR_NUMBER: Final[re.Pattern[str]] = re.compile(r"\(#\d+\)$")
+_PY_LINE_LIMIT: Final = 88
+
+
+def release_notes_target(clone: Path) -> str:
+    """Where this repo's release notes live: ``CHANGELOG.md`` or ``README.md``.
+
+    The owner of the fact is the repo's own ``.readme-only-docs.yaml``, the file
+    the ``readme-only-docs`` validator (kb-doc-gate, the Pre-commit Suite hook
+    ``Root README only documentation gate``, OMN-17427) reads. A repo that carries
+    it and does not list ``CHANGELOG.md`` among its ``exceptions`` refuses a root
+    changelog, so its notes go in the root README. Every other repo keeps the
+    changelog. No train-side key: a second copy of the answer would drift from the
+    gate that actually decides.
+    """
+    config = clone / README_ONLY_DOCS_FILE
+    if not config.is_file():
+        return _CHANGELOG_PATH
+    try:
+        loaded = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        msg = f"{README_ONLY_DOCS_FILE} does not parse: {exc}"
+        raise ReleaseTrainConfigError(msg) from exc
+    exceptions = loaded.get("exceptions", []) if isinstance(loaded, dict) else []
+    allowed = {
+        item.get("path")
+        for item in exceptions
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    if _CHANGELOG_PATH in allowed:
+        return _CHANGELOG_PATH
+    return _README_PATH
+
+
+@dataclass(frozen=True)
+class ModelParsedReleaseEntry:
+    """A rendered release block read back into the facts the companions pin."""
+
+    version: str
+    date: str
+    since: str
+    subjects: tuple[str, ...]
+
+
+def parse_release_entry(entry: str) -> ModelParsedReleaseEntry:
+    """Read the block ``render_changelog_entry`` wrote; refuse any other shape."""
+    lines = entry.strip("\n").splitlines()
+    heading = _ENTRY_HEADING.fullmatch(lines[0]) if lines else None
+    if heading is None:
+        msg = "release entry must start with '## v<version> (<date>)'"
+        raise ReleaseTrainConfigError(msg)
+    since = ""
+    subjects: list[str] = []
+    in_included = False
+    for line in lines[1:]:
+        found = _ENTRY_SINCE.fullmatch(line)
+        if found is not None:
+            since, in_included = found.group(1), True
+        elif in_included and line.startswith("- "):
+            subjects.append(line[2:])
+    if not since:
+        msg = "release entry has no '### Included Since' section"
+        raise ReleaseTrainConfigError(msg)
+    return ModelParsedReleaseEntry(
+        version=heading.group(1),
+        date=heading.group(2),
+        since=since,
+        subjects=tuple(subjects),
+    )
+
+
+def _insert_entry_in_readme(readme: str, entry: str) -> str:
+    """Put the block above the newest existing release section, else at the end."""
+    block = entry.rstrip("\n") + "\n"
+    match = re.search(r"^## v\d+\.\d+\.\d+ ", readme, flags=re.MULTILINE)
+    if match is None:
+        return readme.rstrip("\n") + "\n\n" + block
+    return readme[: match.start()] + block + "\n" + readme[match.start() :]
+
+
+def _python_literal(text: str) -> str:
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _identity_test_source(parsed: ModelParsedReleaseEntry) -> str:
+    slug = parsed.version.replace(".", "_")
+    lines = [
+        "",
+        "",
+        f"def test_release_changelog_retains_version_{slug}_in_root_readme() -> None:",
+        f'    """Keep the {parsed.version} cut\'s public notes in root README, not a changelog."""',
+        '    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")',
+        f'    assert "## v{parsed.version} ({parsed.date})" in readme',
+        f'    assert "### Included Since {parsed.since}" in readme',
+    ]
+    if parsed.subjects:
+        literal = _python_literal(f"- {parsed.subjects[0]}")
+        single = f"    assert {literal} in readme"
+        if len(single) <= _PY_LINE_LIMIT:
+            lines.append(single)
+        else:
+            inner = f"        {literal} in readme"
+            if len(inner) <= _PY_LINE_LIMIT:
+                lines += ["    assert (", inner, "    )"]
+            else:
+                lines += [
+                    "    assert (",
+                    f"        {literal}",
+                    "        in readme",
+                    "    )",
+                ]
+    lines.append('    assert not (REPO_ROOT / "CHANGELOG.md").exists()')
+    return "\n".join(lines) + "\n"
+
+
+def _fold_statements(command: str, width: int = 90) -> list[str]:
+    """Wrap a one-line command at its ``; `` boundaries, never inside a statement."""
+    rows: list[str] = []
+    statements = command.split("; ")
+    for index, statement in enumerate(statements):
+        piece = statement if index == len(statements) - 1 else statement + ";"
+        if rows and len(rows[-1]) + 1 + len(piece) <= width:
+            rows[-1] += " " + piece
+        else:
+            rows.append(piece)
+    return rows
+
+
+def _contract_item_source(parsed: ModelParsedReleaseEntry, repo_name: str) -> str:
+    slug = parsed.version.replace(".", "-")
+    checks = [
+        f'assert "## v{parsed.version} ({parsed.date})" in notes',
+        f'assert "### Included Since {parsed.since}" in notes',
+    ]
+    pins = [
+        f'"{found.group(0)}" in notes'
+        for subject in (parsed.subjects[:1] + parsed.subjects[-1:])
+        if (found := _ENTRY_PR_NUMBER.search(subject)) is not None
+    ]
+    if pins:
+        checks.append("assert " + " and ".join(dict.fromkeys(pins)))
+    body = "; ".join(
+        ["from pathlib import Path", 'notes = Path("README.md").read_text()']
+        + ['assert not Path("CHANGELOG.md").exists()']
+        + checks
+    )
+    return (
+        f"  - id: dod-omn18595-ac1-release-{slug}-notes\n"
+        "    description: The release tree passes the documentation policy and retains this release's notes in\n"
+        "      root README.\n"
+        "    source: manual\n"
+        "    binds_ac: [AC1]\n"
+        "    checks:\n"
+        "      - check_type: test_passes\n"
+        f"        check_value: uv run pytest {_RELEASE_IDENTITY_TEST_PATH} -q -k changelog\n"
+        f"        cwd: ${{OMNI_HOME}}/{repo_name}\n"
+        "      - check_type: command\n"
+        "        check_value: >-\n"
+        + "".join(
+            f"          {row}\n"
+            for row in _fold_statements(f"uv run --locked python -c '{body}'")
+        )
+        + f"        cwd: ${{OMNI_HOME}}/{repo_name}\n"
+    )
+
+
+def apply_release_notes(
+    clone: Path, entry: str, *, repo_name: str | None = None
+) -> list[str]:
+    """Write the release block where the repo's docs policy accepts it.
+
+    Returns the repo-relative paths to stage. A repo whose gate allows a root
+    changelog gets the historical shape (a prepended ``CHANGELOG.md`` block). A
+    README-only repo gets the block in root ``README.md`` above its newest
+    release section, and, where the repo carries its release-cut contract and
+    identity test (omnibase_core), the pinned test and ``dod_evidence`` item that
+    every accepted README-shaped cut has carried: the DoD release-cut exemption
+    reads a root ``CHANGELOG.md`` diff, so a README-shaped cut is judged as an
+    ordinary change and needs its own evidence. A pre-existing root
+    ``CHANGELOG.md`` the policy refuses is removed.
+    """
+    if release_notes_target(clone) == _CHANGELOG_PATH:
+        target = clone / _CHANGELOG_PATH
+        existing = target.read_text(encoding="utf-8") if target.exists() else ""
+        target.write_text(entry.rstrip("\n") + "\n\n" + existing, encoding="utf-8")
+        return [_CHANGELOG_PATH]
+
+    parsed = parse_release_entry(entry)
+    staged: list[str] = []
+    readme = clone / _README_PATH
+    if not readme.is_file():
+        msg = f"{README_ONLY_DOCS_FILE} routes release notes to README.md, which is absent"
+        raise ReleaseTrainConfigError(msg)
+    readme.write_text(
+        _insert_entry_in_readme(readme.read_text(encoding="utf-8"), entry),
+        encoding="utf-8",
+    )
+    staged.append(_README_PATH)
+    stale = clone / _CHANGELOG_PATH
+    if stale.exists():
+        stale.unlink()
+        staged.append(_CHANGELOG_PATH)
+
+    contract = clone / _RELEASE_CONTRACT_PATH
+    test = clone / _RELEASE_IDENTITY_TEST_PATH
+    if contract.is_file() and test.is_file():
+        name = repo_name or clone.resolve().name
+        contract_text = contract.read_text(encoding="utf-8")
+        top_level_keys = re.findall(r"^([A-Za-z_]\w*):", contract_text, re.MULTILINE)
+        if not top_level_keys or top_level_keys[-1] != "dod_evidence":
+            msg = f"{_RELEASE_CONTRACT_PATH} does not end with its dod_evidence list"
+            raise ReleaseTrainConfigError(msg)
+        item = _contract_item_source(parsed, name)
+        contract.write_text(contract_text.rstrip("\n") + "\n" + item, encoding="utf-8")
+        test.write_text(
+            test.read_text(encoding="utf-8").rstrip("\n")
+            + "\n"
+            + _identity_test_source(parsed),
+            encoding="utf-8",
+        )
+        staged += [_RELEASE_CONTRACT_PATH, _RELEASE_IDENTITY_TEST_PATH]
+    return staged
+
+
 _LOCK_PACKAGE_HEADER: Final = "[[package]]"
 
 
@@ -2250,6 +2483,15 @@ def build_parser() -> argparse.ArgumentParser:
     changelog.add_argument("--clone", type=Path, required=True)
     changelog.add_argument("--version", required=True)
 
+    apply_notes = sub.add_parser(
+        "apply-release-notes",
+        help="write a rendered release block where the repo's docs policy accepts it",
+    )
+    apply_notes.add_argument("--policy", type=Path, default=DEFAULT_POLICY_PATH)
+    apply_notes.add_argument("--clone", type=Path, required=True)
+    apply_notes.add_argument("--entry-file", type=Path, required=True)
+    apply_notes.add_argument("--repo", required=True)
+
     bump = sub.add_parser(
         "bump-version",
         help="move the manifest version and the lockfile's own entry together",
@@ -2323,6 +2565,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         # runs' logs is about what changed rather than about dict ordering.
         for name in sorted(policies):
             print(name)
+        return 0
+
+    if args.command == "apply-release-notes":
+        try:
+            staged = apply_release_notes(
+                args.clone,
+                args.entry_file.read_text(encoding="utf-8"),
+                repo_name=args.repo,
+            )
+        except ReleaseTrainConfigError as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            return 2
+        for relative in staged:
+            print(relative)
         return 0
 
     if args.command == "bump-version":
