@@ -2,38 +2,36 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""
-CI/pre-commit check: pin-parity ratchet between .pre-commit-config.yaml and the
-CI workflow(s) that independently pin the SAME omnibase_core validator
-(OMN-14667, WS7 fan-out #3 of OMN-14655; DRIFT-3 recurrence guard).
-
-The problem this guards: a pre-commit `repo:` hook pins an omnibase_core `rev:`
-that clones the validator at one SHA, while a dedicated CI ratchet workflow
-(`uv run --with "omnibase-core @ git+...@<sha>"`) pins the SAME validator at a
-DIFFERENT SHA. Both surfaces then enforce a DIFFERENT frozen baseline, so a
-change that is green locally can be red in CI (or vice-versa) purely because the
-two pins drifted -- staleness by construction. This gate fails closed the moment
-a pinned pair diverges, on either side.
-
-Adaptation from the omnimarket/omniclaude canary (which scanned a single
-`ci.yml`): omnibase_infra pins its per-validator core SHAs in *dedicated* gate
-workflow files, one validator per file (canonical-inference-gate.yml,
-url-authority-gate.yml, ...), and ci.yml pins NO validator core SHA. So each
-PIN_PAIRS row names the SPECIFIC CI workflow file to scan, giving a strict 1:1
-hook<->gate comparison. A flat "scan every workflow for any core pin" (the
-canary's shape) would cross-contaminate here -- one hook's rev would be compared
-against every other validator's unrelated pin and false-fail.
-
-PIN_PAIRS below is a small, explicitly-verified table -- add a new pair only
-after confirming (by hand, via `git diff <old-rev> <new-rev>` in omnibase_core)
-that both sides really do reference the same validator, not two independently
-pinned tools that happen to share an upstream repo.
-
-KNOWN DRIFT (not yet enforced): `.github/workflows/url-authority-gate.yml` pins core
-`8a53a063...`, apart from the `check-url-authority` hook rev; add its row to PIN_PAIRS
-in the change that converges the two. A workflow with no literal pin passes when it
-reads the hook's rev from `.pre-commit-config.yaml` by hook id (one home, no drift).
-"""
+# CI/pre-commit check: pin-parity ratchet between .pre-commit-config.yaml and the
+# CI workflow(s) that independently pin the SAME omnibase_core validator
+# (OMN-14667, WS7 fan-out #3 of OMN-14655; DRIFT-3 recurrence guard).
+#
+# The problem this guards: a pre-commit `repo:` hook pins an omnibase_core `rev:`
+# that clones the validator at one SHA, while a dedicated CI ratchet workflow
+# (`uv run --with "omnibase-core @ git+...@<sha>"`) pins the SAME validator at a
+# DIFFERENT SHA. Both surfaces then enforce a DIFFERENT frozen baseline, so a
+# change that is green locally can be red in CI (or vice-versa) purely because the
+# two pins drifted -- staleness by construction. This gate fails closed the moment
+# a pinned pair diverges, on either side.
+#
+# Adaptation from the omnimarket/omniclaude canary (which scanned a single
+# `ci.yml`): omnibase_infra pins its per-validator core SHAs in *dedicated* gate
+# workflow files, one validator per file (canonical-inference-gate.yml,
+# url-authority-gate.yml, ...), and ci.yml pins NO validator core SHA. So each
+# PIN_PAIRS row names the SPECIFIC CI workflow file to scan, giving a strict 1:1
+# hook<->gate comparison. A flat "scan every workflow for any core pin" (the
+# canary's shape) would cross-contaminate here -- one hook's rev would be compared
+# against every other validator's unrelated pin and false-fail.
+#
+# PIN_PAIRS below is a small, explicitly-verified table -- add a new pair only
+# after confirming (by hand, via `git diff <old-rev> <new-rev>` in omnibase_core)
+# that both sides really do reference the same validator, not two independently
+# pinned tools that happen to share an upstream repo.
+#
+# KNOWN DRIFT (not yet enforced): `.github/workflows/url-authority-gate.yml` pins core
+# `8a53a063...`, apart from the `check-url-authority` hook rev; add its row to PIN_PAIRS
+# in the change that converges the two. A workflow with no literal pin passes when it
+# reads the hook's rev from `.pre-commit-config.yaml` by hook id (one home, no drift).
 
 from __future__ import annotations
 
@@ -80,8 +78,37 @@ def _find_ci_pins(ci_text: str) -> list[str]:
     return [m.group(1) for m in _CI_PIN_RE.finditer(ci_text)]
 
 
-def _reads_hook_rev(ci_text: str, hook_id: str) -> bool:
-    return ".pre-commit-config.yaml" in ci_text and f'"id"] == "{hook_id}"' in ci_text
+_CONFIG_LOAD_RE = re.compile(
+    r"""yaml\.safe_load\(\s*open\(\s*["']\.pre-commit-config\.yaml["']"""
+)
+_ENV_EXPORT_RE = re.compile(
+    r"""^\s*echo\s+["']?([A-Z][A-Z0-9_]*)=.*>>\s*["']?\$GITHUB_ENV""", re.MULTILINE
+)
+
+
+# One job must load .pre-commit-config.yaml, select the block by hook id, read its
+# rev and export it to $GITHUB_ENV; a later step of the same job must pass that exact
+# variable to `uv run --with` while invoking the validator. YAML comments are dropped
+# by the parser and shell comment lines are ignored, so prose naming the file and the
+# hook id is not a read.
+def _reads_hook_rev(workflow: object, hook_id: str, validator: str) -> bool:
+    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    sel = re.compile(rf"""\[\s*["']id["']\s*\]\s*==\s*["']{re.escape(hook_id)}["']""")
+    for job in jobs.values() if isinstance(jobs, dict) else ():
+        exported: set[str] = set()
+        for step in (job.get("steps") or []) if isinstance(job, dict) else ():
+            run = str(step.get("run", "")) if isinstance(step, dict) else ""
+            code = "\n".join(
+                x for x in run.splitlines() if not x.lstrip().startswith("#")
+            )
+            uses = [
+                n for n in exported if re.search(rf"--with\s+[\"']?\${{?{n}\b", code)
+            ]
+            if uses and re.search(rf"\b{re.escape(validator)}\b", code):
+                return True
+            if _CONFIG_LOAD_RE.search(code) and sel.search(code) and '["rev"]' in code:
+                exported.update(_ENV_EXPORT_RE.findall(code))
+    return False
 
 
 def main() -> int:
@@ -113,7 +140,7 @@ def main() -> int:
 
         ci_text = ci_workflow_path.read_text(encoding="utf-8")
         ci_pins = _find_ci_pins(ci_text)
-        if not ci_pins and _reads_hook_rev(ci_text, hook_id):
+        if not ci_pins and _reads_hook_rev(yaml.safe_load(ci_text), hook_id, validator):
             continue
         if not ci_pins:
             violations.append(
