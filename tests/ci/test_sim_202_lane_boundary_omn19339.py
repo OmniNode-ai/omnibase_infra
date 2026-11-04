@@ -163,9 +163,10 @@ def test_stability_test_deploy_attribution_preflight_still_refuses_without_reaso
 @pytest.mark.lab_overlay
 def test_manifest_declares_sim_202_on_lab_202_only() -> None:
     lane = _manifest()["lanes"][LANE]
-    assert lab_registry().hosts_of(LANE) == [HOST_ID], (
+    hosts = lab_registry().hosts_of(LANE)
+    assert hosts == [HOST_ID], (
         f"sim-202 runs on .202 only; a second host would make the census expect "
-        f"it there too. Got {lane['hosts']}"
+        f"it there too. Got {hosts}"
     )
     assert lane["compose_project"] == COMPOSE_PROJECT
     assert lane["network"] == NETWORK
