@@ -183,9 +183,9 @@ repos:
         stages: [pre-commit]
       - id: census-container-health
         name: Census unhealthy and restart bounds (OMN-19416)
-        entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+        entry: bash -c 'uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop or oneshot" -q && uv run --frozen pytest tests/ci/test_census_oneshot_recorded_omn19998.py -q'
         language: system
-        files: ^(scripts/lane_census_plan\.py|tests/unit/scripts/test_lane_census_plan\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(scripts/(lane_census_plan\.py|lane-census-check\.sh|deploy-agent/deploy_agent/executor\.py)|src/omnibase_infra/(handlers/handler_census_oneshot\.py|models/model_census_oneshot_(request|result)\.py|nodes/node_census_oneshot_effect/.*)|tests/(unit/scripts/test_lane_census_plan\.py|ci/test_census_oneshot_recorded_omn19998\.py|ci/fixtures/ci_live_contact/census_oneshot_fresh_omn19998\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: census-desired-state-drift

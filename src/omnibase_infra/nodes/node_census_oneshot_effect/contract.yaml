@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_census_oneshot_effect
+contract_name: node_census_oneshot_effect
+node_name: node_census_oneshot_effect
+node_type: EFFECT_GENERIC
+runtime_profiles: [main]
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: true
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: "Sample running oneshots through the existing migration-preflight deadline."
+input_model:
+  name: ModelCensusOneshotRequest
+  module: omnibase_infra.models.model_census_oneshot_request
+  description: "Collector directory and its original arguments."
+output_model:
+  name: ModelCensusOneshotResult
+  module: omnibase_infra.models.model_census_oneshot_result
+  description: "Final stdout and diagnostics, retaining earlier alarm or delivery failures."
+event_bus:
+  subscribe_topics: ["onex.cmd.omnibase-infra.census-oneshot-sample.v1"]
+  publish_topics: ["onex.evt.omnibase-infra.census-oneshot-sampled.v1"]
+terminal_event: "onex.evt.omnibase-infra.census-oneshot-sampled.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: census_oneshot.sample
+      handler:
+        name: HandlerCensusOneshot
+        module: omnibase_infra.handlers.handler_census_oneshot
+      event_model:
+        name: ModelCensusOneshotRequest
+        module: omnibase_infra.models.model_census_oneshot_request
+      output_events: [ModelCensusOneshotResult]
+capabilities:
+  - name: census_oneshot.sample
+    description: "Recheck pending executions and publish real census alarms promptly."
+# Existing deploy-agent phase limits, moved without changing any value. The
+# migration preflight uses runtime; census and producer read that same entry.
+# Core excludes supervised compose-up; runtime bounds image operations and
+# migration preflight, while compose-up uses its existing health-derived budget.
+phase_timeouts:
+  preflight: 30
+  git: 60
+  compose_gen: 120
+  core: 300
+  runtime: 300
+  verification: 120
+sample_interval_seconds: 2
+dispatch_timeout_seconds: 900
+metadata:
+  ticket: OMN-19998
+  author: OmniNode Team
+  description: "Completion-bound evaluation and automated follow-up of recorded fresh oneshots."
+  tags: [effect, census, completion]

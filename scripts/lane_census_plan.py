@@ -25,7 +25,8 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
   replicas_zero        — a required service resolved to 0 running replicas
   network_detached     — the lane's declared network does not exist
   oneshot_failed       — a run-to-completion container Exited non-zero
-  oneshot_stuck        — a run-to-completion container is still Running
+  oneshot_stuck        — a run-to-completion container exceeded its completion bound
+  oneshot_unobservable — running oneshot timing could not be graded
                          (kind `keepalive` is exempt: a healthcheck sentinel
                          such as migration-gate is a long-running keepalive BY
                          DESIGN — `while true; do sleep 3600; done` + a
@@ -109,6 +110,7 @@ Output (stdout JSON):
     "lanes_not_applicable": ["dogfood", ...],  # lanes declared elsewhere
     "lanes_skipped_optional_down": ["prepr-1", ...],  # optional + entirely down
     "lab_sync_evaluated": true|false,  # the desired-state kinds were graded
+    "pending_oneshots": [{lane, container, started_at, deadline, remaining_seconds}],
     "findings": [ {lane, kind, container, detail, severity}, ... ],
     "has_drift": true|false
   }
@@ -137,6 +139,15 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from omnibase_infra.handlers import handler_census_oneshot as oneshot
+from omnibase_infra.models.model_census_oneshot_request import ModelOneshotObservation
+
+ONESHOT_POLICY = oneshot.load_policy(
+    Path(__file__).resolve().parents[1]
+    / "src/omnibase_infra/nodes/node_census_oneshot_effect/contract.yaml"
+)
 
 SCHEMA_VERSION = "1.1.0"
 DEFAULT_UNHEALTHY_AFTER_SECONDS = 1800
@@ -230,6 +241,7 @@ CENSUS_FINDING_KINDS: tuple[FindingKindSpec, ...] = (
     FindingKindSpec("network_detached", _SEVERITY_CRITICAL, "network", ()),
     FindingKindSpec("oneshot_failed", _SEVERITY_CRITICAL, "container", ()),
     FindingKindSpec("oneshot_stuck", _SEVERITY_WARNING, "container", ()),
+    FindingKindSpec("oneshot_unobservable", _SEVERITY_WARNING, "container", ()),
     FindingKindSpec("image_tag_mismatch", _SEVERITY_WARNING, "container", ()),
     FindingKindSpec("unexpected_container", _SEVERITY_WARNING, "container", ()),
     FindingKindSpec("profile_gated_present", _SEVERITY_WARNING, "container", ()),
@@ -633,12 +645,6 @@ def _undeclared_presence(
 def _running(state: str, status: str) -> bool:
     """A container counts as running only when docker reports it running."""
     return state.lower() == "running" or status.lower().startswith("up")
-
-
-def _exit_code(status: str) -> int | None:
-    """Parse the exit code out of a docker status string, e.g. 'Exited (0) ...'."""
-    match = re.search(r"Exited \((\d+)\)", status)
-    return int(match.group(1)) if match else None
 
 
 def _tag_of(image: str) -> str:
@@ -1143,6 +1149,7 @@ def reconcile_lane(
     default_tag_pattern: str,
     runtime_tag: str | None,
     observed_at: datetime | None,
+    pending_oneshots: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     """Diff one lane's desired state against the actual inventory."""
     findings: list[dict[str, str]] = []
@@ -1216,37 +1223,24 @@ def reconcile_lane(
             )
 
         if kind in ("oneshot", "keepalive"):
-            # Run-to-completion container. Absence (compose removed it) is fine.
-            if actual is None:
-                continue
-            status = actual.get("Status", "")
-            if _running(actual.get("State", ""), status):
-                if kind == "keepalive":
-                    # Healthcheck sentinel (e.g. migration-gate): a long-running
-                    # keepalive BY DESIGN. Running is its healthy steady state,
-                    # never oneshot_stuck (OMN-13772 census false-positive).
-                    continue
-                findings.append(
-                    _finding(
-                        lane_name,
-                        "oneshot_stuck",
-                        name,
-                        f"migration/init container {name!r} is still Running "
-                        f"(expected run-to-completion): {status}",
-                    )
+            row = actual or {}
+            grade = oneshot.grade_oneshot(
+                ModelOneshotObservation(
+                    completion_timeout_seconds=ONESHOT_POLICY.phase_timeouts["runtime"],
+                    lane=lane_name,
+                    container=name,
+                    keepalive=kind == "keepalive",
+                    present=actual is not None,
+                    running=_running(row.get("State", ""), row.get("Status", "")),
+                    status=row.get("Status", ""),
+                    started_at=row.get("StartedAt") or "",
+                    observed_at=observed_at,
                 )
-                continue
-            code = _exit_code(status)
-            if code is not None and code != 0:
-                findings.append(
-                    _finding(
-                        lane_name,
-                        "oneshot_failed",
-                        name,
-                        f"migration/init container {name!r} Exited non-zero "
-                        f"(code {code}): {status}",
-                    )
-                )
+            )
+            if grade.kind:
+                findings.append(_finding(lane_name, grade.kind, name, grade.detail))
+            if grade.pending:
+                pending_oneshots.append(grade.pending.model_dump(mode="json"))
             continue
 
         # kind == service: MUST be running with the required replica count.
@@ -1300,28 +1294,6 @@ def reconcile_lane(
     return findings
 
 
-def _labels_to_dict(labels: Any) -> dict[str, str]:
-    """Coerce a container's Labels to a mapping.
-
-    The Docker Engine API returns Labels as a real mapping; the Docker CLI
-    returns a comma-joined ``k=v`` string. The collector
-    (``lane_census_inventory.py``) normalizes both to a mapping, so the mapping
-    branch is the live path — the string branch is retained for envelopes
-    produced by older callers and for direct CLI-shaped fixtures. Note the string
-    form is lossy by construction: a label VALUE may itself contain commas
-    (``com.docker.compose.project.config_files``), which a flat split cannot
-    recover. Prefer the mapping form (OMN-15466).
-    """
-    if isinstance(labels, dict):
-        return {str(k): str(v) for k, v in labels.items()}
-    out: dict[str, str] = {}
-    for pair in str(labels or "").split(","):
-        if "=" in pair:
-            key, value = pair.split("=", 1)
-            out[key.strip()] = value.strip()
-    return out
-
-
 def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
     """Build the deterministic drift plan from the desired manifest + actual state."""
     validate_service_bounds(manifest)
@@ -1340,7 +1312,7 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
         if not name:
             continue
         actual_by_name[name] = row
-        labels = _labels_to_dict(row.get("Labels", ""))
+        labels = oneshot.labels_to_dict(row.get("Labels", ""))
         labelled_rows.append((name, row, labels))
         lane_label = labels.get("com.omninode.lane")
         if lane_label:
@@ -1358,6 +1330,7 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
     checked: list[str] = []
     not_applicable: list[str] = []
     skipped_optional_down: list[str] = []
+    pending_oneshots: list[dict[str, Any]] = []
     for lane_name, lane_spec in target_lanes.items():
         if host_id not in lane_spec["hosts"]:
             not_applicable.append(lane_name)
@@ -1378,6 +1351,7 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
                 default_tag_pattern=default_pattern,
                 runtime_tag=runtime_tag,
                 observed_at=_parse_instant(envelope.get("observed_at")),
+                pending_oneshots=pending_oneshots,
             )
         )
 
@@ -1396,6 +1370,9 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
         "lab_sync_evaluated": lab_sync_evaluated,
         "findings": findings,
         "has_drift": len(findings) > 0,
+        "pending_oneshots": pending_oneshots,
+        "oneshot_sample_interval_seconds": ONESHOT_POLICY.sample_interval_seconds,
+        "oneshot_completion_timeout_seconds": ONESHOT_POLICY.phase_timeouts["runtime"],
     }
 
 

@@ -438,8 +438,8 @@ def test_recorded_api_envelope_drives_the_planner(inventory: Any, planner: Any) 
 
 def test_labels_mapping_and_string_forms_agree(planner: Any) -> None:
     """The planner's label coercion accepts both the API and CLI forms."""
-    as_map = planner._labels_to_dict({"com.omninode.lane": "prod", "a": "b"})
-    as_str = planner._labels_to_dict("com.omninode.lane=prod,a=b")
+    as_map = planner.oneshot.labels_to_dict({"com.omninode.lane": "prod", "a": "b"})
+    as_str = planner.oneshot.labels_to_dict("com.omninode.lane=prod,a=b")
     assert as_map == as_str == {"com.omninode.lane": "prod", "a": "b"}
 
 
