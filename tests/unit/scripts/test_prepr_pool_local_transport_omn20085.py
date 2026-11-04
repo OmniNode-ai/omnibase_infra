@@ -16,10 +16,12 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POOL_PY = REPO_ROOT / "scripts" / "runtime_build" / "prepr_runtime_pool.py"
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 
 
 def _load(name: str, path: Path) -> Any:

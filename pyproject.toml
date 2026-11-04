@@ -675,6 +675,7 @@ node_invariant_evaluate_compute = "omnibase_infra.nodes.node_invariant_evaluate_
 node_kafka_replay_compute = "omnibase_infra.nodes.node_kafka_replay_compute"
 node_lab_proof_plan_compute = "omnibase_infra.nodes.node_lab_proof_plan_compute"
 node_lab_proof_run_effect = "omnibase_infra.nodes.node_lab_proof_run_effect"
+node_lane_entry_point_census_effect = "omnibase_infra.nodes.node_lane_entry_point_census_effect"
 node_ledger_projection_compute = "omnibase_infra.nodes.node_ledger_projection_compute"
 node_ledger_write_effect = "omnibase_infra.nodes.node_ledger_write_effect"
 node_llm_completion_effect = "omnibase_infra.nodes.node_llm_completion_effect"
