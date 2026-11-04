@@ -168,8 +168,23 @@ requirements:
   - id: req-omn19998-h053-pool-in-memory
     statement: The h053 general omnibase-ci runner pool is sized from the host's measured memory and keeps its job directories in memory, so it adds CI capacity for the starved omnibase-ci label without taking memory from the lab lanes.
     acceptance:
+      - id: AC39
+        statement: 'AC39: the h053 pool declares five runners at 9 GiB with memswap equal and five CPUs, every job directory (workspace, TMPDIR, the six package caches) is an exec tmpfs of the container, no disk path under /data/scratch is bound, the pool slice caps the five at 46G with no swap, and the fleet declares five h053 runners -- falsifier: uv run pytest tests/ci/test_hp053_pool_omn22111.py tests/ci/test_hp053_pool_in_memory_omn19998.py -q -n 0 fails on the merge-base compose file, which has eight runners at 6 GiB bound to /data/scratch'
+  - id: req-omn19998-wrapper-venv-peer-floor
+    statement: The onex wrapper must wait while either a host reconcile or a venv-only reconcile can prove the floor, including overlapping locks and a handoff between them, and must refuse a floor that remains stale without reclaiming either lock.
+    acceptance:
       - id: AC36
-        statement: 'AC36: the h053 pool declares five runners at 9 GiB with memswap equal and five CPUs, every job directory (workspace, TMPDIR, the six package caches) is an exec tmpfs of the container, no disk path under /data/scratch is bound, the pool slice caps the five at 46G with no swap, and the fleet declares five h053 runners -- falsifier: uv run pytest tests/ci/test_hp053_pool_omn22111.py tests/ci/test_hp053_pool_in_memory_omn19998.py -q -n 0 fails on the merge-base compose file, which has eight runners at 6 GiB bound to /data/scratch'
+        statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
+  - id: req-omn19998-refresh-recovery-census
+    statement: The dev refresh completion must run the existing closing lane census after recovery as well as success, while preserving the failed refresh's result and exit code.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: the refresh completion removes only declared same-lane recreate leftovers after recovery, preserves failure results and exit codes, records remaining drift or unreadable inventory, and retains success census exit codes -- falsifier: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q fails ten recovery cases against the merge-base refresh_dev_lane.sh.'
+  - id: req-omn19998-broker-listener-recorded-rows
+    statement: The broker_listener lab alarm must keep raising on the recorded friction rows, a refused connect and an unreachable network on every bootstrap address, and must not read either as INDETERMINATE; the same bootstrap with an answering listener reads OK.
+    acceptance:
+      - id: AC38
+        statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -688,12 +703,48 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC35
-  - id: dod-omn19998-ac36-h053-pool-in-memory
-    description: AC36 reads the h053 compose file, slice and fleet row and checks the five runners, their limits, the eight tmpfs entries each and the absence of any disk-backed job directory.
+  - id: dod-omn19998-ac39-h053-pool-in-memory
+    description: AC39 reads the h053 compose file, slice and fleet row and checks the five runners, their limits, the eight tmpfs entries each and the absence of any disk-backed job directory.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_hp053_pool_omn22111.py tests/ci/test_hp053_pool_in_memory_omn19998.py -q -n 0
         cwd: .
     binds_ac:
+      - AC39
+  - id: dod-omn19998-ac36-wrapper-venv-peer-floor
+    description: AC36 runs the actual wrapper in a disposable workspace with a stale or proven floor and a stub dispatch entrypoint. A deterministic poll clock drives both lock release orders and both handoff directions, and checks refusal without lock reclamation when the floor stays stale.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q
+        cwd: .
+    binds_ac:
       - AC36
+  - id: dod-omn19998-ac36-wrapper-deploy-probe
+    description: Hosted-runner wrapper artifact probe for AC36. Executes scripts/onex from this checkout against disposable floor metadata, lock directories and a stub CLI, requiring successful dispatch only after proof and refusal while the floor remains stale. Uses Bash and Python without a live lane, broker, credentials or Docker; this checks the shipped wrapper rather than live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC36
+  - id: dod-omn19998-refresh-recovery-census
+    description: Replay the recorded dev recreate leftover through the refresh completion block, real census reader and Docker shim. Recovery removes only declared same-lane leftovers, preserves failure results and exit codes, and records remaining drift or unreadable inventory. Success controls retain the census exit code.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q
+        cwd: .
+    binds_ac:
+      - AC37
+  - id: dod-omn19998-ac38-broker-listener-recorded-rows
+    description: AC38 drives evaluate_broker_listener with the recorded refused and network-unreachable rows, a mixed two-address bootstrap and an answering positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network"
+        cwd: .
+    binds_ac:
+      - AC38
