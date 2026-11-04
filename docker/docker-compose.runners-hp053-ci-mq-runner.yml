@@ -53,6 +53,16 @@ x-runner-lab-credentials: &runner-lab-credentials
   read_only: true
   bind:
     create_host_path: true
+# The runner image carries no timezone database, and a merge_group job of a private repository runs tests that resolve
+# `America/New_York` (zoneinfo.ZoneInfoNotFoundError otherwise, measured 2026-11-04 on the first mq-pool jobs). The host
+# has tzdata, so each runner reads it read-only instead of the shared image growing a package for one pool.
+x-runner-host-zoneinfo: &runner-host-zoneinfo
+  type: bind
+  source: /usr/share/zoneinfo
+  target: /usr/share/zoneinfo
+  read_only: true
+  bind:
+    create_host_path: false
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
@@ -117,6 +127,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-host-zoneinfo
       - /data/scratch/cache/runners/mq-1/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/mq-1/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/mq-1/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -139,6 +150,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-host-zoneinfo
       - /data/scratch/cache/runners/mq-2/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/mq-2/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/mq-2/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -161,6 +173,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-host-zoneinfo
       - /data/scratch/cache/runners/mq-3/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/mq-3/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/mq-3/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -183,6 +196,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-host-zoneinfo
       - /data/scratch/cache/runners/mq-4/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/mq-4/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/mq-4/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
