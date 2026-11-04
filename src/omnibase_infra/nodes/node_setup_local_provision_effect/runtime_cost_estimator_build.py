@@ -34,10 +34,10 @@ from omnibase_infra.protocols.protocol_cost_estimator_build_io import (
 )
 
 
-class AdapterCostEstimatorBuildIO:
+class CostEstimatorBuildIO:
     """Only the host effect spawns processes or reads the filesystem."""
 
-    def run(
+    def execute_build_command(
         self, argv: list[str], timeout: int, *, allow_failure: bool = False
     ) -> str | None:
         result = subprocess.run(
@@ -57,7 +57,7 @@ class AdapterCostEstimatorBuildIO:
         return result.stdout.strip()
 
     def build_image(self, argv: list[str], timeout: int, identity_path: str) -> str:
-        self.run(argv, timeout)
+        self.execute_build_command(argv, timeout)
         return Path(identity_path).read_text(encoding="utf-8").strip()
 
     def workspace(self) -> AbstractContextManager[str]:
@@ -129,7 +129,7 @@ def build_dev_lane_services(
                 cast(
                     "type[ProtocolCostEstimatorBuildIO]", ProtocolCostEstimatorBuildIO
                 ),
-                AdapterCostEstimatorBuildIO(),
+                CostEstimatorBuildIO(),
             )
         )
         run_coro_sync(

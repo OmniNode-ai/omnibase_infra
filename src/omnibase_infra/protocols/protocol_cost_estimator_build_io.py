@@ -8,7 +8,7 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class ProtocolCostEstimatorBuildIO(Protocol):
-    def run(
+    def execute_build_command(
         self, argv: list[str], timeout: int, *, allow_failure: bool = False
     ) -> str | None: ...
 

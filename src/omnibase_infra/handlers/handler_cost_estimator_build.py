@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Mapping
 from types import ModuleType
-from typing import Any, cast
+from typing import cast
 
 from pydantic import ValidationError
 
@@ -84,7 +85,7 @@ class HandlerCostEstimatorBuild:
         return EnumHandlerTypeCategory.EFFECT
 
     def _checked(self, argv: list[str], timeout: int) -> str:
-        result = self._io.run(argv, timeout)
+        result = self._io.execute_build_command(argv, timeout)
         if result is None:
             raise RuntimeError(f"estimator {argv[0]} {argv[1]} failed")
         return result
@@ -92,7 +93,7 @@ class HandlerCostEstimatorBuild:
     def _matching_id(
         self, image: str, repository: str, revision: str, timeout: int
     ) -> str | None:
-        output = self._io.run(
+        output = self._io.execute_build_command(
             ["docker", "image", "inspect", "--format", "{{json .}}", "--", image],
             timeout,
             allow_failure=True,
@@ -188,16 +189,22 @@ class HandlerCostEstimatorBuild:
 
 
 def dev_lane_build_settings(
-    execution: ModuleType, lane: str, declaration: dict[str, Any]
+    execution: ModuleType, lane: str, declaration: Mapping[str, object]
 ) -> tuple[ModelCostEstimatorBuildConfig, dict[str, str]] | None:
     """Validate declared settings before any image build or container mutation."""
     if lane != execution.EnumRuntimeLane.DEV:
         return None
     if "cost-estimator-web" in execution.lane_config_for(lane).disabled_services:
         return None
-    build = dict(declaration["build"])
-    source_configuration = declaration["source_configuration"]
-    gate = declaration["gate"]
+    build = dict(cast("Mapping[str, object]", declaration["build"]))
+    source_configuration = cast(
+        "Mapping[str, str]", declaration["source_configuration"]
+    )
+    gate = cast("Mapping[str, object]", declaration["gate"])
+    enabled_env = gate["enabled_env"]
+    password_env = gate["password_env"]
+    if not isinstance(enabled_env, str) or not isinstance(password_env, str):
+        raise RuntimeError("estimator gate environment names must be strings")
     environment = execution._compose_env()
     missing: list[str] = []
     for field in ("repository", "repository_url"):
@@ -208,14 +215,11 @@ def dev_lane_build_settings(
         if not value:
             missing.append(name)
         build[field] = value
-    enabled = environment.get(gate["enabled_env"], str(gate["default_enabled"]))
+    enabled = environment.get(enabled_env, str(gate["default_enabled"]))
     if enabled.lower() not in ("true", "false"):
-        raise RuntimeError(f"estimator {gate['enabled_env']} must be true or false")
-    if (
-        enabled.lower() == "true"
-        and not environment.get(gate["password_env"], "").strip()
-    ):
-        missing.append(gate["password_env"])
+        raise RuntimeError(f"estimator {enabled_env} must be true or false")
+    if enabled.lower() == "true" and not environment.get(password_env, "").strip():
+        missing.append(password_env)
     if missing:
         raise RuntimeError(
             "estimator missing required settings: "
