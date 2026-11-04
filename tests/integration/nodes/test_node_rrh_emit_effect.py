@@ -16,6 +16,9 @@ from omnibase_infra.models.rrh import ModelRRHRepoState
 from omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_repo_state_collect import (
     HandlerRepoStateCollect,
 )
+from omnibase_infra.nodes.node_rrh_emit_effect.models.model_repo_state_collect_request import (
+    ModelRepoStateCollectRequest,
+)
 
 
 class TestHandlerRepoStateCollectIntegration:
@@ -29,7 +32,7 @@ class TestHandlerRepoStateCollectIntegration:
     ) -> None:
         """Collect state from the actual repo hosting this test suite."""
         repo_path = str(Path(__file__).resolve().parents[3])
-        result = await handler.handle(repo_path)
+        result = await handler.handle(ModelRepoStateCollectRequest(repo_path=repo_path))
         assert isinstance(result, ModelRRHRepoState)
         assert result.branch  # Should have a branch
         assert result.head_sha  # Should have a SHA

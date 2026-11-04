@@ -1,9 +1,9 @@
 {
   "_provenance": {
-    "source": "omnibase_core scripts/ci/verify_flip_bundle.py run in the omnibase_infra worktree against base_ref ae5fca1228a3 for each flipped node (OMN-21053)",
+    "source": "omnibase_core scripts/ci/verify_flip_bundle.py run in the omnibase_infra worktree against base_ref ae5fca1228a3 for each flipped node (OMN-21053); source_sha256 rebound in OMN-21536 after that PR removed other nodes from NON_CANONICAL (the three recorded nodes are not among the removed entries)",
     "captured_utc": "2026-10-14T06:04:07Z",
     "source_file": "scripts/ci/canonical_handler_shape_baseline.py",
-    "source_sha256": "bbc461f4e75f9fc83b5836c53643cd58643430c1c8b6ba340ae1363a958b87d5"
+    "source_sha256": "c2de66ecece2c8032afe1dbee30af7e51746d589aeb170d130ebd55df4647bcf"
   },
   "base_ref": "ae5fca1228a3",
   "runs": [

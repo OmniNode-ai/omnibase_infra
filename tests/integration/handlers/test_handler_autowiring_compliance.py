@@ -75,11 +75,17 @@ class TestHandlerAutowiringCompliance:
         assert handler is not None
 
     def test_handler_onboarding_no_args(self) -> None:
+        from omnibase_core.models.container.model_onex_container import (
+            ModelONEXContainer,
+        )
         from omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding import (
             HandlerOnboarding,
         )
 
-        handler = HandlerOnboarding()
+        # OMN-21536: the handler takes the ONEX container (the framework's one
+        # injected argument) and resolves its input adapter from it, so it no
+        # longer constructs with no arguments.
+        handler = HandlerOnboarding(ModelONEXContainer())
         assert handler is not None
 
     def test_handler_node_introspected_no_args(self) -> None:

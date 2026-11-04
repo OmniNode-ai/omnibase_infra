@@ -11,8 +11,9 @@ Two execution paths:
   write env config via ``ConfigWriter`` and the 0600 JSON credentials
   artifact via ``CredentialsWriter`` (OMN-16035, OMN-16038).
 
-The ``input_adapter`` is a function parameter injected by the caller,
-NOT part of the Pydantic model (DI outside models — OMN-10784 GPT #1).
+The ``input_adapter`` is resolved from the ONEX container by
+``ProtocolInputAdapter`` (or passed to the implementation function), outside
+the Pydantic model.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from pathlib import Path
 
 from pydantic import SecretStr, ValidationError
 
+from omnibase_core.errors.error_service_resolution import ServiceResolutionError
+from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_core.types import StrictJsonType
 from omnibase_infra.gateway.client.store_gateway_credential import (
     StoreGatewayCredential,
@@ -488,19 +491,41 @@ class HandlerOnboarding:
 
     The auto-wiring framework requires a class (not a bare function) so it can
     inspect the constructor signature. This wrapper delegates to
-    ``handle_onboarding`` and requires no constructor arguments.
+    ``handle_onboarding`` and resolves the optional input adapter from the container.
     """
 
-    def __init__(self) -> None:  # stub-ok: stateless init
-        """Initialize the handler (stateless)."""
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize the handler with the ONEX container.
+
+        Args:
+            container: ONEX dependency injection container. The interactive
+                input adapter is resolved from it by ``ProtocolInputAdapter``
+                when an interactive policy is requested.
+        """
+        self._container = container
 
     async def handle(
         self,
-        input_model: ModelOnboardingInput,
-        input_adapter: ProtocolInputAdapter | None = None,
+        request: ModelOnboardingInput,
     ) -> ModelOnboardingOutput:
-        """Execute the onboarding orchestration."""
-        return await handle_onboarding(input_model, input_adapter=input_adapter)
+        """Execute the onboarding orchestration.
+
+        Args:
+            request: Onboarding policy, capabilities and output settings.
+        """
+        input_adapter: ProtocolInputAdapter | None = None
+        if request.policy_name is not None:
+            try:
+                input_adapter = await self._container.get_service_async(
+                    ProtocolInputAdapter  # type: ignore[type-abstract]  # Protocol used as DI key
+                )
+            except ServiceResolutionError as exc:
+                msg = (
+                    f"input_adapter is required for interactive policy "
+                    f"'{request.policy_name}'"
+                )
+                raise OnboardingHandlerError(msg) from exc
+        return await handle_onboarding(request, input_adapter=input_adapter)
 
 
 __all__ = ["OnboardingHandlerError", "handle_onboarding", "HandlerOnboarding"]

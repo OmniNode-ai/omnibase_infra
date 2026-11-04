@@ -16,6 +16,9 @@ from pathlib import Path
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.rrh.model_rrh_repo_state import ModelRRHRepoState
+from omnibase_infra.nodes.node_rrh_emit_effect.models.model_repo_state_collect_request import (
+    ModelRepoStateCollectRequest,
+)
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
@@ -39,11 +42,11 @@ class HandlerRepoStateCollect:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, repo_path: str) -> ModelRRHRepoState:
+    async def handle(self, request: ModelRepoStateCollectRequest) -> ModelRRHRepoState:
         """Collect git state from the given repository path.
 
         Args:
-            repo_path: Absolute path to the repository root.
+            request: Absolute path to the repository root to inspect.
 
         Returns:
             Populated ``ModelRRHRepoState`` with git information.
@@ -52,6 +55,7 @@ class HandlerRepoStateCollect:
         Raises:
             ValueError: If *repo_path* is empty or not an absolute path.
         """
+        repo_path = request.repo_path
         if not repo_path or not Path(repo_path).is_absolute():
             raise ValueError(
                 f"repo_path must be a non-empty absolute path, got: {repo_path!r}"

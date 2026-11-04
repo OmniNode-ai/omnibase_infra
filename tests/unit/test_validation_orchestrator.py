@@ -93,7 +93,7 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """handle() produces a plan with exactly 12 MVP checks."""
-        plan = await handler.handle(candidate, correlation_id=uuid4())
+        plan = await handler.handle(candidate)
         assert isinstance(plan, ModelValidationPlan)
         assert len(plan.checks) == 12
 
@@ -104,7 +104,7 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """Plan's candidate_id matches the input candidate."""
-        plan = await handler.handle(candidate, correlation_id=uuid4())
+        plan = await handler.handle(candidate)
         assert plan.candidate_id == candidate.candidate_id
 
     @pytest.mark.asyncio
@@ -114,7 +114,7 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """Plan has default score_threshold of 0.8."""
-        plan = await handler.handle(candidate, correlation_id=uuid4())
+        plan = await handler.handle(candidate)
         assert plan.score_threshold == 0.8
 
     @pytest.mark.asyncio
@@ -124,7 +124,7 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """All checks in the plan are enabled by default."""
-        plan = await handler.handle(candidate, correlation_id=uuid4())
+        plan = await handler.handle(candidate)
         assert all(check.enabled for check in plan.checks)
 
     @pytest.mark.asyncio
@@ -134,7 +134,7 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """Check catalog contains 7 REQUIRED checks."""
-        plan = await handler.handle(candidate, correlation_id=uuid4())
+        plan = await handler.handle(candidate)
         required_count = sum(
             1 for c in plan.checks if c.severity == EnumCheckSeverity.REQUIRED
         )
@@ -147,7 +147,7 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """Check catalog contains 3 RECOMMENDED checks."""
-        plan = await handler.handle(candidate, correlation_id=uuid4())
+        plan = await handler.handle(candidate)
         recommended_count = sum(
             1 for c in plan.checks if c.severity == EnumCheckSeverity.RECOMMENDED
         )
@@ -160,7 +160,7 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """Check catalog contains 2 INFORMATIONAL checks."""
-        plan = await handler.handle(candidate, correlation_id=uuid4())
+        plan = await handler.handle(candidate)
         informational_count = sum(
             1 for c in plan.checks if c.severity == EnumCheckSeverity.INFORMATIONAL
         )
@@ -187,7 +187,7 @@ class TestHandlerBuildPlanHandle:
             "CHECK-COST-001",
             "CHECK-TIME-001",
         }
-        plan = await handler.handle(candidate, correlation_id=uuid4())
+        plan = await handler.handle(candidate)
         actual_codes = {c.check_code for c in plan.checks}
         assert actual_codes == expected_codes
 
@@ -198,8 +198,8 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """Each invocation produces a plan with a distinct plan_id."""
-        plan_a = await handler.handle(candidate, correlation_id=uuid4())
-        plan_b = await handler.handle(candidate, correlation_id=uuid4())
+        plan_a = await handler.handle(candidate)
+        plan_b = await handler.handle(candidate)
         assert plan_a.plan_id != plan_b.plan_id
 
     @pytest.mark.asyncio
@@ -209,7 +209,7 @@ class TestHandlerBuildPlanHandle:
         candidate: ModelPatternCandidate,
     ) -> None:
         """handle() succeeds with correlation_id=None (auto-generates UUID)."""
-        plan = await handler.handle(candidate, correlation_id=None)
+        plan = await handler.handle(candidate)
         assert isinstance(plan, ModelValidationPlan)
         assert isinstance(plan.plan_id, UUID)
         assert len(plan.checks) == 12

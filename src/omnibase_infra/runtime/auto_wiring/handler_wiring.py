@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from functools import cache, lru_cache
+from functools import cache, lru_cache, partial
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -89,6 +89,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_core.utils.util_safe_yaml_loader import load_and_validate_yaml_model
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ProjectionNotMaterializedError,
@@ -129,6 +130,7 @@ from omnibase_infra.handlers.handler_projection_write_cursor import (
 )
 from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
 from omnibase_infra.models.operational_timeouts import TIMEOUTS
+from omnibase_infra.models.projection import ModelProjectionDerivedWriteRequest
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
 )
@@ -3833,14 +3835,15 @@ class ProjectionDatabaseOperations:
         column DEFAULT is consulted only on INSERT -- an existing row would
         otherwise wear its first writer's stamp forever.
         """
-        plan = build_upsert_plan(
+        plan_for = partial(
+            build_upsert_plan,
             table=target.table.name,
             conflict_key=conflict_key,
             row=row,
             insert_only_columns=insert_only_columns,
             sql_expression_columns=sql_expression_columns,
-            returning=returning,
         )
+        plan = plan_for(returning=returning)
         if derive is not None:
             internal_returning = HandlerProjectionDerivedWrite.returning_columns(
                 row=row,
@@ -3851,14 +3854,7 @@ class ProjectionDatabaseOperations:
                 expression_columns=sql_expression_columns,
                 returning=returning,
             )
-            plan = build_upsert_plan(
-                table=target.table.name,
-                conflict_key=conflict_key,
-                row=row,
-                insert_only_columns=insert_only_columns,
-                sql_expression_columns=sql_expression_columns,
-                returning=internal_returning,
-            )
+            plan = plan_for(returning=internal_returning)
         # The plan validated every identifier against its own rule; this
         # adapter's rule is narrower and is applied on top rather than
         # replaced, so relaxing one never silently relaxes the other.
@@ -3912,16 +3908,18 @@ class ProjectionDatabaseOperations:
                         insert_sql, adapted_row, returning=plan.returning
                     )
                     final_rows = HandlerProjectionDerivedWrite.handle(
-                        write_cursor,
-                        schema=target.physical_schema,
-                        table=target.table.name,
-                        stored_rows=stored_rows,
-                        conflict_columns=plan.conflict_keys,
-                        input_columns=input_columns,
-                        derived_columns=derived_columns,
-                        returning=returning,
-                        derive=derive,
-                        adapt=self._adapt_row,
+                        ModelProjectionDerivedWriteRequest(
+                            cursor=write_cursor,
+                            physical_schema=target.physical_schema,
+                            table=target.table.name,
+                            stored_rows=tuple(stored_rows),
+                            conflict_columns=tuple(plan.conflict_keys),
+                            input_columns=tuple(input_columns),
+                            derived_columns=tuple(derived_columns),
+                            returning=tuple(returning),
+                            derive=derive,
+                            adapt=self._adapt_row,
+                        )
                     )
             # The transaction has committed before any caller can publish.
             return final_rows
@@ -10790,58 +10788,15 @@ async def reattach_not_ready_contracts(
 ) -> tuple[dict[str, tuple[str, ...]], tuple[ModelContractAttachResult, ...]]:
     """Re-attempt provision -> confirm-ready -> attach for UNATTACHED contracts.
 
-    OMN-15215 (CONFIRMED root cause): ``subscribe_wired_contract_topics`` makes
-    exactly ONE provision->confirm->attach attempt per contract via
-    ``_interleave_contract``. A contract whose topic metadata has not converged
-    within the bounded readiness poll (``ModelTopicReadinessConfig``, 30s/60
-    attempts by default) is recorded NOT_READY and its consumer attach is
-    skipped — PERMANENTLY, for the rest of the process lifetime, because
-    nothing ever calls ``_interleave_contract`` for it again. For a
-    wide-topic-count contract (e.g. ``node_ledger_projection_compute``'s 26
-    topics, OMN-15006/OMN-15168) a transient cold-broker topic-creation race on
-    a handful of just-provisioned topics starves the ENTIRE contract's
-    consumer: since ``_subscribe_contract_topics`` subscribes a contract's
-    topics as one all-or-nothing unit, zero of its 26 topics ever get a Kafka
-    consumer group — not even the ones unrelated to the race. Live evidence
-    (fresh stability-test boot, 2026-07-27): ``NOT-READY: topic metadata did
-    not converge (status=not_ready failures=[4 OCC governance topics])``
-    logged exactly once at boot, followed by a ZERO count of "Auto-wired
-    subscription ... node=node_ledger_projection_compute" log lines across the
-    container's entire observed lifetime (3 separate contract-discovery
-    passes, ~11 minutes) — the OMN-13237 "runtime stays live" framing implies
-    eventual recoverability that was never actually implemented.
+    A cold broker can leave contracts NOT_READY when topic metadata has not
+    converged; even after readiness succeeds, a transient group-join failure
+    can leave them FAILED. Both outcomes need another idempotent interleave
+    instead of remaining unattached until restart (OMN-15215, OMN-18110).
+    Admission uses ModelContractAttachResult.needs_reattach.
 
-    This is NOT the ``handler_routing_loader`` "Unknown routing_strategy
-    'topic_match'" fallback warning (that code path is a separate, informational
-    ``RuntimeContractConfigLoader`` boot-summary pass — its output is never
-    consumed by ``auto_wiring``'s wire/attach decision, confirmed by a real,
-    unmocked repro: the current ``discovery.py`` + ``handler_wiring.py`` path
-    already wires and attaches 26/26 topic_match entries for
-    ``node_ledger_projection_compute`` via the topic-folded dispatcher-ID
-    derivation from OMN-14580/OMN-13825). Fixing the loader's
-    ``VALID_ROUTING_STRATEGIES`` alone would NOT have unblocked OMN-15169 —
-    only closing this NOT_READY-has-no-retry gap does.
-
-    OMN-18110 widened the input from NOT_READY to every contract that did not
-    attach. ``_interleave_contract`` records a second non-attached outcome —
-    FAILED, meaning readiness PASSED and the consumer attach itself raised —
-    and nothing retried it, so one transient Kafka group-join timeout stranded
-    a contract for the rest of the process. Live on the dev lane,
-    boot 2026-09-10T00:03:45Z: four contracts (``node_omnigate_projection``
-    among them) each recorded ``status=failed detail=InfraTimeoutError`` over a
-    ``readiness.status=ready`` with an empty failure set, while the eleven
-    preceding boots of the same image attached all 215. The runtime then held
-    ``projection_attachment`` DEGRADED with no path back short of a restart.
-    Both outcomes are re-attemptable by this same idempotent interleave, and
-    the admission predicate is now the shared
-    ``ModelContractAttachResult.needs_reattach``.
-
-    Re-runs the SAME provision->confirm->attach interleave
-    (``_interleave_contract``) for each contract still unattached, returning
-    newly-attached topics and updated per-contract results. Callers invoke
-    this repeatedly (bounded, with backoff — see
-    ``run_not_ready_reconciliation_loop``) until every contract attaches or a
-    bounded retry budget is exhausted.
+    Return newly attached topics and updated per-contract results. The caller's
+    run_not_ready_reconciliation_loop supplies bounded backoff and reads its
+    default attempt limit from operational_timeouts.yaml.
     """
     pending_results = _validate_unattached_contract_identities(
         manifest,

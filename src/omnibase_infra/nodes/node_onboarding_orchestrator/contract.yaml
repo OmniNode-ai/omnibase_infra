@@ -3,6 +3,8 @@
 # Ticket: OMN-8272, OMN-10784, OMN-11050, OMN-11069, OMN-16035, OMN-16038, OMN-17028
 name: "node_onboarding_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
+descriptor:
+  node_archetype: orchestrator
 runtime_profiles: [main]
 contract_version:
   major: 1
@@ -29,6 +31,9 @@ handler_routing:
       handler:
         name: "HandlerOnboarding"
         module: "omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding"
+      input_model:
+        name: "ModelOnboardingInput"
+        module: "omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input"
 capabilities:
   - "onboarding.orchestrate"
   - "onboarding.policy.resolve"
