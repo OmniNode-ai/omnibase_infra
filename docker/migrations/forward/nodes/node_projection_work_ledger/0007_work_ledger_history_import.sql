@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS omninode_internal.ledger_line_citation (
 
 -- A guarded CREATE leaves an existing table untouched. Reconcile its columns
 -- before the index and trigger below use them; never replace existing rows.
+-- A populated table missing an identity column must fail: its citation keys
+-- cannot be reconstructed from row_id alone without inventing provenance.
 ALTER TABLE omninode_internal.ledger_line_citation ADD COLUMN IF NOT EXISTS ledger_id TEXT NOT NULL;
 ALTER TABLE omninode_internal.ledger_line_citation ADD COLUMN IF NOT EXISTS file_key TEXT NOT NULL;
 ALTER TABLE omninode_internal.ledger_line_citation ADD COLUMN IF NOT EXISTS generation INT NOT NULL DEFAULT 0;
@@ -54,6 +56,22 @@ ALTER TABLE omninode_internal.ledger_line_citation ALTER COLUMN line_no SET NOT 
 ALTER TABLE omninode_internal.ledger_line_citation ALTER COLUMN row_id SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS ledger_line_citation_pkey
     ON omninode_internal.ledger_line_citation (ledger_id, file_key, generation, line_no);
+
+-- Reuse the index on a reconciled table, including one left by an earlier
+-- application of this migration. A unique index alone is not a primary key.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'omninode_internal.ledger_line_citation'::regclass
+          AND contype = 'p'
+    ) THEN
+        ALTER TABLE omninode_internal.ledger_line_citation
+            ADD CONSTRAINT ledger_line_citation_pkey
+            PRIMARY KEY USING INDEX ledger_line_citation_pkey;
+    END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_ledger_line_citation_row
     ON omninode_internal.ledger_line_citation (row_id);
