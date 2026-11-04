@@ -165,8 +165,8 @@ from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
 from omnibase_infra.models.network_binding import load_network_binding_settings
-from omnibase_infra.models.node_announce.model_kernel_plugin_selection_request import (
-    ModelKernelPluginSelectionRequest,
+from omnibase_infra.models.node_announce.model_kernel_plugin_selection_result import (
+    ModelKernelPluginSelectionResult,
 )
 from omnibase_infra.models.node_announce.model_node_announcement_topic import (
     ModelNodeAnnouncementTopic,
@@ -175,9 +175,6 @@ from omnibase_infra.models.node_announce.model_package_announce_result import (
     ModelPackageAnnounceResult,
 )
 from omnibase_infra.models.runtime import ModelRuntimeNodeSelection
-from omnibase_infra.models.runtime.model_runtime_kernel_plugins import (
-    ModelRuntimeKernelPlugins,
-)
 from omnibase_infra.models.runtime_kernel_defaults import load_runtime_kernel_defaults
 from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
@@ -1701,6 +1698,76 @@ def _resolve_event_bus_transport(
     return resolved_bus_type, reason
 
 
+# Registers the built-ins (PluginLlm, PluginDlq), then the kernel plugins the lane
+# overlay enabled (OMN-21591), in that order. A plugin that fails to load or register
+# is logged and skipped; the rest still register. bootstrap() calls it at step 4.5.
+def register_explicit_domain_plugins(
+    plugin_registry: RegistryDomainPlugin,
+    kernel_plugin_selection: ModelKernelPluginSelectionResult,
+    correlation_id: UUID,
+) -> None:
+    # Register lightweight plugins BEFORE heavy ones. Plugin registration
+    # order determines Pass 2 (start_consumers) order. PluginDelegation (3
+    # topics) subscribes in seconds, while PluginIntelligence (46 topics)
+    # takes ~12 minutes. If Intelligence goes first, later plugins never
+    # get their consumers started before the runtime is restarted or killed.
+
+    # Try to register PluginLlm (OMN-6600: LLM domain plugin).
+    try:
+        from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
+
+        plugin_registry.register(PluginLlm())
+        logger.info(
+            "PluginLlm registered (correlation_id=%s)",
+            correlation_id,
+        )
+    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+        logger.warning(
+            "PluginLlm failed to initialize, continuing without it (correlation_id=%s)",
+            correlation_id,
+            exc_info=True,
+        )
+
+    # Try to register PluginDlq (OMN-6601: DLQ + retry worker).
+    try:
+        from omnibase_infra.dlq.plugin_dlq import PluginDlq
+
+        plugin_registry.register(PluginDlq())
+        logger.info(
+            "PluginDlq registered (correlation_id=%s)",
+            correlation_id,
+        )
+    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+        logger.warning(
+            "PluginDlq failed to initialize, continuing without it (correlation_id=%s)",
+            correlation_id,
+            exc_info=True,
+        )
+
+    # Register the kernel plugins the lane overlay enabled (OMN-21591). The
+    # selection was made before the container existed from the announced
+    # kernel_plugin entries; the kernel holds no plugin name. They register
+    # after the lightweight built-ins above and in the overlay's order, so a
+    # lane lists a light plugin before a heavy one (a 46-topic plugin that
+    # takes ~12 minutes to subscribe must not start its consumers first).
+    for selected_plugin in kernel_plugin_selection.selected:
+        try:
+            plugin_registry.register(load_kernel_plugin(selected_plugin))
+            logger.info(
+                "Kernel plugin %s registered (correlation_id=%s)",
+                selected_plugin.name,
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "Kernel plugin %s failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                selected_plugin.name,
+                correlation_id,
+                exc_info=True,
+            )
+
+
 # ai-slop-ok: pre-existing === separators in example startup log in docstring
 async def bootstrap() -> int:
     """Bootstrap the ONEX runtime from contracts.
@@ -2833,11 +2900,8 @@ async def bootstrap() -> int:
         # 3.95. Select the kernel plugins the lane overlay enables from the catalog
         # (OMN-21591). A name the catalog does not hold as an admitted kernel_plugin
         # entry is a typed boot error raised here, before the container exists.
-        kernel_plugin_selection = HandlerKernelPluginSelection().handle(
-            ModelKernelPluginSelectionRequest(
-                announced=node_catalog_result,
-                enabled=ModelRuntimeKernelPlugins.from_env().names,
-            )
+        kernel_plugin_selection = HandlerKernelPluginSelection().select(
+            node_catalog_result
         )
 
         # 4. Create and wire container for dependency injection
@@ -2984,68 +3048,9 @@ async def bootstrap() -> int:
         plugin_registry = RegistryDomainPlugin()
         registration_service = ServiceRegistration()
 
-        # Register lightweight plugins BEFORE heavy ones. Plugin registration
-        # order determines Pass 2 (start_consumers) order. PluginDelegation (3
-        # topics) subscribes in seconds, while PluginIntelligence (46 topics)
-        # takes ~12 minutes. If Intelligence goes first, later plugins never
-        # get their consumers started before the runtime is restarted or killed.
-
-        # Try to register PluginLlm (OMN-6600: LLM domain plugin).
-        try:
-            from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
-
-            plugin_registry.register(PluginLlm())
-            logger.info(
-                "PluginLlm registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginLlm failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to register PluginDlq (OMN-6601: DLQ + retry worker).
-        try:
-            from omnibase_infra.dlq.plugin_dlq import PluginDlq
-
-            plugin_registry.register(PluginDlq())
-            logger.info(
-                "PluginDlq registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginDlq failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Register the kernel plugins the lane overlay enabled (OMN-21591). The
-        # selection was made before the container existed from the announced
-        # kernel_plugin entries; the kernel holds no plugin name. They register
-        # after the lightweight built-ins above and in the overlay's order, so a
-        # lane lists a light plugin before a heavy one (a 46-topic plugin that
-        # takes ~12 minutes to subscribe must not start its consumers first).
-        for selected_plugin in kernel_plugin_selection.selected:
-            try:
-                plugin_registry.register(load_kernel_plugin(selected_plugin))
-                logger.info(
-                    "Kernel plugin %s registered (correlation_id=%s)",
-                    selected_plugin.name,
-                    correlation_id,
-                )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Kernel plugin %s failed to initialize, continuing without it "
-                    "(correlation_id=%s)",
-                    selected_plugin.name,
-                    correlation_id,
-                    exc_info=True,
-                )
+        register_explicit_domain_plugins(
+            plugin_registry, kernel_plugin_selection, correlation_id
+        )
 
         # 4.6. Discover domain plugins from entry_points (OMN-2000)
         #

@@ -13,6 +13,7 @@ appears only in the announcer's metadata reader; this module reads the catalog.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib import import_module
 from uuid import UUID, uuid4
 
@@ -34,8 +35,14 @@ from omnibase_infra.models.node_announce.model_kernel_plugin_selection_request i
 from omnibase_infra.models.node_announce.model_kernel_plugin_selection_result import (
     ModelKernelPluginSelectionResult,
 )
+from omnibase_infra.models.node_announce.model_package_announce_result import (
+    ModelPackageAnnounceResult,
+)
 from omnibase_infra.models.node_announce.model_selected_kernel_plugin import (
     ModelSelectedKernelPlugin,
+)
+from omnibase_infra.models.runtime.model_runtime_kernel_plugins import (
+    ModelRuntimeKernelPlugins,
 )
 from omnibase_infra.runtime.protocol_domain_plugin import ProtocolDomainPlugin
 
@@ -142,6 +149,24 @@ class HandlerKernelPluginSelection:
                 plugin_names=tuple(missing),
             )
         return ModelKernelPluginSelectionResult(selected=tuple(selected))
+
+    def select(
+        self,
+        announced: ModelPackageAnnounceResult | None,
+        environ: Mapping[str, str] | None = None,
+    ) -> ModelKernelPluginSelectionResult:
+        """Select the plugins the lane overlay's ``runtime.kernel_plugins`` enables.
+
+        ``announced`` is boot step 0's result, or ``None`` when step 0 failed; then any
+        enabled name raises ``KernelPluginNotAnnouncedError``. The kernel calls this
+        before the container exists, so such a lane never starts.
+        """
+        return self.handle(
+            ModelKernelPluginSelectionRequest(
+                announced=announced,
+                enabled=ModelRuntimeKernelPlugins.from_env(environ).names,
+            )
+        )
 
 
 __all__ = [
