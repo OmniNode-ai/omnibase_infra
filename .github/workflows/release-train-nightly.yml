@@ -373,13 +373,27 @@ jobs:
           # a CHANGELOG.md prepend for a repo that allows one, root README.md plus
           # the release-cut contract item and identity test for a README-only repo.
           # Writing CHANGELOG.md unconditionally made every omnibase_core release
-          # PR red from the day dev deleted that file (OMN-17427).
-          notes=$(python3 "${GITHUB_WORKSPACE}/_train/scripts/ci/release_train.py" apply-release-notes \
-            --policy "${GITHUB_WORKSPACE}/_train/config/release_train_policy.yaml" \
-            --repo "${TARGET_REPO}" \
-            --clone . \
-            --entry-file "${RUNNER_TEMP}/changelog-entry.md")
-          read -r -d '' -a staged <<<"${notes}" || true
+          # PR red from the day dev deleted that file (OMN-17427). The behaviour is
+          # the node_release_notes_apply_effect node, run from the checked-out
+          # train by its locked environment; the app token is not in its env.
+          jq -n --arg clone "${PWD}" --arg entry "${RUNNER_TEMP}/changelog-entry.md" \
+            --arg repo "${TARGET_REPO}" \
+            '{clone_path: $clone, entry_file: $entry, repo_name: $repo}' \
+            >"${RUNNER_TEMP}/release-notes-request.json"
+          if ! env -u GH_TOKEN -u GITHUB_TOKEN uv run --frozen --no-dev \
+            --project "${GITHUB_WORKSPACE}/_train" \
+            onex node node_release_notes_apply_effect \
+            --input "${RUNNER_TEMP}/release-notes-request.json" \
+            --state-root "${RUNNER_TEMP}/release-notes-state" \
+            --output receipt >"${RUNNER_TEMP}/release-notes-receipt.json"; then
+            echo "::error::release notes were not applied: $(jq -r '(.result.handler_result // .result).error_message // "no receipt"' "${RUNNER_TEMP}/release-notes-receipt.json" 2>&1 | head -c 2000)"
+            exit 1
+          fi
+          read -r -d '' -a staged < <(jq -r '(.result.handler_result // .result).staged[]' "${RUNNER_TEMP}/release-notes-receipt.json") || true
+          if [ "${#staged[@]}" -eq 0 ]; then
+            echo "::error::the release-notes node reported success and staged nothing"
+            exit 1
+          fi
           if [ "${NEEDS_BUMP}" = "true" ]; then
             # The manifest and the lockfile move together: uv.lock records the
             # root package's own version, so a bump of pyproject.toml alone
