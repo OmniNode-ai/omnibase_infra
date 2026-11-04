@@ -240,23 +240,12 @@ def _vendored_read_write(
 # generated YAML: ``--check`` continues to prove every shipped instance and
 # rendered catalog against one auditable derivation source.
 LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    ContractTableDeclaration(
-        node="legacy_migration:tenant_inference_credentials",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-            "0000_create_tenant_inference_credentials.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="tenant_inference_credentials",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-                "0000_create_tenant_inference_credentials.sql"
-            ),
-            access="write",
-            role="credentials",
-        ),
+    _vendored_read_write(
+        "tenant_inference_credentials",
+        "node_projection_tenant_credentials",
+        schema="public",
+        access="write",
+        role="credentials",
     ),
     # OMN-18159: the four delegation aggregate READ VIEWS, in this manifest for
     # exactly the reason the docstring above gives -- the migration that
@@ -367,15 +356,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # vendored infra-first ahead of omnimarket#4277. Both carry the source
     # contract's read_write access and table-name role. Removable once the
     # pin advances past that pull request; the expiry module names both.
-    _vendored_read_write(
-        "delegation_lab_jobs",
-        "node_llm_delegation_call_effect",
-        "0000_delegation_lab_job_execution.sql",
-    ),
-    _vendored_read_write(
-        "delegation_lab_job_outbox",
-        "node_llm_delegation_call_effect",
-        "0000_delegation_lab_job_execution.sql",
+    *(
+        _vendored_read_write(
+            t,
+            "node_llm_delegation_call_effect",
+            "0000_delegation_lab_job_execution.sql",
+        )
+        for t in ("delegation_lab_jobs", "delegation_lab_job_outbox")
     ),
     #
     # OMN-19861: same infra-first window; this repo vendors
@@ -449,7 +436,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     _vendored_read_write(
         "delegation_capability_cells",
         "node_projection_delegation_capability_map",
-        "0000_create_delegation_capability_cells.sql",
         schema="public",
     ),
     # OMN-19988: the same infra-first window; this repo vendors
