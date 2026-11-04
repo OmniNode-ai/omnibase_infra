@@ -60,33 +60,33 @@ CREATE TABLE IF NOT EXISTS omninode_internal.transcript_mirror_runs (
 -- Existing required values are never inferred: incompatible rows abort this
 -- transaction rather than leaving a nullable or unconstrained projection.
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS run_id TEXT;
+    ADD COLUMN IF NOT EXISTS run_id TEXT NOT NULL;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS attempt_id TEXT;
+    ADD COLUMN IF NOT EXISTS attempt_id TEXT NOT NULL;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS state TEXT;
+    ADD COLUMN IF NOT EXISTS state TEXT NOT NULL;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+    ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL;
 ALTER TABLE omninode_internal.transcript_mirror_runs
     ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS files_seen BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS files_seen BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS stored BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS stored BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS would_store BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS would_store BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS unchanged BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS unchanged BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS destination_ahead BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS destination_ahead BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS refused_stale BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS refused_stale BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS refused_conflict BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS refused_conflict BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS source_unreadable BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS source_unreadable BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
-    ADD COLUMN IF NOT EXISTS bytes_put BIGINT DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS bytes_put BIGINT NOT NULL DEFAULT 0;
 
 -- ADD COLUMN IF NOT EXISTS does not repair constraints or defaults on columns
 -- that already exist. Apply the same requirements on both creation paths.
