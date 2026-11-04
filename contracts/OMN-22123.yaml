@@ -19,6 +19,19 @@ requirements:
     acceptance:
       - id: AC3
         statement: Each of the four runner services in both merge-queue compose files mounts the host /usr/share/zoneinfo at the same path in the container, read-only.
+  - id: req-h051-mq-memory-drive
+    statement: The four h051 merge-queue runners keep their job directories in container tmpfs mounts and have the memory and CPU capacity required by their jobs.
+    acceptance:
+      - id: AC4
+        statement: Every h051 merge-queue runner mounts its workspace, TMPDIR and six package caches as size-bounded tmpfs entries, with no job directory or cache bound to disk.
+      - id: AC5
+        statement: All eight tmpfs mounts of every h051 merge-queue runner explicitly allow exec so job interpreters and compiled extensions can load.
+      - id: AC6
+        statement: Every h051 merge-queue runner declares workspace and TMPDIR tmpfs ceilings of at least 12 GiB to exceed the lane probe's 10 GiB free-space floor.
+      - id: AC7
+        statement: Every h051 merge-queue runner has a memory limit of at least 10 GiB with memswap_limit equal to mem_limit so its tmpfs pages cannot swap to disk.
+      - id: AC8
+        statement: Every h051 merge-queue runner has a CPU quota of at least four CPUs for the slower host cores.
 evidence_requirements:
   - kind: tests
     description: The merge-queue pool declaration test and the existing pool and fleet tests pass.
@@ -35,6 +48,55 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-h051-mq-memory-drive
+    description: The four h051 runners keep all eight job and cache directories in size-bounded tmpfs mounts and bind no disk-backed job directory.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly -k every_merge_queue_job_directory_is_a_tmpfs
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-h051-mq-tmpfs-exec
+    description: Each of the eight in-memory directories explicitly permits execution and none declares noexec.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly -k every_in_memory_directory_allows_exec
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-h051-mq-tmpfs-capacity
+    description: Workspace and TMPDIR ceilings exceed the lane probe's free-space floor on every h051 runner.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly -k job_directories_leave_the_free_space
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-h051-mq-memory-limit
+    description: The memory limit covers at least 10 GiB and the equal memory-plus-swap limit prevents swapping the in-memory directories.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly -k memory_limit_covers_the_tmpfs
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-h051-mq-cpu-quota
+    description: The h051 CPU quota is at least four CPUs on each merge-queue runner.
+    source: manual
+    binds_ac: [AC8]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly -k cpu_quota_matches_the_slower_host_cores
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-h051-mq-memory-drive-source-readback
+    description: Hosted configuration probe reads the h051 compose file through the GitHub contents API at the evaluated commit and parses the four services, requiring eight executable size-bounded tmpfs entries, no scratch-disk mounts, 10 GiB memory without swap and five CPUs. It fails on the merge base's disk-backed services and requires no Docker daemon or lab access. This checks the published deployment definition only.
+    source: manual
+    binds_ac: [AC4, AC5, AC7, AC8]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-hp051-ci-mq-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | env PYTHONDONTWRITEBYTECODE=1 uv run python -c '\''import base64, sys, yaml; document = yaml.safe_load(base64.b64decode(sys.stdin.read())); services = document["services"]; assert len(services) == 4; assert all(s["mem_limit"] == "10g" and s["memswap_limit"] == "10g" and float(s["cpus"]) == 5.0 for s in services.values()); assert all(len(s.get("tmpfs", [])) == 8 and all(":exec,mode=1777,size=" in entry for entry in s["tmpfs"]) for s in services.values()); assert all("/data/scratch" not in repr(s["volumes"]) for s in services.values())'\'''
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-no-other-class-moves
     description: The action and verify counts of h051 and h053 read what they read before the declaration.
