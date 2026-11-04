@@ -3,7 +3,7 @@ ticket_id: OMN-19497
 title: >-
   Every resolved catalog bundle maps each host port to at most one service, enforced by a CI test
 summary: >
-  The duplicate host-port validator (src/omnibase_infra/docker/catalog/validator_host_ports.py), the generate/up refusal in the catalog CLI and the moved host ports for decision-store-consumer, dlq-replay-consumer and infra-routing-decisions-consumer are already on dev. This change moves the test to tests/unit/docker/catalog, the path the acceptance criteria name, so the falsifier command collects it, and points the OMN-20999 contract's check at the new path.
+  The duplicate host-port validator (src/omnibase_infra/docker/catalog/validator_host_ports.py), the generate/up refusal in the catalog CLI and the moved host ports for decision-store-consumer, dlq-replay-consumer and infra-routing-decisions-consumer are already on dev. This change exposes the existing suite at tests/unit/docker/catalog, the path the acceptance criteria name, while retaining its original module for contracts that already cite it. The diff contains only test coverage and this ticket contract; the validator behaviour is already on dev.
 
 is_seam_ticket: false
 interface_change: false
@@ -32,7 +32,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn19497-ac1-every-bundle
     description: >-
-      The parametrised sweep resolves every bundle in bundles.yaml and asserts no host port has two claimants. The merge base has no tests/unit/docker/catalog directory, so this check fails there.
+      The parametrised sweep resolves every bundle in bundles.yaml and asserts no host port has two claimants. This is coverage-only evidence: the hosted control overlays the head tests onto the merge base, where the existing validator already passes them (TEST_ONLY_DIFF).
     source: manual
     binds_ac: [AC1]
     checks:
