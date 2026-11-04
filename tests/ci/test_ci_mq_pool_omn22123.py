@@ -75,6 +75,21 @@ def test_every_named_volume_a_runner_mounts_is_declared_at_the_top_level(
 
 
 @pytest.mark.parametrize("host", sorted(POOLS))
+def test_every_runner_reads_the_host_timezone_database_read_only(host: str) -> None:
+    """The runner image has no tzdata and the merge-group tests resolve ``America/New_York``."""
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        mounts = [
+            v
+            for v in service["volumes"]
+            if isinstance(v, dict) and v.get("target") == "/usr/share/zoneinfo"
+        ]
+        assert len(mounts) == 1, name
+        assert mounts[0]["source"] == "/usr/share/zoneinfo", name
+        assert mounts[0]["read_only"] is True, name
+
+
+@pytest.mark.parametrize("host", sorted(POOLS))
 def test_scratch_paths_never_alias_the_general_pool_on_the_same_host(
     host: str,
 ) -> None:
