@@ -204,7 +204,10 @@ class TestRuntimePhaseRolling:
         lane = _fixture_lane()
         lane.current_image = NEW_IMAGE
         _run_runtime_phase(lane)
-        assert len(lane.recreated) == 19
+        # 19 containers in the recorded job; the hook-events writer is among them
+        # and OMN-21288 folded it into main, so the runtime scope no longer names it.
+        assert len(lane.recreated) == 18
+        assert "projection-claude-hook-events-writer" not in lane.recreated
         assert lane.max_starting == 1, "two runtimes were down at once"
         assert lane.largest_recreate == 1
         pairs = list(zip(lane.events[0::2], lane.events[1::2], strict=True))
