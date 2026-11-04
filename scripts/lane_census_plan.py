@@ -142,7 +142,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from omnibase_infra.handlers import handler_census_oneshot as oneshot
-from omnibase_infra.models.model_census_oneshot_request import ModelOneshotObservation
+from omnibase_infra.models.model_oneshot_observation import ModelOneshotObservation
 
 ONESHOT_POLICY = oneshot.load_policy(
     Path(__file__).resolve().parents[1]
@@ -1232,7 +1232,7 @@ def reconcile_lane(
                     keepalive=kind == "keepalive",
                     present=actual is not None,
                     running=_running(row.get("State", ""), row.get("Status", "")),
-                    status=row.get("Status", ""),
+                    docker_status=row.get("Status", ""),
                     started_at=row.get("StartedAt") or "",
                     observed_at=observed_at,
                 )

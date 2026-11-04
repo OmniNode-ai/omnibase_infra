@@ -14,7 +14,7 @@ from omnibase_infra.handlers.handler_census_oneshot import (
     grade_oneshot,
     load_policy,
 )
-from omnibase_infra.models.model_census_oneshot_request import ModelOneshotObservation
+from omnibase_infra.models.model_oneshot_observation import ModelOneshotObservation
 
 
 @pytest.mark.live_contact(
@@ -36,7 +36,7 @@ def test_oneshot_recorded_statuses_are_pending_then_alarm(
             lane="dev",
             container=row["Names"],
             running=row["State"] == "running",
-            status=row["Status"],
+            docker_status=row["Status"],
             started_at=(observed - timedelta(seconds=age)).isoformat(),
             observed_at=observed,
         )

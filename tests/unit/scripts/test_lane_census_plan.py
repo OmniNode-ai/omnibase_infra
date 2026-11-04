@@ -1919,7 +1919,7 @@ def test_oneshot_sampling_budget_does_not_reset_for_new_executions(
         )
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(handler.subprocess, "run", run_sample)
+    monkeypatch.setattr(handler.collector.subprocess, "run", run_sample)
     result = handler.HandlerCensusOneshot(
         clock=lambda: next(ticks), sleep=sleeps.append
     ).handle(

@@ -4,34 +4,24 @@
 
 from __future__ import annotations
 
-import json
-import os
 import re
-import subprocess
-import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from tempfile import TemporaryDirectory
-
-import yaml
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.models.model_census_oneshot_request import (
-    ModelCensusOneshotPolicy,
-    ModelCensusOneshotRequest,
-    ModelOneshotObservation,
-)
-from omnibase_infra.models.model_census_oneshot_result import (
-    ModelCensusOneshotResult,
-    ModelOneshotGrade,
-    ModelPendingOneshot,
-)
+from omnibase_infra.models.model_census_oneshot_policy import ModelCensusOneshotPolicy
+from omnibase_infra.models.model_census_oneshot_request import ModelCensusOneshotRequest
+from omnibase_infra.models.model_census_oneshot_result import ModelCensusOneshotResult
+from omnibase_infra.models.model_oneshot_grade import ModelOneshotGrade
+from omnibase_infra.models.model_oneshot_observation import ModelOneshotObservation
+from omnibase_infra.models.model_pending_oneshot import ModelPendingOneshot
+from omnibase_infra.nodes.node_census_oneshot_effect import collector
 
 
 def load_policy(path: Path) -> ModelCensusOneshotPolicy:
     """Load explicitly supplied policy at a composition boundary."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = collector.read_policy(path)
     policy = ModelCensusOneshotPolicy.model_validate(
         {key: data[key] for key in ModelCensusOneshotPolicy.model_fields}
     )
@@ -80,11 +70,11 @@ def grade_oneshot(request: ModelOneshotObservation) -> ModelOneshotGrade:
     if not request.present or (request.running and request.keepalive):
         return ModelOneshotGrade()
     if not request.running:
-        match = re.search(r"Exited\s*\((\d+)\)", request.status, re.IGNORECASE)
+        match = re.search(r"Exited\s*\((\d+)\)", request.docker_status, re.IGNORECASE)
         if match and int(match[1]) != 0:
             return ModelOneshotGrade(
                 kind="oneshot_failed",
-                detail=f"migration/init container {request.container!r} Exited non-zero (code {match[1]}): {request.status}",
+                detail=f"migration/init container {request.container!r} Exited non-zero (code {match[1]}): {request.docker_status}",
             )
         return ModelOneshotGrade()
     started = _instant(request.started_at)
@@ -97,7 +87,7 @@ def grade_oneshot(request: ModelOneshotObservation) -> ModelOneshotGrade:
     ):
         return ModelOneshotGrade(
             kind="oneshot_unobservable",
-            detail=f"cannot grade completion of running oneshot {request.container!r}: missing, invalid or future StartedAt/observed_at; {request.status}",
+            detail=f"cannot grade completion of running oneshot {request.container!r}: missing, invalid or future StartedAt/observed_at; {request.docker_status}",
         )
     elapsed = (observed - started).total_seconds()
     bound = request.completion_timeout_seconds
@@ -113,7 +103,7 @@ def grade_oneshot(request: ModelOneshotObservation) -> ModelOneshotGrade:
         )
     return ModelOneshotGrade(
         kind="oneshot_stuck",
-        detail=f"migration/init container {request.container!r} is still Running after {elapsed:g}s (completion bound {bound}s): {request.status}",
+        detail=f"migration/init container {request.container!r} is still Running after {elapsed:g}s (completion bound {bound}s): {request.docker_status}",
     )
 
 
@@ -123,8 +113,8 @@ class HandlerCensusOneshot:
     def __init__(
         self,
         *,
-        clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = collector.monotonic,
+        sleep: Callable[[float], None] = collector.sleep,
     ) -> None:
         self._clock = clock
         self._sleep = sleep
@@ -143,31 +133,16 @@ class HandlerCensusOneshot:
         diagnostics: list[str] = []
         deadline = self._clock() + request.policy.phase_timeouts["runtime"]
         arguments = request.arguments
-        with TemporaryDirectory(prefix="census-oneshot-") as scratch:
-            plan_path = Path(scratch) / "plan.json"
-            environment = {
-                **os.environ,
-                "ONEX_CENSUS_SINGLE_SAMPLE": "1",
-                "ONEX_CENSUS_PLAN_OUT": str(plan_path),
-            }
+        with collector.workspace() as plan_path:
             while True:
-                plan_path.unlink(missing_ok=True)
                 try:
-                    sample = subprocess.run(
-                        [
-                            "bash",
-                            str(
-                                Path(request.script_directory) / "lane-census-check.sh"
-                            ),
-                            *arguments,
-                        ],
-                        env=environment,
-                        capture_output=True,
-                        text=True,
-                        timeout=request.policy.phase_timeouts["runtime"],
-                        check=False,
+                    sample = collector.sample(
+                        request.script_directory,
+                        arguments,
+                        plan_path,
+                        request.policy.phase_timeouts["runtime"],
                     )
-                except subprocess.TimeoutExpired as exc:
+                except collector.TimeoutExpired as exc:
                     diagnostics.append(f"census sample timed out: {exc}\n")
                     return ModelCensusOneshotResult(
                         exit_code=4, stderr="".join(diagnostics)
@@ -176,16 +151,20 @@ class HandlerCensusOneshot:
                 if sample.returncode:
                     if sample.returncode == 8 or status in (0, 30):
                         status = sample.returncode
-                if (
-                    sample.returncode not in (0, 6, 7, 8, 30, 31)
-                    or not plan_path.is_file()
-                ):
+                if sample.returncode not in (
+                    0,
+                    6,
+                    7,
+                    8,
+                    30,
+                    31,
+                ) or not collector.has_plan(plan_path):
                     return ModelCensusOneshotResult(
                         exit_code=sample.returncode,
                         stdout=sample.stdout,
                         stderr="".join(diagnostics),
                     )
-                if not plan_path.is_file():
+                if not collector.has_plan(plan_path):
                     code = sample.returncode or (
                         0 if set(arguments) & {"--help", "-h"} else 4
                     )
@@ -195,8 +174,7 @@ class HandlerCensusOneshot:
                         stderr="".join(diagnostics)
                         + "census sample supplied no completion plan\n",
                     )
-                plan = json.loads(plan_path.read_text(encoding="utf-8"))
-                pending = plan["pending_oneshots"]
+                pending = collector.pending_seconds(plan_path)
                 if not pending:
                     return ModelCensusOneshotResult(
                         exit_code=status,
@@ -212,7 +190,7 @@ class HandlerCensusOneshot:
                     )
                 delay = min(
                     request.policy.sample_interval_seconds,
-                    *[row["remaining_seconds"] for row in pending],
+                    *pending,
                 )
                 diagnostics.append(
                     f"Oneshot completion pending; automatically sampling again in {delay}s.\n"

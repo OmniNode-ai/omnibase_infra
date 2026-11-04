@@ -265,6 +265,22 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_census_oneshot_effect.HandlerCensusOneshot.census_oneshot_sample_fb36ada9": {
+      "category": "command",
+      "contract_name": "node_census_oneshot_effect",
+      "event_model_module": "omnibase_infra.models.model_census_oneshot_request",
+      "event_model_name": "ModelCensusOneshotRequest",
+      "handler_id": "dispatcher.auto.node_census_oneshot_effect.HandlerCensusOneshot.census_oneshot_sample_fb36ada9",
+      "handler_module": "omnibase_infra.handlers.handler_census_oneshot",
+      "handler_name": "HandlerCensusOneshot",
+      "message_types": [
+        "ModelCensusOneshotRequest",
+        "omnibase-infra.census-oneshot-sample",
+        "${topic:contract:omnibase-infra.CMD_CENSUS_ONESHOT_SAMPLE_V1}"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_chain_canary_effect.HandlerBoardProbeResultPublisher.board_probe_publish_result_4c512134": {
       "category": "event",
       "contract_name": "node_chain_canary_effect",
@@ -3779,16 +3795,16 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 129,
+        "omnibase_infra": 145,
         "onex-change-control": 4
       },
-      "contracts_discovered": 154,
+      "contracts_discovered": 170,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 97,
-      "probe_count": 1100,
-      "registered_dispatchers": 130,
-      "registered_routes": 114,
-      "type_scoped_dispatchers": 77
+      "distinct_subscribe_topics": 102,
+      "probe_count": 1133,
+      "registered_dispatchers": 136,
+      "registered_routes": 119,
+      "type_scoped_dispatchers": 83
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -4045,6 +4061,21 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnibase-infra.CMD_BUILD_LOOP_APPEND_V1}"
+    },
+    "P1a::${topic:contract:omnibase-infra.CMD_CENSUS_ONESHOT_SAMPLE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.census-oneshot-sample",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_OMNIBASE_INFRA_V1}",
+        "message_category": "command",
+        "message_type": "omnibase-infra.census-oneshot-sample",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:omnibase-infra.CMD_CENSUS_ONESHOT_SAMPLE_V1}"
     },
     "P1a::${topic:contract:omnibase-infra.CMD_CHAIN_LEARN_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -5615,6 +5646,21 @@
       },
       "topic": "${topic:contract:omnibase-infra.CMD_BUILD_LOOP_APPEND_V1}"
     },
+    "P1b::${topic:contract:omnibase-infra.CMD_CENSUS_ONESHOT_SAMPLE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:omnibase-infra.CMD_CENSUS_ONESHOT_SAMPLE_V1}"
+    },
     "P1b::${topic:contract:omnibase-infra.CMD_CHAIN_LEARN_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -7162,6 +7208,26 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnibase-core.CMD_SHARED_TOKEN_POLICY_REQUESTED_V1}"
+    },
+    "P4::dispatcher.auto.node_census_oneshot_effect.HandlerCensusOneshot.census_oneshot_sample_fb36ada9::${topic:contract:omnibase-infra.CMD_CENSUS_ONESHOT_SAMPLE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_census_oneshot_effect.HandlerCensusOneshot.census_oneshot_sample_fb36ada9",
+      "event_model": "omnibase_infra.models.model_census_oneshot_request.ModelCensusOneshotRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.census-oneshot-sample",
+        "payload": "ModelCensusOneshotRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_census_oneshot_effect.HandlerCensusOneshot.census_oneshot_sample_fb36ada9"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.census-oneshot-sample",
+        "status": "success"
+      },
+      "topic": "${topic:contract:omnibase-infra.CMD_CENSUS_ONESHOT_SAMPLE_V1}"
     },
     "P4::dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate::${topic:contract:omnibase-infra.CMD_CHAIN_LEARN_V1}": {
       "construct_only": true,
@@ -25614,6 +25680,16 @@
       "topic": "${topic:contract:omnibase-infra.CMD_BUILD_LOOP_APPEND_V1}",
       "topic_pattern": "*.cmd.omnibase-infra.build-loop-append.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_census_oneshot_effect",
+      "dispatcher_id": "dispatcher.auto.node_census_oneshot_effect.HandlerCensusOneshot.census_oneshot_sample_fb36ada9",
+      "handler_id": "dispatcher.auto.node_census_oneshot_effect.HandlerCensusOneshot.census_oneshot_sample_fb36ada9",
+      "message_category": "command",
+      "route_id": "route.auto.node_census_oneshot_effect.HandlerCensusOneshot.census_oneshot_sample_fb36ada9.onex_cmd_omnibase_infra_census_oneshot_sample_v1",
+      "topic": "${topic:contract:omnibase-infra.CMD_CENSUS_ONESHOT_SAMPLE_V1}",
+      "topic_pattern": "*.cmd.omnibase-infra.census-oneshot-sample.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_chain_orchestrator",
