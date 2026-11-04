@@ -8,20 +8,32 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
+    ModelDbTableDeclaration,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _resolve_projection_database_target,
 )
 from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.application_database import TOPOLOGY_PROFILE_INSTANCE_MAP
-from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
-)
 
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[3]
 _NODE = "node_projection_delegation_budget_readings"
 _TABLE = "delegation_budget_readings"
+# The pinned omnimarket contract (node_projection_delegation_budget_readings)
+# declares this relation; the supplemental bridge that used to stand in for it
+# was retired by the pin advance to 16c45fb32691.
+_CREATE = f"docker/migrations/forward/nodes/{_NODE}/0000_create_{_TABLE}.sql"
+_DECLARED_TABLE = ModelDbTableDeclaration(
+    name=_TABLE,
+    database_ref="application",
+    schema="omninode_internal",
+    migration=_CREATE,
+    access="read_write",
+    role=_TABLE,
+)
 
 # Shipped bytes of the vendored migrations; re-pin with the ledger row when the
 # omnimarket source changes.
@@ -36,10 +48,7 @@ _EXPECTED = {
 )
 def test_the_write_uses_only_the_runtime_table_grant(profile: str) -> None:
     topology = load_topology_profile(profile)
-    (declaration,) = (
-        d for d in LEGACY_MIGRATION_TABLE_DECLARATIONS if d.table.name == _TABLE
-    )
-    target = _resolve_projection_database_target((declaration.table,), topology)
+    target = _resolve_projection_database_target((_DECLARED_TABLE,), topology)
     assert target.database_refs == ("application",)
     assert target.physical_schemas == ("omninode_internal",)
     principal = topology.databases["application"].principals["omninode_runtime"]
@@ -52,13 +61,8 @@ def test_the_write_uses_only_the_runtime_table_grant(profile: str) -> None:
             assert not any(_TABLE in g.objects for g in other.grants)
 
 
-def test_the_interim_declaration_has_delivered_migrations() -> None:
-    (declaration,) = (
-        d for d in LEGACY_MIGRATION_TABLE_DECLARATIONS if d.table.name == _TABLE
-    )
-    assert declaration.table.access == "read_write"
-    assert declaration.table.role == _TABLE
-    create = _ROOT / declaration.table.migration
+def test_the_declared_table_has_delivered_migrations() -> None:
+    create = _ROOT / _DECLARED_TABLE.migration
     assert create.is_file()
     grant = create.parent / "0001_grant_omninode_runtime_delegation_budget_readings.sql"
     assert grant.is_file()

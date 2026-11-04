@@ -106,7 +106,7 @@ jobs:
     # (`shared-env-enabled: true`), whose directory is keyed by a digest that
     # includes the lockfile (`scripts/ci/ensure_ci_env.sh` -> `ci_env_digest.py`)
     # and which lives INSIDE each runner container at
-    # `/home/runner/.cache/omni/ci-envs`. So every change to `uv.lock` invalidates
+    # the runner user's `.cache/omni/ci-envs`. So every change to `uv.lock` invalidates
     # it on all 88 containers at once, and the first job on each container then
     # pays the full build. A release version bump does exactly that -- #3449 bumped
     # `dev` to 0.38.24 -- which is why the two cold runs above are adjacent in
