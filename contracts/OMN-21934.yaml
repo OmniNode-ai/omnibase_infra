@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21934
+title: omnibase_infra grants tenant_projection_writer write on context_audit_events in every topology instance
+summary: >-
+  Declares one interim table-grant declaration for public.context_audit_events in the OMN-18863 expiry module's list, and regenerates the three topology instances and the nine rendered catalogs from it. The bridge names the vendored node_projection_context_audit/0000_add_context_audit_event_key.sql migration that creates the application-database table. tenant_projection_writer holds SELECT, INSERT and UPDATE on the table, which the omnimarket node_projection_context_audit contract requires for its db_io entry. This is the infrastructure half of OMN-21934; the omnimarket node is proven against this branch.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21934-grants
+    statement: >-
+      The role the context-audit node writes as, tenant_projection_writer, holds SELECT, INSERT and UPDATE on public.context_audit_events in the local, dev and prod topology instances.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: omnibase_infra topology grants tenant_projection_writer write on context_audit_events in the local, dev and prod topology instances -- falsifier: uv run pytest tests/unit/contracts/test_every_node_auto_wires_in_process_omn17427.py -q in omnimarket against the omnibase_infra branch
+evidence_requirements:
+  - kind: tests
+    description: The grants in every topology instance and rendered catalog, and the bridge declaration.
+    command: uv run pytest tests/unit/topology/test_omn21934_context_audit_grants.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21934-ac2-grants
+    description: tenant_projection_writer holds SELECT, INSERT and UPDATE on public.context_audit_events in the local, dev and prod topology instances and in every rendered catalog, and the bridge declaration names the vendored application-database table migration. The tests fail at the merge base, which declares no such grant.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_omn21934_context_audit_grants.py -q --no-cov
+        cwd: .
+  - id: dod-omn21934-hosted-deploy-grants
+    description: >-
+      Apply both context-audit node migrations in a rolled-back transaction on the hosted verifier's PostgreSQL service. The grant migration asserts SELECT, INSERT and UPDATE on the table and USAGE on its sequence; the writer role then reads event_key. Explicit integration-service coordinates prevent selecting an ambient database.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          env PGHOST="${INTEGRATION_POSTGRES_HOST:?}" PGPORT="${INTEGRATION_POSTGRES_PORT:?}" PGUSER="${INTEGRATION_POSTGRES_USER:?}" PGPASSWORD="${INTEGRATION_POSTGRES_PASSWORD:?}" PGDATABASE="${INTEGRATION_POSTGRES_DB:?}" psql -X -v ON_ERROR_STOP=1 -c 'BEGIN' -c "DO \$role\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tenant_projection_writer') THEN CREATE ROLE tenant_projection_writer NOSUPERUSER NOBYPASSRLS; END IF; END \$role\$;" -f docker/migrations/forward/nodes/node_projection_context_audit/0000_add_context_audit_event_key.sql -f docker/migrations/forward/nodes/node_projection_context_audit/0001_grant_tenant_projection_writer_context_audit_events.sql -c 'SET LOCAL ROLE tenant_projection_writer' -c 'SELECT event_key FROM public.context_audit_events LIMIT 0' -c 'ROLLBACK'
+        cwd: .
+  - id: dod-omn21934-migration-runtime
+    description: >-
+      Apply the vendored SQL to fresh and drifted PostgreSQL tables, rerun both migrations, and read back an INSERT ON CONFLICT replay as tenant_projection_writer. Missing cluster roles and unexpected sequence dependencies refuse before table grants. Compare all rendered catalogs with fresh projections.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_context_audit_migrations_omn21934.py tests/unit/topology/test_omn21934_context_audit_grants.py -q --no-cov
+        cwd: .

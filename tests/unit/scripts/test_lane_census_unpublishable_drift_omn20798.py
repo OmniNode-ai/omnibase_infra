@@ -40,6 +40,7 @@ from tests.helpers.lane_census_fixtures import (
     NEUTRAL_CONFIG_ROOT,
     NEUTRAL_HOSTNAME,
     NEUTRAL_LANE,
+    NEUTRAL_REGISTRY,
 )
 
 pytestmark = pytest.mark.unit
@@ -104,6 +105,7 @@ def _run(
     env["LANE_CENSUS_DOCKER_SOCKET"] = "/nonexistent/lane-census-test.sock"
     env["HOME"] = str(tmp_path)
     env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+    env["LANE_CENSUS_REGISTRY"] = str(NEUTRAL_REGISTRY)
     env.pop("LANE_MANIFEST", None)
     for name in ("KAFKA_BOOTSTRAP_SERVERS", "LANE_MEMORY_BROKER_CONTAINER"):
         env.pop(name, None)

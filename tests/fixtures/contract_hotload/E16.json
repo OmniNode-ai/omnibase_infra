@@ -1,0 +1,80 @@
+{
+  "chain": "E16",
+  "kind": "error",
+  "title": "registry frozen",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "registry",
+      "action": "observe",
+      "note": "a prune is running and the registry is frozen"
+    },
+    {
+      "step": 2,
+      "actor": "deploy",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "907bb51b-049a-50b9-89e9-a4c3f6014ef0",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 3,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:907bb51b-049a-50b9-89e9-a4c3f6014ef0",
+        "outcome": "rejected",
+        "reason": "REGISTRY_FROZEN",
+        "registry_version": 0
+      },
+      "key": "lab-deploy:907bb51b-049a-50b9-89e9-a4c3f6014ef0"
+    },
+    {
+      "step": 4,
+      "actor": "deploy",
+      "action": "observe",
+      "note": "the freeze lifts and the sender retries"
+    },
+    {
+      "step": 5,
+      "actor": "deploy",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "d0d85c54-4f6a-56bd-9eea-eacd1e64f59f",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 6,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:d0d85c54-4f6a-56bd-9eea-eacd1e64f59f",
+        "outcome": "accepted",
+        "reason": null,
+        "registry_version": 1
+      },
+      "key": "lab-deploy:d0d85c54-4f6a-56bd-9eea-eacd1e64f59f"
+    }
+  ],
+  "ends_in": "REGISTRY_FROZEN, then accepted on the retry"
+}
