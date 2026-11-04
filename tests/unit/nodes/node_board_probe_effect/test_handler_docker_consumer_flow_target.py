@@ -151,8 +151,37 @@ def test_marker_count_uses_seam_dlq_when_generic_dlq_also_advances(
         urlopen=fake.http,
         sleep=lambda _: None,
     )
-    collect = observe_lane if collector == "node" else script.observe_lane
-    observed = collect(lane, samples=2, interval=0, settle_seconds=0, injection_wait=0)
+    if collector == "node":
+        observed = observe_lane(
+            lane, samples=2, interval=0, settle_seconds=0, injection_wait=0
+        )
+    else:
+
+        def node_runner(
+            argv: list[str], **kwargs: Any
+        ) -> subprocess.CompletedProcess[str]:
+            request = json.loads(Path(argv[argv.index("--input") + 1]).read_text())
+            observed = observe_lane(
+                lane,
+                samples=request["samples"],
+                interval=request["sample_interval"],
+                settle_seconds=request["settle_seconds"],
+                injection_wait=request["injection_wait"],
+            )
+            Path(request["record"]).write_text(
+                json.dumps({"observation": {"read_ok": True, **observed}})
+            )
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        observed = script._observe_node(
+            {
+                "samples": 2,
+                "sample_interval": 0,
+                "settle_seconds": 0,
+                "injection_wait": 0,
+            },
+            runner=node_runner,
+        )
 
     injection = observed["boot"]["injection"]
     assert watermarks[generic_dlq] == 102

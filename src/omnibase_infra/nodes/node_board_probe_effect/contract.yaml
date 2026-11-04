@@ -80,6 +80,11 @@ consumer_flow_topics:
 # derived from that project (models/model_consumer_flow_lane.py).
 consumer_flow_endpoints:
   projection_api_base_url: "http://host.docker.internal:13002"
+# OMN-21485: the standalone CLI uses the scheduled proof's node budget;
+# the process deadline includes room for the node receipt to return.
+consumer_flow_execution:
+  node_timeout_seconds: 1700
+  process_timeout_seconds: 1800
 capabilities:
   - name: "board_probe.consumer_flow"
     description: "Observe and grade C28 consumer-flow observability on the lab lane"

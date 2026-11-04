@@ -117,6 +117,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -125,15 +126,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
-    ConsumerFlowLane as Lane,
-)
-from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
-    ConsumerFlowInputError as ProbeInputError,
-)
-from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
-    ModelConsumerFlowLane,
-)
+import yaml
 
 RECORD_VERSION: Final[int] = 1
 
@@ -226,8 +219,8 @@ AST_GATE_TEST: Final[str] = (
 )
 
 
-class BootChangedError(ProbeInputError):
-    """A lane container was replaced while the run was measuring."""
+class ProbeInputError(RuntimeError):
+    """The probe could not look. Exit 2, never exit 1."""
 
 
 @dataclass(frozen=True)
@@ -621,7 +614,7 @@ def parse_high_watermark(describe_out: str) -> int:
     return total
 
 
-def walk(lane: Lane, max_pages: int = 200) -> dict[str, Any]:
+def walk(lane: Any, max_pages: int = 200) -> dict[str, Any]:
     pages: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
     cursor: str | None = None
@@ -788,7 +781,7 @@ def probe_correlation_id() -> str:
     return str(uuid.UUID(hex="c28c28c2c28c" + uuid.uuid4().hex[12:]))
 
 
-def inject(lane: Lane) -> dict[str, Any]:
+def inject(lane: Any) -> dict[str, Any]:
     """Publish one malformed trigger, envelope copied from the newest real one."""
     newest = lane.rpk("topic", "consume", APPLIED_TOPIC, "-o", "-1", "-n", "1")
     try:
@@ -825,7 +818,7 @@ def inject(lane: Lane) -> dict[str, Any]:
 
 
 def observe_injection(
-    lane: Lane, inj: dict[str, Any], seam_dlq_before: int, wait_seconds: float
+    lane: Any, inj: dict[str, Any], seam_dlq_before: int, wait_seconds: float
 ) -> dict[str, Any]:
     deadline = time.monotonic() + wait_seconds
     since = inj["published_at"]
@@ -871,100 +864,84 @@ def observe_injection(
         time.sleep(10)
 
 
-def observe_lane(
-    lane: Lane,
-    *,
-    samples: int,
-    interval: float,
-    settle_seconds: float,
-    injection_wait: float,
+def _observe_node(
+    request: dict[str, Any], *, runner: Callable[..., subprocess.CompletedProcess[str]]
 ) -> dict[str, Any]:
-    ident_before = lane.wait_settled(settle_seconds)
-
-    natural: dict[str, dict[str, Any]] = {}
-    for c in lane.containers.runtime_containers:
-        lines = lane.logs(c)
-        total, probe, nat = natural_validation_errors(lines)
-        natural[c] = {
-            "lines": len(lines),
-            "total": total,
-            "probe": probe,
-            "natural": nat,
-            "first_line": lines[0][:120] if lines else None,
-        }
-
-    hwm_before = lane.high_watermark(APPLIED_TOPIC)
-    t0 = time.monotonic()
-    kind_samples: list[list[dict[str, Any]]] = []
-    kind_view: list[dict[str, Any]] = []
-    for i in range(samples):
-        if i:
-            time.sleep(interval)
-        rows = walk(lane)["rows"]
-        kind_samples.append(rows)
-        kind_view.append({k: kind_rows(rows, p, t) for k, p, t, _c in KINDS})
-    # At least a minute on the applied topic, as the readback took it.
-    remaining = 60.0 - (time.monotonic() - t0)
-    if remaining > 0:
-        time.sleep(remaining)
-    hwm_after = lane.high_watermark(APPLIED_TOPIC)
-    applied_window = round(time.monotonic() - t0)
-
-    live = lane.live_groups()
-    w = walk(lane)
-    control_page1 = lane.page({})
-    control_cursor = (
-        lane.page({"cursor": str(control_page1["next_cursor"])})
-        if control_page1.get("next_cursor")
-        else None
+    """Collect through the same contract-backed node entrypoint as the workflow."""
+    path = REPO_ROOT / "src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml"
+    contract = yaml.safe_load(path.read_text(encoding="utf-8"))
+    route = next(
+        r
+        for r in contract["handler_routing"]["handlers"]
+        if r["operation"] == "board_probe.consumer_flow"
     )
-
-    seam_dlq_before = lane.high_watermark(SEAM_DLQ)
-    inj = observe_injection(lane, inject(lane), seam_dlq_before, injection_wait)
-    seam_dlq_after = lane.high_watermark(SEAM_DLQ)
-
-    ident_after = lane.identity()
-    changed = {
-        n: (ident_before[n]["id"], ident_after.get(n, {}).get("id"))
-        for n in lane.containers.boot_containers
-        if ident_before[n]["id"] != ident_after.get(n, {}).get("id")
-        or ident_before[n]["started_at"] != ident_after.get(n, {}).get("started_at")
+    model = route["input_model"]
+    contract["input_model"] = model
+    contract["handler"] = {
+        "module": route["handler"]["module"],
+        "class": route["handler"]["name"],
+        "input_model": model["module"] + "." + model["name"],
     }
-    if changed:
-        raise BootChangedError(f"lane containers replaced during the run: {changed}")
-
-    walked_rows = w["rows"]
-    return {
-        "boot_identity": ident_before,
-        "kinds": {"samples": kind_samples, "view": kind_view},
-        "cursor": {
-            "pages": w["pages"],
-            "terminated": w["terminated"],
-            "second_page_differs": w["second_page_differs"],
-            "rows": len(walked_rows),
-            "walked_groups": sorted(
-                {str(r.get("consumer_group")) for r in walked_rows}
-            ),
-            "walked_pairs": len(
-                {(r.get("consumer_group"), r.get("topic")) for r in walked_rows}
-            ),
-            "live_groups": live,
-            "undeclared_cursor_control": None
-            if control_cursor is None
-            else {
-                "returns_page_1_again": control_cursor["rows"][:3]
-                == control_page1["rows"][:3],
-            },
-        },
-        "boot": {
-            "applied_hwm_before": hwm_before,
-            "applied_hwm_after": hwm_after,
-            "applied_window_seconds": applied_window,
-            "natural": natural,
-            "injection": inj,
-            "seam_dlq_hwm": [seam_dlq_before, seam_dlq_after],
-        },
-    }
+    with tempfile.TemporaryDirectory(prefix="c28-") as temp:
+        root = Path(temp)
+        request_path, contract_path, record_path = (
+            root / "request.json",
+            root / "contract.yaml",
+            root / "observation.json",
+        )
+        request_path.write_text(
+            json.dumps({**request, "record": str(record_path)}), encoding="utf-8"
+        )
+        contract_path.write_text(
+            yaml.safe_dump(contract, sort_keys=False), encoding="utf-8"
+        )
+        try:
+            done = runner(
+                [
+                    "uv",
+                    "run",
+                    "--frozen",
+                    "onex",
+                    "node",
+                    "node_board_probe_effect",
+                    "--contract",
+                    str(contract_path),
+                    "--input",
+                    str(request_path),
+                    "--timeout",
+                    str(contract["consumer_flow_execution"]["node_timeout_seconds"]),
+                    "--output",
+                    "receipt",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=contract["consumer_flow_execution"]["process_timeout_seconds"],
+                check=False,
+            )
+        except subprocess.SubprocessError as exc:
+            raise ProbeInputError(
+                f"C28 node could not run: {type(exc).__name__}"
+            ) from exc
+        if done.returncode:
+            raise ProbeInputError(f"C28 node exited {done.returncode}")
+        try:
+            observation = json.loads(record_path.read_text(encoding="utf-8"))[
+                "observation"
+            ]
+            if (
+                not isinstance(observation, dict)
+                or observation.get("read_ok") is not True
+            ):
+                reason = (
+                    observation.get("read_error", "")
+                    if isinstance(observation, dict)
+                    else ""
+                )
+                raise ProbeInputError(f"C28 node could not read the lane: {reason}")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ProbeInputError("C28 node wrote an unreadable observation") from exc
+        return observation
 
 
 # =============================================================================
@@ -1028,7 +1005,9 @@ def _write_record(path: str, payload: dict[str, Any]) -> None:
 
 
 def main(
-    argv: list[str] | None = None, *, lane_factory: Callable[..., Lane] = Lane
+    argv: list[str] | None = None,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--base-url", default="")
@@ -1074,35 +1053,21 @@ def main(
                 raise ProbeInputError(
                     "live probes require --compose-project and --base-url"
                 )
-            try:
-                containers = ModelConsumerFlowLane.from_compose_project(
-                    args.compose_project
-                )
-            except ValueError as exc:
-                raise ProbeInputError(str(exc)) from exc
-            lane = lane_factory(
-                docker=args.docker_bin, base_url=args.base_url, containers=containers
-            )
-            last: ProbeInputError | None = None
-            obs = {}
-            for attempt in range(1, max(1, args.attempts) + 1):
-                try:
-                    obs = observe_lane(
-                        lane,
-                        samples=args.samples,
-                        interval=args.sample_interval,
-                        settle_seconds=args.settle_seconds,
-                        injection_wait=args.injection_wait,
-                    )
-                    last = None
-                    break
-                except BootChangedError as exc:
-                    print(f"::warning::attempt {attempt}: {exc}", file=sys.stderr)
-                    last = exc
-            if last is not None:
-                raise last
-            obs["negative"] = run_negative(
-                REPO_ROOT, shlex.split(args.pytest_cmd), Path(args.scratch)
+            obs = _observe_node(
+                {
+                    "subject_lane": args.compose_project,
+                    "compose_project": args.compose_project,
+                    "base_url": args.base_url,
+                    "docker_bin": args.docker_bin,
+                    "samples": args.samples,
+                    "sample_interval": args.sample_interval,
+                    "settle_seconds": args.settle_seconds,
+                    "injection_wait": args.injection_wait,
+                    "attempts": args.attempts,
+                    "pytest_cmd": args.pytest_cmd,
+                    "scratch": str(Path(args.scratch).resolve()),
+                },
+                runner=runner,
             )
     except (ProbeInputError, OSError) as exc:
         print(f"::error::C28 probe could not look: {exc}", file=sys.stderr)

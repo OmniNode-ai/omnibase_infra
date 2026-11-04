@@ -604,29 +604,38 @@ def test_junit_outcomes_reads_failures_and_param_ids() -> None:
 # ---- could-not-look is exit 2 and still leaves a record ---------------------
 
 
-def test_standalone_probe_reads_only_the_requested_lane(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_standalone_probe_reads_only_the_requested_lane(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     def runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
-        out = "[]"
-        if argv[1] == "inspect":
-            out = json.dumps([{"State": {"Status": "running"}}])
-        elif argv[1] == "exec":
-            out = ""
-        return subprocess.CompletedProcess(argv, 0, out, "")
+        assert argv[:6] == [
+            "uv",
+            "run",
+            "--frozen",
+            "onex",
+            "node",
+            "node_board_probe_effect",
+        ]
+        request = json.loads(Path(argv[argv.index("--input") + 1]).read_text())
+        contract = yaml.safe_load(Path(argv[argv.index("--contract") + 1]).read_text())
+        route = next(
+            r
+            for r in contract["handler_routing"]["handlers"]
+            if r["operation"] == "board_probe.consumer_flow"
+        )
+        assert contract["handler"]["module"] == route["handler"]["module"]
+        assert contract["handler"]["class"] == route["handler"]["name"]
+        assert request["compose_project"] == "omnibase-infra-stability"
+        assert request["base_url"] == "http://projection.test"
+        assert request["docker_bin"] == "fake-docker"
+        assert request["samples"] == 3
+        assert kwargs["timeout"] == 1800
+        Path(request["record"]).write_text(
+            json.dumps({"observation": {"read_ok": True, **_green()}})
+        )
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
 
-    def lane_factory(**kwargs: Any) -> probe.Lane:
-        lane = probe.Lane(**kwargs, runner=runner)
-        lane.identity()
-        lane.rpk("topic", "list")
-        lane.live_groups()
-        return lane
-
-    monkeypatch.setattr(probe, "observe_lane", lambda *a, **kw: _green())
-    monkeypatch.setattr(probe, "run_negative", lambda *a: _green()["negative"])
     assert (
         probe.main(
             [
@@ -634,21 +643,18 @@ def test_standalone_probe_reads_only_the_requested_lane(
                 "omnibase-infra-stability",
                 "--base-url",
                 "http://projection.test",
+                "--docker-bin",
+                "fake-docker",
+                "--samples",
+                "3",
+                "--scratch",
+                str(tmp_path),
             ],
-            lane_factory=lane_factory,
+            runner=runner,
         )
         == 0
     )
-    assert [argv[2] for argv in calls if argv[1] == "inspect"] == [
-        "omninode-stability-runtime",
-        "omninode-stability-runtime-effects",
-        "omnimarket-stability-projection-api",
-    ]
-    assert [
-        argv[3] if argv[2] == "-i" else argv[2] for argv in calls if argv[1] == "exec"
-    ] == ["omnibase-infra-stability-redpanda", "omnibase-infra-stability-postgres"]
-    assert 'brokers="redpanda:9092"' in calls[3][6]
-    assert 'if [ -n "${DEV_KAFKA_SASL_USERNAME:-}" ]' in calls[3][6]
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -657,42 +663,62 @@ def test_standalone_probe_reads_only_the_requested_lane(
         [],
         ["--compose-project", "omnibase-infra-stability"],
         ["--base-url", "http://projection.test"],
-        ["--compose-project", "foreign", "--base-url", "http://projection.test"],
     ],
 )
 def test_standalone_probe_refuses_missing_or_invalid_lane_inputs(
     args: list[str],
 ) -> None:
-    def unexpected_lane(**kwargs: Any) -> probe.Lane:
-        pytest.fail("invalid lane inputs must be refused before transport I/O")
+    def unexpected_node(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        pytest.fail("missing lane inputs must be refused before transport I/O")
 
-    assert probe.main(args, lane_factory=unexpected_lane) == 2
+    assert probe.main(args, runner=unexpected_node) == 2
 
 
-def test_a_lane_that_cannot_be_read_exits_2_with_a_record(tmp_path: Path) -> None:
-    class DeadLane(probe.Lane):
-        def identity(self) -> dict[str, dict[str, Any]]:
-            raise probe.ProbeInputError("docker inspect omninode-runtime exited 1")
+@pytest.mark.parametrize(
+    "failure", ["command", "timeout", "missing-record", "bad-json", "unreadable-lane"]
+)
+def test_a_lane_that_cannot_be_read_exits_2_with_a_record(
+    tmp_path: Path, failure: str
+) -> None:
+    def runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        request = json.loads(Path(argv[argv.index("--input") + 1]).read_text())
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if failure == "bad-json":
+            Path(request["record"]).write_text("not json")
+        elif failure == "unreadable-lane":
+            Path(request["record"]).write_text(
+                json.dumps(
+                    {
+                        "observation": {
+                            "read_ok": False,
+                            "read_error": "lane unavailable",
+                        }
+                    }
+                )
+            )
+        return subprocess.CompletedProcess(
+            argv, 1 if failure == "command" else 0, "", ""
+        )
 
     rec_path = tmp_path / "c28.json"
-    code = probe.main(
-        [
-            "--record",
-            str(rec_path),
-            "--scratch",
-            str(tmp_path),
-            "--pytest-cmd",
-            "true",
-            "--compose-project",
-            "omnibase-infra-stability",
-            "--base-url",
-            "http://projection.test",
-        ],
-        lane_factory=DeadLane,
+    assert (
+        probe.main(
+            [
+                "--record",
+                str(rec_path),
+                "--scratch",
+                str(tmp_path),
+                "--compose-project",
+                "foreign",
+                "--base-url",
+                "http://projection.test",
+            ],
+            runner=runner,
+        )
+        == 2
     )
-    assert code == 2
-    body = json.loads(rec_path.read_text(encoding="utf-8"))
-    assert body["verdict"] == "could_not_look"
+    assert json.loads(rec_path.read_text())["verdict"] == "could_not_look"
 
 
 def test_replay_of_the_green_observation_exits_0(tmp_path: Path) -> None:
