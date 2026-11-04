@@ -18,10 +18,17 @@ Deleting a bridge must not delete the grant it carried. For each relation this
 proves, from the committed repository state alone, that the derivation no longer
 carries a bridge for it, that the vendored migration lineage is still in the
 tree, and that every shipped instance still grants the principal exactly
-SELECT, INSERT and UPDATE on it. The grants are read from the shipped
-``topology/instances/*.yaml`` that the Application Database Domain Enforcement
-gate projects, so a bridge removed ahead of the contract that replaces it fails
-here and not on a deploy.
+SELECT, INSERT and UPDATE on it. The grants are read from the committed
+``topology/instances/*.yaml``.
+
+What this does NOT prove: that the pinned omnimarket contracts derive those
+grants. The instances are generated files, so a bridge removed ahead of the
+contract that replaces it would still pass here. That proof is the OMN-15361
+Application Database Domain Enforcement job's: it regenerates every grant from
+the pinned contracts (``.proof-dependencies/omnimarket-pin``) and fails when
+the result differs from these committed instances by a byte. This repo may not
+import omnimarket (OMN-19998), which is why the derivation proof lives there
+and not here.
 """
 
 from __future__ import annotations
