@@ -69,11 +69,51 @@ async def test_ledger_preserves_dispatch_identity(
     with bind_dispatch_envelope(envelope):
         output = await handler.handle(request)
 
-    expected_correlation = payload_correlation or envelope.correlation_id
+    expected_correlation = envelope.correlation_id
     assert output.correlation_id == expected_correlation
     assert output.input_envelope_id == envelope.envelope_id
     assert db.execute.call_args.args[0]["correlation_id"] == str(expected_correlation)
     assert request.correlation_id == payload_correlation
+    assert current_dispatch_envelope() is None
+
+
+async def test_ledger_dispatch_overrides_stale_payload_correlation() -> None:
+    handler = HandlerValidationLedgerAppend(MagicMock(spec=ModelONEXContainer))
+    handler._initialized = True
+    db = AsyncMock()
+    db.execute.return_value = MagicMock(result=MagicMock(payload=MagicMock(rows=[])))
+    handler._db_handler = db
+    engine = MessageDispatchEngine()
+    topic = "onex.evt.platform.validation-ledger-append.v1"
+    engine.register_dispatcher(
+        dispatcher_id="validation-ledger",
+        dispatcher=_make_dispatch_callback(handler),
+        category=EnumMessageCategory.EVENT,
+        message_types={"ValidationLedgerAppend"},
+    )
+    engine.register_route(
+        ModelDispatchRoute(
+            route_id="validation-ledger-route",
+            topic_pattern=topic,
+            message_category=EnumMessageCategory.EVENT,
+            dispatcher_id="validation-ledger",
+        )
+    )
+    engine.freeze()
+    request = _ledger_request(uuid4())
+    envelope = ModelEventEnvelope[object](
+        payload=request.model_dump(mode="json"),
+        correlation_id=uuid4(),
+        event_type="ValidationLedgerAppend",
+    )
+
+    result = await engine.dispatch(topic, envelope)
+
+    assert result.status is EnumDispatchStatus.SUCCESS, result
+    db.execute.assert_awaited_once()
+    assert db.execute.call_args.args[0]["correlation_id"] == str(
+        envelope.correlation_id
+    )
     assert current_dispatch_envelope() is None
 
 

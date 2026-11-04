@@ -105,13 +105,17 @@ async def test_bridge_writes_validation_ledger_row_through_typed_handle() -> Non
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_bridge_carries_correlation_id_to_the_database_call() -> None:
-    """The intent's correlation id rides to the DB envelope; payload id wins."""
+@pytest.mark.parametrize("payload_has_correlation", [False, True])
+async def test_bridge_carries_correlation_id_to_the_database_call(
+    payload_has_correlation: bool,
+) -> None:
+    """The intent's correlation id reaches the DB even with a stale payload id."""
     handler, db = _handler_with_mock_db(uuid4())
     correlation_id = uuid4()
 
     await IntentEffectDispatchBridge(handler).execute(
-        _payload(correlation_id=None), correlation_id=correlation_id
+        _payload(correlation_id=uuid4() if payload_has_correlation else None),
+        correlation_id=correlation_id,
     )
 
     sent = db.execute.await_args.args[0]

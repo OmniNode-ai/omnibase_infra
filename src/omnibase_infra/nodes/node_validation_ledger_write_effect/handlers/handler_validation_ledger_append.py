@@ -361,12 +361,12 @@ class HandlerValidationLedgerAppend:
         payload = request
         envelope = current_dispatch_envelope()
         correlation_id = (
-            payload.correlation_id
-            or (envelope.correlation_id if envelope is not None else None)
+            (envelope.correlation_id if envelope is not None else None)
+            or payload.correlation_id
             or uuid4()
         )
         input_envelope_id = envelope.envelope_id if envelope is not None else uuid4()
-        if payload.correlation_id is None:
+        if payload.correlation_id != correlation_id:
             # Keep the DB operation and handler output on the same trace without
             # mutating the frozen request supplied by the dispatch adapter.
             payload = payload.model_copy(update={"correlation_id": correlation_id})

@@ -191,6 +191,7 @@ def replay_ledger(case: ModelReplayInput) -> None:
                     )
                     if case.bound:
                         assert output.input_envelope_id == envelope.envelope_id
+                        assert output.correlation_id == envelope.correlation_id
                 else:
                     with pytest.raises(RuntimeHostError, match="invalid 'payload'"):
                         await handler.execute({})

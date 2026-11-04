@@ -3,11 +3,11 @@
   "candidate_count": 8,
   "coverage_target": 80.0,
   "handler_module": "omnibase_infra.nodes.node_validation_ledger_write_effect.handlers.handler_validation_ledger_append",
-  "handler_module_sha256": "sha256:2e55380026610b790dbef96f32c6780db0dd4e790cba8f66575125aa43397346",
+  "handler_module_sha256": "sha256:660c4562d5e3650d6e25c3dee0f4dc930ff11b754077655d5c7fe0876bdc0b8d",
   "meets_target": true,
   "node_id": "omnibase_infra.nodes.node_validation_ledger_write_effect",
   "receipt_schema": "adequacy_receipt.v1",
-  "recorded_at": "2026-11-04T13:41:51.186569+00:00",
+  "recorded_at": "2026-11-04T15:50:04.492168+00:00",
   "recorder_schema": "adequacy_receipt.v1",
   "selected_count": 6,
   "selected_input_hashes": [
