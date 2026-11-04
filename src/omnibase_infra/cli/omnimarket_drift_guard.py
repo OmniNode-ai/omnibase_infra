@@ -123,7 +123,6 @@ fail-open-on-None path let it pass silently).
 
 from __future__ import annotations
 
-import importlib
 import json
 import logging
 import os
@@ -146,6 +145,9 @@ from omnibase_infra.cli.model_off_registry_check import ModelOffRegistryCheck
 from omnibase_infra.cli.model_omnimarket_lag_stamp import ModelOmnimarketLagStamp
 from omnibase_infra.cli.protocol_drift_guard_verdict import ProtocolDriftGuardVerdict
 from omnibase_infra.cli.workspace_reconcile import ReconcileFn
+from omnibase_infra.handlers.handler_omnimarket_reconcile_readback import (
+    read_omnimarket_reconcile_state,
+)
 from omnibase_infra.models.delegation.model_floor_marker import ModelFloorMarker
 from omnibase_infra.models.delegation.model_omnimarket_registry_stamp import (
     ModelOmnimarketRegistryStamp,
@@ -1183,17 +1185,10 @@ def check_omnimarket_drift(
                 f"evidence), set {DRIFT_OVERRIDE_ENV}=1."
             )
 
-        # The reconcile mutated site-packages out of process. importlib caches
-        # directory listings per sys.path entry, so without this the re-probe
-        # would faithfully report the pre-repair state and refuse a venv that
-        # was just fixed.
-        importlib.invalidate_caches()
-        installed = installed_omnimarket_commit()
-        if installed == canonical:
-            logger.info(
-                "omnimarket drift reconciled in-flight to %s; continuing.",
-                canonical[:12],
-            )
+        # A peer can advance the clone while the reconcile installs from it.
+        # The node handler reads both identities again and refuses unread state.
+        readback = read_omnimarket_reconcile_state(omni_home_path)
+        if readback.matches:
             return None
 
         # Reaching here means the reconcile outcome claimed a readback-proven
@@ -1206,8 +1201,9 @@ def check_omnimarket_drift(
         raise OmnimarketDriftError(
             f"{detail} Reconcile run {outcome.run_id} reported a "
             f"readback-PROVEN success and this venv is STILL drifted: installed "
-            f"{(installed or 'ABSENT')[:12]} != canonical "
-            f"$OMNIBASE_PATH/omnimarket HEAD {canonical[:12]}. That is a "
+            f"{(readback.installed or 'ABSENT')[:12]} != canonical "
+            f"$OMNIBASE_PATH/omnimarket HEAD "
+            f"{(readback.canonical or 'UNREADABLE')[:12]}. That is a "
             f"contradiction between two readings of the same fact, not a stale "
             f"venv, and no retry will resolve it. Reproduce run "
             f"{outcome.run_id} with:\n"

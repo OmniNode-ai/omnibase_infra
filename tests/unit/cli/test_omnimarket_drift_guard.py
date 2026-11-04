@@ -987,6 +987,98 @@ def test_reconcile_reporting_success_while_still_drifted_still_refuses(
     assert "STILL drifted" in str(excinfo.value)
 
 
+def _clone_advances_during_reconcile(
+    monkeypatch: pytest.MonkeyPatch, *, installed_after: str
+) -> tuple[str, _Reconciler]:
+    """Model a peer actor fast-forwarding the canonical clone mid-reconcile.
+
+    The guard reads the clone HEAD (``before``) first; while the reconcile runs,
+    the clone moves to ``after`` (pull-all.sh or the periodic tick advances it --
+    the reconciler itself never does) and the reconcile installs and proves the
+    venv against the clone as it now stands.
+    """
+    after = "c" * 40
+    state: dict[str, str | None] = {"canonical": "a" * 40, "installed": "b" * 40}
+    monkeypatch.setattr(
+        guard,
+        "canonical_local_omnimarket_commit",
+        lambda *_, **__: state["canonical"],
+    )
+    monkeypatch.setattr(
+        guard, "installed_omnimarket_commit", lambda: state["installed"]
+    )
+    # The pre-reconcile installed commit is not an ancestor of anything here.
+    monkeypatch.setattr(guard, "resolve_ancestor_lag", lambda **_: None)
+
+    def _repair() -> None:
+        state["canonical"] = after
+        state["installed"] = installed_after
+
+    return after, _Reconciler(ok=True, on_success=_repair)
+
+
+def test_reconcile_against_an_advanced_clone_proceeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Friction class 1593: the re-check compares against the clone as it NOW is.
+
+    Before the fix the guard compared the refreshed installed commit against
+    the canonical HEAD it read BEFORE the reconcile, so a readback-proven repair
+    onto a clone a peer had just advanced was refused as a "contradiction
+    between two readings of the same fact".
+    """
+    _, reconciler = _clone_advances_during_reconcile(
+        monkeypatch, installed_after="c" * 40
+    )
+
+    guard.check_omnimarket_drift("/w", reconcile=reconciler)
+
+    assert reconciler.calls == 1
+
+
+def test_reconcile_against_an_advanced_clone_still_refuses_genuine_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-reading the clone must not widen the check: a real mismatch refuses."""
+    after, reconciler = _clone_advances_during_reconcile(
+        monkeypatch, installed_after="d" * 40
+    )
+
+    with pytest.raises(guard.OmnimarketDriftError) as excinfo:
+        guard.check_omnimarket_drift("/w", reconcile=reconciler)
+
+    message = str(excinfo.value)
+    assert "STILL drifted" in message
+    assert ("d" * 12) in message
+    # The refusal names the canonical HEAD it actually compared against.
+    assert f"HEAD {after[:12]}. That is" in message
+
+
+def test_reconcile_refuses_when_the_clone_vanishes_mid_reconcile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreadable clone after the reconcile proves nothing: refuse."""
+    state: dict[str, str | None] = {"canonical": "a" * 40, "installed": "b" * 40}
+    monkeypatch.setattr(
+        guard,
+        "canonical_local_omnimarket_commit",
+        lambda *_, **__: state["canonical"],
+    )
+    monkeypatch.setattr(
+        guard, "installed_omnimarket_commit", lambda: state["installed"]
+    )
+    monkeypatch.setattr(guard, "resolve_ancestor_lag", lambda **_: None)
+
+    def _repair() -> None:
+        state["canonical"] = None
+        state["installed"] = "a" * 40
+
+    with pytest.raises(guard.OmnimarketDriftError):
+        guard.check_omnimarket_drift(
+            "/w", reconcile=_Reconciler(ok=True, on_success=_repair)
+        )
+
+
 def test_no_reconciler_preserves_the_pure_refusal(
     monkeypatch: pytest.MonkeyPatch, canonical_head: str
 ) -> None:
