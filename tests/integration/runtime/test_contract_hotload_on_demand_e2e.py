@@ -49,6 +49,7 @@ from omnibase_infra.runtime.registry.registry_protocol_binding import (
     RegistryProtocolBinding,
 )
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_profile import resolve_runtime_profile_name
 
 pytestmark = pytest.mark.integration
 
@@ -243,6 +244,7 @@ async def _installed_contract_scenario(tmp_path: Path) -> None:
 
 async def test_an_installed_contract_loads_serves_and_survives_a_restart(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Expect only the missing accepted record at the first assertion.
 
@@ -250,6 +252,8 @@ async def test_an_installed_contract_loads_serves_and_survives_a_restart(
     Reaching a later assertion, a harness failure or passing the whole scenario
     fails this test. This keeps the executable expectation without adding a skip.
     """
+    monkeypatch.setenv("RUNTIME_PROFILE", _WORKLOAD)
+    assert resolve_runtime_profile_name() == _WORKLOAD
     with pytest.raises(
         AssertionError,
         match="^" + re.escape(_MISSING_ACCEPTED) + r"(?:\nassert \[\])?$",
@@ -270,7 +274,9 @@ async def test_expected_failure_does_not_accept_other_assertions(
 
     monkeypatch.setattr(f"{__name__}._installed_contract_scenario", broken_scenario)
     with pytest.raises(AssertionError):
-        await test_an_installed_contract_loads_serves_and_survives_a_restart(tmp_path)
+        await test_an_installed_contract_loads_serves_and_survives_a_restart(
+            tmp_path, monkeypatch
+        )
 
 
 async def test_expected_failure_does_not_accept_a_passing_scenario(
@@ -282,7 +288,9 @@ async def test_expected_failure_does_not_accept_a_passing_scenario(
 
     monkeypatch.setattr(f"{__name__}._installed_contract_scenario", passing_scenario)
     with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
-        await test_an_installed_contract_loads_serves_and_survives_a_restart(tmp_path)
+        await test_an_installed_contract_loads_serves_and_survives_a_restart(
+            tmp_path, monkeypatch
+        )
 
 
 @pytest.mark.parametrize(

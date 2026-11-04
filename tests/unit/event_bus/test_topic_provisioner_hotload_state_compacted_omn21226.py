@@ -18,11 +18,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_core.constants.constants_runtime_profiles import (
+    REGISTERED_RUNTIME_PROFILES,
+)
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
 from omnibase_infra.models.contract_hotload.model_contract_hotload_workload_topic import (
     ModelContractHotloadWorkloadTopic,
 )
-from omnibase_infra.runtime.runtime_profile import _PROFILES
 
 pytestmark = pytest.mark.unit
 
@@ -119,7 +121,7 @@ def _no_partition_cap(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("workload", sorted(_PROFILES))
+@pytest.mark.parametrize("workload", sorted(REGISTERED_RUNTIME_PROFILES))
 async def test_the_state_topic_is_created_compacted_from_its_declaration(
     workload: str, empty_contracts_root: Path
 ) -> None:

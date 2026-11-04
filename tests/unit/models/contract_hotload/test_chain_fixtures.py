@@ -5,21 +5,22 @@
 Plan section 4 names the chains G1 to G8 and E1 to E17. Each is a fixture under
 ``tests/fixtures/contract_hotload/``, written before the code that makes it pass.
 
-This file checks the fixture shape. It does not import the record models: they are in
-omnibase_core's ``models.events.contract_hotload``, and this repository pins a core
-release that does not carry them yet. The follow-up that moves the pin adds the test
-that parses each ``record`` with its named model and refuses an undeclared field; the
-planted-violation test below is the control that this shape check refuses one at the
-step level in the meantime.
+Records are validated against wire schemas exported from core's hot-loading models.
+The snapshot includes their Python validator constraints and source-file digests.
+It keeps this suite self-contained while the pinned core predates those models;
+no sibling checkout or optional import can silently remove record validation.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
+from jsonschema import Draft202012Validator, FormatChecker
 
 pytestmark = pytest.mark.unit
 
@@ -50,6 +51,13 @@ _MODELS = {
     "ModelRegistryWatermark",
     "ModelContractHotloadApplied",
     "ModelRuntimeHotloadState",
+}
+_SCHEMAS = json.loads(
+    (_FIXTURES / "schemas" / "records.json").read_text(encoding="utf-8")
+)["models"]
+_VALIDATORS = {
+    name: Draft202012Validator(schema, format_checker=FormatChecker())
+    for name, schema in _SCHEMAS.items()
 }
 _ROLES = {
     "sender_request",
@@ -106,6 +114,9 @@ def shape_errors(fixture: dict[str, Any], chain: str) -> list[str]:
             )
         if "model" in step and not isinstance(step.get("record"), dict):
             errors.append(f"step {index} record is not a mapping")
+        if step.get("model") in _VALIDATORS and isinstance(step.get("record"), dict):
+            for error in _VALIDATORS[step["model"]].iter_errors(step["record"]):
+                errors.append(f"step {index} record {error.json_path}: {error.message}")
         if "model" in step and "topic_role" not in step:
             errors.append(f"step {index} carries a record without a topic role")
         if "topic_role" in step and step["topic_role"] not in _ROLES:
@@ -123,6 +134,12 @@ def test_the_plan_names_eight_golden_and_seventeen_error_chains() -> None:
 def test_the_fixture_directory_holds_exactly_the_planned_chains() -> None:
     present = {path.stem for path in _FIXTURES.glob("*.json")}
     assert present == set(_GOLDEN) | set(_ERROR)
+
+
+def test_every_record_model_has_a_valid_schema() -> None:
+    assert set(_SCHEMAS) == _MODELS
+    for schema in _SCHEMAS.values():
+        Draft202012Validator.check_schema(schema)
 
 
 @pytest.mark.parametrize("chain", _GOLDEN + _ERROR)
@@ -167,3 +184,66 @@ def test_planted_violation_a_record_of_an_unknown_model_is_refused() -> None:
     fixture = _load("G1")
     fixture["steps"][0]["model"] = "ModelSomethingElse"
     assert any("not a hot-loading record" in e for e in shape_errors(fixture, "G1"))
+
+
+def test_planted_violation_an_undeclared_record_field_is_refused() -> None:
+    fixture = _load("G1")
+    fixture["steps"][0]["record"]["undeclared_field"] = "x"
+    assert any("undeclared_field" in error for error in shape_errors(fixture, "G1"))
+
+
+def _record_objects(
+    record: dict[str, Any], path: tuple[str, ...] = ()
+) -> Iterator[tuple[tuple[str, ...], dict[str, Any]]]:
+    # `names` is a map keyed by contract name; its values and every other
+    # object are closed models, including observed and served entries.
+    if path != ("names",):
+        yield path, record
+    for key, value in record.items():
+        if isinstance(value, dict):
+            yield from _record_objects(value, (*path, key))
+
+
+@pytest.mark.parametrize("chain", _GOLDEN + _ERROR)
+def test_every_record_refuses_unknown_and_missing_fields(chain: str) -> None:
+    fixture = _load(chain)
+    for step in fixture["steps"]:
+        if "record" not in step:
+            continue
+        validator = _VALIDATORS[step["model"]]
+        validator.validate(step["record"])
+        for path, obj in _record_objects(step["record"]):
+            for field in ("undeclared_field", *obj):
+                mutated = deepcopy(step["record"])
+                target = mutated
+                for key in path:
+                    target = target[key]
+                if field == "undeclared_field":
+                    target[field] = "x"
+                else:
+                    del target[field]
+                assert not validator.is_valid(mutated), (
+                    chain,
+                    step["step"],
+                    path,
+                    field,
+                )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("operation", "unknown"),
+        ("registration_request_id", "not-a-uuid"),
+        ("content_hash", "A" * 64),
+        ("expected_version", -1),
+        ("expected_version", "1"),
+        ("owner", ""),
+    ],
+)
+def test_planted_violation_invalid_record_values_are_refused(
+    field: str, value: Any
+) -> None:
+    fixture = _load("G1")
+    fixture["steps"][0]["record"][field] = value
+    assert shape_errors(fixture, "G1")

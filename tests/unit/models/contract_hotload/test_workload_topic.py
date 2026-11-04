@@ -9,19 +9,36 @@ core's topic validator, and the state topic is declared compacted.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
+import yaml
 
+from omnibase_core.constants.constants_runtime_profiles import (
+    REGISTERED_RUNTIME_PROFILES,
+)
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.models.contract_hotload.model_contract_hotload_workload_topic import (
     ModelContractHotloadWorkloadTopic,
 )
-from omnibase_infra.runtime.runtime_profile import _PROFILES
+from omnibase_infra.runtime.runtime_profile import load_runtime_profile
 
 pytestmark = pytest.mark.unit
 
+# Profiles are routing identities, while catalog service names identify deployed
+# workloads. Exercise both sets rather than treating a private profile map as
+# the workload inventory.
+_CATALOG = Path(__file__).resolve().parents[4] / "docker" / "catalog" / "services"
+_LANE_WORKLOADS = {
+    service["name"]
+    for path in _CATALOG.glob("*.yaml")
+    if (service := yaml.safe_load(path.read_text(encoding="utf-8")))["layer"]
+    == "runtime"
+}
+_TOPIC_WRITERS = sorted(_LANE_WORKLOADS | REGISTERED_RUNTIME_PROFILES)
 
-@pytest.mark.parametrize("workload", sorted(_PROFILES))
+
+@pytest.mark.parametrize("workload", _TOPIC_WRITERS)
 @pytest.mark.parametrize(
     "expand",
     [
@@ -44,7 +61,14 @@ def test_every_workload_expansion_passes_the_topic_validator(
 
 def test_the_profile_set_is_not_empty() -> None:
     """Positive control for the parametrisation above."""
-    assert len(_PROFILES) > 1
+    assert "omninode-runtime" in _LANE_WORKLOADS
+    assert "runtime-effects" in _LANE_WORKLOADS
+    assert "main" in REGISTERED_RUNTIME_PROFILES
+
+
+@pytest.mark.parametrize("profile", sorted(REGISTERED_RUNTIME_PROFILES))
+def test_registered_profiles_resolve_through_the_public_api(profile: str) -> None:
+    assert load_runtime_profile(profile).name == profile
 
 
 def test_the_workload_sits_in_the_event_name_segment() -> None:
@@ -62,7 +86,7 @@ def test_the_workload_sits_in_the_event_name_segment() -> None:
     ]
 
 
-@pytest.mark.parametrize("workload", sorted(_PROFILES))
+@pytest.mark.parametrize("workload", _TOPIC_WRITERS)
 def test_the_state_topic_is_declared_compacted(workload: str) -> None:
     spec = ModelContractHotloadWorkloadTopic.state(workload).spec
 
@@ -70,7 +94,7 @@ def test_the_state_topic_is_declared_compacted(workload: str) -> None:
     assert spec.kafka_config["cleanup.policy"] == "compact"
 
 
-@pytest.mark.parametrize("workload", sorted(_PROFILES))
+@pytest.mark.parametrize("workload", _TOPIC_WRITERS)
 def test_the_applied_topic_is_declared_time_retained(workload: str) -> None:
     spec = ModelContractHotloadWorkloadTopic.applied(workload).spec
 

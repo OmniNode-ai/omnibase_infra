@@ -1,0 +1,696 @@
+{
+  "source_package": "omnibase_core",
+  "source_version": "0.47.66",
+  "source_sha256": {
+    "models/events/contract_hotload/__init__.py": "b17204ca98e911ec376435a7dec32bde6f5217e88dfe4a38c2cd248dff2691fa",
+    "models/events/contract_hotload/model_contract_hotload_accepted.py": "a1fe208a97577335e3fa5ba3b06acbef9fa9be0951f27ef33dde136ff121e64e",
+    "models/events/contract_hotload/model_contract_hotload_applied.py": "0ce421c1835ca5067ed2bac9b2cd66d10244e44764ae0b4c47eb70651294c233",
+    "models/events/contract_hotload/model_contract_hotload_removed.py": "224820211b33d8be903c2c1f949ffc4fa77c78cbf238cf710a62915c45d8159c",
+    "models/events/contract_hotload/model_contract_load_reply.py": "ed9761ab49df5c635a314189c2c9a4c82ff409ff8ac31ae501ec44fa95deef39",
+    "models/events/contract_hotload/model_contract_load_request.py": "6d9f46a5003791edc431b4cc99a17e54d32f7bbeeca488febdd2f24bd17101fb",
+    "models/events/contract_hotload/model_contract_revision.py": "10aea78b484abeff03e99e3f09e5902bc42bede65df64574337d8c232ba52e00",
+    "models/events/contract_hotload/model_hotload_name_state.py": "c3978c386041666b23b5b2e1cd2e534349c7a385de6561e3daebe992062023e5",
+    "models/events/contract_hotload/model_hotload_observed_entry.py": "4bef22d723f14126cf8b6715edf35f7f3e4221ceee6448c83a4a3424e3ca675b",
+    "models/events/contract_hotload/model_hotload_served_entry.py": "29585ee5f53c32cfb93ce5e148205d9f67023844f28e584b3e6e604ef7e84248",
+    "models/events/contract_hotload/model_partition_end_offset.py": "a2ad670ccda6c5cbbf7d250a7b1775284ff1f2da62888ef525aa9f4339a245e3",
+    "models/events/contract_hotload/model_prune_candidate.py": "f13820fe8a53943aaab2bec747e3acb103426626704effc3ae6393e8b9174af6",
+    "models/events/contract_hotload/model_prune_completion.py": "2f1ffcd5fc11f30841f96542a6c8a0a56ebbc864c2ea05376c96abbec845cb4e",
+    "models/events/contract_hotload/model_prune_request.py": "1a06155f4b1b3cea03e45fe17b82695c99e186cb6d9efd1dfdcb03ddf7596517",
+    "models/events/contract_hotload/model_prune_topic_result.py": "a6f152b529def03beeb5390ac740976792509e8fd47fffa65b3d5c0aa9e1bc39",
+    "models/events/contract_hotload/model_registry_watermark.py": "821fbe330b5413230361b57c67b7a73410fd829b2c2321f99a064e87b9d8abbf",
+    "models/events/contract_hotload/model_runtime_hotload_state.py": "ffa3ce9f3fc3982468887d12f3acec5ce76056336e752914fcf02dcd00de9a41",
+    "enums/enum_contract_hotload_operation.py": "937c516bd0c36de7094db335a44ba59df0670eed8c96f1f03417795e20015053",
+    "enums/enum_contract_hotload_reason.py": "fd51b7a24a37f0e3cbd1c9f4de1e7b1f16db2c40a07db2080504c2813871d228",
+    "enums/enum_contract_hotload_status.py": "5c48f13a77beb1c853b9433c1bfb1e8af8a72475db3c4b471ec7b9f5ff220fae",
+    "enums/enum_contract_load_outcome.py": "df934d38afe4e70d6dc06f1d65197d95946bd9008dee4214a28612b54434d500"
+  },
+  "note": "Pydantic model_json_schema snapshots, with the existing Python validators expressed as JSON Schema constraints. Used until the dependency pin carries the hot-loading record models.",
+  "models": {
+    "ModelContractLoadRequest": {
+      "$defs": {
+        "EnumContractHotloadOperation": {
+          "description": "What a request or registry record does to one contract name.\n\nPlan section 4 names the three: ``register`` (a name the registry has not\nheld, ``expected_version: 0``), ``replace`` (a new hash for a held name)\nand ``remove``.",
+          "enum": [
+            "register",
+            "replace",
+            "remove"
+          ],
+          "title": "EnumContractHotloadOperation",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A caller asks the registry to load or remove one contract by name and hash.\n\nAttributes:\n    operation: ``load`` or ``remove``.\n    contract_name: The installed contract's name.\n    content_hash: Canonical content hash of the contract the caller means.\n    registration_request_id: Caller-chosen id; the reply and the registry\n        record carry it back, so a resend is told from a new request.\n    expected_version: The registry version the caller last saw for the name\n        (``0`` for a name it has never seen); a mismatch is a conflict.\n    owner: The principal that owns the registration.",
+      "properties": {
+        "operation": {
+          "$ref": "#/$defs/EnumContractHotloadOperation"
+        },
+        "contract_name": {
+          "minLength": 1,
+          "title": "Contract Name",
+          "type": "string"
+        },
+        "content_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "registration_request_id": {
+          "format": "uuid",
+          "title": "Registration Request Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 0,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "owner": {
+          "minLength": 1,
+          "title": "Owner",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "contract_name",
+        "content_hash",
+        "registration_request_id",
+        "expected_version",
+        "owner"
+      ],
+      "title": "ModelContractLoadRequest",
+      "type": "object"
+    },
+    "ModelContractHotloadAccepted": {
+      "$defs": {
+        "EnumContractHotloadOperation": {
+          "description": "What a request or registry record does to one contract name.\n\nPlan section 4 names the three: ``register`` (a name the registry has not\nheld, ``expected_version: 0``), ``replace`` (a new hash for a held name)\nand ``remove``.",
+          "enum": [
+            "register",
+            "replace",
+            "remove"
+          ],
+          "title": "EnumContractHotloadOperation",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The compacted record of one accepted contract, keyed by its name.\n\nAttributes:\n    entity_id: The contract name (the record's compaction key).\n    registry_version: The registry version this acceptance created.\n    content_hash: Canonical content hash of the installed contract.\n    operation: ``register`` or ``replace``.\n    owner: The principal that owns the registration.\n    registration_request_id: The request this acceptance answers.\n    contract_yaml: The installed contract, as text.",
+      "properties": {
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "registry_version": {
+          "minimum": 1,
+          "title": "Registry Version",
+          "type": "integer"
+        },
+        "content_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "operation": {
+          "enum": [
+            "register",
+            "replace"
+          ]
+        },
+        "owner": {
+          "minLength": 1,
+          "title": "Owner",
+          "type": "string"
+        },
+        "registration_request_id": {
+          "format": "uuid",
+          "title": "Registration Request Id",
+          "type": "string"
+        },
+        "contract_yaml": {
+          "minLength": 1,
+          "title": "Contract Yaml",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id",
+        "registry_version",
+        "content_hash",
+        "operation",
+        "owner",
+        "registration_request_id",
+        "contract_yaml"
+      ],
+      "title": "ModelContractHotloadAccepted",
+      "type": "object"
+    },
+    "ModelContractHotloadRemoved": {
+      "$defs": {
+        "EnumContractHotloadOperation": {
+          "description": "What a request or registry record does to one contract name.\n\nPlan section 4 names the three: ``register`` (a name the registry has not\nheld, ``expected_version: 0``), ``replace`` (a new hash for a held name)\nand ``remove``.",
+          "enum": [
+            "register",
+            "replace",
+            "remove"
+          ],
+          "title": "EnumContractHotloadOperation",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The compacted record of one removed contract, keyed by its name.\n\nIt carries no ``contract_yaml``: a removal installs nothing.\n\nAttributes:\n    entity_id: The contract name (the record's compaction key).\n    registry_version: The registry version this removal created.\n    content_hash: Canonical content hash of the contract that was removed.\n    operation: Always ``remove``.\n    owner: The principal that owns the registration.\n    registration_request_id: The request this removal answers.",
+      "properties": {
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "registry_version": {
+          "minimum": 1,
+          "title": "Registry Version",
+          "type": "integer"
+        },
+        "content_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "operation": {
+          "const": "remove"
+        },
+        "owner": {
+          "minLength": 1,
+          "title": "Owner",
+          "type": "string"
+        },
+        "registration_request_id": {
+          "format": "uuid",
+          "title": "Registration Request Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id",
+        "registry_version",
+        "content_hash",
+        "operation",
+        "owner",
+        "registration_request_id"
+      ],
+      "title": "ModelContractHotloadRemoved",
+      "type": "object"
+    },
+    "ModelContractLoadReply": {
+      "$defs": {
+        "EnumContractHotloadReason": {
+          "description": "Why the registry rejected a request or a runtime did not apply a change.\n\nThe values are the tokens plan sections 3.2 and 4 spell in capitals. Registry\nside: ``VERSION_CONFLICT``, ``REQUEST_ID_REUSED``, ``BASELINE_PROTECTED``,\n``OWNER_FORBIDDEN``, ``OWNER_MISMATCH``, ``REGISTRY_FROZEN``,\n``ALREADY_REGISTERED``, and the four rejection causes of error chain E1\n(``NOT_INSTALLED``, ``HASH_NOT_INSTALLED``, ``HANDLER_OUTSIDE_PREFIX``,\n``PROFILE_NOT_LOADED``). Runtime side: ``PACKAGE_HASH_MISMATCH``,\n``NO_PROVISIONER``, ``CORE_RUNTIME_OWNED``, ``DUPLICATE_COMMAND_OWNER``,\n``TOPIC_SPEC_CONFLICT``, ``STORE_UNAVAILABLE``. First-request ingress:\n``CONTRACT_NOT_ANNOUNCED``, ``NOT_ADMITTED``, ``HASH_DRIFT``.",
+          "enum": [
+            "VERSION_CONFLICT",
+            "REQUEST_ID_REUSED",
+            "BASELINE_PROTECTED",
+            "OWNER_FORBIDDEN",
+            "OWNER_MISMATCH",
+            "REGISTRY_FROZEN",
+            "ALREADY_REGISTERED",
+            "NOT_INSTALLED",
+            "HASH_NOT_INSTALLED",
+            "HANDLER_OUTSIDE_PREFIX",
+            "PROFILE_NOT_LOADED",
+            "PACKAGE_HASH_MISMATCH",
+            "NO_PROVISIONER",
+            "CORE_RUNTIME_OWNED",
+            "DUPLICATE_COMMAND_OWNER",
+            "TOPIC_SPEC_CONFLICT",
+            "STORE_UNAVAILABLE",
+            "CONTRACT_NOT_ANNOUNCED",
+            "NOT_ADMITTED",
+            "HASH_DRIFT"
+          ],
+          "title": "EnumContractHotloadReason",
+          "type": "string"
+        },
+        "EnumContractLoadOutcome": {
+          "description": "How the registry answered one contract load request.",
+          "enum": [
+            "accepted",
+            "rejected",
+            "unchanged",
+            "replayed"
+          ],
+          "title": "EnumContractLoadOutcome",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One reply per request: accepted, rejected, unchanged or replayed.\n\nAttributes:\n    entity_id: Identifies the sender principal and the request id together, so\n        one request has one reply (the reply topic's compaction-free key).\n    outcome: How the registry answered.\n    reason: Typed reason, or ``None`` when the outcome needs none. The field is\n        required: a reply states its reason or states there is none.\n    registry_version: The registry version the answer is about.",
+      "properties": {
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/EnumContractLoadOutcome"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnumContractHotloadReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registry_version": {
+          "minimum": 0,
+          "title": "Registry Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entity_id",
+        "outcome",
+        "reason",
+        "registry_version"
+      ],
+      "title": "ModelContractLoadReply",
+      "type": "object"
+    },
+    "ModelContractRevision": {
+      "additionalProperties": false,
+      "description": "A contract at one content hash, with its text.\n\nAttributes:\n    entity_id: ``{name}@{content_hash}``, the record's compaction key.\n    contract_yaml: The contract, as text.\n    registry_version: The registry version that registered this revision.",
+      "properties": {
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string",
+          "pattern": "^.+@[0-9a-f]{64}$"
+        },
+        "contract_yaml": {
+          "minLength": 1,
+          "title": "Contract Yaml",
+          "type": "string"
+        },
+        "registry_version": {
+          "minimum": 1,
+          "title": "Registry Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entity_id",
+        "contract_yaml",
+        "registry_version"
+      ],
+      "title": "ModelContractRevision",
+      "type": "object"
+    },
+    "ModelRegistryWatermark": {
+      "additionalProperties": false,
+      "description": "The highest committed and highest published change sequence, and when.\n\nAttributes:\n    entity_id: Fixed: ``registry-watermark``. The topic holds one key.\n    committed_sequence: The highest change sequence the registry committed.\n    published_sequence: The highest change sequence published to the bus.\n    observed_at: When the registry read these two values (timezone-aware).",
+      "properties": {
+        "entity_id": {
+          "const": "registry-watermark"
+        },
+        "committed_sequence": {
+          "minimum": 0,
+          "title": "Committed Sequence",
+          "type": "integer"
+        },
+        "published_sequence": {
+          "minimum": 0,
+          "title": "Published Sequence",
+          "type": "integer"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id",
+        "committed_sequence",
+        "published_sequence",
+        "observed_at"
+      ],
+      "title": "ModelRegistryWatermark",
+      "type": "object"
+    },
+    "ModelContractHotloadApplied": {
+      "$defs": {
+        "EnumContractHotloadOperation": {
+          "description": "What a request or registry record does to one contract name.\n\nPlan section 4 names the three: ``register`` (a name the registry has not\nheld, ``expected_version: 0``), ``replace`` (a new hash for a held name)\nand ``remove``.",
+          "enum": [
+            "register",
+            "replace",
+            "remove"
+          ],
+          "title": "EnumContractHotloadOperation",
+          "type": "string"
+        },
+        "EnumContractHotloadReason": {
+          "description": "Why the registry rejected a request or a runtime did not apply a change.\n\nThe values are the tokens plan sections 3.2 and 4 spell in capitals. Registry\nside: ``VERSION_CONFLICT``, ``REQUEST_ID_REUSED``, ``BASELINE_PROTECTED``,\n``OWNER_FORBIDDEN``, ``OWNER_MISMATCH``, ``REGISTRY_FROZEN``,\n``ALREADY_REGISTERED``, and the four rejection causes of error chain E1\n(``NOT_INSTALLED``, ``HASH_NOT_INSTALLED``, ``HANDLER_OUTSIDE_PREFIX``,\n``PROFILE_NOT_LOADED``). Runtime side: ``PACKAGE_HASH_MISMATCH``,\n``NO_PROVISIONER``, ``CORE_RUNTIME_OWNED``, ``DUPLICATE_COMMAND_OWNER``,\n``TOPIC_SPEC_CONFLICT``, ``STORE_UNAVAILABLE``. First-request ingress:\n``CONTRACT_NOT_ANNOUNCED``, ``NOT_ADMITTED``, ``HASH_DRIFT``.",
+          "enum": [
+            "VERSION_CONFLICT",
+            "REQUEST_ID_REUSED",
+            "BASELINE_PROTECTED",
+            "OWNER_FORBIDDEN",
+            "OWNER_MISMATCH",
+            "REGISTRY_FROZEN",
+            "ALREADY_REGISTERED",
+            "NOT_INSTALLED",
+            "HASH_NOT_INSTALLED",
+            "HANDLER_OUTSIDE_PREFIX",
+            "PROFILE_NOT_LOADED",
+            "PACKAGE_HASH_MISMATCH",
+            "NO_PROVISIONER",
+            "CORE_RUNTIME_OWNED",
+            "DUPLICATE_COMMAND_OWNER",
+            "TOPIC_SPEC_CONFLICT",
+            "STORE_UNAVAILABLE",
+            "CONTRACT_NOT_ANNOUNCED",
+            "NOT_ADMITTED",
+            "HASH_DRIFT"
+          ],
+          "title": "EnumContractHotloadReason",
+          "type": "string"
+        },
+        "EnumContractHotloadStatus": {
+          "description": "The outcome of one registry change at one runtime instance.\n\nUsed by the applied event and by the ``observed`` entry of the runtime state\nrecord (plan section 3.2): ``materialized``, ``adopted``, ``replaced``,\n``removed``, ``refused`` (with a reason), ``not_ready`` and ``failed``.",
+          "enum": [
+            "materialized",
+            "adopted",
+            "replaced",
+            "removed",
+            "refused",
+            "not_ready",
+            "failed"
+          ],
+          "title": "EnumContractHotloadStatus",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "What one runtime instance did with one registry change.\n\nAttributes:\n    entity_id: The contract name.\n    registry_version: The registry version the runtime acted on.\n    content_hash: Canonical content hash of the contract acted on.\n    operation: The operation the runtime applied or refused.\n    status: ``materialized``, ``adopted``, ``replaced``, ``removed``,\n        ``refused``, ``not_ready`` or ``failed``.\n    reason: Typed reason, or ``None``. A ``refused`` event must carry one.\n    runtime_instance_id: The runtime instance.\n    incarnation_id: The incarnation of that instance (fresh at each process start).\n    profile: The runtime profile.\n    lane: The lane the runtime serves.\n    image_digest: Digest of the image the runtime runs.",
+      "properties": {
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "registry_version": {
+          "minimum": 1,
+          "title": "Registry Version",
+          "type": "integer"
+        },
+        "content_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/EnumContractHotloadOperation"
+        },
+        "status": {
+          "$ref": "#/$defs/EnumContractHotloadStatus"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnumContractHotloadReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runtime_instance_id": {
+          "format": "uuid",
+          "title": "Runtime Instance Id",
+          "type": "string"
+        },
+        "incarnation_id": {
+          "format": "uuid",
+          "title": "Incarnation Id",
+          "type": "string"
+        },
+        "profile": {
+          "minLength": 1,
+          "title": "Profile",
+          "type": "string"
+        },
+        "lane": {
+          "minLength": 1,
+          "title": "Lane",
+          "type": "string"
+        },
+        "image_digest": {
+          "minLength": 1,
+          "title": "Image Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id",
+        "registry_version",
+        "content_hash",
+        "operation",
+        "status",
+        "reason",
+        "runtime_instance_id",
+        "incarnation_id",
+        "profile",
+        "lane",
+        "image_digest"
+      ],
+      "title": "ModelContractHotloadApplied",
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "refused"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ModelRuntimeHotloadState": {
+      "$defs": {
+        "EnumContractHotloadReason": {
+          "description": "Why the registry rejected a request or a runtime did not apply a change.\n\nThe values are the tokens plan sections 3.2 and 4 spell in capitals. Registry\nside: ``VERSION_CONFLICT``, ``REQUEST_ID_REUSED``, ``BASELINE_PROTECTED``,\n``OWNER_FORBIDDEN``, ``OWNER_MISMATCH``, ``REGISTRY_FROZEN``,\n``ALREADY_REGISTERED``, and the four rejection causes of error chain E1\n(``NOT_INSTALLED``, ``HASH_NOT_INSTALLED``, ``HANDLER_OUTSIDE_PREFIX``,\n``PROFILE_NOT_LOADED``). Runtime side: ``PACKAGE_HASH_MISMATCH``,\n``NO_PROVISIONER``, ``CORE_RUNTIME_OWNED``, ``DUPLICATE_COMMAND_OWNER``,\n``TOPIC_SPEC_CONFLICT``, ``STORE_UNAVAILABLE``. First-request ingress:\n``CONTRACT_NOT_ANNOUNCED``, ``NOT_ADMITTED``, ``HASH_DRIFT``.",
+          "enum": [
+            "VERSION_CONFLICT",
+            "REQUEST_ID_REUSED",
+            "BASELINE_PROTECTED",
+            "OWNER_FORBIDDEN",
+            "OWNER_MISMATCH",
+            "REGISTRY_FROZEN",
+            "ALREADY_REGISTERED",
+            "NOT_INSTALLED",
+            "HASH_NOT_INSTALLED",
+            "HANDLER_OUTSIDE_PREFIX",
+            "PROFILE_NOT_LOADED",
+            "PACKAGE_HASH_MISMATCH",
+            "NO_PROVISIONER",
+            "CORE_RUNTIME_OWNED",
+            "DUPLICATE_COMMAND_OWNER",
+            "TOPIC_SPEC_CONFLICT",
+            "STORE_UNAVAILABLE",
+            "CONTRACT_NOT_ANNOUNCED",
+            "NOT_ADMITTED",
+            "HASH_DRIFT"
+          ],
+          "title": "EnumContractHotloadReason",
+          "type": "string"
+        },
+        "EnumContractHotloadStatus": {
+          "description": "The outcome of one registry change at one runtime instance.\n\nUsed by the applied event and by the ``observed`` entry of the runtime state\nrecord (plan section 3.2): ``materialized``, ``adopted``, ``replaced``,\n``removed``, ``refused`` (with a reason), ``not_ready`` and ``failed``.",
+          "enum": [
+            "materialized",
+            "adopted",
+            "replaced",
+            "removed",
+            "refused",
+            "not_ready",
+            "failed"
+          ],
+          "title": "EnumContractHotloadStatus",
+          "type": "string"
+        },
+        "ModelHotloadNameState": {
+          "additionalProperties": false,
+          "description": "The observed and the served entry of one owned name.\n\nAttributes:\n    observed: What the runtime has folded for the name.\n    served: What it has wired, or ``None`` when nothing is served (after a\n        removal, or while a first load is refused).",
+          "properties": {
+            "observed": {
+              "$ref": "#/$defs/ModelHotloadObservedEntry"
+            },
+            "served": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelHotloadServedEntry"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "observed",
+            "served"
+          ],
+          "title": "ModelHotloadNameState",
+          "type": "object"
+        },
+        "ModelHotloadObservedEntry": {
+          "additionalProperties": false,
+          "description": "What the runtime has observed for one name (plan section 3.2).\n\nIt is the highest accepted or removal version the runtime has folded, with the\nstatus of that record. After a refused replacement it reads version 2,\n``refused``; after a removal it reads version n, ``removed``.\n\nAttributes:\n    registry_version: The highest version folded.\n    status: What the runtime did with that record.\n    reason: Typed reason, or ``None``. A ``refused`` entry must carry one.",
+          "properties": {
+            "registry_version": {
+              "minimum": 1,
+              "title": "Registry Version",
+              "type": "integer"
+            },
+            "status": {
+              "$ref": "#/$defs/EnumContractHotloadStatus"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EnumContractHotloadReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "registry_version",
+            "status",
+            "reason"
+          ],
+          "title": "ModelHotloadObservedEntry",
+          "type": "object",
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "refused"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "ModelHotloadServedEntry": {
+          "additionalProperties": false,
+          "description": "The hash and version currently wired for one name (plan section 3.2).\n\nA reader that needs the served revision's declarations joins this name and\ncontent hash to the registry's revisions topic.",
+          "properties": {
+            "registry_version": {
+              "minimum": 1,
+              "title": "Registry Version",
+              "type": "integer"
+            },
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "registry_version",
+            "content_hash"
+          ],
+          "title": "ModelHotloadServedEntry",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The compacted state record of one runtime instance (plan section 3.2).\n\nPublished on the workload's own state topic, which only that workload's\nprincipal may write, so a reader takes the workload from the topic and never\nfrom this payload. It is not a response, so it carries no request id. A clean\nshutdown publishes a null for the key, which is a tombstone and not a record.\n\nAttributes:\n    entity_id: The runtime instance id (the record's compaction key).\n    incarnation_id: Fresh at each process start.\n    profile: The runtime profile.\n    lane: The lane the runtime serves.\n    image_digest: Digest of the image the runtime runs.\n    bootstrap_ready: True once the baseline is attached and the follower has\n        caught up with the accepted topic.\n    serving_ready: True once every owned accepted contract the image can serve\n        is attached.\n    names: For each owned name, what the runtime observed and what it serves.",
+      "properties": {
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "incarnation_id": {
+          "format": "uuid",
+          "title": "Incarnation Id",
+          "type": "string"
+        },
+        "profile": {
+          "minLength": 1,
+          "title": "Profile",
+          "type": "string"
+        },
+        "lane": {
+          "minLength": 1,
+          "title": "Lane",
+          "type": "string"
+        },
+        "image_digest": {
+          "minLength": 1,
+          "title": "Image Digest",
+          "type": "string"
+        },
+        "bootstrap_ready": {
+          "title": "Bootstrap Ready",
+          "type": "boolean"
+        },
+        "serving_ready": {
+          "title": "Serving Ready",
+          "type": "boolean"
+        },
+        "names": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ModelHotloadNameState"
+          },
+          "title": "Names",
+          "type": "object"
+        }
+      },
+      "required": [
+        "entity_id",
+        "incarnation_id",
+        "profile",
+        "lane",
+        "image_digest",
+        "bootstrap_ready",
+        "serving_ready",
+        "names"
+      ],
+      "title": "ModelRuntimeHotloadState",
+      "type": "object"
+    }
+  }
+}
