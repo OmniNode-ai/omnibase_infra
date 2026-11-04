@@ -1,0 +1,157 @@
+# Design-review verdict: transcript ingest reducer, terminal outbox and downstream version update (OMN-22258)
+
+Verdict: **PASS with conditions.** The ingest reducer, the manifest-close
+transaction with the terminal outbox, and the downstream source-version
+conditional update of plan task T0 (transcript intent-to-outcome graph plan) may
+be built as T2 (ingest and terminal), T3 and T6 (projection folds), under the
+seven conditions below. The model is `formal/transcript_ingest_reducer/`
+(`TranscriptIngestReducer.tla`); T2, T3 and T6 cite it by that path.
+
+Reviewed against the committed TLC output in `results/`, bound to
+`model.sha256` (the sha256 of `TranscriptIngestReducer.tla`, then each cfg in
+sorted order). TLC2 Version 2026.11.02.164701 (rev: dc6a944), `-workers 4`,
+Java Adoptium 17.0.20.1 in `eclipse-temurin:17-jre-alpine` on lab host h053,
+tla2tools.jar sha256 `c57d4d7bbee3ed2c89c32cb9c60cac728f751e80e2570bc4b7368ae39291fc21`
+(the tlaplus v1.8.0 release asset; the host_bringup jar was not obtainable on
+h053).
+
+| Config | Expected | TLC result | Distinct states |
+| --- | --- | --- | --- |
+| Model.cfg (ConflictDig 2) | pass all nine invariants and both properties | No error has been found, 0 states left on queue | 48632 |
+| NoConflict.cfg (ConflictDig 1) | same, both runs can close | No error has been found, 0 states left on queue | 374586 |
+| mut_accept_any_decreases.cfg | counterexample | RowNeverDecreases violated | 197 |
+| mut_accept_any_highest.cfg | counterexample | RowIsHighestApplied violated | 280 |
+| mut_term_on_publish.cfg | counterexample | TerminalOnlyWhenSatisfied violated | 89 |
+| mut_term_on_publish_emitted.cfg | counterexample | EmittedOnlyWhenSatisfied violated | 277 |
+| mut_no_digest.cfg | counterexample | TerminalOnlyWhenSatisfied violated | 453 |
+| mut_two_step.cfg | counterexample | CloseCarriesOutbox violated | 1282 |
+| mut_two_step_lost.cfg | counterexample | ClosedEventuallyEffected violated | 54768 |
+| mut_mark_before_publish.cfg | counterexample | SentWasPublished violated | 3027 |
+| mut_no_dedup.cfg | counterexample | EffectAtMostOnce violated | 13937 |
+| mut_apply_by_arrival.cfg | counterexample | DerivedNeverOlder violated | 1169 |
+| mut_apply_by_arrival_newest.cfg | counterexample | DerivedIsNewest violated | 1025 |
+| mut_no_fairness.cfg | counterexample | EventuallyApplied violated (stuttering) | 22745 |
+| wit_both_effected.cfg | witness violated | BothEffectedWitness violated | 19941 |
+| wit_conflict.cfg | witness violated | ConflictWitness violated | 294 |
+| wit_duplicate_terminal.cfg | witness violated | DuplicateWitness violated | 14018 |
+| wit_ignored_older.cfg | witness violated | IgnoredOlderWitness violated | 267 |
+| wit_redelivery.cfg | witness violated | RedeliveryWitness violated | 112 |
+
+Distinct-state counts of a violated config are where TLC stopped, and vary
+with the worker count; the Model.cfg and NoConflict.cfg counts do not.
+Command, per cfg, on a copy of the model: `docker run --rm -v <copy>:/w -v
+<jar dir>:/tlc -w /w eclipse-temurin:17-jre-alpine java -XX:+UseParallelGC -cp
+/tlc/tla2tools.jar tlc2.TLC -noGenerateSpecTE -config <cfg> -workers 4
+-metadir /tmp/states TranscriptIngestReducer.tla`. Control runs were made
+before the passing runs.
+
+## Findings
+
+1. AC1 and AC2. Over two runs with overlapping manifests, events delivered in
+   any order, and up to two crashes (a redelivery after an applied but
+   unacknowledged event, a reducer crash between the two steps of a close, a
+   publisher crash between publish and mark), the compare-and-upsert reducer
+   keeps both "a session row's revision never decreases" and "a session row
+   equals the highest revision applied so far". The control that accepts any
+   arriving revision violates each: `mut_accept_any_decreases` (a revision 2
+   row replaced by revision 1 that arrives later) and `mut_accept_any_highest`.
+   Both traces are five states. Under fair delivery every published event is
+   applied and its key is at least at its revision (`EventuallyApplied`);
+   without the fairness clause TLC finds a stuttering counterexample
+   (`mut_no_fairness`), so the property is not vacuous.
+2. AC3, close. The terminal is emitted only when every required tuple is
+   stored above the required revision or at it with the same digest. A run that
+   closes when its events are published (`mut_term_on_publish`) closes before
+   they are stored, in four states; the same control is caught at the publish
+   by `EmittedOnlyWhenSatisfied` (`mut_term_on_publish_emitted`). Treating an
+   equal revision as satisfying whatever its digest (`mut_no_digest`) closes a
+   run on content it never stored.
+3. AC3, outbox. Completion and the outbox row in two steps lose the terminal
+   when the reducer dies between them (`mut_two_step`: Close, ReducerCrash;
+   `mut_two_step_lost`: the lost terminal is never effected). Marking the row
+   sent before publishing loses it when the publisher dies between the two
+   (`mut_mark_before_publish`). With the one-step close and the order publish
+   then mark, a publisher crash after the publish republishes the terminal; the
+   consumer's dedup on the manifest id keeps the effect at one
+   (`wit_duplicate_terminal`: two copies published and consumed, one effect), and
+   without the dedup it is two (`mut_no_dedup`: Publish, Consume, PublisherCrash,
+   Publish, Consume). A crash between close and publish leaves the pending row
+   as the only state, and the next publish pass finds it.
+4. AC4. The generic source-version conditional update, applied by a downstream
+   reducer to results of source versions 1 and 2 arriving in either order and
+   redelivered after a crash, never replaces a newer result with an older and
+   holds the result of the newest version applied. The control that applies by
+   arrival order violates both (`mut_apply_by_arrival`,
+   `mut_apply_by_arrival_newest`).
+5. Digest conflicts. With `ConflictDig` 2, r1 and r2 require different content
+   at the same key and revision; whichever is stored first wins, the other
+   manifest can never close, and the model finds no safety violation
+   (`wit_conflict` shows the conflict is flagged). That a manifest can be stuck
+   open for ever is not a flaw of the invariants, but it is a gap in the plan
+   (condition 6).
+
+## Codex review (h053, thread 01a19f67-6ccc-7820-a395-ea3473bb03bb, read-only, high effort)
+
+Codex reviewed the four models before this verdict; the models were then
+strengthened where noted and every cfg re-run, so the committed output is of
+the revised models. Its findings on this model, and the disposition of each:
+
+- W1 `EventuallyApplied` checked only the row's revision, not that the event
+  was processed. Fixed: it now requires `e \in applied` as well. It still
+  holds at an equal revision with different content; that case is guarded by
+  `TerminalOnlyWhenSatisfied`, and Model.cfg cannot close both manifests by
+  design (NoConflict.cfg covers both closing).
+- W2 `TerminalOnlyWhenSatisfied` checks the close, not the publish. Fixed: added
+  `EmittedOnlyWhenSatisfied` and `mut_term_on_publish_emitted`.
+- N3 `CloseCarriesOutbox` and `SentWasPublished` exempt the legitimate
+  intermediate states. Accepted: deliberate, and each control still fails after
+  the crash for its named reason.
+- W4 `DuplicateWitness` fired with a copy still on the bus. Fixed: it now needs
+  the bus empty (both copies consumed, one effect).
+- W5 the downstream sub-machine is two ordered scalar versions with no payload
+  and no tie to ingest state. Accepted and made condition 5.
+- N6, N7 atomic steps and the manifest id. Accepted as conditions 1, 2 and 4.
+- N8 fairness is `WF(Next)`, enough for these finite workloads only. Accepted,
+  condition 7.
+
+## Conditions on T2, T3, T6
+
+1. Compare-and-upsert on (session id, stream id) is one atomic statement that
+   compares revision and, at an equal revision, the digest, and writes both the
+   revision and the digest together. An equal revision with a different digest
+   leaves the row and records a conflict. Never a read then a write.
+2. The close transaction is one database transaction that sets the run closed
+   and inserts the outbox row; no code path writes either alone. The close
+   check is evaluated on every apply and on a periodic pass over open runs, not
+   only for the run whose event was just applied: a manifest can be satisfied
+   by rows another run wrote (r2's tuples satisfy r1 in the model).
+3. The publisher publishes the terminal for a `pending` row, and only then marks
+   the row `sent`. It finds pending rows from the table on start, not from
+   memory. The terminal is allowed to be published more than once.
+4. The consumer of the terminal deduplicates on the manifest id and commits the
+   dedup record with its effect in one step. The manifest id is stable across
+   retries and across publishers.
+5. Every downstream reducer (T3, T6) applies the same source-version
+   conditional update: a result replaces the stored one only when its source
+   version is higher; an equal version is a no-op. The source version of a
+   result is taken from one consistent snapshot of its sources. The model
+   shows the update rule is right; it does not check how a version is assigned
+   or that several source versions combine into one number.
+6. Plan gap, T0 criterion AC3 and task T2: a manifest that requires a tuple
+   which is stored at the same revision with different content can never close.
+   The model leaves it open for ever (`ConflictDig` 2, exactly one of the two
+   manifests closes). T2 must define the outcome of such a manifest (a conflict
+   terminal, or an alarm after a time bound); the model does not emit one.
+7. Delivery to the reducer is at least once with a fair scheduler: each pending
+   event is eventually processed despite unrelated work. The models check
+   liveness under `WF(Next)` over finite workloads, which does not by itself
+   promise this for an unbounded stream.
+
+## Not modelled
+
+- More than two runs, more than two tuples in a manifest, revisions above 2.
+- The database as a database: each reducer step is atomic by assumption
+  (condition 1 and 2 are what make it so).
+- A consumer crash between its dedup record and its effect (one step here).
+- A second use of the terminal after the effect (the effect is a counter).
+- Time, and the order of the two runs' emission (all interleavings are explored).
