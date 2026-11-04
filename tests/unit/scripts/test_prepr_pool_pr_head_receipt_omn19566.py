@@ -26,13 +26,14 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POOL_PY = REPO_ROOT / "scripts" / "runtime_build" / "prepr_runtime_pool.py"
 PROVE_SH = REPO_ROOT / "scripts" / "runtime_build" / "prepr_pool_prove.sh"
 POOL_TESTS = Path(__file__).with_name("test_prepr_runtime_pool_omn18893.py")
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 
 
 def _load(name: str, path: Path) -> Any:

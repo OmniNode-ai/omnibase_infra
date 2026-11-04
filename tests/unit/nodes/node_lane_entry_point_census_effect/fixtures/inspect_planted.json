@@ -1,0 +1,189 @@
+[
+  {
+    "Name": "/proj-a-runtime",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "proj-a-omninode-runtime",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "onex-runtime"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-a"
+      }
+    }
+  },
+  {
+    "Name": "/proj-a-runtime-effects",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "proj-a-runtime-effects",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "onex-runtime"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-a"
+      }
+    }
+  },
+  {
+    "Name": "/proj-a-runtime-workers",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "proj-a-runtime-worker",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "onex-runtime"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-a"
+      }
+    }
+  },
+  {
+    "Name": "/proj-a-ctx-consumer",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "proj-a-context-audit-consumer",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "python",
+        "-m",
+        "omnibase_infra.services.observability.context_audit.consumer"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-a"
+      }
+    }
+  },
+  {
+    "Name": "/proj-a-delegation-writer",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "proj-a-projection-delegation-writer",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "python",
+        "-m",
+        "omnimarket.nodes.node_projection_delegation.handlers.handler_delegation"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-a"
+      }
+    }
+  },
+  {
+    "Name": "/proj-a-resolver",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "proj-a-omninode-contract-resolver",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "uvicorn",
+        "pkg.launcher:app",
+        "--host",
+        "0.0.0.0"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-a"
+      }
+    }
+  },
+  {
+    "Name": "/proj-a-postgres",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "postgres:16",
+      "Entrypoint": [
+        "docker-entrypoint.sh"
+      ],
+      "Cmd": [
+        "postgres"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-a"
+      }
+    }
+  },
+  {
+    "Name": "/proj-b-runtime",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "proj-b-omninode-runtime",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "onex-runtime"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-b"
+      }
+    }
+  },
+  {
+    "Name": "/proj-b-gateway-forwarder",
+    "State": {
+      "Status": "running"
+    },
+    "Config": {
+      "Image": "gateway-image:build-1",
+      "Entrypoint": [
+        "/usr/bin/tini",
+        "--",
+        "/app/entrypoint-runtime.sh"
+      ],
+      "Cmd": [
+        "onex-gateway-forwarder",
+        "--config",
+        "/app/config/gateway-forwarder.yaml"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "proj-b"
+      }
+    }
+  }
+]

@@ -35,6 +35,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_GATEWAY_DETACH_REQUEST_V1 = contract_topic_value('nodes/node_gateway_attach_effect/contract.yaml', 'omnibase-infra', 'CMD_GATEWAY_DETACH_REQUEST_V1')  # onex.cmd.omnibase-infra.gateway-detach-request.v1
     CMD_GATEWAY_HEARTBEAT_REQUEST_V1 = contract_topic_value('nodes/node_gateway_attach_effect/contract.yaml', 'omnibase-infra', 'CMD_GATEWAY_HEARTBEAT_REQUEST_V1')  # onex.cmd.omnibase-infra.gateway-heartbeat-request.v1
     CMD_GATEWAY_LINK_HEALTH_UPSERT_V1 = contract_topic_value('nodes/node_gateway_link_health_write_effect/contract.yaml', 'omnibase-infra', 'CMD_GATEWAY_LINK_HEALTH_UPSERT_V1')  # onex.cmd.omnibase-infra.gateway-link-health-upsert.v1
+    CMD_LANE_ENTRY_POINT_CENSUS_V1 = contract_topic_value('nodes/node_lane_entry_point_census_effect/contract.yaml', 'omnibase-infra', 'CMD_LANE_ENTRY_POINT_CENSUS_V1')  # onex.cmd.omnibase-infra.lane-entry-point-census.v1
     CMD_LLM_COMPLETION_REQUEST_V1 = contract_topic_value('nodes/node_llm_completion_effect/contract.yaml', 'omnibase-infra', 'CMD_LLM_COMPLETION_REQUEST_V1')  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = contract_topic_value('nodes/node_llm_embedding_effect/contract.yaml', 'omnibase-infra', 'CMD_LLM_EMBEDDING_REQUEST_V1')  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = contract_topic_value('nodes/node_llm_inference_effect/contract.yaml', 'omnibase-infra', 'CMD_LLM_INFERENCE_REQUEST_V1')  # onex.cmd.omnibase-infra.llm-inference-request.v1
@@ -86,6 +87,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_GMAIL_ARCHIVE_PURGED_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_GMAIL_ARCHIVE_PURGED_V1')  # onex.evt.omnibase-infra.gmail-archive-purged.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = contract_topic_value('nodes/node_gmail_intent_poller_effect/contract.yaml', 'omnibase-infra', 'EVT_GMAIL_INTENT_RECEIVED_V1')  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_INFERENCE_RESPONSE_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'omnibase-infra', 'EVT_INFERENCE_RESPONSE_V1')  # onex.evt.omnibase-infra.inference-response.v1
+    EVT_LANE_ENTRY_POINT_CENSUSED_V1 = contract_topic_value('nodes/node_lane_entry_point_census_effect/contract.yaml', 'omnibase-infra', 'EVT_LANE_ENTRY_POINT_CENSUSED_V1')  # onex.evt.omnibase-infra.lane-entry-point-censused.v1
     EVT_LLM_CALL_COMPLETED_V1 = contract_topic_value('nodes/node_llm_inference_effect/contract.yaml', 'omnibase-infra', 'EVT_LLM_CALL_COMPLETED_V1')  # onex.evt.omnibase-infra.llm-call-completed.v1
     EVT_LLM_COMPLETION_COMPLETED_V1 = contract_topic_value('nodes/node_llm_completion_effect/contract.yaml', 'omnibase-infra', 'EVT_LLM_COMPLETION_COMPLETED_V1')  # onex.evt.omnibase-infra.llm-completion-completed.v1
     EVT_LLM_ENDPOINT_HEALTH_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_LLM_ENDPOINT_HEALTH_V1')  # onex.evt.omnibase-infra.llm-endpoint-health.v1

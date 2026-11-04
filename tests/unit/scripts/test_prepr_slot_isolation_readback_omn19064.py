@@ -19,12 +19,14 @@ from typing import Any
 
 import pytest
 
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POOL_PY = REPO_ROOT / "scripts" / "runtime_build" / "prepr_runtime_pool.py"
 PROVE_SH = REPO_ROOT / "scripts" / "runtime_build" / "prepr_pool_prove.sh"
 POOL_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "prepr_runtime_pool.yaml"
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 
 SLOT_1_BLOCK = "28085|28086|28090|23002"
 

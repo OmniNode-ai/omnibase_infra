@@ -344,6 +344,7 @@ _STAGE_DISTS = {
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
     "omnibase_spi": "omnibase-spi",
+    "omniintelligence": "omninode-intelligence",
 }
 _STAGE_VERSION = "9.9.9"
 
@@ -385,7 +386,8 @@ def _stage_clones(tmp_path: Path) -> tuple[Path, dict[str, str], dict[str, str]]
             (clone / "uv.lock").write_text(
                 "\n".join(
                     f'[[package]]\nname = "{d}"\nversion = "{_STAGE_VERSION}"\n'
-                    for d in _STAGE_DISTS.values()
+                    for r, d in _STAGE_DISTS.items()
+                    if r != "omniintelligence"  # no lock pins it (OMN-22153)
                 )
             )
         _stage_git(clone, "add", "-A")
