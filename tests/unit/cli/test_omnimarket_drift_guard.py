@@ -998,11 +998,11 @@ def _clone_advances_during_reconcile(
     venv against the clone as it now stands.
     """
     after = "c" * 40
-    state = {"canonical": "a" * 40, "installed": "b" * 40}
+    state: dict[str, str | None] = {"canonical": "a" * 40, "installed": "b" * 40}
     monkeypatch.setattr(
         guard,
         "canonical_local_omnimarket_commit",
-        lambda omni_home=None: state["canonical"],
+        lambda *_, **__: state["canonical"],
     )
     monkeypatch.setattr(
         guard, "installed_omnimarket_commit", lambda: state["installed"]
@@ -1031,7 +1031,7 @@ def test_reconcile_against_an_advanced_clone_proceeds(
         monkeypatch, installed_after="c" * 40
     )
 
-    guard.check_omnimarket_drift(omni_home="/w", reconcile=reconciler)
+    guard.check_omnimarket_drift("/w", reconcile=reconciler)
 
     assert reconciler.calls == 1
 
@@ -1045,7 +1045,7 @@ def test_reconcile_against_an_advanced_clone_still_refuses_genuine_drift(
     )
 
     with pytest.raises(guard.OmnimarketDriftError) as excinfo:
-        guard.check_omnimarket_drift(omni_home="/w", reconcile=reconciler)
+        guard.check_omnimarket_drift("/w", reconcile=reconciler)
 
     message = str(excinfo.value)
     assert "STILL drifted" in message
@@ -1058,11 +1058,11 @@ def test_reconcile_refuses_when_the_clone_vanishes_mid_reconcile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unreadable clone after the reconcile proves nothing: refuse."""
-    state = {"canonical": "a" * 40, "installed": "b" * 40}
+    state: dict[str, str | None] = {"canonical": "a" * 40, "installed": "b" * 40}
     monkeypatch.setattr(
         guard,
         "canonical_local_omnimarket_commit",
-        lambda omni_home=None: state["canonical"],
+        lambda *_, **__: state["canonical"],
     )
     monkeypatch.setattr(
         guard, "installed_omnimarket_commit", lambda: state["installed"]
@@ -1070,12 +1070,12 @@ def test_reconcile_refuses_when_the_clone_vanishes_mid_reconcile(
     monkeypatch.setattr(guard, "resolve_ancestor_lag", lambda **_: None)
 
     def _repair() -> None:
-        state["canonical"] = None  # type: ignore[assignment]
+        state["canonical"] = None
         state["installed"] = "a" * 40
 
     with pytest.raises(guard.OmnimarketDriftError):
         guard.check_omnimarket_drift(
-            omni_home="/w", reconcile=_Reconciler(ok=True, on_success=_repair)
+            "/w", reconcile=_Reconciler(ok=True, on_success=_repair)
         )
 
 

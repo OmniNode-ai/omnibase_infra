@@ -170,6 +170,11 @@ requirements:
     acceptance:
       - id: AC36
         statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
+  - id: req-omn19998-reconcile-current-readback
+    statement: Reconciliation must compare freshly read installed provenance with the current canonical clone HEAD.
+    acceptance:
+      - id: AC37
+        statement: A clone that advances during reconciliation permits dispatch only when the refreshed install matches its current HEAD; mismatched or unreadable identities refuse, and reconciliation runs once.
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -706,3 +711,19 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC36
+  - id: dod-omn19998-ac37-reconcile-current-readback
+    description: AC37 exercises a real local clone and distribution metadata through the drift guard, covering a moving HEAD, mismatched install and unreadable clone or metadata; the node contract routes to the same reader.
+    source: manual
+    binds_ac: [AC37]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_omnimarket_reconcile_readback_omn19998.py -q
+        cwd: .
+  - id: dod-omn19998-ac37-reconcile-deploy-probe
+    description: Hosted-runner runtime artifact probe for AC37. Runs the shipped guard and contract-routed handler against disposable Git clones and installed-package metadata. Requires current-head equality and refusal on missing or mismatched identities without external services.
+    source: manual
+    binds_ac: [AC37]
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/cli/test_omnimarket_reconcile_readback_omn19998.py -q
+        cwd: .

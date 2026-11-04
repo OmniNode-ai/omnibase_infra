@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_omnimarket_reconcile_readback_effect
+contract_name: node_omnimarket_reconcile_readback_effect
+node_name: node_omnimarket_reconcile_readback_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: Read installed package provenance and canonical clone HEAD after reconciliation; unreadable state never establishes equality.
+input_model:
+  name: ModelOmnimarketReconcileReadbackRequest
+  module: omnibase_infra.models.model_omnimarket_reconcile_readback_request
+  description: Canonical workspace root.
+output_model:
+  name: ModelOmnimarketReconcileReadbackResult
+  module: omnibase_infra.models.model_omnimarket_reconcile_readback_result
+  description: Fresh identities; an empty identity means unreadable.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: omnimarket.reconcile_readback
+      handler:
+        name: HandlerOmnimarketReconcileReadback
+        module: omnibase_infra.handlers.handler_omnimarket_reconcile_readback
+      event_model:
+        name: ModelOmnimarketReconcileReadbackRequest
+        module: omnibase_infra.models.model_omnimarket_reconcile_readback_request
+      output_events: [ModelOmnimarketReconcileReadbackResult]
+capabilities:
+  - name: omnimarket.reconcile_readback
+    description: Read current local package and clone identities without mutation.
+metadata:
+  ticket: OMN-19998
+  author: OmniNode Team
+  description: Post-reconcile readback uses both current identities.
+  tags: [effect, provenance, filesystem]
