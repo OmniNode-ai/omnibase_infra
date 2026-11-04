@@ -1,0 +1,121 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22291
+title: "A quiet local stack is not a consumer wedge"
+summary: >-
+  The local stack's runtime graded consumer_sync CRITICAL on three consumer groups with no traffic, so its /health body reported status=unhealthy with every component green, compose's dependents never started and `make up-local` failed. The measured cause is not zero-lag mis-grading: the three groups held NO partition assignment (a clean join at generation 11 followed by `Setting newly assigned partitions set()`), the no-assignment branch of the observation reported a placeholder zero backlog, the classifier correctly refused to read that as idle, and the stall clock then ran for as long as the stack did. On a laptop that is the normal case: the local partition cap leaves one partition per topic, so every group with more members than partitions has standbys. This change measures the GROUP's backlog over the whole topic -- committed offsets from the coordinator against the leaders' end offsets -- before classifying a member that holds no assignment, which is what tells a standby (nothing waiting) from OMN-18640's `Empty`-group outage (records waiting, nobody taking them). A backlog that could not be measured stays unknown and still falls toward the remedy, so no unmeasured zero can read as health. The dimension's detail now also names every group it holds inside the readiness window, with the window, so an excluded group and an unmeasured group no longer read the same.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - protocols
+requirements:
+  - id: req-omn22291-ac1-zero-lag
+    statement: "A zero-lag group advancing inside the stall window, and a standby holding no assignment with nothing waiting, are both in sync."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: a consumer group with zero lag whose last advance is inside the stall window is not counted out of sync, and a group carrying the reason not_stalled_within_cooldown never appears in the out-of-sync list -- falsifier: uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py -q -k zero_lag_recent_advance
+  - id: req-omn22291-ac2-detail-exclusions
+    statement: "The dimension's detail states why each group it excludes was excluded."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: the consumer_sync dimension's detail states, for each group it excludes, why it was excluded, so a CRITICAL verdict can never rest on a group its own reason string clears -- falsifier: uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py -q -k detail_names_exclusions
+  - id: req-omn22291-ac3-quiet-not-critical
+    statement: "A local stack with no traffic on the runtime_config topics does not grade consumer_sync CRITICAL."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: a local stack with no traffic on the runtime_config topics grades consumer_sync HEALTHY or DEGRADED, never CRITICAL, on the same payload the container healthcheck reads -- falsifier: uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py -q -k quiet_local_stack_not_critical
+  - id: req-omn22291-ac4-incident-fixture
+    statement: "A regression test built from the incident's recorded payload grades CRITICAL as recorded and non-CRITICAL on the fix."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: a regression test built from this incident's recorded health payload (the s.txt runtime payload from the Shared folder named on the ticket, committed as a scrubbed fixture) grades CRITICAL on the current code and non-CRITICAL on the fix -- falsifier: uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py -q -k incident_payload_fixture
+  - id: req-omn22291-ac5-up-local-healthy
+    statement: "make up-local reaches a healthy runtime inside the compose dependency timeout, with the receipt naming the runtime's own health status."
+    acceptance:
+      - id: AC5
+        statement: |-
+          AC5: make up-local on a machine with no prior stack reaches a healthy runtime inside the compose dependency timeout, with the receipt naming the runtime's own health status -- falsifier: uv run pytest tests/integration/test_up_local_reaches_healthy.py -q
+evidence_requirements:
+  - kind: tests
+    description: "The OMN-22291 unit suite, the OMN-18640 suites it must not break, and the AC5 boot-gate test."
+    command: "uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py tests/unit/event_bus/test_consumer_rejoin_on_coordinator_loss.py tests/unit/event_bus/test_consumer_sync_readiness_omn18640.py tests/integration/test_up_local_reaches_healthy.py -q"
+  - kind: ci
+    description: "boot-catalog-local boots the laptop profile with make up-local and waits on each kernel's own /health status, which is the live AC5 proof."
+    command: "gh pr checks --repo OmniNode-ai/omnibase_infra --watch=false"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22291-ac1-zero-lag
+    description: >-
+      Two halves, because the detail's lag=0 had two meanings. A consumer that delivered a record inside the stall window classifies not_stalled_progressing with no confirmation held. And the incident's own shape -- no assignment, nothing waiting on the topic -- replayed through the real supervisor for 9000 seconds, past the recorded 8021, stays ready, keeps a zero stall clock, classifies not_stalled_idle and is never recreated. Red-first: at the merge base the replay half fails with ready=False after 22 rejoins.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py -q -k zero_lag_recent_advance
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn22291-ac2-detail-exclusions
+    description: >-
+      describe_consumer_sync names every group that carries a stall the readiness window is still covering, with its reason and the window it was judged against, on both the in-sync and the out-of-sync sentence, and names no group that carries no stall at all. Red-first: at the merge base the held group is absent from the detail entirely.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py -q -k detail_names_exclusions
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn22291-ac3-quiet-not-critical
+    description: >-
+      The three incident groups, replayed through the real supervisor from the conditions the payload recorded, are graded through evaluate_consumer_sync -- the function the runtime_health verdict and therefore the container healthcheck read -- and come out HEALTHY with no group out of sync. Red-first: CRITICAL at the merge base.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py -q -k quiet_local_stack_not_critical
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn22291-ac4-incident-fixture
+    description: >-
+      tests/unit/runtime/fixtures/omn22291_consumer_sync_critical.json carries the incident's own numbers from the runtime's /health payload, scrubbed of everything but the measurement: the verbatim dimension detail, the three group ids with lag, stall and last-advance, the 217-deep failing streak, and the conditions the payload's log lines recorded. The test grades the recorded statuses CRITICAL as a control -- if that half ever goes green the fixture has stopped reproducing the incident -- and the same three groups replayed through the code under test non-CRITICAL.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py -q -k incident_payload_fixture
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn22291-ac5-boot-gate
+    description: >-
+      The live half of AC5 needs a machine with a local stack and is SKIPPED, never passed, where there is none. What runs everywhere is the gate read: boot-catalog-local boots the laptop profile with make up-local and then requires status=healthy from each kernel's own /health body with a bounded deadline and an ::error:: on timeout -- which is the field the incident drove to unhealthy with every component green. That job's run on this change is the live proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_up_local_reaches_healthy.py -q -rs
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-omn22291-omn18640-preserved
+    description: >-
+      The outage this class was built for must still be red. The OMN-18640 suites pass unchanged, including the group that wedges inside the rejoin cooldown staying out of sync, and the empty-assignment class now states its own premise in its data: an empty assignment with records waiting is a stall, and so is one whose group backlog could not be measured at all.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consumer_rejoin_on_coordinator_loss.py tests/unit/event_bus/test_consumer_sync_readiness_omn18640.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC3]
+  - id: dod-omn22291-deploy-grading-surface
+    description: >-
+      The runtime image is built from these three modules, so a deployed runtime that lacks any of the three legs of the fix is the incident. Read the committed source at the checkout commit through the GitHub contents API and fail when the no-assignment branch does not measure the GROUP's backlog, when the classifier does not require that measurement before clearing, or when the dimension's detail does not name the groups it holds inside the window. Runs on hosted runners with no container daemon and no access to a private runtime.
+    source: manual
+    binds_ac: [AC3, AC5]
+    checks:
+      - check_type: command
+        check_value: |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/event_bus/consumer_rejoin_supervisor.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'group_backlog, measured = await self._group_backlog(consumer)' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/event_bus/consumer_rejoin_policy.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'if observation.backlog_measured and observation.backlog_records == 0:' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/services/service_runtime_health_monitor.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'carrying a stall held inside the window' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
