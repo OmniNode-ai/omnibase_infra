@@ -37,8 +37,9 @@ dod_evidence:
       - check_type: command
         check_value: 'uv run --frozen check-dependency-pins .'
   - id: dod-003
-    description: "Deploy-scope readback, bound to no criterion: the landing branch's ci.yml calls the dependency-pins reusable at the core dev-merge tag; read through the GitHub contents API on dev, it exits non-zero until this change has merged. A hosted runner can run it."
+    description: "Deploy-scope readback, bound to no criterion: the landing branch's ci.yml calls the dependency-pins reusable at the core dev-merge tag; read through the GitHub contents API on dev, it exits non-zero until this change has merged. Only the local Done gate runs it; a pull request runner cannot pass it before the merge."
     source: manual
+    execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: >-
