@@ -55,6 +55,7 @@ PINNED_WORKFLOWS = (
 # resolver step (omnimarket-contract-pin.yaml, OMN-17427 pin resolver, the
 # paired-PR resolver of node-migration-sync.yml) or is a sha already pinned in place.
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
+DEV_TAG = re.compile(r"^dev-\d{14}-[0-9a-f]{12}$")
 REPOSITORY = re.compile(r"^\s*repository: OmniNode-ai/(\w+)\s*$")
 REF = re.compile(r"^\s*ref: (\S+)")
 USES = re.compile(r"uses: OmniNode-ai/((\w+)/\.github/\S+)@(\S+)")
@@ -111,7 +112,8 @@ def test_no_sibling_reusable_workflow_or_clone_by_branch(name: str) -> None:
     bad = [
         f"{name}: {m.group(1)}@{m.group(3)}"
         for m in USES.finditer(text)
-        if m.group(2) in PINS and not HEX40.fullmatch(m.group(3))
+        if m.group(2) in PINS
+        and not (HEX40.fullmatch(m.group(3)) or DEV_TAG.fullmatch(m.group(3)))
     ]
     assert not bad, f"sibling reusable workflow/action by branch: {bad}"
     assert not re.search(r"^\s*core-ref: (dev|main)\s*$", text, re.M)
