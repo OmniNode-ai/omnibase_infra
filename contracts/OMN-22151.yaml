@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-22151
+title: Stage 1 model of the start-first dev runtime redeploy and the first install of the ready-aware front (AC22151901)
+summary: Adds formal/runtime_start_first, a TLA+ model of the runtime standby handover (fence, seek, resume, switch, stop), its abort path, and the one declared first-install window of the front on host ports 8085 and 8086, with a mutant per property and the recorded TLC output. The design and the stage-2 build plan are on the ticket. No product code changes in this stage; AC1 to AC4 of the ticket are built and proven in later stages.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The recorded TLC output binds to the spec and configurations by digest, the two real configurations hold every property, and each mutant breaks the property it is named for.
+    command: uv run --frozen pytest tests/formal/test_runtime_start_first_model.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-start-first-model
+    description: The model holds its properties in redeploy and install modes and each mutant and witness behaves as recorded.
+    source: manual
+    binds_ac:
+      - AC22151901
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/formal/test_runtime_start_first_model.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-start-first-model
+    statement: The start-first handover and the first-install window are modelled before they are built.
+    acceptance:
+      - id: AC22151901
+        statement: formal/runtime_start_first holds AtMostOneServing, Contiguous, NoDoubleEffect, the gapless properties, StopOnlyWhenLit, FailedLeavesOldServing, the window properties and the Resolves liveness properties in both modes, and each named mutant fails its property.

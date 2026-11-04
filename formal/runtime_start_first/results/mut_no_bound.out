@@ -1,0 +1,441 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 70 and seed -4091639712078721530 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 90560] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmplctihjo0/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15274931286643377771/Naturals.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15274931286643377771/Integers.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15274931286643377771/FiniteSets.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15274931286643377771/TLC.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15274931286643377771/Sequences.tla (jar:file:/Users/jonah/lab-run/scratch-rsf/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module RuntimeStartFirst
+Linting of module RuntimeStartFirst
+Starting... (2026-11-02 21:55:26)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-02 21:55:26.
+Error: Invariant WindowBounded is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ le = "up"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "idle"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = FALSE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "none", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 0
+/\ eff = <<0, 0, 0>>
+/\ age = 0
+
+State 2: <CrashE line 330, col 3 to line 335, col 252 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "idle"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = FALSE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "none", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 0
+
+State 3: <StartN line 407, col 3 to line 413, col 253 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "created"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = FALSE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "boot", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 0
+
+State 4: <BootN line 301, col 3 to line 305, col 247 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "created"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = TRUE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "standby", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 0
+
+State 5: <ArmWindow line 581, col 3 to line 588, col 251 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "window"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = TRUE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "standby", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 0
+
+State 6: <Tick line 756, col 3 to line 765, col 245 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "window"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = TRUE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "standby", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 1
+
+State 7: <Tick line 756, col 3 to line 765, col 245 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "window"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = TRUE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "standby", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 2
+
+State 8: <Tick line 756, col 3 to line 765, col 245 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "window"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = TRUE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "standby", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 3
+
+State 9: <Tick line 756, col 3 to line 765, col 245 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "window"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = TRUE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "standby", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 4
+
+State 10: <Tick line 756, col 3 to line 765, col 245 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "window"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = TRUE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "standby", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 5
+
+State 11: <Tick line 756, col 3 to line 765, col 245 of module RuntimeStartFirst>
+/\ le = "dead"
+/\ degraded = [n |-> FALSE, o |-> FALSE]
+/\ litAtStop = TRUE
+/\ stopped = FALSE
+/\ nDeg = 0
+/\ obsAtStop = TRUE
+/\ cm = 0
+/\ pos = [n |-> -1, o |-> 0]
+/\ dage = 0
+/\ unready = [n |-> FALSE, o |-> FALSE]
+/\ ph = "window"
+/\ nServed = FALSE
+/\ copied = FALSE
+/\ re = FALSE
+/\ rm = FALSE
+/\ agentUp = TRUE
+/\ fl = [n |-> FALSE, o |-> FALSE]
+/\ fv = [n |-> "down", o |-> "down"]
+/\ lastRan = "o"
+/\ replayed = FALSE
+/\ nStandby = TRUE
+/\ rfs = 0
+/\ frontUp = FALSE
+/\ st = [n |-> "standby", o |-> "serving"]
+/\ evSrc = "o"
+/\ crashed = [n |-> FALSE, o |-> FALSE]
+/\ gop = FALSE
+/\ obs = FALSE
+/\ pub = 0
+/\ aCrashes = 0
+/\ installed = FALSE
+/\ fwd = FALSE
+/\ jr = [n |-> "none", o |-> "none"]
+/\ nCrashes = 1
+/\ eff = <<0, 0, 0>>
+/\ age = 6
+
+173273 states generated, 20991 distinct states found, 9248 states left on queue.
+The depth of the complete state graph search is 12.
+Finished in 02s at (2026-11-02 21:55:28)
