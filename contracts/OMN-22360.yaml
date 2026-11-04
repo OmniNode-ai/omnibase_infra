@@ -2,7 +2,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-22360"
 title: "Core validator: cross-repository dependency pins follow the declared layer order, form no cycle, and stay at the newest release"
-summary: "omnibase_infra calls omnibase_core's dependency-pins reusable workflow at dev-20261103173624-74e0b0f12767 from ci.yml (job dependency-pins) and registers its context dependency-pins / Dependency Pins in STRICT_GATE_JOBS so CI Summary fails closed on it. Every omnibase_core hook revision in .pre-commit-config.yaml and the CI twins of those revisions move to the same tag. omnibase-spi moves to a range that admits the newest release (>=0.23.12,<0.24.0) in the project table and the uv override, with uv.lock and the version-matrix fallback regenerated. The omnibase-compat dependency is already deleted on dev by omnibase_infra#5648, so with dev merged in the validator reports no finding on this tree."
+summary: "omnibase_infra calls omnibase_core's dependency-pins reusable workflow at dev-20261103173624-74e0b0f12767 from ci.yml (job dependency-pins) and registers its context dependency-pins / Dependency Pins in STRICT_GATE_JOBS so CI Summary fails closed on it. Ten of the eleven omnibase_core hook blocks in .pre-commit-config.yaml move to that tag. The public-runner-placement block retains 1c9566e2c249fe54257a4b3ef3ff2e71de027b89 under the core policy's enforced 14-release hook-revision bound, and each CI twin reads its revision from its hook block. omnibase-spi moves to a range that admits the newest release (>=0.23.12,<0.24.0) in the project table and the uv override, with uv.lock and the version-matrix fallback regenerated. The omnibase-compat dependency is already deleted on dev by omnibase_infra#5648, so with dev merged in the validator reports no finding on this tree."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -23,7 +23,7 @@ evidence_requirements:
     command: "deploy: gh api 'repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/ci.yml?ref=dev' --jq .content | base64 -d | grep -q 'dependency-pins.yml@dev-20261103173624-74e0b0f12767'"
 dod_evidence:
   - id: dod-001
-    description: "The dependency-pins job calls the core reusable workflow at dev-20261103173624-74e0b0f12767, every omnibase_core hook revision in .pre-commit-config.yaml is that tag, and CI Summary registers dependency-pins / Dependency Pins as a strict gate."
+    description: "The dependency-pins job calls the core reusable workflow at dev-20261103173624-74e0b0f12767, ten of the eleven omnibase_core hook blocks use that tag, the public-runner-placement block retains its separately bounded revision, and CI Summary registers dependency-pins / Dependency Pins as a strict gate."
     source: generated
     binds_ac: [AC7]
     checks:

@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22393
+title: T26 The lane-mirror forwarder is decided keep or fold from what it needs, and the stack-shape allowlist records the decision (one-runtime plan)
+summary: The decision is KEEP. onex-gateway-forwarder needs a second bus connection the runtime does not provide (the runtime container resolves one event bus; the forwarder opens its own KafkaTransport to the cloud and lane-mirror brokers with their own credentials) and runs as a separate failure domain on the edge host (docker/docker-compose.gateway.yml holds the forwarder and its DNS sidecar beside no runtime). config/validation/stack_shape.yaml gains a kept_outside_runtime entry for gateway-forwarder naming the compose file, the ticket and that reason, and the stack-shape test fails when a kept entry carries an empty reason, names a file that does not declare the service, or when the service appears in any other judged file. The forwarder is declared in no judged dev compose file, so the dev file set judges clean.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22393-decision-recorded
+    statement: The keep decision is recorded in the allowlist entry with a reason that names the second bus connection or failure domain it rests on, and an empty reason fails the check.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the decision is recorded with its reason in the allowlist entry or in the removal PR body, naming the second bus connection or failure domain it rests on -- falsifier: uv run pytest tests/unit/validation/test_checker_stack_shape.py -q reads the allowlist entry and fails when the reason field is empty"
+  - id: req-omn22393-dev-file-set
+    statement: The stack-shape validator passes over the dev compose file set with the forwarder allowed by name in its named file and absent from every judged file.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the stack-shape validator run on the dev file set passes with the forwarder either allowed by name or absent -- falsifier: uv run pytest tests/unit/validation/test_checker_stack_shape.py -q over the dev compose file set"
+evidence_requirements:
+  - kind: tests
+    description: The forwarder entry read from the real data file, an empty reason refused, a kept service allowed only in its named file, and the real compose tree judged clean.
+    command: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22393-ac1-decision-recorded
+    description: The real data file holds a kept_outside_runtime entry for gateway-forwarder with ticket OMN-22393, its compose file and a reason naming the second bus connection; blanking that reason in a copy of the real data is refused by name. At the merge base the entry is absent, so these tests fail there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k "forwarder_decision or kept_entry"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22393-ac2-dev-file-set
+    description: No judged dev compose file declares the forwarder, a kept service passes in its named file and is refused in any other judged file, and the real compose tree judges clean.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k "forwarder or kept or real_compose"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

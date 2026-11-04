@@ -279,10 +279,11 @@ repos:
   # OMN-22360: this is the one core hook rev that is not the dev-merge tag of the
   # other core blocks. From omnibase_core#2072 (OMN-21280) the check runs with no
   # baseline and refuses the computed runs-on of every job in this repository's
-  # workflows; the hosted-runner move that clears them is a separate change. This rev
-  # is the last core commit before that change, 11 core releases behind the newest
-  # (the pin policy allows 14); move it to the dev-merge tag in the change that moves
-  # those jobs to GitHub-hosted runners.
+  # workflows; adopting it requires the hosted-runner migration and the new CLI.
+  # This rev still enforces the existing placement ratchet. It is subject to the
+  # same hook_rev_max_releases_behind policy as every other core hook: the required
+  # dependency-pins job refuses it when more than 14 release tags are newer.
+  # This is a release-count bound, not an indefinite exception or a new baseline.
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: 1c9566e2c249fe54257a4b3ef3ff2e71de027b89
     hooks:
@@ -293,7 +294,7 @@ repos:
   # OMN-17427). Refuses any new import crossing a node boundary. Shrink-only
   # baseline .onex_ratchets/node_boundary_import_baseline.yaml; no allowlist,
   # no suppression marker. CI twin job node-boundary-imports in
-  # .github/workflows/ci.yml; keep this rev equal to that job's pin.
+  # .github/workflows/ci.yml reads this rev from here.
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: dev-20261103173624-74e0b0f12767
     hooks:
@@ -314,8 +315,8 @@ repos:
   # claude -p or llama-cli; a model SDK import; or a caller of one) must sit in a
   # sanctioned delegation node package named in omnibase_core's policy.yaml.
   # Shrink-only baseline .onex_ratchets/direct_model_call_baseline.yaml; no
-  # suppression marker. Keep this rev equal to the pin in
-  # .github/workflows/direct-model-call.yml. Server-side backstop: OMN-20299.
+  # suppression marker. .github/workflows/direct-model-call.yml reads this rev
+  # from here. Server-side backstop: OMN-20299.
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: dev-20261103173624-74e0b0f12767
     hooks:
@@ -2426,7 +2427,6 @@ repos:
   # required gates for omnibase_infra against omnibase_core's
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
   # repo's own architecture-handshakes/validator-requirements-baseline.yaml.
-  # Re-pin rev to the merged-dev SHA once the omnibase_core export PR lands.
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: dev-20261103173624-74e0b0f12767
     hooks:
