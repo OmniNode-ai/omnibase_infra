@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from functools import cache, lru_cache
+from functools import cache, lru_cache, partial
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -10507,10 +10507,9 @@ async def subscribe_wired_contract_topics(
     if demand_source is not None:
         eligible = await _split_boot_set_by_demand(
             eligible,
+            priority_contracts=knobs.priority_contracts,
             demand_source=demand_source,
-            start=lambda result, contract: _provision_ready_attach(
-                result, contract, auto_offset_reset="earliest"
-            ),
+            start=partial(_provision_ready_attach, auto_offset_reset="earliest"),
             exclude=_exclude,
             watch_stops_out=demand_watch_stops_out,
         )
@@ -10539,21 +10538,25 @@ async def _split_boot_set_by_demand(
     ],
     exclude: Callable[[str, EnumContractAttachExclusionReason, str], None],
     watch_stops_out: list[Callable[[], Awaitable[None]]] | None,
+    priority_contracts: Sequence[str] = (),
 ) -> list[tuple[ModelContractWiringResult, ModelDiscoveredContract]]:
-    """Keep the contracts in use for boot; start the rest on their first record.
+    """Boot priority contracts and contracts whose topics hold retained records.
 
-    OMN-18087. A contract is in use when any topic it subscribes holds a
-    retained record. The rest are watched by one group-less reader, which costs
+    The rest are watched by one group-less reader, which costs
     no group join, and each is attached by *start* when a record first reaches
     one of its topics. Each start runs as its own task, so a slow join never
     holds up the watch, and a start that does not attach is retried with the
     unattached-contract reconciliation's bounded backoff.
     """
+    # Clients can require a live first hop before publishing. Priority consumers
+    # therefore take the normal provision->ready->attach path without waiting
+    # for demand, and only nonpriority contracts need a first-record watch.
     topics_of = {
         contract.name: tuple(contract.event_bus.subscribe_topics)
         if contract.event_bus is not None
         else ()
         for _, contract in eligible
+        if contract.name not in priority_contracts
     }
     all_topics = {topic for topics in topics_of.values() for topic in topics}
     deferred_by_topic: dict[
@@ -10608,8 +10611,8 @@ async def _split_boot_set_by_demand(
         watch_stops_out.append(stop)
     boot: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []
     for result, contract in eligible:
-        topics = topics_of[contract.name]
-        if any(topic in in_use for topic in topics):
+        topics = topics_of.get(contract.name, ())
+        if contract.name in priority_contracts or in_use.intersection(topics):
             boot.append((result, contract))
             continue
         for topic in topics:
@@ -10620,7 +10623,7 @@ async def _split_boot_set_by_demand(
             f"idle_topics={list(topics)}",
         )
     logger.info(
-        "Boot subscription split: %d contract(s) in use attach at boot, %d "
+        "Boot subscription split: %d priority or in-use contract(s) attach at boot, %d "
         "start on their first request; %d of %d topic(s) are in use (hold a "
         "record, or cannot be read here); watched_topics=%s (OMN-18087)",
         len(boot),
