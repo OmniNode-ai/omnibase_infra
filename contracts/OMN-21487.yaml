@@ -18,6 +18,9 @@ evidence_requirements:
   - kind: tests
     description: Exercise the real deploy-agent build boundary with controlled Git and Docker responses, including absent images, advanced source revisions and refusal controls.
     command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov -p no:randomly
+  - kind: tests
+    description: Drive the delivery from the shipped node contract against a real Git source repository and a stand-in container engine on PATH.
+    command: uv run --frozen pytest tests/integration/docker/test_cost_estimator_build_delivery_omn21487.py -q --no-cov -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -39,3 +42,21 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov -p no:randomly
+  - id: dod-omn21487-ac1-ac2-delivery-integration
+    description: >-
+      Integration regression for AC1 and AC2: the shipped node contract supplies the build recipe, a real Git clone resolves the web head, an absent image is built and stamped, an unchanged head is reused, an advanced head rebuilds, and an unreachable source or missing source setting refuses before any engine call. Only the container engine is a stand-in executable; this is not a live build on a lab host.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/docker/test_cost_estimator_build_delivery_omn21487.py -q --no-cov -p no:randomly
+  - id: dod-omn21487-deploy-probe
+    description: >-
+      Deploy probe for the delivery change: read the build handler and the dev compose declaration from GitHub at the evaluated checkout's commit and require the estimator build entry point and the gate settings the compose passes through. This does not deploy a service or claim a lab host serves the page; the live build, password materialization and serving readback remain separate obligations. The probe fails on the merge base, which has neither the handler nor the setting.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_cost_estimator_build.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class HandlerCostEstimatorBuild' > /dev/null && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'ESTIMATOR_GATE_PASSWORD' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
