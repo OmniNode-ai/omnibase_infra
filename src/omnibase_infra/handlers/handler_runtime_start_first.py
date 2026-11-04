@@ -62,12 +62,22 @@ def _run_errors(execution: ModuleType) -> tuple[type[Exception], ...]:
 
 def _running(container: str, *, execution: ModuleType) -> bool:
     argv = ["docker", "inspect", "-f", "{{.State.Running}}", container]
-    result = execution._run(argv, timeout=DOCKER_SECONDS)
+    try:
+        result = execution._run(argv, timeout=DOCKER_SECONDS)
+    except _run_errors(execution):
+        return False
     return bool(result.returncode == 0 and result.stdout.strip() == "true")
 
 
-def _remove(container: str, *, execution: ModuleType) -> None:
-    execution._run(["docker", "rm", "-f", container], timeout=COMPOSE_SECONDS)
+def _remove(container: str, *, execution: ModuleType) -> bool:
+    """Remove ``container``; ``False`` when Docker could not be asked or refused."""
+    try:
+        result = execution._run(
+            ["docker", "rm", "-f", container], timeout=COMPOSE_SECONDS
+        )
+    except _run_errors(execution):
+        return False
+    return bool(result.returncode == 0)
 
 
 def _start(service: str, container: str, *, execution: ModuleType) -> str:
@@ -144,12 +154,15 @@ class HandlerRuntimeStartFirst:
         _remove(new, execution=run)
         not_started = _start(request.service, new, execution=run)
         if not_started:
-            _remove(new, execution=run)
+            cleaned = _remove(new, execution=run)
             return ModelRuntimeStartFirstResult(
                 **base,
                 status="fail",
                 failure="replacement-not-started",
-                detail=f"{new} did not start ({not_started}); {old} left running",
+                detail=(
+                    f"{new} did not start ({not_started}); {old} left running"
+                    f"{'' if cleaned else '; removing the replacement failed'}"
+                ),
             )
         started = self.clock()
         probes = 0
@@ -161,7 +174,7 @@ class HandlerRuntimeStartFirst:
                 break
             exited = not _running(new, execution=run)
             if exited or waited + request.poll_seconds > request.bound_seconds:
-                _remove(new, execution=run)
+                cleaned = _remove(new, execution=run)
                 return ModelRuntimeStartFirstResult(
                     **base,
                     status="fail",
@@ -173,14 +186,19 @@ class HandlerRuntimeStartFirst:
                     detail=(
                         f"{new} did not read /ready 200 within "
                         f"{request.bound_seconds:.0f}s ({probes} probe(s), last "
-                        f"status {status}); removed, {old} left running"
+                        f"status {status}); "
+                        f"{'removed' if cleaned else 'removal failed'}, "
+                        f"{old} left running"
                     ),
                     probes=probes,
                     waited_seconds=waited,
                 )
             self.sleep(request.poll_seconds)
         old_running = _running(old, execution=run)
-        run._run(["docker", "stop", old], timeout=COMPOSE_SECONDS)
+        try:
+            run._run(["docker", "stop", old], timeout=COMPOSE_SECONDS)
+        except _run_errors(run):
+            pass  # the readback below names old-runtime-not-stopped
         stopped = not _running(old, execution=run)
         return ModelRuntimeStartFirstResult(
             **base,

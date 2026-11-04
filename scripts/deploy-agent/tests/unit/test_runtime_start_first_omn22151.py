@@ -366,3 +366,45 @@ def test_runtime_start_first_failed_probe_does_not_stop_old(
     assert result.failure == "replacement-never-ready"
     assert host.running == {OLD}
     assert f"stop {OLD}" not in host.events
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("Docker unavailable"), subprocess.TimeoutExpired("docker", 300)]
+)
+def test_runtime_start_first_never_ready_remove_error_still_names_failure(
+    host: FakeDevHost, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    host.ready_after_probes = None
+
+    def run(cmd: list[str], *args: object, **kwargs: object) -> object:
+        if cmd[:3] == ["docker", "rm", "-f"]:
+            raise error
+        return host.run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(executor_mod, "_run", run)
+    result = _replace(host, bound=10)
+    assert result.status == "fail"
+    assert result.failure == "replacement-never-ready"
+    assert "removal failed" in result.detail
+    assert OLD in host.running
+    assert f"stop {OLD}" not in host.events
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("Docker unavailable"), subprocess.TimeoutExpired("docker", 300)]
+)
+def test_runtime_start_first_stop_error_names_old_runtime_not_stopped(
+    host: FakeDevHost, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    host.ready_after_probes = 2
+
+    def run(cmd: list[str], *args: object, **kwargs: object) -> object:
+        if cmd[:2] == ["docker", "stop"]:
+            raise error
+        return host.run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(executor_mod, "_run", run)
+    result = _replace(host)
+    assert result.status == "fail"
+    assert result.failure == "old-runtime-not-stopped"
+    assert OLD in host.running
