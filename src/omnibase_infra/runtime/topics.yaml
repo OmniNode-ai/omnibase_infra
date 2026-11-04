@@ -49,3 +49,6 @@ topics:
   # OMN-21924: the generic node CLI publishes the architecture-validation
   # request through RuntimeLocal; the allowed-command tests exercise that bus path.
   - onex.cmd.platform.architecture-validate.v1
+  # OMN-19998: the generic node CLI publishes the host timer command through
+  # RuntimeLocal; the image-prune integration test exercises this bus dispatch.
+  - onex.cmd.platform.deploy-agent-image-prune.v1

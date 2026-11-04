@@ -614,6 +614,54 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217": {
+      "category": "command",
+      "contract_name": "node_deploy_agent_image_prune_effect",
+      "event_model_module": "omnibase_infra.models.model_deploy_agent_image_prune_request",
+      "event_model_name": "ModelDeployAgentImagePruneRequest",
+      "handler_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217",
+      "handler_module": "omnibase_infra.handlers.handler_deploy_agent_image_prune",
+      "handler_name": "HandlerDeployAgentImagePrune",
+      "message_types": [
+        "ModelDeployAgentImagePruneRequest",
+        "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}",
+        "platform.deploy-agent-image-prune"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410": {
+      "category": "command",
+      "contract_name": "node_deploy_agent_image_prune_effect",
+      "event_model_module": "omnibase_infra.models.model_deploy_agent_image_prune_request",
+      "event_model_name": "ModelDeployAgentImagePruneRequest",
+      "handler_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410",
+      "handler_module": "omnibase_infra.handlers.handler_deploy_agent_image_prune",
+      "handler_name": "HandlerDeployAgentImagePrune",
+      "message_types": [
+        "ModelDeployAgentImagePruneRequest",
+        "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}",
+        "platform.deploy-agent-image-prune"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e": {
+      "category": "command",
+      "contract_name": "node_deploy_agent_image_prune_effect",
+      "event_model_module": "omnibase_infra.models.model_deploy_agent_image_prune_request",
+      "event_model_name": "ModelDeployAgentImagePruneRequest",
+      "handler_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e",
+      "handler_module": "omnibase_infra.handlers.handler_deploy_agent_image_prune",
+      "handler_name": "HandlerDeployAgentImagePrune",
+      "message_types": [
+        "ModelDeployAgentImagePruneRequest",
+        "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}",
+        "platform.deploy-agent-image-prune"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_4314b56c": {
       "category": "event",
       "contract_name": "node_dlq_replay_effect",
@@ -5009,6 +5057,21 @@
       },
       "topic": "${topic:contract:platform.CMD_CI_LIVE_CONTACT_CHECK_V1}"
     },
+    "P1a::${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.deploy-agent-image-prune",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.deploy-agent-image-prune",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}"
+    },
     "P1a::${topic:contract:platform.CMD_HOTPATCH_LEDGER_RECONCILE_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6530,6 +6593,21 @@
       },
       "topic": "${topic:contract:platform.CMD_CI_LIVE_CONTACT_CHECK_V1}"
     },
+    "P1b::${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}"
+    },
     "P1b::${topic:contract:platform.CMD_HOTPATCH_LEDGER_RECONCILE_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -7569,6 +7647,72 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnimarket.EVT_DELEGATE_SKILL_FAILED_V1}"
+    },
+    "P4::dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217::${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217",
+      "event_model": "omnibase_infra.models.model_deploy_agent_image_prune_request.ModelDeployAgentImagePruneRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.deploy-agent-image-prune",
+        "payload": "ModelDeployAgentImagePruneRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410",
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e",
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.deploy-agent-image-prune",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}"
+    },
+    "P4::dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410::${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410",
+      "event_model": "omnibase_infra.models.model_deploy_agent_image_prune_request.ModelDeployAgentImagePruneRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.deploy-agent-image-prune",
+        "payload": "ModelDeployAgentImagePruneRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410",
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e",
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.deploy-agent-image-prune",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}"
+    },
+    "P4::dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e::${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e",
+      "event_model": "omnibase_infra.models.model_deploy_agent_image_prune_request.ModelDeployAgentImagePruneRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.deploy-agent-image-prune",
+        "payload": "ModelDeployAgentImagePruneRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410",
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e",
+          "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.deploy-agent-image-prune",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}"
     },
     "P4::dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6::${topic:contract:platform.CMD_HOTPATCH_LEDGER_RECONCILE_V1}": {
       "construct_only": true,
@@ -25783,6 +25927,36 @@
       "route_id": "route.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e.onex_evt_omnimarket_delegate_skill_completed_v1",
       "topic": "${topic:contract:omnimarket.EVT_DELEGATE_SKILL_COMPLETED_V1}",
       "topic_pattern": "*.evt.omnimarket.delegate-skill-completed.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_deploy_agent_image_prune_effect",
+      "dispatcher_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217",
+      "handler_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217",
+      "message_category": "command",
+      "route_id": "route.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_install_6ed7e217.onex_cmd_platform_deploy_agent_image_prune_v1",
+      "topic": "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}",
+      "topic_pattern": "*.cmd.platform.deploy-agent-image-prune.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_deploy_agent_image_prune_effect",
+      "dispatcher_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410",
+      "handler_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410",
+      "message_category": "command",
+      "route_id": "route.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_plan_588fa410.onex_cmd_platform_deploy_agent_image_prune_v1",
+      "topic": "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}",
+      "topic_pattern": "*.cmd.platform.deploy-agent-image-prune.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_deploy_agent_image_prune_effect",
+      "dispatcher_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e",
+      "handler_id": "dispatcher.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e",
+      "message_category": "command",
+      "route_id": "route.auto.node_deploy_agent_image_prune_effect.HandlerDeployAgentImagePrune.deploy_agent_images_prune_9879594e.onex_cmd_platform_deploy_agent_image_prune_v1",
+      "topic": "${topic:contract:platform.CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1}",
+      "topic_pattern": "*.cmd.platform.deploy-agent-image-prune.*",
       "type_scoped": true
     },
     {

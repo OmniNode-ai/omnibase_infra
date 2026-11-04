@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelDeployAgentImagePrunePolicy(BaseModel):
-    """One source-label filter avoids Docker's OR semantics for repeated labels."""
+    """One source-label predicate scopes both inventory and deletion."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
