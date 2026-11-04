@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -38,6 +39,15 @@ _REPO = Path(__file__).resolve().parents[3]
 _SCRIPTS = _REPO / "scripts"
 _CENSUS_SH = _SCRIPTS / "lane-census-check.sh"
 _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "lane_container_memory"
+
+
+def _registry_overlay(directory: Path, alias: str) -> Path:
+    """OMN-22152: a host registry listing every lane of the fixture manifest for one host."""
+    manifest = yaml.safe_load((_FIXTURES / "lane-manifest.yaml").read_text())
+    row = {"name": "host-a", "aliases": [alias], "lanes": list(manifest["lanes"])}
+    overlay = directory / f"registry-{alias}.yaml"
+    overlay.write_text(yaml.safe_dump({"registry": [row]}), encoding="utf-8")
+    return overlay
 
 
 def _load(name: str, path: Path) -> Any:
@@ -615,6 +625,8 @@ class _Pass:
             "STUB_PRODUCE_RC": str(produce_rc),
             **host.env(),
         }
+        overlay = _registry_overlay(self.home.parent, env["LANE_CENSUS_HOST"])
+        env["LANE_CENSUS_REGISTRY"] = str(overlay)
         if broker is not None:
             env["LANE_MEMORY_BROKER_CONTAINER"] = broker
         return subprocess.run(
@@ -718,6 +730,9 @@ def test_an_undeclared_host_publishes_no_memory_event(
                 "LANE_CENSUS_PYTHON": sys.executable,
                 "LANE_CENSUS_HOST": "some-undeclared-host",
                 "LANE_MANIFEST": str(_FIXTURES / "lane-manifest.yaml"),
+                "LANE_CENSUS_REGISTRY": str(
+                    _registry_overlay(census.home.parent, "a-declared-box")
+                ),
                 "LANE_MEMORY_RUNNER_FLEET_CONFIG": str(_FIXTURES / "runner_fleet.yaml"),
                 "LANE_MEMORY_BROKER_CONTAINER": "omnibase-infra-dev-202-redpanda",
                 **env_host,

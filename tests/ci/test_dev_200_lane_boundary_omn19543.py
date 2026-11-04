@@ -39,7 +39,11 @@ from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
 )
-from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+from tests.helpers.lane_census_fixtures import (
+    LAB_MANIFEST,
+    lab_registry,
+    lanes_declared_on_host,
+)
 from tests.helpers.lane_overlay_fixtures import (
     LANE_OVERLAY_MOUNT,
     LANE_OVERLAY_TARGET,
@@ -160,7 +164,7 @@ def test_dev_200_lane_boundary_is_not_in_the_prod_grant_interlock() -> None:
 @pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_manifest_declares_lab_200_only() -> None:
     lane = _manifest()["lanes"][LANE]
-    assert lane["hosts"] == [HOST_ID]
+    assert lab_registry().hosts_of(LANE) == [HOST_ID]
     assert lane["compose_project"] == COMPOSE_PROJECT
     assert lane["network"] == NETWORK
     assert lane["compose_file"] == "docker/docker-compose.dev-200.yml"
@@ -346,17 +350,15 @@ def _plan_on_200(rows: list[dict[str, Any]], networks: list[str]) -> dict[str, A
         "networks": networks,
         "runtime_tag": None,
     }
-    return build_plan(envelope, _manifest())
+    return build_plan(envelope, _manifest(), lab_registry())
 
 
 @pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_host_resolves_and_carries_dev_200() -> None:
     manifest = _manifest()
-    validate_hosts(manifest)
-    assert resolve_host(HOSTNAME_ON_HOST, manifest) == HOST_ID
-    lanes_on_host = sorted(
-        name for name, spec in manifest["lanes"].items() if HOST_ID in spec["hosts"]
-    )
+    validate_hosts(manifest, lab_registry())
+    assert resolve_host(HOSTNAME_ON_HOST, manifest, lab_registry()) == HOST_ID
+    lanes_on_host = sorted(lanes_declared_on_host(lab_registry(), HOST_ID))
     assert lanes_on_host == ["dev-200", "dogfood"]
 
 
