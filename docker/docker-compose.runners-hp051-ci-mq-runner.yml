@@ -75,9 +75,12 @@ x-runner-host-zoneinfo: &runner-host-zoneinfo
 # otherwise, and the job workspace holds the interpreters and the compiled extensions the jobs run (measured 2026-11-04
 # on the first in-memory runners: `./python: Permission denied` in setup-python and an ImportError on pydantic_core's
 # shared object, so both merge groups went red). Each entry is `<container path>:<options>`; `size` is a ceiling.
+# The two job directories are 16 and 12 GiB because the lane probe the repository's tests run reads free space under the
+# workspace and refuses a volume with under 10 GiB free (`disk free 8.0G < 10G` on the 8 GiB first try, 2026-11-04). The
+# real bound on what they hold is the container's memory limit.
 x-runner-ram-dirs: &runner-ram-dirs
-  - ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work:exec,mode=1777,size=8g
-  - ${RUNNER_USER_HOME:-/home/runner}/tmp:exec,mode=1777,size=1g
+  - ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work:exec,mode=1777,size=16g
+  - ${RUNNER_USER_HOME:-/home/runner}/tmp:exec,mode=1777,size=12g
   - ${RUNNER_USER_HOME:-/home/runner}/.cache/pip:exec,mode=1777,size=2g
   - ${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit:exec,mode=1777,size=2g
   - ${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm:exec,mode=1777,size=2g
