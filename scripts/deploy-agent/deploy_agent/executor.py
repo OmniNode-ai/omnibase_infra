@@ -172,6 +172,7 @@ def load_dev_boot_guard() -> ModuleType:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
     for relative in (
+        "models/coding_agent/model_subprocess_outcome.py",
         "models/handlers/model_value_holder.py",
         "models/model_dev_boot_health_status.py",
         "models/model_dev_boot_state.py",
@@ -220,7 +221,7 @@ def DevBootGuard(executor: DeployExecutor, state_dir: Path) -> HandlerDevBootGua
         "HandlerDevBootGuard",
         load_dev_boot_guard().HandlerDevBootGuard(
             state_dir,
-            config_hashes=lambda services: executor.dev_boot_config_hashes(services),
+            config_hashes=executor.dev_boot_config_hashes,
             verify_recovery=lambda update: executor.verify_dev_boot_recovery(
                 on_phase_update=update
             ),
@@ -3106,6 +3107,19 @@ GATEWAY_INFISICAL_BOOTSTRAP_ENV_VARS: tuple[str, ...] = (
     "INFISICAL_CLIENT_SECRET",
     "INFISICAL_PROJECT_ID",
 )
+
+
+def _read_private_text(path: Path) -> str:
+    """Read retained boot evidence through the host execution boundary."""
+    return path.read_text(encoding="utf-8")
+
+
+def _dev_boot_clock() -> float:
+    return time.monotonic()
+
+
+def _dev_boot_timestamp() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _atomic_write_private_json(path: Path, document: dict[str, object]) -> None:
@@ -6269,11 +6283,7 @@ class DeployExecutor:
         # waits on core infra containers (OMN-9455). The same list bounds the
         # ceiling derivation, so an unrelated long healthcheck elsewhere in the
         # compose file cannot inflate it.
-        expected = (
-            requested_services
-            if requested_services
-            else services_for_scope(scope, lane=lane)
-        )
+        expected = requested_services or services_for_scope(scope, lane=lane)
 
         # OMN-21279: run the candidate's setting/package check before any
         # runtime replacement (and never on a prod or stability runner).
@@ -6286,7 +6296,7 @@ class DeployExecutor:
         # a ceiling that can see the machine and a supervisor that refuses to
         # cancel a live recreate. Every other phase's execution is unchanged.
         deps_phase = scope == Scope.CORE
-        timeout = 0
+        timeout = 0 if deps_phase else PHASE_TIMEOUTS.get(phase, 300)
         rolling = False
         if scope == Scope.RUNTIME:
             # OMN-18057: derived from the compose model, never a bare constant.
@@ -6319,18 +6329,9 @@ class DeployExecutor:
                     )
             # OMN-22006: compose converges each service alone; nothing is forced.
             rolling = build and bool(requested_services)
-            force_recreate = force_recreate and not rolling
-        elif not deps_phase:
-            timeout = PHASE_TIMEOUTS.get(phase, 300)
         if scope is Scope.RUNTIME and "omninode-runtime" in requested_services:
             self._retire_folded_dev_services(lane, config)
-        cmd = [
-            *_compose_argv(lane),
-            "--profile",
-            profile,
-            "up",
-            "-d",
-        ]
+        cmd = [*_compose_argv(lane), "--profile", profile, "up", "-d"]
         # OMN-18640: `--force-recreate` is a CALL-SITE decision, not a constant
         # of this function. It was a constant from 505c6e78d (OMN-7409,
         # 2026-04-03) with no recorded reason, and the CORE leg of a FULL
@@ -6355,18 +6356,14 @@ class DeployExecutor:
         # Running`, and the same dry-run with `--force-recreate --pull always`
         # reports it `Recreated`. The flag was the whole cause; there was no
         # config drift to respond to.
-        if force_recreate:
-            cmd.append("--force-recreate")
-        if not build or not compose_may_build:
-            cmd.append("--no-build")
+        cmd.extend(["--force-recreate"] if force_recreate and not rolling else [])
+        cmd.extend(["--no-build"] if not build or not compose_may_build else [])
         cmd += ["--pull", "never" if scope == Scope.RUNTIME or not build else "always"]
         # OMN-9455: runtime scope must pass --no-deps so compose cannot recreate
         # the core infra services (postgres/redpanda/valkey/infisical) declared
         # as depends_on targets of the runtime services.
-        if scope == Scope.RUNTIME:
-            cmd.append("--no-deps")
-        if requested_services:
-            cmd.extend(requested_services)
+        cmd.extend(["--no-deps"] if scope == Scope.RUNTIME else [])
+        cmd.extend(requested_services)
 
         # OMN-18057: a blown ceiling is a compose-up OUTCOME, not a reason to
         # skip the outcome check. Before this, TimeoutExpired propagated out of
@@ -6395,13 +6392,22 @@ class DeployExecutor:
                 # OMN-22006: one service per `up`, each running before the next
                 # is touched; compose recreates only a service whose config hash
                 # or image id moved, so no two runtimes are ever stopped together.
-                steps = [
-                    [*cmd[: -len(requested_services)], x] for x in requested_services
-                ]
-                for step in steps if rolling else [cmd]:
-                    result = _run(step, timeout=timeout, env=_compose_env(extra_env))
+                prefix = cmd[: -len(requested_services)]
+                steps = [prefix + [x] for x in requested_services] if rolling else [cmd]
+                env = _compose_env(extra_env)
+                for step in steps:
+                    if rolling and lane is EnumRuntimeLane.DEV:
+                        result = load_dev_boot_guard().run_runtime_roll_step(
+                            step,
+                            timeout,
+                            execution=sys.modules[__name__],
+                            extra_env=extra_env,
+                        )
+                    else:
+                        result = _run(step, timeout=timeout, env=env)
                     if result.returncode != 0 or (
                         rolling
+                        and lane is not EnumRuntimeLane.DEV
                         and not verify_containers_up(
                             step[-1:],
                             timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS,
