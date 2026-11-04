@@ -751,6 +751,11 @@ requirements:
     acceptance:
       - id: AC17427650001
         statement: 'A sleep made outside the probe is not recorded by the test fixture, and the probe retry assertions still hold -- falsifier: uv run pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q fails at the merge base on test_a_sleep_outside_the_probe_is_not_recorded'
+  - id: req-omn17427-auto-wiring-dir-effect-archetype
+    statement: handler_wiring.py under src/omnibase_infra/runtime/auto_wiring/ passes the no-io-outside-effects hook because the directory declares the effect archetype.
+    acceptance:
+      - id: AC17427680001
+        statement: 'The auto-wiring directory contract declares node_type EFFECT_GENERIC and node_archetype effect, handler_wiring.py passes the no-io-outside-effects validator beside it, and a copy of the module with no contract above it fails -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q fails at the merge base because the contract file does not exist there'
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -3416,3 +3421,11 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q --no-cov
         cwd: .
     binds_ac: [AC17427650001]
+  - id: dod-omn17427-auto-wiring-dir-effect-archetype
+    description: Runs the no-io-outside-effects validator on handler_wiring.py beside the directory contract, and on a copy of the same module with no contract above it. The contract file is new, so the test fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427680001]
