@@ -12,11 +12,11 @@
       "record": {
         "entity_id": "node_core",
         "registry_version": 1,
-        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "content_hash": "f11333d76321e5ccb6d2edbab824c04481427f62534fd42e8a65b059f8ee77a1",
         "operation": "register",
         "owner": "lab-deploy",
         "registration_request_id": "0d4b768e-5195-55fd-ab32-e827a32e2875",
-        "contract_yaml": "name: node_y\nnode_version: 1.0.0\n"
+        "contract_yaml": "name: node_core\nnode_version: 1.0.0\n"
       },
       "key": "node_core"
     },
@@ -29,7 +29,7 @@
       "record": {
         "entity_id": "node_core",
         "registry_version": 1,
-        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "content_hash": "f11333d76321e5ccb6d2edbab824c04481427f62534fd42e8a65b059f8ee77a1",
         "operation": "register",
         "status": "refused",
         "reason": "CORE_RUNTIME_OWNED",

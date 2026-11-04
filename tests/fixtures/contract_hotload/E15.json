@@ -12,11 +12,11 @@
       "record": {
         "entity_id": "node_dup",
         "registry_version": 1,
-        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "content_hash": "d07c4d6230c0a1c36c478b638cce4b3c14c3947d66f638019b0f36353ebfc407",
         "operation": "register",
         "owner": "lab-deploy",
         "registration_request_id": "07f00bdc-38e6-509b-8f83-a5c554fefcdb",
-        "contract_yaml": "name: node_y\nnode_version: 1.0.0\n"
+        "contract_yaml": "name: node_dup\nnode_version: 1.0.0\n"
       },
       "key": "node_dup"
     },
@@ -29,7 +29,7 @@
       "record": {
         "entity_id": "node_dup",
         "registry_version": 1,
-        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "content_hash": "d07c4d6230c0a1c36c478b638cce4b3c14c3947d66f638019b0f36353ebfc407",
         "operation": "register",
         "status": "refused",
         "reason": "DUPLICATE_COMMAND_OWNER",

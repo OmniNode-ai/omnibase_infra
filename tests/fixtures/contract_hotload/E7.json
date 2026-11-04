@@ -50,11 +50,11 @@
       "record": {
         "entity_id": "node_n",
         "registry_version": 1,
-        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "content_hash": "30589cf3c94cd077d6d640a7e8772b62f3e7bec8abd1370c2664cf89f1cd83f0",
         "operation": "register",
         "owner": "lab-deploy",
         "registration_request_id": "b07006b3-c430-54e4-8c4a-a8dc25ed101b",
-        "contract_yaml": "name: node_y\nnode_version: 1.0.0\n"
+        "contract_yaml": "name: node_n\nnode_version: 1.0.0\n"
       },
       "key": "node_n"
     },
@@ -67,7 +67,7 @@
       "record": {
         "entity_id": "node_n",
         "registry_version": 1,
-        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "content_hash": "30589cf3c94cd077d6d640a7e8772b62f3e7bec8abd1370c2664cf89f1cd83f0",
         "operation": "register",
         "status": "refused",
         "reason": "NOT_INSTALLED",
@@ -88,11 +88,11 @@
       "record": {
         "entity_id": "node_k",
         "registry_version": 1,
-        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "content_hash": "ef871d5033b55f32e4d2b459455a4d98191c984cfa8e04bd48967edda16a4e92",
         "operation": "register",
         "owner": "lab-deploy",
         "registration_request_id": "96695969-94fd-55dc-af3e-0884fdd5f596",
-        "contract_yaml": "name: node_y\nnode_version: 1.0.0\n"
+        "contract_yaml": "name: node_k\nnode_version: 1.0.0\n"
       },
       "key": "node_k"
     },
@@ -105,7 +105,7 @@
       "record": {
         "entity_id": "node_k",
         "registry_version": 1,
-        "content_hash": "95e0e03177d97d1313d2afd07910da811ae5bf925f3a3fecf76b068f3127b770",
+        "content_hash": "ef871d5033b55f32e4d2b459455a4d98191c984cfa8e04bd48967edda16a4e92",
         "operation": "register",
         "status": "refused",
         "reason": "NO_PROVISIONER",
