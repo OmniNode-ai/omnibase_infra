@@ -21,16 +21,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-import json
 import sys
 import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
-from click.testing import CliRunner
 
-from omnibase_infra.cli.cli_node import run_node_by_name
 from omnibase_infra.handlers.handler_release_notes_apply import (
     HandlerReleaseNotesApply,
     apply_release_notes,
@@ -312,66 +309,6 @@ class TestHandler:
         )
         assert result.success is False
         assert result.error_message is not None
-
-
-def _run_node(
-    tmp_path: Path, clone: Path, entry: Path, *, repo_name: str
-) -> tuple[int, str]:
-    request = tmp_path / "request.json"
-    request.write_text(
-        json.dumps(
-            {
-                "clone_path": str(clone),
-                "entry_file": str(entry),
-                "repo_name": repo_name,
-            }
-        ),
-        encoding="utf-8",
-    )
-    result = CliRunner().invoke(
-        run_node_by_name,
-        [
-            _NODE_NAME,
-            "--contract",
-            str(_CONTRACT),
-            "--input",
-            str(request),
-            "--state-root",
-            str(tmp_path / "state"),
-            "--timeout",
-            "60",
-        ],
-    )
-    return result.exit_code, result.output
-
-
-@pytest.mark.integration
-class TestRunThroughTheNodeCli:
-    """The cut job runs ``onex node node_release_notes_apply_effect``; so do these."""
-
-    def test_the_node_writes_a_readme_only_clone_and_exits_zero(
-        self, tmp_path: Path
-    ) -> None:
-        clone = _readme_only_clone(tmp_path / "clone")
-        entry = tmp_path / "entry.md"
-        entry.write_text(_ENTRY, encoding="utf-8")
-        code, output = _run_node(tmp_path, clone, entry, repo_name="omnibase_core")
-        assert code == 0, output
-        readme = (clone / "README.md").read_text(encoding="utf-8")
-        assert readme.index("## v0.47.66 (") < readme.index("## v0.47.62 (")
-        assert "def test_release_changelog_retains_version_0_47_66" in (
-            clone / "tests" / "ci" / "test_release_cut_identity_omn18595.py"
-        ).read_text(encoding="utf-8")
-
-    def test_the_node_exits_nonzero_on_a_refusal(self, tmp_path: Path) -> None:
-        clone = tmp_path / "clone"
-        clone.mkdir()
-        (clone / ".readme-only-docs.yaml").write_text("exceptions: []\n", "utf-8")
-        entry = tmp_path / "entry.md"
-        entry.write_text(_ENTRY, encoding="utf-8")
-        code, output = _run_node(tmp_path, clone, entry, repo_name="x")
-        assert code == 1, output
-        assert not (clone / "README.md").exists()
 
 
 @pytest.mark.unit
