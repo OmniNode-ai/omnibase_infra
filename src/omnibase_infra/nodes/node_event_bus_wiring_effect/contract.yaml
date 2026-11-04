@@ -3,6 +3,8 @@
 # Source: omnibase_core/contracts/runtime/event_bus_wiring_effect.yaml
 # Contract Metadata
 node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
 name: node_event_bus_wiring_effect
 node_version: {major: 1, minor: 1, patch: 0}
 description: Event bus wiring effect node for ONEX runtime self-hosting architecture
@@ -306,3 +308,18 @@ metadata:
     - self-hosted
     - wiring
   documentation_url: https://docs.onex.ai/runtime/event-bus-wiring
+# Snapshot resources are acquired during plugin bootstrap, before subscriptions start.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: registration.snapshot_publisher
+      handler:
+        name: HandlerRegistrationSnapshotPublisher
+        module: omnibase_infra.handlers.handler_registration_snapshot_publisher
+      supported_operations: [registration.snapshot_publisher]
+      input_model:
+        name: ModelDomainPluginConfig
+        module: omnibase_infra.runtime.protocol_domain_plugin
+      output_model:
+        name: ModelRegistrationSnapshotProducer
+        module: omnibase_infra.models.registration.model_registration_snapshot_producer
