@@ -18,12 +18,12 @@ evidence_requirements:
     command: "uv run pytest tests/unit/migrations/test_omn21970_daily_view_cursor_vendor.py -q -n 0 --no-cov"
 dod_evidence:
   - id: "dod-omn21970-daily-view-cursor-vendor"
-    description: "AC1 deployment identity only: a missing or altered 0065 or 0066, a wrong ledger binding, a wrong class or a missing view grant fails."
+    description: "AC1 on a real Postgres: 0065 and 0066 applied with psql -f to a throwaway cluster serve 600 runs over 20 days as 20 days summing to 600, past the 500-row cap, a tokenless day as null, a distinct cursor on every row and one sequence after a second apply, beside a capped 500-row control that fails the same check; plus the deployment identity: a missing or altered 0065 or 0066, a wrong ledger binding, a wrong class or a missing view grant fails."
     source: "manual"
     binds_ac: ["AC1"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/migrations/test_omn21970_daily_view_cursor_vendor.py -q -n 0 --no-cov"
+        check_value: "uv run pytest tests/integration/migrations/test_omn21970_daily_view_full_history.py tests/unit/migrations/test_omn21970_daily_view_cursor_vendor.py -q -n 0 --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
 emergency_bypass:
   enabled: false
