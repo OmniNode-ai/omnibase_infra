@@ -40,7 +40,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -276,6 +278,12 @@ class _Workspace:
         # The GATE venv: the clone's own project environment, lock-governed
         # only. It carries no omnimarket, which after OMN-17819 is the point.
         self.gate_venv = _make_fake_venv(self.infra / ".venv", None)
+        gate_python = self.gate_venv / "bin/python"
+        gate_python.write_text(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "-m" && "$2" == "omnibase_infra.nodes.node_reconcile_workspace_venvs.runtime_reconcile_workspace_venvs" ]]; then\n'
+            f'  exec "{sys.executable}" "$@"\nfi\n' + gate_python.read_text()
+        )
         # The DISPATCH venv: outside the clone, composed, and the one the
         # installed-omnimarket probe reads.
         self.dispatch_venv = root / ".onex-dispatch-venv"
@@ -432,6 +440,260 @@ class _Workspace:
 @pytest.fixture
 def ws(tmp_path: Path) -> _Workspace:
     return _Workspace(tmp_path / "omni_home")
+
+
+def _branch_hook_install(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch, *, plan: str, replace: bool
+) -> Path:
+    """An installer-selected Git ref, followed by the scheduled exact sync.
+
+    PEP 610 is the installer's on-disk intent: requested_revision names the
+    ref and commit_id records what it installed. The uv shim models a lock
+    sync replacing it even though the package version stays the same.
+    """
+    dist = ws.omniclaude / ".venv/lib/python3.12/site-packages/omniclaude-1.0.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "METADATA").write_text("Name: omniclaude\nVersion: 1.0\n")
+    direct = dist / "direct_url.json"
+    direct.write_text(
+        json.dumps(
+            {
+                "url": "https://example.com/omniclaude.git",
+                "vcs_info": {
+                    "vcs": "git",
+                    "requested_revision": "omn-19998-branch-fix",
+                    "commit_id": "b" * 40,
+                },
+            }
+        )
+    )
+    monkeypatch.setenv("HOOK_PROJECT", str(ws.omniclaude))
+    monkeypatch.setenv("HOOK_DIRECT_URL", str(direct))
+    monkeypatch.setenv("HOOK_PLAN", plan)
+    monkeypatch.setenv("HOOK_REPLACE", "1" if replace else "0")
+    uv = ws.bin_dir / "uv"
+    original = uv.read_text()
+    uv.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$*" == *"--project $HOOK_PROJECT"* ]]; then\n'
+        '  if [[ " $* " == *" --dry-run "* ]]; then\n'
+        '    printf "%s\\n" "$HOOK_PLAN" >&2\n'
+        "    exit 0\n"
+        "  fi\n"
+        '  if [[ " $* " != *" --check "* && "$HOOK_REPLACE" == 1 ]]; then\n'
+        # Exact sync can replace a branch with a registry wheel: no PEP 610
+        # metadata remains. A zero exit is not a revision readback.
+        '    rm "$HOOK_DIRECT_URL"\n'
+        "  fi\n"
+        "fi\n" + original
+    )
+    return direct
+
+
+@pytest.mark.parametrize("requested", ["omn-19998-branch-fix", "b" * 40])
+def test_hook_sync_refuses_replacing_an_installer_selected_branch(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch, requested: str
+) -> None:
+    _make_uv_shim(ws.bin_dir, check_exit=1)
+    direct = _branch_hook_install(
+        ws,
+        monkeypatch,
+        plan=" - omniclaude==1.0\n + omniclaude==1.0",
+        replace=True,
+    )
+    metadata = json.loads(direct.read_text())
+    metadata["vcs_info"]["requested_revision"] = requested
+    direct.write_text(json.dumps(metadata))
+    before = direct.read_bytes()
+    result = ws.run()
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert "branch install" in (result.stdout + result.stderr).lower()
+    assert direct.read_bytes() == before
+    assert not any(
+        "--check" not in call and str(ws.omniclaude) in call for call in ws.uv_calls()
+    )
+
+
+def test_hook_sync_checks_revision_after_a_zero_exit(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _make_uv_shim(ws.bin_dir, check_exit=1)
+    _branch_hook_install(ws, monkeypatch, plan="Would make no changes", replace=True)
+    result = ws.run()
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert "revision" in (result.stdout + result.stderr).lower()
+    assert "hook venv: reconciled" not in result.stdout
+
+
+def test_hook_sync_reads_revision_even_when_uv_reports_no_change(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    direct = _branch_hook_install(
+        ws, monkeypatch, plan="Would make no changes", replace=False
+    )
+    shim = ws.bin_dir / "uv"
+    shim.write_text(
+        '#!/usr/bin/env bash\nif [[ "$*" == *"--project $HOOK_PROJECT"* && '
+        '" $* " == *" --check "* ]]; then\n'
+        '  rm "$HOOK_DIRECT_URL"\nfi\n' + shim.read_text()
+    )
+    result = ws.run()
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert not direct.exists()
+    assert "revision changed" in result.stderr
+    assert "hook venv: already in sync" not in result.stdout
+
+
+def test_hook_sync_preserves_branch_while_repairing_an_unrelated_pin(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _make_uv_shim(ws.bin_dir, check_exit=1)
+    direct = _branch_hook_install(
+        ws, monkeypatch, plan=" - packaging==24.0\n + packaging==25.0", replace=False
+    )
+    before = direct.read_bytes()
+    result = ws.run()
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert direct.read_bytes() == before
+    assert any(
+        "--check" not in call and str(ws.omniclaude) in call for call in ws.uv_calls()
+    )
+
+
+def test_hook_sync_allows_a_revision_that_contains_the_installed_commit(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _make_clone(ws.root, "hook-source")
+    before = _git("rev-parse", "HEAD", cwd=source)
+    after = _advance(source, "contains installed commit")
+    _make_uv_shim(ws.bin_dir, check_exit=1)
+    direct = _branch_hook_install(
+        ws,
+        monkeypatch,
+        plan=f" - omniclaude==1.0\n + omniclaude==1.0 (from git+{source.as_uri()}@{after})",
+        replace=False,
+    )
+    metadata = json.loads(direct.read_text())
+    metadata["url"] = source.as_uri()
+    metadata["vcs_info"]["commit_id"] = before
+    direct.write_text(json.dumps(metadata))
+    metadata["vcs_info"]["commit_id"] = after
+    monkeypatch.setenv("HOOK_NEXT_JSON", json.dumps(metadata))
+    shim = ws.bin_dir / "uv"
+    shim.write_text(
+        '#!/usr/bin/env bash\nif [[ "$*" == *"--project $HOOK_PROJECT"* && '
+        '" $* " != *" --check "* && " $* " != *" --dry-run "* ]]; then\n'
+        '  printf "%s" "$HOOK_NEXT_JSON" > "$HOOK_DIRECT_URL"\nfi\n' + shim.read_text()
+    )
+    result = ws.run()
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert json.loads(direct.read_text())["vcs_info"]["commit_id"] == after
+    assert "hook venv: reconciled" in result.stdout
+
+
+def test_hook_sync_refuses_an_unreadable_branch_plan(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _make_uv_shim(ws.bin_dir, check_exit=1)
+    direct = _branch_hook_install(ws, monkeypatch, plan="", replace=True)
+    before = direct.read_bytes()
+    result = ws.run()
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert "unreadable branch install sync plan" in result.stderr
+    assert direct.read_bytes() == before
+
+
+def test_real_uv_hook_sync_keeps_the_installed_branch_revision(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replay same-version Git replacement through real uv, entirely offline."""
+    uv = shutil.which("uv")
+    assert uv is not None, "uv is required to run workspace reconciliation"
+    source = _make_clone(ws.root, "branch-probe")
+    (source / "pyproject.toml").write_text(
+        '[build-system]\nrequires=[]\nbuild-backend="_backend"\nbackend-path=["."]\n'
+        '[project]\nname="branch-probe"\nversion="1.0"\n'
+    )
+    # A stdlib-only build backend keeps this reproduction offline, including
+    # build isolation: it asks for no setuptools, hatchling or index packages.
+    (source / "_backend.py").write_text(
+        "from pathlib import Path\nimport zipfile\n"
+        "def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):\n"
+        '    name = "branch_probe-1.0-py3-none-any.whl"\n'
+        '    with zipfile.ZipFile(Path(wheel_directory) / name, "w") as z:\n'
+        '        z.writestr("probe.py", Path("probe.py").read_text())\n'
+        '        z.writestr("branch_probe-1.0.dist-info/METADATA", '
+        '"Metadata-Version: 2.1\\nName: branch-probe\\nVersion: 1.0\\n")\n'
+        '        z.writestr("branch_probe-1.0.dist-info/WHEEL", '
+        '"Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n")\n'
+        '        z.writestr("branch_probe-1.0.dist-info/RECORD", "")\n'
+        "    return name\n"
+    )
+    (source / "probe.py").write_text('REV = "locked"\n')
+    _git("add", ".", cwd=source)
+    _git("commit", "-qm", "locked package", cwd=source)
+    (ws.omniclaude / "pyproject.toml").write_text(
+        '[project]\nname="hook-project"\nversion="1.0"\nrequires-python=">=3.12"\n'
+        f'dependencies=["branch-probe @ git+{source.as_uri()}@dev"]\n'
+    )
+    shutil.rmtree(ws.omniclaude / ".venv")
+    (ws.omniclaude / "uv.lock").unlink()
+    env = scrub_git_location_env()
+    env.pop("UV_PROJECT_ENVIRONMENT", None)
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [
+            uv,
+            "sync",
+            "--offline",
+            "--python",
+            sys.executable,
+            "--project",
+            str(ws.omniclaude),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    _git("switch", "-c", "omn-19998-branch-fix", cwd=source)
+    (source / "probe.py").write_text('REV = "branch"\n')
+    _git("add", "probe.py", cwd=source)
+    _git("commit", "-qm", "branch package", cwd=source)
+    branch_commit = _git("rev-parse", "HEAD", cwd=source)
+    result = subprocess.run(
+        [
+            uv,
+            "pip",
+            "install",
+            "--offline",
+            "--python",
+            str(ws.omniclaude / ".venv/bin/python"),
+            f"git+{source.as_uri()}@omn-19998-branch-fix",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    direct = next(
+        (ws.omniclaude / ".venv").glob("lib/python*/site-packages/*/direct_url.json")
+    )
+    assert json.loads(direct.read_text())["vcs_info"]["commit_id"] == branch_commit
+    monkeypatch.setenv("HOOK_PROJECT", str(ws.omniclaude))
+    monkeypatch.setenv("REAL_UV", uv)
+    monkeypatch.setenv("UV_OFFLINE", "true")
+    shim = ws.bin_dir / "uv"
+    shim.write_text(
+        '#!/usr/bin/env bash\nif [[ "$*" == *"--project $HOOK_PROJECT"* ]]; then\n'
+        '  exec "$REAL_UV" "$@"\nfi\n' + shim.read_text()
+    )
+    result = ws.run()
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert "conflicting branch install" in result.stdout + result.stderr
+    assert json.loads(direct.read_text())["vcs_info"]["commit_id"] == branch_commit
 
 
 def test_proven_installs_the_floor_commit_without_moving_the_clone(
@@ -1097,6 +1359,7 @@ def test_absent_hook_venv_is_skipped_not_failed(ws: _Workspace) -> None:
     import shutil
 
     shutil.rmtree(ws.omniclaude / ".venv")
+    (ws.omniclaude / "uv.lock").unlink()
     result = ws.run()
     assert result.returncode == _EXIT_OK, result.stdout + result.stderr
     assert "SKIP" in result.stdout.upper()

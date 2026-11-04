@@ -23,6 +23,7 @@ class EnumPlatformTopic(str, Enum):
     CMD_API_FIXTURE_RECORD_V1 = contract_topic_value('nodes/node_api_fixture_record_effect/contract.yaml', 'platform', 'CMD_API_FIXTURE_RECORD_V1')  # onex.cmd.platform.api-fixture-record.v1
     CMD_ARCHITECTURE_VALIDATE_V1 = contract_topic_value('nodes/node_architecture_validator/contract.yaml', 'platform', 'CMD_ARCHITECTURE_VALIDATE_V1')  # onex.cmd.platform.architecture-validate.v1
     CMD_CI_LIVE_CONTACT_CHECK_V1 = contract_topic_value('nodes/node_ci_live_contact_effect/contract.yaml', 'platform', 'CMD_CI_LIVE_CONTACT_CHECK_V1')  # onex.cmd.platform.ci-live-contact-check.v1
+    CMD_HOOK_VENV_RECONCILE_V1 = contract_topic_value('nodes/node_reconcile_workspace_venvs/contract.yaml', 'platform', 'CMD_HOOK_VENV_RECONCILE_V1')  # onex.cmd.platform.hook-venv-reconcile.v1
     CMD_HOTPATCH_LEDGER_RECONCILE_V1 = contract_topic_value('nodes/node_hotpatch_ledger_reconcile_effect/contract.yaml', 'platform', 'CMD_HOTPATCH_LEDGER_RECONCILE_V1')  # onex.cmd.platform.hotpatch-ledger-reconcile.v1
     CMD_LEDGER_APPEND_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_APPEND_V1')  # onex.cmd.platform.ledger-append.v1
     CMD_LEDGER_QUERY_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_QUERY_V1')  # onex.cmd.platform.ledger-query.v1
@@ -38,6 +39,7 @@ class EnumPlatformTopic(str, Enum):
     EVT_DLQ_MESSAGE_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_DLQ_MESSAGE_V1')  # onex.evt.platform.dlq-message.v1
     EVT_FEATURE_FLAG_CHANGED_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_FEATURE_FLAG_CHANGED_V1')  # onex.evt.platform.feature-flag-changed.v1
     EVT_FSM_STATE_TRANSITIONS_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'EVT_FSM_STATE_TRANSITIONS_V1')  # onex.evt.platform.fsm-state-transitions.v1
+    EVT_HOOK_VENV_RECONCILED_V1 = contract_topic_value('nodes/node_reconcile_workspace_venvs/contract.yaml', 'platform', 'EVT_HOOK_VENV_RECONCILED_V1')  # onex.evt.platform.hook-venv-reconciled.v1
     EVT_HOTPATCH_LEDGER_RECONCILED_V1 = contract_topic_value('nodes/node_hotpatch_ledger_reconcile_effect/contract.yaml', 'platform', 'EVT_HOTPATCH_LEDGER_RECONCILED_V1')  # onex.evt.platform.hotpatch-ledger-reconciled.v1
     EVT_LEDGER_APPENDED_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'EVT_LEDGER_APPENDED_V1')  # onex.evt.platform.ledger-appended.v1
     EVT_LEDGER_QUERY_RESULT_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'EVT_LEDGER_QUERY_RESULT_V1')  # onex.evt.platform.ledger-query-result.v1

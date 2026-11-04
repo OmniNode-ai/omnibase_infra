@@ -185,6 +185,11 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-hook-venv-installer-revision
+    statement: The hook environment reconciler must read installer-selected Git revisions before exact sync, refuse a plan that discards their commits, and verify the approved revisions afterward.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: exact hook sync refuses a same-version branch replacement before mutation, permits a forward revision and unrelated lock repairs, refuses an unreadable plan, and rejects a zero-exit sync that loses the selected revision; a real offline uv and local Git package replay retains the branch commit -- falsifier: uv run pytest tests/scripts/test_reconcile_workspace_venvs.py -q --no-cov'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -302,6 +307,17 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC39
+  - id: dod-omn19998-ac37-hook-venv-installer-revision
+    description: AC37 runs the shipped host reconciler through its contract-bound hook effect. A real offline uv build installs a local Git branch at the locked version, then the exact sync refuses the older lock revision and reads back the branch commit. Shim controls cover full-SHA intent, forward revisions, unrelated repairs, unreadable plans and revision loss after a zero exit.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_reconcile_workspace_venvs.py -q --no-cov
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_reconcile_workspace_venvs.py -q --no-cov -k real_uv_hook_sync
+        cwd: .
+    binds_ac: [AC37]
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual

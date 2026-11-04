@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_reconcile_workspace_venvs
+contract_name: node_reconcile_workspace_venvs
+node_name: node_reconcile_workspace_venvs
+node_type: EFFECT_GENERIC
+runtime_profiles: [local-dev]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: Reconcile an existing host hook environment without discarding installer-selected Git commits.
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: true
+reconcile_policy:
+  git_timeout_seconds: 30
+  sync_timeout_seconds: 600
+input_model:
+  name: ModelHookVenvReconcileRequest
+  module: omnibase_infra.models.model_hook_venv_reconcile_request
+  description: Workspace, hook project and resolved package-tool paths.
+output_model:
+  name: ModelHookVenvReconcileResult
+  module: omnibase_infra.models.model_hook_venv_reconcile_result
+  description: Refusal or a sync with the approved revisions read back.
+event_bus:
+  subscribe_topics: [onex.cmd.platform.hook-venv-reconcile.v1]
+  publish_topics: [onex.evt.platform.hook-venv-reconciled.v1]
+terminal_event: onex.evt.platform.hook-venv-reconciled.v1
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: hook_venv.reconcile
+      handler:
+        name: HandlerReconcileWorkspaceVenvs
+        module: omnibase_infra.handlers.handler_reconcile_workspace_venvs
+      event_model:
+        name: ModelHookVenvReconcileRequest
+        module: omnibase_infra.models.model_hook_venv_reconcile_request
+      supported_operations: [hook_venv.reconcile]
+      output_events: [ModelHookVenvReconcileResult]
+io_operations:
+  - operation: hook_venv.reconcile
+    description: Plan exact sync, refuse dropped commits, sync and verify revisions.
+    input_fields: [workspace_root, project, uv_bin]
+    output_fields: [status, detail, output]
+capabilities:
+  - name: hook_venv.reconcile
+    description: Exact sync with installer revision preservation and readback.
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  author: OmniNode Team
+  license: MIT
+  description: The host bootstrap adapter uses this handler before dispatch is available.
+  related_tickets: [OMN-19998]
