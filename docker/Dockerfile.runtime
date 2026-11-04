@@ -539,16 +539,17 @@ import importlib; \
 print('generation-path transitive deps verified: cachetools, omnimemory')"
 
 # OMN-12658: build-time import smoke guard for the foundation packages.
-# After ALL wheels are installed, import omnibase_compat, omnibase_core and
-# omnibase_infra. A skewed omnibase_compat / omnibase_core wheel fails the
+# After ALL wheels are installed, import omnibase_core and omnibase_infra. A
+# skewed omnibase_core wheel fails the
 # docker build non-zero here — at build time — instead of degrading silently as
 # a runtime entry-point load failure. The docker-build CI job loads this image,
-# so a failing import fails the required status check on the PR.
+# so a failing import fails the required status check on the PR. OMN-20074:
+# the smoke names only packages uv.lock carries (omnibase-compat is retired);
+# tests/unit/docker/test_delegation_import_smoke_guard.py enforces that.
 RUN /app/.venv/bin/python -c "\
-import omnibase_compat; \
 import omnibase_core; \
 import omnibase_infra; \
-print(f'foundation import smoke OK: omnibase_compat={omnibase_compat.__version__}, omnibase_core={omnibase_core.__version__}')"
+print(f'foundation import smoke OK: omnibase_core={omnibase_core.__version__}')"
 
 # Cleanup: remove __pycache__ and .pyc files from venv
 # Note: does NOT touch /root/.cache/uv (that's a cache mount, not persisted in layer)
