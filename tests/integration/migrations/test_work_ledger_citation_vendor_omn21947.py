@@ -168,3 +168,72 @@ def test_runtime_grant_refuses_inherited_delete(ledger: EphemeralPostgres) -> No
     refused = ledger.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CHAIN / _GRANT))
     assert refused.returncode != 0
     assert "division by zero" in refused.stderr
+
+
+def test_history_import_rolls_back_incompatible_citation_schema(
+    ledger: EphemeralPostgres,
+) -> None:
+    _sql(
+        ledger,
+        "CREATE TABLE omninode_internal.ledger_line_citation (row_id text); "
+        "INSERT INTO omninode_internal.ledger_line_citation VALUES ('legacy')",
+    )
+    refused = ledger.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CHAIN / _HISTORY))
+    assert refused.returncode != 0
+    assert "contains null values" in refused.stderr
+    assert (
+        _sql(
+            ledger,
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_schema='omninode_internal' AND table_name='work_ledger_rows' "
+            "AND column_name='legacy_ordinal'",
+        )
+        == "0"
+    )
+    assert (
+        _sql(
+            ledger,
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema='omninode_internal' AND table_name='ledger_line_citation'",
+        )
+        == "row_id"
+    )
+    assert (
+        _sql(ledger, "SELECT row_id FROM omninode_internal.ledger_line_citation")
+        == "legacy"
+    )
+
+
+def test_history_import_refuses_an_incompatible_existing_primary_key(
+    ledger: EphemeralPostgres,
+) -> None:
+    _sql(
+        ledger,
+        "CREATE TABLE omninode_internal.ledger_line_citation "
+        "(ledger_id text, file_key text, generation int, line_no int, "
+        "row_id text PRIMARY KEY); "
+        "INSERT INTO omninode_internal.ledger_line_citation "
+        "VALUES ('ledger', 'live', 0, 1, 'legacy')",
+    )
+    refused = ledger.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CHAIN / _HISTORY))
+    assert refused.returncode != 0
+    assert "ledger_line_citation has an incompatible primary key" in refused.stderr
+    assert (
+        _sql(
+            ledger,
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid='omninode_internal.ledger_line_citation'::regclass "
+            "AND contype='p'",
+        )
+        == "PRIMARY KEY (row_id)"
+    )
+    assert (
+        _sql(ledger, "SELECT row_id FROM omninode_internal.ledger_line_citation")
+        == "legacy"
+    )
+
+
+def test_history_import_and_runtime_grant_follow_ingestion_time() -> None:
+    order = sorted(path.name for path in _CHAIN.glob("*.sql"))
+    assert order.index("0006_work_ledger_ingested_at.sql") < order.index(_HISTORY)
+    assert order.index(_HISTORY) < order.index(_GRANT)

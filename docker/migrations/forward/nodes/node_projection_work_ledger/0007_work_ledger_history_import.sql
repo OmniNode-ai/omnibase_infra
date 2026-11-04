@@ -19,6 +19,9 @@
 -- and never changed or deleted.
 -- =============================================================================
 
+-- Reconciliation is atomic: incompatible existing rows leave no partial DDL.
+BEGIN;
+
 ALTER TABLE omninode_internal.work_ledger_rows ADD COLUMN IF NOT EXISTS legacy_ordinal BIGINT;
 
 -- Unique so a second import that numbered a row differently fails loud. The projection
@@ -60,15 +63,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS ledger_line_citation_pkey
 -- Reuse the index on a reconciled table, including one left by an earlier
 -- application of this migration. A unique index alone is not a primary key.
 DO $$
+DECLARE
+    primary_key_definition TEXT;
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_constraint
-        WHERE conrelid = 'omninode_internal.ledger_line_citation'::regclass
-          AND contype = 'p'
-    ) THEN
+    SELECT pg_get_constraintdef(oid) INTO primary_key_definition
+    FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'omninode_internal.ledger_line_citation'::regclass
+      AND contype = 'p';
+    IF primary_key_definition IS NULL THEN
         ALTER TABLE omninode_internal.ledger_line_citation
             ADD CONSTRAINT ledger_line_citation_pkey
             PRIMARY KEY USING INDEX ledger_line_citation_pkey;
+    ELSIF primary_key_definition <> 'PRIMARY KEY (ledger_id, file_key, generation, line_no)' THEN
+        RAISE EXCEPTION 'ledger_line_citation has an incompatible primary key: %', primary_key_definition;
     END IF;
 END;
 $$;
@@ -88,3 +95,5 @@ DROP TRIGGER IF EXISTS ledger_line_citation_immutable
 CREATE TRIGGER ledger_line_citation_immutable
     BEFORE UPDATE OR DELETE ON omninode_internal.ledger_line_citation
     FOR EACH ROW EXECUTE FUNCTION omninode_internal.ledger_line_citation_immutable();
+
+COMMIT;

@@ -71,7 +71,7 @@ def test_nullable_column_is_added_before_its_insert_default() -> None:
     )
 
 
-def test_runner_applies_it_directly_after_0005_and_before_history_import() -> None:
+def test_runner_applies_it_directly_after_0005() -> None:
     # The runner applies each node's files in `ls | sort` order; mirror it in C order.
     runner = (_ROOT / "scripts" / "run-forward-migrations.sh").read_text(
         encoding="utf-8"
@@ -82,8 +82,4 @@ def test_runner_applies_it_directly_after_0005_and_before_history_import() -> No
     assert prefixes == [f"{n:04d}" for n in range(len(order))]
     position = order.index(_INGESTED_AT)
     assert order[position - 1].startswith("0005_")
-    assert order[position + 1 : position + 3] == [
-        "0007_work_ledger_history_import.sql",
-        "0008_grant_omninode_runtime_ledger_line_citation.sql",
-    ]
     assert order.index(_SEQUENCE) < order.index(_INGESTED_AT)
