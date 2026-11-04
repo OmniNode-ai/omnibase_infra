@@ -5,10 +5,9 @@
 Plan section 4 names the chains G1 to G8 and E1 to E17. Each is a fixture under
 ``tests/fixtures/contract_hotload/``, written before the code that makes it pass.
 
-Records are validated against wire schemas exported from core's hot-loading models.
-The snapshot includes their Python validator constraints and source-file digests.
-It keeps this suite self-contained while the pinned core predates those models;
-no sibling checkout or optional import can silently remove record validation.
+Records are parsed by the hot-loading models in the pinned core dependency,
+including their Python validators. No schema copy or sibling checkout can drift
+from the models the runtime uses.
 """
 
 from __future__ import annotations
@@ -20,7 +19,32 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from jsonschema import Draft202012Validator, FormatChecker
+from pydantic import BaseModel, ValidationError
+
+from omnibase_core.models.events.contract_hotload.model_contract_hotload_accepted import (
+    ModelContractHotloadAccepted,
+)
+from omnibase_core.models.events.contract_hotload.model_contract_hotload_applied import (
+    ModelContractHotloadApplied,
+)
+from omnibase_core.models.events.contract_hotload.model_contract_hotload_removed import (
+    ModelContractHotloadRemoved,
+)
+from omnibase_core.models.events.contract_hotload.model_contract_load_reply import (
+    ModelContractLoadReply,
+)
+from omnibase_core.models.events.contract_hotload.model_contract_load_request import (
+    ModelContractLoadRequest,
+)
+from omnibase_core.models.events.contract_hotload.model_contract_revision import (
+    ModelContractRevision,
+)
+from omnibase_core.models.events.contract_hotload.model_registry_watermark import (
+    ModelRegistryWatermark,
+)
+from omnibase_core.models.events.contract_hotload.model_runtime_hotload_state import (
+    ModelRuntimeHotloadState,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -42,22 +66,18 @@ _STEP_KEYS = {
 }
 _REQUIRED_STEP_KEYS = {"step", "actor", "action"}
 _ACTIONS = {"publish", "commit", "observe", "replay"}
-_MODELS = {
-    "ModelContractLoadRequest",
-    "ModelContractHotloadAccepted",
-    "ModelContractHotloadRemoved",
-    "ModelContractLoadReply",
-    "ModelContractRevision",
-    "ModelRegistryWatermark",
-    "ModelContractHotloadApplied",
-    "ModelRuntimeHotloadState",
-}
-_SCHEMAS = json.loads(
-    (_FIXTURES / "schemas" / "records.json").read_text(encoding="utf-8")
-)["models"]
-_VALIDATORS = {
-    name: Draft202012Validator(schema, format_checker=FormatChecker())
-    for name, schema in _SCHEMAS.items()
+_MODELS: dict[str, type[BaseModel]] = {
+    model.__name__: model
+    for model in (
+        ModelContractLoadRequest,
+        ModelContractHotloadAccepted,
+        ModelContractHotloadRemoved,
+        ModelContractLoadReply,
+        ModelContractRevision,
+        ModelRegistryWatermark,
+        ModelContractHotloadApplied,
+        ModelRuntimeHotloadState,
+    )
 }
 _ROLES = {
     "sender_request",
@@ -114,9 +134,13 @@ def shape_errors(fixture: dict[str, Any], chain: str) -> list[str]:
             )
         if "model" in step and not isinstance(step.get("record"), dict):
             errors.append(f"step {index} record is not a mapping")
-        if step.get("model") in _VALIDATORS and isinstance(step.get("record"), dict):
-            for error in _VALIDATORS[step["model"]].iter_errors(step["record"]):
-                errors.append(f"step {index} record {error.json_path}: {error.message}")
+        if step.get("model") in _MODELS and isinstance(step.get("record"), dict):
+            try:
+                _MODELS[step["model"]].model_validate_json(
+                    json.dumps(step["record"]), strict=True
+                )
+            except ValidationError as error:
+                errors.append(f"step {index} record: {error}")
         if "model" in step and "topic_role" not in step:
             errors.append(f"step {index} carries a record without a topic role")
         if "topic_role" in step and step["topic_role"] not in _ROLES:
@@ -134,12 +158,6 @@ def test_the_plan_names_eight_golden_and_seventeen_error_chains() -> None:
 def test_the_fixture_directory_holds_exactly_the_planned_chains() -> None:
     present = {path.stem for path in _FIXTURES.glob("*.json")}
     assert present == set(_GOLDEN) | set(_ERROR)
-
-
-def test_every_record_model_has_a_valid_schema() -> None:
-    assert set(_SCHEMAS) == _MODELS
-    for schema in _SCHEMAS.values():
-        Draft202012Validator.check_schema(schema)
 
 
 @pytest.mark.parametrize("chain", _GOLDEN + _ERROR)
@@ -210,8 +228,8 @@ def test_every_record_refuses_unknown_and_missing_fields(chain: str) -> None:
     for step in fixture["steps"]:
         if "record" not in step:
             continue
-        validator = _VALIDATORS[step["model"]]
-        validator.validate(step["record"])
+        model = _MODELS[step["model"]]
+        model.model_validate_json(json.dumps(step["record"]), strict=True)
         for path, obj in _record_objects(step["record"]):
             for field in ("undeclared_field", *obj):
                 mutated = deepcopy(step["record"])
@@ -222,12 +240,8 @@ def test_every_record_refuses_unknown_and_missing_fields(chain: str) -> None:
                     target[field] = "x"
                 else:
                     del target[field]
-                assert not validator.is_valid(mutated), (
-                    chain,
-                    step["step"],
-                    path,
-                    field,
-                )
+                with pytest.raises(ValidationError):
+                    model.model_validate_json(json.dumps(mutated), strict=True)
 
 
 @pytest.mark.parametrize(
@@ -247,3 +261,30 @@ def test_planted_violation_invalid_record_values_are_refused(
     fixture = _load("G1")
     fixture["steps"][0]["record"][field] = value
     assert shape_errors(fixture, "G1")
+
+
+def test_fixture_validation_follows_core_validator_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Simulate core tightening a Python validator without changing its JSON Schema.
+    # A copied schema would keep accepting this record and hide the drift.
+    def tightened_validator(*args: Any, **kwargs: Any) -> Any:
+        raise ValidationError.from_exception_data(
+            "ModelContractLoadRequest",
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("owner",),
+                    "input": "lab-deploy",
+                    "ctx": {"error": ValueError("owner rejected by core validator")},
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        ModelContractLoadRequest, "model_validate_json", tightened_validator
+    )
+    assert any(
+        "owner rejected by core validator" in error
+        for error in shape_errors(_load("G1"), "G1")
+    )

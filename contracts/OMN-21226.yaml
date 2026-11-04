@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21226
 title: "Contract hot loading H1 (omnibase_infra piece): the per-workload topic declarations, the chain fixtures and the first-assertion end-to-end expectation"
 summary: >-
-  The runtime declarations of the per-workload hot-loading topics (the applied topic and the compacted state topic, whose expansions for every lane workload pass core's topic validator), the golden and error chain fixtures G1 to G8 and E1 to E17, and the end-to-end test, whose executable expectation accepts only the exact missing-accepted-record failure at its first assertion and fails on any other assertion or on full success. The record models are in omnibase_core and are not importable here before a core release, so the fixtures are checked for shape here and parsed against the models in the follow-up that moves the pin.
+  The runtime declarations of the per-workload hot-loading topics (the applied topic and the compacted state topic, whose expansions for every lane workload pass core's topic validator), the golden and error chain fixtures G1 to G8 and E1 to E17, and the end-to-end test, whose executable expectation accepts only the exact missing-accepted-record failure at its first assertion and fails on any other assertion or on full success. Every fixture record is parsed by the hot-loading models in the pinned omnibase_core dependency, including Python validators; unknown and missing fields are refused at every model level.
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:
@@ -32,7 +32,7 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn21226-ac1-fixtures-and-e2e
-    description: All 25 chain fixtures conform to the shape and refuse an undeclared field, and the end-to-end test is an expected failure that fails at its first assertion.
+    description: All 25 chain fixtures parse with the pinned core models and refuse unknown and missing fields, and the end-to-end test is an expected failure that fails at its first assertion.
     source: manual
     checks:
       - check_type: test_passes
