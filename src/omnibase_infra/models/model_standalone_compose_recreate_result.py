@@ -19,6 +19,8 @@ class ModelStandaloneComposeRecreateResult(BaseModel):
     ``containers_before`` and ``containers_after`` map every container name on the host to its
     id, read around the recreate, so the readback shows that only the one service changed.
     ``changed`` lists the container names whose id differs, appeared or vanished.
+    ``carried_files`` lists the repo-relative files whose bytes the recreate rewrote in the host's
+    tree from the requested git ref before it ran compose.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -31,3 +33,4 @@ class ModelStandaloneComposeRecreateResult(BaseModel):
     containers_before: dict[str, str] = Field(default_factory=dict)
     containers_after: dict[str, str] = Field(default_factory=dict)
     changed: tuple[str, ...] = ()
+    carried_files: tuple[str, ...] = ()
