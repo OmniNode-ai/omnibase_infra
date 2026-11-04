@@ -48,6 +48,7 @@ TOPIC = "omn20117-delegate-skill"
 GROUP = "test.omnimarket.omn20117.consume.v1"
 PARTITION = 0
 BASE = 4847
+_TERMINAL_TOPIC = "onex.evt.omn20117.{}.v1"
 
 
 class _FakeConsumer:
@@ -195,7 +196,9 @@ async def test_declared_concurrent_consumer_is_built_without_auto_commit() -> No
         "record still in flight on a concurrent subscription; a restart then "
         "resumes past them and they are never redelivered"
     )
-    assert serial_kwargs["enable_auto_commit"] is True, "the serial path is unchanged"
+    # OMN-21229: the serial path no longer auto-commits either; it commits each
+    # record as it completes (see test_omn21229_subscription_lifecycle.py).
+    assert serial_kwargs["enable_auto_commit"] is False
 
 
 # --------------------------------------------------------------------------
@@ -296,7 +299,7 @@ async def test_close_lets_a_running_dispatch_publish_its_terminal() -> None:
         ) -> bool:
             await asyncio.sleep(0.3)
             try:
-                await bus.publish("onex.evt.omn20117.completed.v1", None, b"done")
+                await bus.publish(_TERMINAL_TOPIC.format("completed"), None, b"done")
                 published.append("completed")
             except Exception as exc:  # noqa: BLE001 - the assertion reads it
                 errors.append(exc)
@@ -337,7 +340,7 @@ async def test_cancelled_dispatch_can_answer_and_is_committed() -> None:
                 await asyncio.sleep(60)
             except asyncio.CancelledError:
                 # A cancellation-aware handler answers with a failure terminal.
-                await bus.publish("onex.evt.omn20117.failed.v1", None, b"shutdown")
+                await bus.publish(_TERMINAL_TOPIC.format("failed"), None, b"shutdown")
                 published.append("failed")
 
         async def _dispatch(
