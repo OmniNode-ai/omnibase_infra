@@ -26,6 +26,7 @@ import time
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import IO
 
 import pytest
@@ -390,6 +391,57 @@ def test_listener_holder_ignores_descriptors_meant_for_another_pid() -> None:
     assert result.outcome == "inert:listen_pid_mismatch"
     assert result.pools == ()
     assert holder.fd_store.pools() == ()
+
+
+@pytest.mark.parametrize("listen_pid", [None, "foreign", "0"])
+def test_listener_holder_registry_ignores_foreign_activation_before_assembly(
+    listen_pid: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environ = {"LISTEN_FDS": "2", "LISTEN_FDNAMES": "runtime-main:runtime-effects"}
+    if listen_pid is not None:
+        environ["LISTEN_PID"] = listen_pid
+
+    def refuse_assembly(*args: object, **kwargs: object) -> None:
+        pytest.fail("foreign activation must not load contracts or assemble services")
+
+    monkeypatch.setattr(ModelRuntimeListenerRegistry, "assemble", refuse_assembly)
+    before = dict(environ)
+    assert ModelRuntimeListenerRegistry.start(environ) is None
+    assert environ == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("own_activation", [False, True])
+async def test_listener_holder_agent_only_starts_for_its_activation(
+    own_activation: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DEV_RUNTIME_HANDOVER_DIR", raising=False)
+    monkeypatch.setenv("LISTEN_FDS", "2")
+    monkeypatch.setenv(
+        "LISTEN_PID", str(os.getpid() if own_activation else os.getpid() + 1)
+    )
+    calls: list[str] = []
+
+    def start() -> None:
+        calls.append("start")
+
+    class StartupReachedError(Exception):
+        pass
+
+    def stop_startup() -> None:
+        raise StartupReachedError
+
+    monkeypatch.setattr(ModelRuntimeListenerRegistry, "start", start)
+    agent = object.__new__(DeployAgent)
+    agent._kafka_config = SimpleNamespace(bootstrap_servers="unused")
+    agent._allowed_lanes = []
+    agent._router = None
+    agent._load_gate = SimpleNamespace(
+        thresholds=SimpleNamespace(model_dump=stop_startup)
+    )
+    with pytest.raises(StartupReachedError):
+        await agent.run()
+    assert calls == (["start"] if own_activation else [])
 
 
 def test_listener_holder_refuses_a_stored_descriptor_that_does_not_listen(

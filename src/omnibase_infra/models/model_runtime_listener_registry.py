@@ -162,7 +162,10 @@ class ModelRuntimeListenerRegistry(BaseModel):
         """Recover or rebind the listeners and serve the broker; ``None`` while inert."""
         env = os.environ if environ is None else environ
         handover_dir = env.get("DEV_RUNTIME_HANDOVER_DIR", "")
-        if not env.get("LISTEN_FDS") and not handover_dir:
+        owns_activation = bool(env.get("LISTEN_FDS")) and env.get("LISTEN_PID") == str(
+            os.getpid()
+        )
+        if not owns_activation and not handover_dir:
             return None
         from omnibase_infra.handlers.handler_runtime_listener_broker_server import (
             HandlerRuntimeListenerBrokerServer,

@@ -29,6 +29,15 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: dod-omn22379-activation-owner
+    description: >-
+      A missing or foreign LISTEN_PID leaves the registry inert before contract loading and service assembly. The agent starts the registry only for its own activation; the matching-pid control exercises that startup path.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_listener_holder_omn22379.py -k "registry_ignores_foreign_activation or agent_only_starts" -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
   - id: dod-omn22379-ac1-listener-holder
     description: >-
       Real sockets: a connection and its request are queued on the held listeners while no process accepts, the agent process re-execs with a real execv (same pid, descriptors remapped onto 3 and 4 in LISTEN_FDNAMES order) and answers it; a test double of systemd receives the FDSTORE=1 datagrams with the descriptors, the agent is killed, and a new process started with LISTEN_FDS, LISTEN_FDNAMES and its own LISTEN_PID answers the queued connections, with the stored order reversed to prove recovery is by name. A foreign LISTEN_PID and a descriptor that does not listen are refused. The dev unit carries the four keys.

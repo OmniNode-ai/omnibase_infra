@@ -753,10 +753,7 @@ class DeployAgent:
             self._kafka_config.bootstrap_servers,
             ",".join(sorted(lane.value for lane in self._allowed_lanes)),
         )
-        # OMN-19507. Stated here, after logging is configured, rather than in
-        # __init__, where both lines were emitted before basicConfig ran and
-        # reached no handler: the dev-200 agent's log had no instance line
-        # (dev-200-lane TERMINAL, omni_home ledger 2026-09-25T11:23:31Z).
+        # OMN-19507: log the routing identity after configuring logging.
         if self._router is not None:
             logger.info(
                 "Deploy agent routing instance: %s, consumer group %s, %d route(s), "
@@ -766,7 +763,10 @@ class DeployAgent:
                 len(self._router.table.routes),
                 self._router.table.default_instance,
             )
-        if os.environ.get("LISTEN_FDS") or os.environ.get("DEV_RUNTIME_HANDOVER_DIR"):
+        if os.environ.get("DEV_RUNTIME_HANDOVER_DIR") or (
+            os.environ.get("LISTEN_FDS")
+            and os.environ.get("LISTEN_PID") == str(os.getpid())
+        ):
             from omnibase_infra.models.model_runtime_listener_registry import (
                 ModelRuntimeListenerRegistry,
             )
