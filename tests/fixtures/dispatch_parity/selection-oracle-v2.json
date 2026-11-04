@@ -3733,15 +3733,16 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 143
+        "omnibase_infra": 129,
+        "onex-change-control": 4
       },
-      "contracts_discovered": 164,
+      "contracts_discovered": 154,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 98,
-      "probe_count": 1121,
-      "registered_dispatchers": 131,
-      "registered_routes": 115,
-      "type_scoped_dispatchers": 78
+      "distinct_subscribe_topics": 96,
+      "probe_count": 1097,
+      "registered_dispatchers": 129,
+      "registered_routes": 113,
+      "type_scoped_dispatchers": 76
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3772,30 +3773,24 @@
         "installed": false,
         "package": "omnimemory",
         "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
-      },
-      {
-        "installed": false,
-        "package": "onex-change-control",
-        "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
       }
     ],
     "expected_excluded_onex_nodes_packages": [
       "omnimarket",
       "omniclaude",
       "omniintelligence",
-      "omnimemory",
-      "onex-change-control"
+      "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-04T01:17:10.454521+00:00",
+    "generated_at_utc": "2026-10-13T15:23:59.279690+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.62",
-      "omnibase-infra": "0.38.77",
+      "omnibase-core": "0.47.39",
+      "omnibase-infra": "0.38.72",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
       "omnimemory": null,
-      "onex-change-control": null
+      "onex-change-control": "0.5.1"
     },
     "p0_outcomes": {
       "P0-1_guard_tripped_orchestrators": {
@@ -3835,7 +3830,8 @@
     "required_missing_packages": [],
     "required_onex_nodes_packages": [
       "omnibase-core",
-      "omnibase-infra"
+      "omnibase-infra",
+      "onex-change-control"
     ],
     "ticket": "OMN-12548"
   },
