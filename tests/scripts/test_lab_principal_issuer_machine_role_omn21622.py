@@ -55,6 +55,16 @@ MACHINE_TOPICS = (
     "onex.evt.omnimarket.credential-registered.v1",
     *(f"onex.evt.omnimarket.work-ledger-{kind}.v1" for kind in LEDGER_ROW_KINDS),
 )
+DISPATCH_TOPICS = (
+    "onex.cmd.omnimarket.lane-dispatch-requested.v1",
+    "onex.evt.omnimarket.lane-dispatch-completed.v1",
+)
+DISPATCH_GROUPS = (
+    "local.omnibase_core.handlerlanedispatch.consume.v1",
+    "local.omnibase_core.runtime_local_terminal.consume.v1",
+    "dev.omnibase_core.handlerlanedispatch.consume.v1",
+    "dev.omnibase_core.runtime_local_terminal.consume.v1",
+)
 MACHINE_ROW = {
     "principal": "dev-ops-lab-host",
     "login": "ops@example.invalid",
@@ -168,6 +178,76 @@ def test_a_machine_never_reads_a_ledger_row_event(declaration: lpi.Declaration) 
     for grant in declaration.machine_grants:
         if grant.name in MACHINE_TOPICS:
             assert grant.operations == ("describe", "write"), grant.name
+
+
+def test_dispatch_bindings_derive_the_shipped_machine_grants() -> None:
+    from omnibase_infra.handlers.handler_broker_grant_derive import (
+        HandlerBrokerGrantDerive,
+    )
+    from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+        ModelBrokerGrantBindings,
+    )
+
+    bindings = ModelBrokerGrantBindings.model_validate(
+        yaml.safe_load((LAB / "machine-principal-bindings.yaml").read_text())
+    )
+    result = HandlerBrokerGrantDerive().handle(bindings)
+    assert {
+        (g.resource_type, g.resource, g.operation, g.pattern)
+        for g in result.grants
+        if g.resource in (*DISPATCH_TOPICS, *DISPATCH_GROUPS)
+    } == {
+        ("TOPIC", topic, op, "LITERAL")
+        for topic in DISPATCH_TOPICS
+        for op in ("READ", "WRITE", "DESCRIBE")
+    } | {("GROUP", group, "READ", "LITERAL") for group in DISPATCH_GROUPS}
+    assert MACHINE_DERIVED.read_text() == result.model_dump_json(indent=2) + "\n"
+
+
+def test_dispatch_grants_require_a_trusted_machine_row(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    overlay = lpi.load_overlay(
+        _overlay(tmp_path, MACHINE_ROW, DEVELOPER_ROW), declaration
+    )
+    machine = lpi.expected_acl_rows(declaration, MACHINE_ROW["principal"], overlay)
+    developer = lpi.expected_acl_rows(declaration, DEVELOPER_ROW["principal"], overlay)
+    assert {
+        row for row in machine if row.name in (*DISPATCH_TOPICS, *DISPATCH_GROUPS)
+    } == {
+        lpi.AclRow("topic", topic, "literal", operation)
+        for topic in DISPATCH_TOPICS
+        for operation in ("read", "write", "describe")
+    } | {lpi.AclRow("group", group, "literal", "read") for group in DISPATCH_GROUPS}
+    assert not {
+        row for row in developer if row.name in (*DISPATCH_TOPICS, *DISPATCH_GROUPS)
+    }
+    assert not {
+        row
+        for row in lpi.expected_acl_rows(declaration, MACHINE_ROW["principal"])
+        if row.name in DISPATCH_TOPICS
+    }
+
+
+@pytest.mark.parametrize("environment", [None, "local", "dev"])
+def test_dispatch_groups_match_runtime_local(
+    monkeypatch: pytest.MonkeyPatch,
+    declaration: lpi.Declaration,
+    environment: str | None,
+) -> None:
+    from omnibase_core.runtime.runtime_local import derive_runtime_local_group_id
+
+    if environment is None:
+        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
+    else:
+        monkeypatch.setenv("ONEX_ENVIRONMENT", environment)
+    groups = {
+        grant.name: grant.operations
+        for grant in declaration.machine_grants
+        if grant.resource == "group"
+    }
+    for node in ("HandlerLaneDispatch", "runtime_local_terminal"):
+        assert groups[derive_runtime_local_group_id(node)] == ("read",)
 
 
 # --- the overlay names which principals are machines ----------------------------
@@ -316,6 +396,37 @@ def test_the_drift_check_fails_naming_the_machine_and_each_missing_grant(
     )
 
 
+@pytest.mark.parametrize(
+    ("resource", "name", "operation"),
+    [
+        ("topic", topic, operation)
+        for topic in DISPATCH_TOPICS
+        for operation in ("read", "write", "describe")
+    ]
+    + [("group", group, "read") for group in DISPATCH_GROUPS],
+)
+def test_dispatch_audit_reports_each_missing_permission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    resource: str,
+    name: str,
+    operation: str,
+) -> None:
+    """Replay the command-topic denial and each other dispatch permission gap."""
+    principal = MACHINE_ROW["principal"]
+    missing = (
+        f"User:{principal}  *  {resource.upper()}  {name}  "
+        f"LITERAL  {operation.upper()}  ALLOW"
+    )
+    broker = FakeBroker({principal: _listing(principal, drop=missing)})
+    assert _audit(tmp_path, broker, monkeypatch, "--role", "machine") == 1
+    output = capsys.readouterr().out.splitlines()
+    assert output[0].endswith("missing=1 extra=0")
+    assert f"MISSING {principal} {resource} literal {name} {operation}" in output
+    assert broker.granted == []
+
+
 def test_a_grant_another_declaration_gives_a_machine_is_reported_not_failed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -442,7 +553,10 @@ def test_request_role_cannot_grant_machine_privileges(
     issuer.issue(
         row["login"], {"lane": "dev", "device": row["device"], "role": "machine"}
     )
-    assert not any(topic in MACHINE_TOPICS for topic, _ in broker.granted)
+    assert not any(
+        name in (*MACHINE_TOPICS, *DISPATCH_TOPICS, *DISPATCH_GROUPS)
+        for name, _ in broker.granted
+    )
     assert ("onex.cmd.omnimarket.delegate-skill.v1", "write") in broker.granted
 
 
@@ -505,5 +619,9 @@ def test_issuer_image_copies_every_referenced_grant_document(tmp_path: Path) -> 
             _, source, destination = shlex.split(line)
             shutil.copyfile(REPO_ROOT / source, tmp_path / Path(destination).name)
     declaration = lpi.load_declaration(tmp_path / GRANTS.name)
-    assert {grant.name for grant in declaration.machine_grants} == set(MACHINE_TOPICS)
+    assert {grant.name for grant in declaration.machine_grants} == {
+        *MACHINE_TOPICS,
+        *DISPATCH_TOPICS,
+        *DISPATCH_GROUPS,
+    }
     assert not {grant.name for grant in declaration.grants} & set(MACHINE_TOPICS)

@@ -3,6 +3,55 @@
   "grants": [
     {
       "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "dev.omnibase_core.handlerlanedispatch.consume.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "dev.omnibase_core.runtime_local_terminal.consume.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnibase_core.handlerlanedispatch.consume.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnibase_core.runtime_local_terminal.consume.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.lane-dispatch-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.lane-dispatch-requested.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.lane-dispatch-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.credential-registered.v1",
       "operation": "DESCRIBE",
@@ -12,6 +61,27 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.credential-registered.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.lane-dispatch-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.lane-dispatch-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.lane-dispatch-completed.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },

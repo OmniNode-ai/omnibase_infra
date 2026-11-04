@@ -1065,11 +1065,32 @@ def test_machine_supplement_is_independently_derived_and_never_shared() -> None:
             (ROOT / "deploy/lab/machine-principal-bindings.yaml").read_text()
         )
     )
-    expected = {
-        (BROKER, "TOPIC", topic, "LITERAL", op)
-        for topic in MACHINE_PROFILE_TOPICS
-        for op in ("WRITE", "DESCRIBE")
-    }
+    expected = (
+        {
+            (BROKER, "TOPIC", topic, "LITERAL", op)
+            for topic in MACHINE_PROFILE_TOPICS
+            for op in ("WRITE", "DESCRIBE")
+        }
+        | {
+            (BROKER, "TOPIC", topic, "LITERAL", op)
+            for topic in (
+                "onex.cmd.omnimarket.lane-dispatch-requested.v1",
+                "onex.evt.omnimarket.lane-dispatch-completed.v1",
+            )
+            for op in ("READ", "WRITE", "DESCRIBE")
+        }
+        | {
+            (
+                BROKER,
+                "GROUP",
+                f"{env}.omnibase_core.{node}.consume.v1",
+                "LITERAL",
+                "READ",
+            )
+            for env in ("local", "dev")
+            for node in ("handlerlanedispatch", "runtime_local_terminal")
+        }
+    )
     assert derive(bindings) == expected
     assert not derive(shipped_bindings()) & expected
     committed = ROOT / "deploy/lab/machine-principal-derived-grants.json"

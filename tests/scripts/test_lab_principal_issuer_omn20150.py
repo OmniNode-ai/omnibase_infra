@@ -261,7 +261,8 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # hook topics the operator's hook principal holds, and on no command topic.
     # The compaction receipt-mode client (OMN-21099) adds write on its request topic only.
     # The machine profile (OMN-21622) adds write on the twelve work-ledger row events the
-    # hook-emit drainer publishes and on credential registration, and on no command topic.
+    # hook-emit drainer publishes and on credential registration. Dispatch machines
+    # also host the handler: both dispatch topics are read/write, with exact groups.
     writable = [g for g in declaration.grants if "write" in g.operations]
     hook_edge = {g.name for g in writable if g.name.startswith("onex.evt.omniclaude.")}
     assert len(hook_edge) == 29
@@ -274,8 +275,47 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     }
     assert machine == set()
     machine_grants = declaration.machine_grants
-    assert len(machine_grants) == 13
-    assert all(g.operations == ("describe", "write") for g in machine_grants)
+    assert {(g.resource, g.name, g.pattern): g.operations for g in machine_grants} == {
+        **{
+            ("topic", f"onex.evt.omnimarket.work-ledger-{kind}.v1", "literal"): (
+                "describe",
+                "write",
+            )
+            for kind in (
+                "ack",
+                "claim",
+                "correction",
+                "friction",
+                "hold",
+                "msg",
+                "operator-consent",
+                "release",
+                "ruling",
+                "status",
+                "terminal",
+                "terminal-refused",
+            )
+        },
+        ("topic", "onex.evt.omnimarket.credential-registered.v1", "literal"): (
+            "describe",
+            "write",
+        ),
+        ("topic", "onex.cmd.omnimarket.lane-dispatch-requested.v1", "literal"): (
+            "describe",
+            "read",
+            "write",
+        ),
+        ("topic", "onex.evt.omnimarket.lane-dispatch-completed.v1", "literal"): (
+            "describe",
+            "read",
+            "write",
+        ),
+        **{
+            ("group", f"{env}.omnibase_core.{node}.consume.v1", "literal"): ("read",)
+            for env in ("local", "dev")
+            for node in ("handlerlanedispatch", "runtime_local_terminal")
+        },
+    }
     assert not {g.name for g in machine_grants} & {g.name for g in writable}
     assert all(
         g.operations == ("describe", "write") for g in writable if g.name in machine

@@ -180,6 +180,11 @@ requirements:
     acceptance:
       - id: AC38
         statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
+  - id: req-omn19998-dispatch-derived-machine-grants
+    statement: The lab machine profile must derive the serialized lane dispatch node's caller and local runtime topic access from wire bindings, with canonical consumer groups, without granting dispatch to the shared developer profile.
+    acceptance:
+      - id: AC39
+        statement: 'AC39: machine bindings derive literal READ, WRITE and DESCRIBE on lane-dispatch-requested and lane-dispatch-completed and READ on the canonical local handler and terminal groups; the committed JSON equals the compute handler output, trusted machine rows receive the grants and developer rows or an absent overlay do not -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov -k dispatch fails against the merge-base machine bindings.'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -267,6 +272,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac39-dispatch-derived-machine-grants
+    description: AC39 drives HandlerBrokerGrantDerive with the shipped machine bindings, compares its serialized output byte for byte, resolves the issuer's real trusted overlay selection for machine and developer principals, and checks group names with RuntimeLocal's derivation. It exercises issuance, apply and audit with the focused module's fake broker and makes no live ACL or credential change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC39
+  - id: dod-omn19998-ac39-dispatch-grants-deploy-probe
+    description: Hosted-runner artifact probe loads the shipped grant policy and derived machine JSON through the actual issuer, exercises apply-grants and audit-grants against a fake broker, and requires exact node output and denial for an ordinary developer row. This checks the deployable grant documents without asserting live broker convergence.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC39
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual

@@ -2,9 +2,27 @@
 # SPDX-License-Identifier: MIT
 #
 # Machine-only supplement, selected by a trusted overlay role (OMN-21622).
-# Derived by node_broker_grant_derive_compute; produce only.
+# Derived by node_broker_grant_derive_compute. Ledger events are produce only.
+# OMN-19998: the lane-dispatch CLI runs its caller and handler in RuntimeLocal
+# on the same machine: both declared topics are produced and consumed. The
+# bindings name its canonical handler and terminal groups for the lab's local
+# default and explicit dev environment, without environment wildcard grants.
+# Armed Kafka runs read without groups; group ACLs are not topic-read boundaries.
+# A trusted machine hosts the handler and therefore publishes completions as well
+# as commands. These machines share a trust domain: a compromised machine could
+# forge a completion with a matching correlation ID. The trusted overlay role,
+# not a consumer group or correlation ID, is the dispatch authorization boundary.
+# Apply through lab_principal_issuer.py apply-grants with the trusted machine
+# overlay, then audit-grants. Neither step rotates credentials or restarts the
+# broker. The shared developer profile receives none of these dispatch grants.
 principal: "{principal}"
 bindings:
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.lane-dispatch-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.lane-dispatch-requested.v1, direction: consume, consumer_group: local.omnibase_core.handlerlanedispatch.consume.v1}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.lane-dispatch-requested.v1, direction: consume, consumer_group: dev.omnibase_core.handlerlanedispatch.consume.v1}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.lane-dispatch-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.lane-dispatch-completed.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal.consume.v1}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.lane-dispatch-completed.v1, direction: consume, consumer_group: dev.omnibase_core.runtime_local_terminal.consume.v1}
   - {broker: dev, physical_topic: onex.evt.omnimarket.credential-registered.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-ack.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-claim.v1, direction: produce}
