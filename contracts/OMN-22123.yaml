@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22123
+title: The reserved merge-queue label omnibase-ci-mq has declared runners on h051 and h053
+summary: >-
+  This contract covers the repository side of giving the merge queue runners. A merge_group job of a private repository asks for the reserved label omnibase-ci-mq; the runners that carried it lived on a host now in repair and the fleet config declared none, so each job waited 14 to 60 minutes. The fleet config now declares a merge-queue pool of four runners on each of h051 and h053, each with its own compose file, labelled omnibase-ci-mq alone. Registering the runners needs an org registration token minted by an org administrator and the installer run on each host; that is a runtime step that follows the merge and is not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-mq-pool-declared
+    statement: The fleet config declares four merge-queue runners on h051 and four on h053, every one labelled with the reserved merge-queue label and no shared label, and no other class count moves.
+    acceptance:
+      - id: AC1
+        statement: The fleet config declares a merge-queue pool of four runners on each of h051 and h053, each compose file names exactly those four runners with the labels self-hosted, omnibase-ci-mq, linux, x64 and arch-amd64 and the scratch directories of their own.
+      - id: AC2
+        statement: The declaration moves no other class count, so the action count of h051 stays 0 and the action count of h053 stays 8.
+evidence_requirements:
+  - kind: tests
+    description: The merge-queue pool declaration test and the existing pool and fleet tests pass.
+    command: uv run pytest tests/ci/test_ci_mq_pool_omn22123.py tests/ci/test_hp053_pool_omn22111.py tests/ci/test_hp051_pool_omn17232.py tests/ci/test_runner_pool_spread_omn19895.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-mq-pool-declared
+    description: The fleet config and both compose files agree on the four merge-queue runners per host and their labels.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-no-other-class-moves
+    description: The action and verify counts of h051 and h053 read what they read before the declaration.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly -k "other_class"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-mq-pool-source-readback
+    description: Hermetic readback of both merge-queue compose files at the evaluated commit; the fourth runner service of each is absent at the merge base.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'for p in hp051 hp053; do gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-${p}-ci-mq-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "${p}-ci-mq-runner-4" > /dev/null; done'
+        cwd: ${OMNI_HOME}/omnibase_infra

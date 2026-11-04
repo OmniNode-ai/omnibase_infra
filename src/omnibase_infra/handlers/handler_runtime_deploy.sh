@@ -249,12 +249,8 @@ readonly RUNTIME_SERVICES=(
 # START the carrier on a lane that never opted into it, defeating the compose
 # profile that keeps it inert there. Membership here scopes the restart to the
 # two lanes whose overlays put it in the `runtime` compose profile.
-# OMN-19513 adds projection-claude-hook-events-writer for the same reason as
-# the carrier: declared in the base compose file, started only by the dev lane
-# overlay that moves it into the `runtime` profile.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     tenant-projection-writer
-    projection-claude-hook-events-writer
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
@@ -365,8 +361,15 @@ resolve_lane_folded_services() {
     LANE_FOLDED_SERVICES=()
     # Each folding lane is selected by its declared project and policy.
     local folded_profiles=""
+    # OMN-21288: services whose node main runs with no profile of its own (the
+    # claude hook-events projection). Their container of the previous revision
+    # is retired with the folded ones, from the same policy (the dev branch below
+    # seeds LANE_FOLDED_SERVICES with them), so the node's
+    # consumer group has one owner at a time; main's KAFKA_INSTANCE_ID is the
+    # group id the retired writer used, so main resumes from its offsets.
     if [[ -n "${DEV_COMPOSE_PROJECT:-}" && "${compose_project}" == "${DEV_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}"
+        IFS=',' read -r -a LANE_FOLDED_SERVICES <<< "${DEV_RUNTIME_MAIN_RETIRED_SERVICES:-}"
     elif [[ -n "${STABILITY_TEST_COMPOSE_PROJECT:-}" \
         && "${compose_project}" == "${STABILITY_TEST_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:-}"

@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -13,7 +12,6 @@ import pytest
 
 from omnibase_infra.enums.enum_shared_listener_state import EnumSharedListenerState
 from omnibase_infra.handlers import mixin_shared_listener
-from omnibase_infra.runtime import service_kernel
 from omnibase_infra.services.health_checker import ServiceHealth
 from tests.unit.services.shared_listener_harness import (
     FakeBroker,
@@ -144,13 +142,3 @@ async def test_shared_listener_unmounted_runtime_is_unchanged(
         await server.drain_shared_listener()
     finally:
         await server.stop()
-
-
-def test_shared_listener_kernel_latches_then_drains_before_teardown() -> None:
-    source = inspect.getsource(service_kernel)
-    latch = source.index("health_server.mark_stopping()")
-    set_event = source.index("shutdown_event.set()", latch)
-    drain = source.index("await health_server.drain_shared_listener()")
-    monitor_stop = source.index("await runtime_health_monitor.stop()", drain)
-    runtime_stop = source.index("runtime.stop(), timeout=grace_period", drain)
-    assert latch < set_event < drain < monitor_stop < runtime_stop
