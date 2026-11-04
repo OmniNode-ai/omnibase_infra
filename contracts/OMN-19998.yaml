@@ -170,6 +170,11 @@ requirements:
     acceptance:
       - id: AC36
         statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
+  - id: req-omn19998-infisical-stability-mail
+    statement: Record the standalone stability Infisical compose project with its SMTP settings and required secret references without deploying it or managing its existing dependencies.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: the standalone compose renders the existing 8880 project and external stability network with mail enabled by required inputs, and rendering refuses each missing secret input -- falsifier: uv run pytest tests/unit/infra/test_infisical_stability_compose_omn19998.py -q -n 0 --no-cov'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -706,3 +711,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC36
+  - id: dod-omn19998-ac37-infisical-stability-mail
+    description: AC37 renders Compose with synthetic inputs without a Docker daemon and checks isolated project identity, external dependencies, SMTP variable names and fail-closed missing-input behavior. No runtime deployment is performed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_infisical_stability_compose_omn19998.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC37
