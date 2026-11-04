@@ -26,7 +26,7 @@ from omnibase_infra.docker.catalog.validator_host_ports import (
 
 pytestmark = pytest.mark.unit
 
-_CATALOG_DIR = Path(__file__).resolve().parents[3] / "docker" / "catalog"
+_CATALOG_DIR = Path(__file__).resolve().parents[4] / "docker" / "catalog"
 _BUNDLE_NAMES = sorted(
     yaml.safe_load((_CATALOG_DIR / "bundles.yaml").read_text(encoding="utf-8"))
 )

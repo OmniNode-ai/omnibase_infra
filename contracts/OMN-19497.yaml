@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19497
+title: >-
+  Every resolved catalog bundle maps each host port to at most one service, enforced by a CI test
+summary: >
+  The duplicate host-port validator (src/omnibase_infra/docker/catalog/validator_host_ports.py), the generate/up refusal in the catalog CLI and the moved host ports for decision-store-consumer, dlq-replay-consumer and infra-routing-decisions-consumer are already on dev. This change moves the test to tests/unit/docker/catalog, the path the acceptance criteria name, so the falsifier command collects it, and points the OMN-20999 contract's check at the new path.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19497-unique-host-ports
+    statement: No resolved catalog bundle publishes one host port from two services, and a test in the unit CI job enforces it.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: Resolving every bundle in docker/catalog/bundles.yaml yields no host port claimed by two services -- falsifier: uv run pytest tests/unit/docker/catalog -k duplicate_host_port fails on the branch head
+      - id: AC2
+        statement: >-
+          AC2: The test fails when a clash is planted -- falsifier: uv run pytest tests/unit/docker/catalog -k duplicate_host_port passes with a planted duplicate port fixture
+      - id: AC3
+        statement: >-
+          AC3: The test runs in CI on every pull request -- falsifier: the unit test job log of the PR run does not list the duplicate host port test
+evidence_requirements:
+  - kind: tests
+    description: The duplicate host-port tests resolve every bundle and refuse a planted clash.
+    command: "uv run pytest tests/unit/docker/catalog -k duplicate_host_port -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn19497-ac1-every-bundle
+    description: >-
+      The parametrised sweep resolves every bundle in bundles.yaml and asserts no host port has two claimants. The merge base has no tests/unit/docker/catalog directory, so this check fails there.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/docker/catalog -k no_duplicate_host_port_in_resolved_bundle -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn19497-ac2-planted-clash
+    description: >-
+      A planted catalog with two services on one host port is reported by the validator and refused by onex generate before any compose file is written.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/docker/catalog -k 'duplicate_host_port_planted_clash_is_reported or duplicate_host_port_cli_generate_refuses_before_writing' -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn19497-ac3-unit-ci
+    description: >-
+      The tests sit under tests/unit, which the hosted unit test job collects on every pull request, and carry the unit marker.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/docker/catalog -m unit -k duplicate_host_port -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
