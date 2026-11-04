@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-19998
+[Unit]
+Description=Hourly deploy agent unreferenced runtime image cleanup
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Unit=onex-deploy-agent-image-prune.service
+
+[Install]
+WantedBy=timers.target

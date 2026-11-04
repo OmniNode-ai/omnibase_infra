@@ -165,6 +165,11 @@ requirements:
     acceptance:
       - id: AC35
         statement: 'AC35: the test-parallel job runs one step, with a timeout-minutes ceiling and no pytest, before both of its pytest steps, that installs the verifier at the caller tag through install_verifier and fails when the install fails -- falsifier: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0 fails at the merge base, where the step does not exist'
+  - id: req-omn19998-deploy-agent-image-prune
+    statement: The dev deploy agent declares an hourly image cleanup companion that preserves rollback references and removes only unreferenced runtime images older than 24 hours.
+    acceptance:
+      - id: AC36
+        statement: 'AC36: the declared deploy-agent timer uses the contract-routed image cleanup node; dry-run prints its image ids and nominal bytes without deletion; execution uses Docker dangling-only prune with the same age cutoff and runtime source label, retaining tags, digests and running or stopped container references, refusing failed inventory and touching no containers, build cache or volumes -- falsifier: uv run pytest tests/unit/scripts/test_deploy_agent_image_prune.py -q -n 0 --no-cov fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -252,6 +257,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac36-deploy-agent-image-prune
+    description: AC36 exercises the contract-routed image cleanup handler with Docker and systemctl boundaries recorded, including inventory failure and the rollback retention table.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_agent_image_prune.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC36
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual

@@ -154,6 +154,7 @@ StartLimitBurst=5
 Description=ONEX Deploy Agent (dev lane) — Kafka-driven rebuild orchestrator
 After=network-online.target docker.service
 Wants=network-online.target
+Wants=onex-deploy-agent-image-prune.timer
 
 [Service]
 Type=simple
