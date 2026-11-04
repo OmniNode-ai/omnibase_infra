@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import subprocess
 import tempfile
@@ -47,7 +46,7 @@ def _checked(argv: list[str], timeout: int) -> str:
         capture_output=True,
         text=True,
         check=False,
-        env=scrub_git_location_env(os.environ),
+        env=scrub_git_location_env(),
     )
     if result.returncode:
         # Tool output can contain credentials; the failed operation is enough.
