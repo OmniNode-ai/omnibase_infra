@@ -1045,28 +1045,10 @@ entries:
     content_sha1: 26b51e223c955ffe31c6d7664a349ff4ce92bcc0
   - path: scripts/ci/c28_consumer_flow_probe.py
     family: O
-    content_sha1: 1e942263faa5c7f5c89ffe3db84ec63b36188ca6
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
     content_sha1: 21fd9338cd40a474e6a1c2dc8ce2ee29312e6fe5
   - path: scripts/ci/c28_consumer_flow_probe.py
     family: O
-    content_sha1: 5f9c9f77322d3d68b727ec7e83a4abb6f02c5d1a
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
-    content_sha1: 9084e85f901b60188594a231c6c4f6e4ea12d9de
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
-    content_sha1: ac2f1f14dc5012eb55ff82569a0979b96e88ef8c
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
-    content_sha1: b04fe7de26e3c31eacb267e9612e60fce11c23bc
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
     content_sha1: bc2d74b348b9a1c61ede79a10fe0746a3d911379
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
-    content_sha1: bf2ccf2deca619d9851d2fd0174950792546b376
   - path: scripts/ci/c28_consumer_flow_probe.py
     family: O
     content_sha1: e346125ae99e4f703974fd474c4ee2e82efa9d14

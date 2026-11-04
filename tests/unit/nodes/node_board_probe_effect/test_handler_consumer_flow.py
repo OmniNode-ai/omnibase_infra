@@ -15,6 +15,9 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_consumer_flow
     HandlerConsumerFlow,
     grade_consumer_flow,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_observation import (
     ModelConsumerFlowObservation,
 )
@@ -24,6 +27,7 @@ from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_req
 from scripts.ci import c28_consumer_flow_probe as script
 
 pytestmark = pytest.mark.unit
+RECORDED_LANE = ModelConsumerFlowLane.from_compose_project("omnibase-infra")
 FIXTURE = Path(__file__).parent / "fixtures/consumer_flow_recorded.json"
 
 
@@ -167,7 +171,7 @@ def test_handler_writes_self_contained_record_even_when_unreadable(
         (("negative", "mutations", "event_bus", "outcomes"), {}),
         (("boot", "applied_hwm_after"), 0),
         (("boot", "natural"), {}),
-        (("boot", "natural", script.RUNTIME_CONTAINERS[0], "natural"), 1),
+        (("boot", "natural", RECORDED_LANE.runtime_containers[0], "natural"), 1),
         (("boot", "injection", "offset"), None),
         (("boot", "injection", "validation_errors_after"), 0),
         (("boot", "injection", "boundary_lines"), 0),

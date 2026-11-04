@@ -60,6 +60,7 @@ REDUCER = "local.omnimarket.projection_consumer_flow.consume.1.0.1"
 KIND_TOPIC = {kind: topic for kind, _prefix, topic, _counter in probe.KINDS}
 AUDIT_TOPIC = KIND_TOPIC["audit_projection_consumer"]
 REDUCER_TOPIC = KIND_TOPIC["publishing_reducer"]
+RECORDED_LANE = ModelConsumerFlowLane.from_compose_project("omnibase-infra")
 
 
 def _row(
@@ -162,7 +163,7 @@ def _green() -> dict[str, Any]:
             "applied_window_seconds": 90,
             "natural": {
                 c: {"lines": 30000, "total": 0, "probe": 0, "natural": 0}
-                for c in probe.RUNTIME_CONTAINERS
+                for c in RECORDED_LANE.runtime_containers
             },
             "injection": {
                 "offset": 271662,
@@ -425,7 +426,9 @@ def test_red_when_no_applied_event_arrived() -> None:
 
 def test_red_on_a_natural_validation_error() -> None:
     def mutate(obs: dict[str, Any]) -> None:
-        obs["boot"]["natural"][probe.RUNTIME_CONTAINERS[0]].update(total=2, natural=2)
+        obs["boot"]["natural"][RECORDED_LANE.runtime_containers[0]].update(
+            total=2, natural=2
+        )
 
     assert _mutate(mutate) == {"zero_natural_stall_alert_validation_errors"}
 
@@ -447,7 +450,7 @@ def test_red_when_the_seam_did_not_observe_the_injection() -> None:
 
 def test_red_when_the_logs_were_not_read() -> None:
     def mutate(obs: dict[str, Any]) -> None:
-        del obs["boot"]["natural"][probe.RUNTIME_CONTAINERS[1]]
+        del obs["boot"]["natural"][RECORDED_LANE.runtime_containers[1]]
 
     assert "runtime_logs_read" in _mutate(mutate)
 
@@ -601,6 +604,71 @@ def test_junit_outcomes_reads_failures_and_param_ids() -> None:
 # ---- could-not-look is exit 2 and still leaves a record ---------------------
 
 
+def test_standalone_probe_reads_only_the_requested_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        out = "[]"
+        if argv[1] == "inspect":
+            out = json.dumps([{"State": {"Status": "running"}}])
+        elif argv[1] == "exec":
+            out = ""
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    def lane_factory(**kwargs: Any) -> probe.Lane:
+        lane = probe.Lane(**kwargs, runner=runner)
+        lane.identity()
+        lane.rpk("topic", "list")
+        lane.live_groups()
+        return lane
+
+    monkeypatch.setattr(probe, "observe_lane", lambda *a, **kw: _green())
+    monkeypatch.setattr(probe, "run_negative", lambda *a: _green()["negative"])
+    assert (
+        probe.main(
+            [
+                "--compose-project",
+                "omnibase-infra-stability",
+                "--base-url",
+                "http://projection.test",
+            ],
+            lane_factory=lane_factory,
+        )
+        == 0
+    )
+    assert [argv[2] for argv in calls if argv[1] == "inspect"] == [
+        "omninode-stability-runtime",
+        "omninode-stability-runtime-effects",
+        "omnimarket-stability-projection-api",
+    ]
+    assert [
+        argv[3] if argv[2] == "-i" else argv[2] for argv in calls if argv[1] == "exec"
+    ] == ["omnibase-infra-stability-redpanda", "omnibase-infra-stability-postgres"]
+    assert 'brokers="redpanda:9092"' in calls[3][6]
+    assert 'if [ -n "${DEV_KAFKA_SASL_USERNAME:-}" ]' in calls[3][6]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        [],
+        ["--compose-project", "omnibase-infra-stability"],
+        ["--base-url", "http://projection.test"],
+        ["--compose-project", "foreign", "--base-url", "http://projection.test"],
+    ],
+)
+def test_standalone_probe_refuses_missing_or_invalid_lane_inputs(
+    args: list[str],
+) -> None:
+    def unexpected_lane(**kwargs: Any) -> probe.Lane:
+        pytest.fail("invalid lane inputs must be refused before transport I/O")
+
+    assert probe.main(args, lane_factory=unexpected_lane) == 2
+
+
 def test_a_lane_that_cannot_be_read_exits_2_with_a_record(tmp_path: Path) -> None:
     class DeadLane(probe.Lane):
         def identity(self) -> dict[str, dict[str, Any]]:
@@ -608,7 +676,18 @@ def test_a_lane_that_cannot_be_read_exits_2_with_a_record(tmp_path: Path) -> Non
 
     rec_path = tmp_path / "c28.json"
     code = probe.main(
-        ["--record", str(rec_path), "--scratch", str(tmp_path), "--pytest-cmd", "true"],
+        [
+            "--record",
+            str(rec_path),
+            "--scratch",
+            str(tmp_path),
+            "--pytest-cmd",
+            "true",
+            "--compose-project",
+            "omnibase-infra-stability",
+            "--base-url",
+            "http://projection.test",
+        ],
         lane_factory=DeadLane,
     )
     assert code == 2
@@ -802,8 +881,9 @@ class _RecordedSeamDlqLane:
 
 @pytest.mark.live_contact("tests/ci/fixtures/c28_seam_dlq_marker_omn17427.json")
 @pytest.mark.parametrize("collector", ["script", "node"])
+@pytest.mark.parametrize("project", ["omnibase-infra", "omnibase-infra-stability"])
 def test_recorded_dev_lane_marker_is_counted_on_the_seam_dlq(
-    recorded_response: dict[str, Any], collector: str
+    recorded_response: dict[str, Any], collector: str, project: str
 ) -> None:
     from omnibase_infra.nodes.node_board_probe_effect.handlers import (
         _consumer_flow_collection,
@@ -821,6 +901,20 @@ def test_recorded_dev_lane_marker_is_counted_on_the_seam_dlq(
     assert f"correlation_id={recorded_injection['correlation_id']}" in boundary_line
 
     lane = _RecordedSeamDlqLane(recorded_response)
+    lane.containers = ModelConsumerFlowLane.from_compose_project(project)
+    lane.recorded_response = {
+        **recorded_response,
+        "runtime_log_lines": dict(
+            zip(
+                lane.containers.runtime_containers,
+                (
+                    recorded_response["runtime_log_lines"][c]
+                    for c in RECORDED_LANE.runtime_containers
+                ),
+                strict=True,
+            )
+        ),
+    }
     injection_subset = {
         key: recorded_injection[key]
         for key in ("marker", "correlation_id", "published_at", "offset")

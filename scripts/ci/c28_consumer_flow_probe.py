@@ -118,15 +118,22 @@ import shlex
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
+
+from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
+    ConsumerFlowLane as Lane,
+)
+from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
+    ConsumerFlowInputError as ProbeInputError,
+)
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 
 RECORD_VERSION: Final[int] = 1
 
@@ -139,7 +146,6 @@ REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 # ---- the subject, as the readback named it ---------------------------------
 EXPOSURE_TOPIC: Final[str] = "onex.snapshot.projection.consumer-flow.v1"
 CURSOR_FIELD: Final[str] = "projection_cursor"
-DEFAULT_BASE_URL: Final[str] = "http://host.docker.internal:3002"
 LIVE_WINDOW_MINUTES: Final[int] = 10
 # consumer_flow_windows keeps every window (48M rows, 32 GB on dev-201) and no
 # index leads with window_start, so a plain distinct over it is a whole-table
@@ -185,18 +191,6 @@ KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
 APPLIED_TOPIC: Final[str] = "onex.evt.omnimarket.projection-consumer-flow-applied.v1"
 SEAM_DLQ: Final[str] = "onex.dlq.omnimarket.consumer-flow-stall-alert-malformed.v1"
 
-RUNTIME_CONTAINERS: Final[tuple[str, ...]] = (
-    "omninode-runtime",
-    "omninode-runtime-effects",
-)
-BOOT_CONTAINERS: Final[tuple[str, ...]] = (
-    *RUNTIME_CONTAINERS,
-    "omnimarket-projection-api",
-)
-BROKER_CONTAINER: Final[str] = "omnibase-infra-redpanda"
-PG_CONTAINER: Final[str] = "omnibase-infra-postgres"
-ANALYTICS_DB: Final[str] = "omnidash_analytics"
-
 #: Both names the stall-alert seam's input model has carried.
 VALIDATION_ERROR_RE: Final[re.Pattern[str]] = re.compile(
     r"validation errors? for ModelConsumerFlowStallAlert(?:Request|Trigger)\b"
@@ -230,10 +224,6 @@ BRANCHES: Final[dict[str, str]] = {
 AST_GATE_TEST: Final[str] = (
     "test_every_selected_subscription_factory_registers_a_flow_counter"
 )
-
-
-class ProbeInputError(RuntimeError):
-    """The probe could not look. Exit 2, never exit 1."""
 
 
 class BootChangedError(ProbeInputError):
@@ -609,141 +599,6 @@ def grade(obs: dict[str, Any]) -> Record:
 # =============================================================================
 
 
-def _run(
-    args: Sequence[str], *, stdin: str | None = None, timeout: float = 120.0
-) -> str:
-    try:
-        proc = subprocess.run(
-            list(args),
-            input=stdin,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProbeInputError(
-            f"{args[0]} {args[1:3]} could not run: {type(exc).__name__}"
-        ) from exc
-    if proc.returncode != 0:
-        raise ProbeInputError(
-            f"{' '.join(args[:4])} exited {proc.returncode}: {proc.stderr.strip()[:400]}"
-        )
-    return proc.stdout
-
-
-@dataclass
-class Lane:
-    docker: str = "docker"
-    base_url: str = DEFAULT_BASE_URL
-    http_timeout: float = 30.0
-
-    # ---- containers -------------------------------------------------------
-    def identity(self) -> dict[str, dict[str, Any]]:
-        out: dict[str, dict[str, Any]] = {}
-        for name in BOOT_CONTAINERS:
-            raw = _run([self.docker, "inspect", name], timeout=30)
-            try:
-                info = json.loads(raw)[0]
-            except (ValueError, IndexError) as exc:
-                raise ProbeInputError(f"docker inspect {name}: unreadable") from exc
-            state = info.get("State") or {}
-            out[name] = {
-                "id": str(info.get("Id", ""))[:12],
-                "started_at": state.get("StartedAt"),
-                "status": state.get("Status"),
-                "health": (state.get("Health") or {}).get("Status"),
-                "image": (info.get("Config") or {}).get("Image"),
-            }
-        return out
-
-    def wait_settled(
-        self, settle_seconds: float, poll: float = 15.0
-    ) -> dict[str, dict[str, Any]]:
-        deadline = time.monotonic() + settle_seconds
-        while True:
-            ident = self.identity()
-            unsettled = {
-                n: (v["status"], v["health"])
-                for n, v in ident.items()
-                if v["status"] != "running" or v["health"] not in (None, "healthy")
-            }
-            if not unsettled:
-                return ident
-            if time.monotonic() >= deadline:
-                raise ProbeInputError(
-                    f"lane containers not running and healthy after {settle_seconds:.0f}s: {unsettled}"
-                )
-            time.sleep(poll)
-
-    def logs(self, container: str, since: str | None = None) -> list[str]:
-        args = [self.docker, "logs"]
-        if since:
-            args += ["--since", since]
-        args.append(container)
-        try:
-            proc = subprocess.run(
-                args, capture_output=True, text=True, timeout=180, check=False
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise ProbeInputError(
-                f"docker logs {container}: {type(exc).__name__}"
-            ) from exc
-        if proc.returncode != 0:
-            raise ProbeInputError(f"docker logs {container} exited {proc.returncode}")
-        # The runtime logs to stderr and stdout both.
-        return (proc.stdout + proc.stderr).splitlines()
-
-    # ---- broker (credential stays inside the broker container) -----------
-    def rpk(self, *args: str, stdin: str | None = None, timeout: float = 60.0) -> str:
-        # The credential reaches rpk through its environment, never as a -X flag:
-        # the expanded flag would sit in the in-container rpk argv, which every user
-        # on the host reads through `ps` (OMN-17427).
-        script = (
-            'RPK_USER="$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$DEV_KAFKA_SASL_PASSWORD" '
-            'RPK_SASL_MECHANISM=SCRAM-SHA-256 rpk "$@"'
-        )
-        return _run(
-            [
-                self.docker,
-                "exec",
-                "-i",
-                BROKER_CONTAINER,
-                "sh",
-                "-c",
-                script,
-                "rpk",
-                *args,
-            ],
-            stdin=stdin,
-            timeout=timeout,
-        )
-
-    def high_watermark(self, topic: str) -> int:
-        return parse_high_watermark(self.rpk("topic", "describe", "-p", topic))
-
-    # ---- database ---------------------------------------------------------
-    def live_groups(self) -> list[str]:
-        sql = LIVE_WINDOW_SQL
-        script = f'psql -U "$POSTGRES_USER" -d {ANALYTICS_DB} -AtX -v ON_ERROR_STOP=1 -c "{sql}"'
-        out = _run([self.docker, "exec", PG_CONTAINER, "sh", "-c", script], timeout=120)
-        return sorted({line.strip() for line in out.splitlines() if line.strip()})
-
-    # ---- exposure ---------------------------------------------------------
-    def page(self, query: dict[str, str]) -> dict[str, Any]:
-        url = f"{self.base_url.rstrip('/')}/projection/{EXPOSURE_TOPIC}"
-        if query:
-            url += "?" + urllib.parse.urlencode(query)
-        try:
-            with urllib.request.urlopen(url, timeout=self.http_timeout) as resp:  # noqa: S310
-                body = json.load(resp)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            raise ProbeInputError(f"GET {url}: {type(exc).__name__}: {exc}") from exc
-        if not isinstance(body, dict) or not isinstance(body.get("rows"), list):
-            raise ProbeInputError(f"GET {url}: no rows list in the response")
-        return body
-
-
 def parse_high_watermark(describe_out: str) -> int:
     """Sum of HIGH-WATERMARK over the partitions table of ``rpk topic describe -p``."""
     col: int | None = None
@@ -981,7 +836,7 @@ def observe_injection(
     since_arg = since_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     while True:
         errors = boundaries = 0
-        for c in RUNTIME_CONTAINERS:
+        for c in lane.containers.runtime_containers:
             lines = lane.logs(c, since=since_arg)
             errors += sum(1 for ln in lines if VALIDATION_ERROR_RE.search(ln))
             boundaries += sum(
@@ -1027,7 +882,7 @@ def observe_lane(
     ident_before = lane.wait_settled(settle_seconds)
 
     natural: dict[str, dict[str, Any]] = {}
-    for c in RUNTIME_CONTAINERS:
+    for c in lane.containers.runtime_containers:
         lines = lane.logs(c)
         total, probe, nat = natural_validation_errors(lines)
         natural[c] = {
@@ -1071,7 +926,7 @@ def observe_lane(
     ident_after = lane.identity()
     changed = {
         n: (ident_before[n]["id"], ident_after.get(n, {}).get("id"))
-        for n in BOOT_CONTAINERS
+        for n in lane.containers.boot_containers
         if ident_before[n]["id"] != ident_after.get(n, {}).get("id")
         or ident_before[n]["started_at"] != ident_after.get(n, {}).get("started_at")
     }
@@ -1147,7 +1002,7 @@ def _observed_summary(obs: dict[str, Any]) -> dict[str, Any]:
 
 def _render_summary(rec: Record, *, as_of: str) -> str:
     lines = [
-        "## C28 -- consumer-flow observability on the dev lane (OMN-19812)",
+        "## C28 -- consumer-flow observability on the selected lane (OMN-19812)",
         "",
         f"**Verdict: `{rec.verdict}`** at `{as_of}`.",
         "",
@@ -1176,7 +1031,8 @@ def main(
     argv: list[str] | None = None, *, lane_factory: Callable[..., Lane] = Lane
 ) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument("--base-url", default="")
+    parser.add_argument("--compose-project", default="")
     parser.add_argument("--docker-bin", default="docker")
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--sample-interval", type=float, default=30.0)
@@ -1214,7 +1070,19 @@ def main(
             if not isinstance(obs, dict):
                 raise ProbeInputError("replay file is not a JSON object")
         else:
-            lane = lane_factory(docker=args.docker_bin, base_url=args.base_url)
+            if not args.compose_project or not args.base_url:
+                raise ProbeInputError(
+                    "live probes require --compose-project and --base-url"
+                )
+            try:
+                containers = ModelConsumerFlowLane.from_compose_project(
+                    args.compose_project
+                )
+            except ValueError as exc:
+                raise ProbeInputError(str(exc)) from exc
+            lane = lane_factory(
+                docker=args.docker_bin, base_url=args.base_url, containers=containers
+            )
             last: ProbeInputError | None = None
             obs = {}
             for attempt in range(1, max(1, args.attempts) + 1):

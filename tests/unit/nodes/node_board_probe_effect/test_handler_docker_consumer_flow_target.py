@@ -29,6 +29,7 @@ from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_req
 from scripts.ci import c28_consumer_flow_probe as script
 
 pytestmark = pytest.mark.unit
+RECORDED_LANE = ModelConsumerFlowLane.from_compose_project("omnibase-infra")
 
 
 class FakeIO:
@@ -465,7 +466,7 @@ def test_mid_run_redeploy_retries_after_connection_refused(
     assert grade_consumer_flow(request, observed).outcome == "PASS"
     assert sum(
         argv[1] == "logs" and "--since" not in argv for argv, _ in fake.calls
-    ) == (refused_gets + 1) * len(script.RUNTIME_CONTAINERS)
+    ) == (refused_gets + 1) * len(RECORDED_LANE.runtime_containers)
     assert any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
 
 
@@ -520,7 +521,7 @@ def test_repeated_mid_run_redeploy_exhausts_attempts(
         if argv[1] == "inspect":
             inspections += 1
             body = json.loads(proc.stdout)
-            revision = (inspections - 1) // len(script.BOOT_CONTAINERS)
+            revision = (inspections - 1) // len(RECORDED_LANE.boot_containers)
             body[0]["Id"] = str(revision)
             body[0]["State"]["StartedAt"] = f"2026-10-08T00:59:{revision:02d}Z"
             proc.stdout = json.dumps(body)
@@ -545,7 +546,7 @@ def test_repeated_mid_run_redeploy_exhausts_attempts(
     assert "Connection refused" in observed.read_error
     assert grade_consumer_flow(request, observed).outcome == "INDETERMINATE"
     assert gets == request.attempts
-    assert inspections == 2 * request.attempts * len(script.BOOT_CONTAINERS)
+    assert inspections == 2 * request.attempts * len(RECORDED_LANE.boot_containers)
     assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
 
 
