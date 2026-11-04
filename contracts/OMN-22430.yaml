@@ -14,7 +14,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The read committed consumer tests.
-    command: uv run --frozen pytest tests/unit/event_bus/test_read_committed_omn22430.py -q --no-cov
+    command: uv run --frozen pytest tests/unit/event_bus/test_read_committed_omn22430.py tests/integration/event_bus/test_read_committed_real_consumer_omn22430.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -25,7 +25,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/event_bus/test_read_committed_omn22430.py -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_read_committed_omn22430.py tests/integration/event_bus/test_read_committed_real_consumer_omn22430.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC9
