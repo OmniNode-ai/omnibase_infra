@@ -15,8 +15,6 @@ Two properties of the in-use boot split, each with a falsifier:
 from __future__ import annotations
 
 import asyncio
-import json
-import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from unittest.mock import patch
@@ -47,7 +45,6 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
-from scripts import lab_alarm
 from scripts.render_runtime_policy_env import load_contract, render_env
 from tests.helpers.lane_overlay_fixtures import load_compose
 from tests.unit.runtime.auto_wiring.test_omn18087_boot_subscribes_only_topics_in_use import (
@@ -79,9 +76,6 @@ DELEGATE_SKILL_TOPICS = (
 DELEGATE_SKILL_GROUP = (
     "local.omnimarket.node_delegate_skill_orchestrator.consume.1.3.0."
     "__i.runtime-effects.__t.onex.cmd.omnimarket.delegate-skill.v1"
-)
-RECORDED_ROWS = json.loads(
-    (ROOT / "tests/fixtures/delegate_skill_effects_held.json").read_text()
 )
 
 
@@ -118,6 +112,7 @@ async def _boot(
             environment="local",
             subscribe_immediately=False,
         )
+        engine.freeze()
         await subscribe_wired_contract_topics(
             manifest=manifest,
             report=report,
@@ -430,40 +425,3 @@ def test_dev_delegation_priority_reaches_both_carriers(
         environment["ONEX_BOOT_PRIORITY_CONTRACTS"]
         == f"${{{key}:?runtime policy contract must set {key}}}"
     )
-
-
-@pytest.mark.parametrize("row", RECORDED_ROWS, ids=lambda row: row["raised_at"])
-def test_recorded_empty_effects_groups_still_alarm_and_only_live_members_clear(
-    row: dict[str, str],
-) -> None:
-    """Replay all nine recorded holds without broadening the alarm's live predicate."""
-    assert row["evidence"].startswith(f"{DELEGATE_SKILL_GROUP}: Empty/0;")
-    since_match = re.search(r"\(since ([^)]+)\)", row["evidence"])
-    duration_match = re.search(r"instances for ([^ ]+) ", row["evidence"])
-    assert since_match is not None and duration_match is not None
-    state = lab_alarm.ModelAlarmState(
-        effects_held_since={"runtime-effects": since_match[1]}
-    )
-    for group_state, members in (
-        ("Empty", 0),
-        ("Stable", 0),
-        ("PreparingRebalance", 1),
-    ):
-        report, recovery = lab_alarm.evaluate_effects_held_behind_runtime(
-            lambda group_state=group_state, members=members: (
-                (DELEGATE_SKILL_GROUP, group_state, members),
-            ),
-            state=state,
-            now=row["raised_at"],
-        )
-        assert report.outcome is lab_alarm.EnumConditionOutcome.ALARM
-        assert recovery is None
-        assert f"instances for {duration_match[1]} " in report.evidence
-    report, recovery = lab_alarm.evaluate_effects_held_behind_runtime(
-        lambda: ((DELEGATE_SKILL_GROUP, "Stable", 1),),
-        state=state,
-        now=row["raised_at"],
-    )
-    assert report.outcome is lab_alarm.EnumConditionOutcome.OK
-    assert recovery is not None
-    assert state.effects_held_since == {}

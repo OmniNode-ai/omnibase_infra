@@ -193,8 +193,8 @@ requirements:
   - id: req-omn19998-delegate-skill-boot-priority
     statement: The dev delegation first-hop consumer joins through provision, readiness and attach before first publication, even when its topics are empty; unrelated idle contracts remain demand-deferred and the effects-held alarm retains its live-member predicate.
     acceptance:
-      - id: AC36
-        statement: 'AC36: boot priority survives the demand split; both dev main and effects carriers receive the delegate-skill priority; empty priority topics attach while unrelated idle work stays deferred, topic-not-ready still refuses attach, the real client pre-publish probe still refuses an unbound first hop, and all nine recorded Empty/0 holds still alarm until Stable with a positive member count -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly fails on the merge-base splitter and runtime policy'
+      - id: AC37
+        statement: 'AC37: boot priority survives the demand split; both dev main and effects carriers receive the delegate-skill priority; empty priority topics attach while unrelated idle work stays deferred, topic-not-ready still refuses attach, the real client pre-publish probe still refuses an unbound first hop, and all nine recorded Empty/0 holds still alarm until Stable with a positive member count -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly fails on the merge-base splitter and runtime policy'
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -807,16 +807,19 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
-  - id: dod-omn19998-ac36-delegate-skill-boot-priority
-    description: AC36 drives the production boot subscription path and client pre-publish probe with empty topics, checks readiness and lazy-start controls, and replays the nine recorded effects-held episodes against the unchanged alarm evaluator.
+  - id: dod-omn19998-ac37-delegate-skill-boot-priority
+    description: AC37 drives the production boot subscription path and client pre-publish probe with empty topics, checks readiness and lazy-start controls, and integrates the shipped main and effects policy with recorded effects-held episodes and an independent alarm clock.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_delegation_boot_priority_omn19998.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC36
-  - id: dod-omn19998-ac36-dev-carrier-deploy-probe
+      - AC37
+  - id: dod-omn19998-ac37-dev-carrier-deploy-probe
     description: Hosted-runner deployment artifact check reads the dev policy through its typed loader and renderer and verifies the priority environment binding in both main and effects compose carriers. It does not claim a live install.
     source: manual
     checks:
@@ -824,4 +827,4 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly -k dev_delegation_priority_reaches_both_carriers
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC36
+      - AC37
