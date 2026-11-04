@@ -31,7 +31,6 @@ src/omnibase_infra/handlers/placement/handler_placement_election.py
 src/omnibase_infra/handlers/placement/handler_placement_epoch_guard.py
 src/omnibase_infra/handlers/placement/handler_placement_etcd.py
 src/omnibase_infra/handlers/placement/handler_placement_rebuild.py
-src/omnibase_infra/handlers/placement/handler_placement_runtime.py
 src/omnibase_infra/handlers/placement/handler_placement_serving.py
 src/omnibase_infra/handlers/placement/handler_placement_session.py
 src/omnibase_infra/handlers/service_discovery/handler_service_discovery_mock.py
