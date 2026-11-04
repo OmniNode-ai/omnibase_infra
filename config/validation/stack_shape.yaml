@@ -446,6 +446,10 @@ console_scripts:
       target: omnibase_core.nodes.node_dependency_direction_check_effect.runtime_dependency_direction_check:main
       status: developer_only
       reason: Developer or CI tooling; not a permitted runtime-image service command.
+    check-dependency-pins:
+      target: omnibase_core.nodes.node_dependency_pins_check_effect.runtime_dependency_pins_check:main
+      status: developer_only
+      reason: Developer or CI tooling; not a permitted runtime-image service command.
     check-doc-content-scan-compute:
       target: omnibase_core.validation.doc_content_scan.runtime_doc_content_scan:main
       status: developer_only
@@ -698,7 +702,7 @@ console_scripts:
       status: developer_only
       reason: Developer or CI tooling; not a permitted runtime-image service command.
 console_script_sources:
-  omnibase_core: installed 0.47.62
+  omnibase_core: installed 0.47.66
   omnibase_spi: installed 0.23.7
   omnibase_compat: installed 0.5.7
   omnibase_infra: installed 0.38.77
