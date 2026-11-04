@@ -33,6 +33,8 @@ standalone_targets:
     service: factory-floor-web
     container_key: omninode-factory-floor-web
     env_file_variable: DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE
+    carried_files:
+      - docker/factory-floor-web/nginx.conf
 capabilities:
   - name: standalone_service.recreate
     description: Recreate one declared service of one declared standalone compose file, leaving every other container unchanged.
