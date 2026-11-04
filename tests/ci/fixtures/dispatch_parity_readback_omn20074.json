@@ -24,13 +24,13 @@
     "snapshot_sha256": "5509645535394bcd5e81e23c4c5dbc9712cf7b71c26d4f6b3c8b759638ef627f"
   },
   "retired": {
-    "captured_utc": "2026-11-04T08:55:14.563040+00:00",
+    "captured_utc": "2026-11-04T13:32:36.875524+00:00",
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 143
+        "omnibase_infra": 144
       },
-      "contracts_discovered": 164,
+      "contracts_discovered": 165,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 101,
       "probe_count": 1130,
@@ -38,6 +38,6 @@
       "registered_routes": 118,
       "type_scoped_dispatchers": 81
     },
-    "snapshot_sha256": "6e18577381f6f7ad3c32b4697a5b7fc564760dce6b78e9687d34ec41c2305329"
+    "snapshot_sha256": "01d892176103494b281284557461030d3169ad4e362dc1950d3041c01253ab00"
   }
 }
