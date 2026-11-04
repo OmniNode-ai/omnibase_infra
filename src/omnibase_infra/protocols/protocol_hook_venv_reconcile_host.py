@@ -3,7 +3,7 @@
 """Host effect boundary used by the hook reconciliation handler."""
 
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from omnibase_infra.models.model_hook_venv_reconcile_request import (
     ModelHookVenvReconcileRequest,
@@ -34,6 +34,4 @@ class ProtocolHookVenvReconcileHost(Protocol):
 
 
 # The container uses interface classes as keys; it does not instantiate them.
-HOOK_VENV_HOST_SERVICE = cast(
-    "type[ProtocolHookVenvReconcileHost]", ProtocolHookVenvReconcileHost
-)
+HOOK_VENV_HOST_SERVICE: type = ProtocolHookVenvReconcileHost

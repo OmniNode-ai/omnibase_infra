@@ -4,16 +4,24 @@
 
 The existing host reconciler calls this effect through the node bootstrap runtime:
 dispatch itself depends on a reconciled environment. The same typed handler is
-bound by node_reconcile_workspace_venvs for runtime dispatch (OMN-19998).
+bound by node_reconcile_workspace_venvs for local bootstrap (OMN-19998).
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.model_hook_venv_reconcile_policy import (
+    ModelHookVenvReconcilePolicy,
+)
 from omnibase_infra.models.model_hook_venv_reconcile_request import (
     ModelHookVenvReconcileRequest,
 )
@@ -71,7 +79,9 @@ class HandlerReconcileWorkspaceVenvs:
 
     def __init__(self, container: ModelONEXContainer) -> None:
         """Resolve the node's host effect port from the container."""
-        self._host = container.get_service(HOOK_VENV_HOST_SERVICE)
+        self._host: ProtocolHookVenvReconcileHost = container.get_service(
+            HOOK_VENV_HOST_SERVICE
+        )
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -138,3 +148,105 @@ class HandlerReconcileWorkspaceVenvs:
                 status="refused",
                 detail="hook venv branch intent: " + str(exc),
             )
+
+
+class HandlerHookVenvReconcileHost:
+    """Keep raw filesystem and process I/O inside the declared EFFECT node."""
+
+    def __init__(self, container: ModelONEXContainer) -> None:
+        self._policy = container.get_service(ModelHookVenvReconcilePolicy)
+
+    def installed(self, project: Path) -> dict[str, _Revision]:
+        """Read the installer's PEP 610 records without importing the target venv."""
+        result: dict[str, _Revision] = {}
+        for path in (project / ".venv").glob(
+            "lib/python*/site-packages/*.dist-info/direct_url.json"
+        ):
+            data = json.loads(path.read_text())
+            vcs = data.get("vcs_info", {})
+            if vcs.get("vcs") != "git":
+                continue
+            metadata = (path.parent / "METADATA").read_text()
+            name = _normalize(
+                next(
+                    line[6:]
+                    for line in metadata.splitlines()
+                    if line.startswith("Name: ")
+                )
+            )
+            commit, url = vcs.get("commit_id", ""), data.get("url", "")
+            if (
+                not isinstance(commit, str)
+                or not re.fullmatch(r"[0-9a-fA-F]{40}", commit)
+                or not isinstance(url, str)
+                or not url
+                or name in result
+            ):
+                raise ValueError("unreadable or ambiguous Git revision for " + name)
+            result[name] = (url, commit)
+        return result
+
+    def carries(self, root: Path, before: _Revision, after: _Revision) -> bool:
+        """Allow ordinary forward updates; refuse unknown or discarded commits."""
+        if before == after:
+            return True
+        source = urlsplit(before[0])
+        clone = (
+            Path(unquote(source.path))
+            if source.scheme == "file"
+            else root / Path(source.path).name.removesuffix(".git")
+        )
+        if before[0] != after[0] or not clone.is_dir():
+            return False
+        try:
+            probe = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(clone),
+                    "merge-base",
+                    "--is-ancestor",
+                    before[1],
+                    after[1],
+                ],
+                env=scrub_git_location_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=self._policy.git_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("branch install ancestry read timed out") from exc
+        if probe.returncode not in (0, 1):
+            raise ValueError("branch install ancestry is unreadable")
+        return probe.returncode == 0
+
+    def uv(
+        self, request: ModelHookVenvReconcileRequest, flag: str | None = None
+    ) -> tuple[int, str]:
+        """Run uv against exactly the requested project as the host owner."""
+        env = dict(os.environ)
+        env.pop("PYTHONPATH", None)
+        env.pop("UV_PROJECT_ENVIRONMENT", None)
+        args = [
+            str(request.uv_bin),
+            "sync",
+            "--frozen",
+            "--project",
+            str(request.project),
+        ]
+        if flag:
+            args.append(flag)
+        try:
+            result = subprocess.run(
+                args,
+                cwd=request.project,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=self._policy.sync_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("hook venv package operation timed out") from exc
+        return result.returncode, result.stdout + result.stderr

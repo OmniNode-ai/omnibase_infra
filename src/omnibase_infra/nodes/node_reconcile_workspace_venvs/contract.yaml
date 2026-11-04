@@ -23,22 +23,17 @@ output_model:
   name: ModelHookVenvReconcileResult
   module: omnibase_infra.models.model_hook_venv_reconcile_result
   description: Refusal or a sync with the approved revisions read back.
-event_bus:
-  subscribe_topics: [onex.cmd.platform.hook-venv-reconcile.v1]
-  publish_topics: [onex.evt.platform.hook-venv-reconciled.v1]
-terminal_event: onex.evt.platform.hook-venv-reconciled.v1
 handler_routing:
   routing_strategy: operation_match
   handlers:
     - operation: hook_venv.reconcile
       handler:
         name: HandlerReconcileWorkspaceVenvs
-        module: omnibase_infra.handlers.handler_reconcile_workspace_venvs
+        module: omnibase_infra.nodes.node_reconcile_workspace_venvs.handler_reconcile_workspace_venvs
       event_model:
         name: ModelHookVenvReconcileRequest
         module: omnibase_infra.models.model_hook_venv_reconcile_request
       supported_operations: [hook_venv.reconcile]
-      output_events: [ModelHookVenvReconcileResult]
 io_operations:
   - operation: hook_venv.reconcile
     description: Plan exact sync, refuse dropped commits, sync and verify revisions.
@@ -58,5 +53,5 @@ error_handling:
 metadata:
   author: OmniNode Team
   license: MIT
-  description: The host bootstrap adapter uses this handler before dispatch is available.
+  description: The host bootstrap invokes this local effect directly before dispatch is available; it has no broker consumer or publisher.
   related_tickets: [OMN-19998]
