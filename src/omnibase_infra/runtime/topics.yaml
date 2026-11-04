@@ -43,3 +43,6 @@ topics:
   # consumes them, so they are declared as published outside this corpus.
   - onex.evt.platform.validator-run.v1
   - onex.evt.platform.validator-triggered.v1
+  # OMN-21924: the generic node CLI publishes the architecture-validation
+  # request through RuntimeLocal; the allowed-command tests exercise that bus path.
+  - onex.cmd.platform.architecture-validate.v1
