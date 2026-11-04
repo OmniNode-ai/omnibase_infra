@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 def read_omnimarket_reconcile_state(
-    workspace_root: str | Path | None,
+    workspace_root: Path | None,
 ) -> ModelOmnimarketReconcileReadbackResult:
     """Invalidate package caches, then read the install and clone as they stand."""
     # Import at invocation time: the CLI guard also calls this handler's reader.
@@ -65,4 +65,7 @@ class HandlerOmnimarketReconcileReadback:
     async def handle(
         self, request: ModelOmnimarketReconcileReadbackRequest
     ) -> ModelOmnimarketReconcileReadbackResult:
-        return read_omnimarket_reconcile_state(request.workspace_root or None)
+        workspace_root = (
+            Path(request.workspace_root) if request.workspace_root else None
+        )
+        return read_omnimarket_reconcile_state(workspace_root)
