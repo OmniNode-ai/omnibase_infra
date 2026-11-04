@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_placement_runtime_effect
+contract_name: node_placement_runtime_effect
+node_name: node_placement_runtime_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: "OMN-22132: runtime placement, membership, per-node primary election, self-fence, rebuild then consume. The handler takes its session, elections, serving reader, lock and timings by constructor injection; RegistryInfraPlacementRuntime is the composition root."
+input_model:
+  name: ModelPlacementServingRequest
+  module: omnibase_infra.models.model_placement_serving_request
+  description: "One placement decision request; min_serving overrides the profile's value."
+output_model:
+  name: ModelPlacementServingReport
+  module: omnibase_infra.handlers.placement.model_placement_serving_report
+  description: "Per-node serving counts and their health verdict."
+event_bus:
+  plugin_managed: true
+  subscribe_topics: []
+  publish_topics: []
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: placement.serving_report
+      handler:
+        name: HandlerPlacementRuntime
+        module: omnibase_infra.handlers.placement.handler_placement_runtime
+      event_model:
+        name: ModelPlacementServingRequest
+        module: omnibase_infra.models.model_placement_serving_request
+      output_events: [ModelPlacementServingReport]
+# Timings the registry reads, one block per binding profile. A value held here is
+# read through RegistryInfraPlacementRuntime.settings_from_contract; the handler
+# holds none.
+placement_runtime:
+  profiles:
+    inmemory:
+      ttl_s: 4
+      margin_s: 1.5
+      keepalive_interval_s: 1.0
+      campaign_interval_s: 0.25
+      fence_tick_s: 0.1
+      min_serving: 2
+    redpanda:
+      ttl_s: 6
+      margin_s: 2.0
+      keepalive_interval_s: 1.5
+      campaign_interval_s: 0.5
+      fence_tick_s: 0.1
+      min_serving: 2
+capabilities:
+  - name: placement.runtime
+    description: "Start any-nodes at once; start a primary node only after winning its election and rebuilding its projection."
+  - name: placement.serving_report
+    description: "Count the live runtimes serving each loaded node."
+metadata:
+  ticket: OMN-22132
+  author: OmniNode Team
+  description: "Handler dependency injection slice; the runtime has no production construction site yet, the registry is the wiring point."
+  tags: [effect, placement, etcd]
