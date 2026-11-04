@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-22430
+title: 'Host desired and observed state shapes: read-committed readers in omnibase_infra'
+summary: The omnibase_infra part of OMN-22430. A packaged declaration lists the three host state event topics, a model validates it, and both consumer constructors of the Kafka event bus apply isolation_level=read_committed to a listed topic; the event bus refuses to start when the declaration is unavailable. This contract binds the hosted-runnable tests of that part (AC9); the lab reading with an injected aborted transaction and the other criteria of the ticket belong to the omnimarket part and the lab step, and are not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22430-ac9-read-committed
+    statement: Consumers of the three host state event topics read committed records only.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: The three event topics are read committed only -- falsifier: in omnibase_infra `uv run pytest tests -k subscribe_read_committed` finds a consumer built without `read_committed` for a listed topic (at first subscription, after a rebalance recreation, on a cold replay from `earliest`, and through the grouped and the ungrouped constructor for each of the three event topics), or `-k read_committed_from_installed_wheel` (run from a wheel installed outside the checkout) finds the resource missing without a startup failure or a consumer built without the setting, or `-k read_committed_declaration_validated` accepts a malformed topic name or one that is not among the plan''s declared topics, or refuses the plan''s three event topics together (including `host-layer-decided`, whose reader is the `onex host-layer show` command), or `-k runtime_startup_from_actual_contracts_applies_read_committed` starts a subscriber of the runtime''s writer without it, or in the lab step an aborted transaction injected on `host-desired-state` and `host-observed-state` reaches the runtime''s projection writer, a reconciler subscriber or a cold reader (`-k aborted_record_never_delivered`).'
+evidence_requirements:
+  - kind: tests
+    description: The read committed consumer tests.
+    command: uv run --frozen pytest tests/unit/event_bus/test_read_committed_omn22430.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22430-ac9-read-committed-consumers
+    description: Grouped and ungrouped consumer construction for each of the three topics carries read_committed, an unlisted topic is untouched, the declaration refuses a malformed, undeclared or duplicate topic and accepts the three together, an unavailable resource fails event bus construction, and the declaration is inside the built wheel. The aborted-transaction reading on the dev broker is taken in the lab step and recorded in the pull request's Lab comment; this check does not claim it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_read_committed_omn22430.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9
