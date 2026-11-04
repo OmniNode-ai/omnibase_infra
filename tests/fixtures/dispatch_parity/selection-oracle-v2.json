@@ -840,6 +840,22 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4": {
+      "category": "command",
+      "contract_name": "node_lane_entry_point_census_effect",
+      "event_model_module": "omnibase_infra.models.lane_entry_point_census.model_lane_entry_point_census_request",
+      "event_model_name": "ModelLaneEntryPointCensusRequest",
+      "handler_id": "dispatcher.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4",
+      "handler_module": "omnibase_infra.handlers.handler_lane_entry_point_census",
+      "handler_name": "HandlerLaneEntryPointCensus",
+      "message_types": [
+        "ModelLaneEntryPointCensusRequest",
+        "omnibase-infra.lane-entry-point-census",
+        "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86": {
       "category": "command",
       "contract_name": "node_ledger_projection_compute",
@@ -4210,6 +4226,23 @@
       },
       "topic": "${topic:contract:omnibase-infra.CMD_GATEWAY_LINK_HEALTH_UPSERT_V1}"
     },
+    "P1a::${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.lane-entry-point-census",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.lane-entry-point-census",
+        "status": "success"
+      },
+      "topic": "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}"
+    },
     "P1a::${topic:contract:omnibase-infra.CMD_LLM_COMPLETION_REQUEST_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -5747,6 +5780,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:omnibase-infra.CMD_GATEWAY_LINK_HEALTH_UPSERT_V1}"
+    },
+    "P1b::${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}"
     },
     "P1b::${topic:contract:omnibase-infra.CMD_LLM_COMPLETION_REQUEST_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -7527,6 +7575,26 @@
         "status": "success"
       },
       "topic": "${topic:contract:platform.CMD_HOTPATCH_LEDGER_RECONCILE_V1}"
+    },
+    "P4::dispatcher.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4::${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4",
+      "event_model": "omnibase_infra.models.lane_entry_point_census.model_lane_entry_point_census_request.ModelLaneEntryPointCensusRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.lane-entry-point-census",
+        "payload": "ModelLaneEntryPointCensusRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.lane-entry-point-census",
+        "status": "success"
+      },
+      "topic": "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::${topic:contract:occ.EVT_NIGHTLY_PROMOTION_V1}": {
       "construct_only": true,
@@ -25812,6 +25880,16 @@
       "topic": "${topic:contract:artifact.EVT_CHANGE_DETECTED_V1}",
       "topic_pattern": "*.evt.artifact.change-detected.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_lane_entry_point_census_effect",
+      "dispatcher_id": "dispatcher.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4",
+      "handler_id": "dispatcher.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4",
+      "message_category": "command",
+      "route_id": "route.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4.onex_cmd_omnibase_infra_lane_entry_point_census_v1",
+      "topic": "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}",
+      "topic_pattern": "*.cmd.omnibase-infra.lane-entry-point-census.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_ledger_projection_compute",
