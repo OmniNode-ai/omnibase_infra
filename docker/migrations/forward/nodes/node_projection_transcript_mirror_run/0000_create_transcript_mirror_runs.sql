@@ -88,6 +88,44 @@ ALTER TABLE omninode_internal.transcript_mirror_runs
 ALTER TABLE omninode_internal.transcript_mirror_runs
     ADD COLUMN IF NOT EXISTS bytes_put BIGINT NOT NULL DEFAULT 0;
 
+-- Existing columns must already have the declared types. Refuse incompatible
+-- storage without casting, truncating or otherwise rewriting existing values.
+DO $column_types$
+DECLARE
+    incompatible RECORD;
+BEGIN
+    SELECT a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod) AS actual,
+           pg_catalog.format_type(expected.type_oid, -1) AS expected
+    INTO incompatible
+    FROM pg_catalog.pg_attribute a
+    JOIN (VALUES
+        ('run_id', 'text'::regtype),
+        ('attempt_id', 'text'::regtype),
+        ('state', 'text'::regtype),
+        ('started_at', 'timestamptz'::regtype),
+        ('finished_at', 'timestamptz'::regtype),
+        ('files_seen', 'bigint'::regtype),
+        ('stored', 'bigint'::regtype),
+        ('would_store', 'bigint'::regtype),
+        ('unchanged', 'bigint'::regtype),
+        ('destination_ahead', 'bigint'::regtype),
+        ('refused_stale', 'bigint'::regtype),
+        ('refused_conflict', 'bigint'::regtype),
+        ('source_unreadable', 'bigint'::regtype),
+        ('bytes_put', 'bigint'::regtype)
+    ) AS expected(name, type_oid) ON a.attname = expected.name
+    WHERE a.attrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+      AND NOT a.attisdropped
+      AND (a.atttypid <> expected.type_oid OR a.atttypmod <> -1)
+    ORDER BY a.attnum
+    LIMIT 1;
+    IF FOUND THEN
+        RAISE EXCEPTION 'transcript_mirror_runs: incompatible column %; expected %, found %',
+            incompatible.attname, incompatible.expected, incompatible.actual;
+    END IF;
+END;
+$column_types$;
+
 -- ADD COLUMN IF NOT EXISTS does not repair constraints or defaults on columns
 -- that already exist. Apply the same requirements on both creation paths.
 ALTER TABLE omninode_internal.transcript_mirror_runs

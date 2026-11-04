@@ -26,7 +26,7 @@ _VENDOR = _FORWARD / "nodes" / _NODE
 _CREATE = "0000_create_transcript_mirror_runs.sql"
 _GRANT = "0001_grant_omninode_runtime_transcript_mirror_runs.sql"
 _SHA256 = {
-    _CREATE: "eabb0036be56aa71739226fed32ba2d92151d487dac5e438a2a159317393b510",
+    _CREATE: "c3264aa6cb7fa8d60caaa3cef5bd3177d1eccfe94217e5edc554263807b867a6",
     _GRANT: "a2252fd70e10dbe920392dafa8c16ef2e95e94e9a575e84fa980331404339414",
 }
 _COUNT_COLUMNS = (

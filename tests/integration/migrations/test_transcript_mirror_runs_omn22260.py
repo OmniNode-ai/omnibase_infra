@@ -722,3 +722,48 @@ def test_reconciliation_preserves_existing_valid_rows(
             assert cur.fetchall() == [(0, 0, 0, 0, 0, 0, 0)]
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize(
+    ("column", "incompatible_type"),
+    [
+        ("run_id", "VARCHAR(32)"),
+        ("attempt_id", "VARCHAR(32)"),
+        ("state", "VARCHAR(32)"),
+        ("started_at", "TIMESTAMP"),
+        ("finished_at", "TIMESTAMP"),
+        ("started_at", "TIMESTAMPTZ(0)"),
+        ("finished_at", "TIMESTAMPTZ(0)"),
+        *[(name, "INTEGER") for name, kind, _ in EXPECTED_COLUMNS if kind == "bigint"],
+    ],
+)
+def test_incompatible_column_type_refuses_reconciliation_atomically(
+    database: EphemeralPostgres,
+    column: str,
+    incompatible_type: str,
+) -> None:
+    conn = _connect(database)
+    try:
+        definitions = ", ".join(
+            f"{name} {incompatible_type if name == column else kind}"
+            + (" DEFAULT 0" if kind == "bigint" else "")
+            for name, kind, _ in EXPECTED_COLUMNS
+        )
+        with conn.cursor() as cur:
+            cur.execute(f"CREATE TABLE {TABLE} ({definitions})")
+            cur.execute(_INSERT_STARTED, _start_row("run-1", "attempt-1"))
+            cur.execute("SELECT * FROM omninode_internal.transcript_mirror_runs")
+            original = cur.fetchall()
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE
+        )
+        assert result.returncode != 0
+        assert f"incompatible column {column}; expected" in result.stderr
+        assert _snapshot(conn) == before
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM omninode_internal.transcript_mirror_runs")
+            assert cur.fetchall() == original
+    finally:
+        conn.close()
