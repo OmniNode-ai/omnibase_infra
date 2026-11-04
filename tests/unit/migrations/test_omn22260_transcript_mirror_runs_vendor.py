@@ -26,7 +26,7 @@ _VENDOR = _FORWARD / "nodes" / _NODE
 _CREATE = "0000_create_transcript_mirror_runs.sql"
 _GRANT = "0001_grant_omninode_runtime_transcript_mirror_runs.sql"
 _SHA256 = {
-    _CREATE: "5e6fa1c1087122706543b053e93385e7c3054e8db25bf46b9979f6426de8b357",
+    _CREATE: "83146be4441fd04498a0ef40235705eb4bd63569906cc171eec833662867bfc2",
     _GRANT: "a2252fd70e10dbe920392dafa8c16ef2e95e94e9a575e84fa980331404339414",
 }
 _COUNT_COLUMNS = (
@@ -86,11 +86,12 @@ def test_vendor_bytes_and_manifest_binding_are_exact(filename: str) -> None:
 
 
 @pytest.mark.parametrize("filename", [_CREATE, _GRANT])
-def test_both_migrations_are_declared_expand_only(filename: str) -> None:
+def test_migrations_have_their_required_rollback_classes(filename: str) -> None:
     classes = yaml.safe_load(
         (_ROOT / "config" / "migration_classes.yaml").read_text(encoding="utf-8")
     )["migrations"]
-    assert classes[f"forward/nodes/{_NODE}/{filename}"] == "expand-only"
+    expected = "forward-only" if filename == _CREATE else "expand-only"
+    assert classes[f"forward/nodes/{_NODE}/{filename}"] == expected
 
 
 def test_creates_exactly_one_table_keyed_by_run_and_attempt() -> None:

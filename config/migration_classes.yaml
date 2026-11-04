@@ -458,7 +458,7 @@ migrations:
   forward/nodes/node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql: expand-only
   forward/nodes/node_projection_traces/0001_create_traces.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT TRACES_PKEY; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_TRACES_EVENT_COUNT; A
   forward/nodes/node_projection_traces/0002_grant_omninode_runtime_traces.sql: expand-only
-  forward/nodes/node_projection_transcript_mirror_run/0000_create_transcript_mirror_runs.sql: expand-only # CREATE TABLE IF NOT EXISTS, nullable or defaulted ADD COLUMN IF NOT EXISTS and CREATE INDEX IF NOT EXISTS (additive)
+  forward/nodes/node_projection_transcript_mirror_run/0000_create_transcript_mirror_runs.sql: forward-only # NOT NULL, default, primary-key and CHECK reconciliation on a pre-existing table
   forward/nodes/node_projection_transcript_mirror_run/0001_grant_omninode_runtime_transcript_mirror_runs.sql: expand-only # guarded GRANT to the runtime writer (additive)
   forward/nodes/node_projection_usage_by_model_day/0000_create_usage_by_model_day.sql: forward-only # UNIQUE INDEX on an existing table (public.usage_by_model_day)
   forward/nodes/node_projection_usage_by_model_day/0001_grant_usage_by_model_day.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP

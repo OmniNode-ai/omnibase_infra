@@ -29,6 +29,7 @@ from pathlib import Path
 import psycopg2
 import psycopg2.errors
 import psycopg2.extensions
+import psycopg2.sql
 import pytest
 
 from tests.integration.migrations.conftest import EphemeralPostgres
@@ -260,13 +261,19 @@ def test_a_table_that_exists_with_only_its_key_converges(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT column_name, data_type FROM information_schema.columns "
+                "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
                 "WHERE table_schema = 'omninode_internal' "
                 "AND table_name = 'transcript_mirror_runs' ORDER BY ordinal_position"
             )
-            assert cur.fetchall() == [
-                (name, kind) for name, kind, _ in EXPECTED_COLUMNS
-            ]
+            assert cur.fetchall() == EXPECTED_COLUMNS
+        reconciled = _snapshot(conn)
+        _apply(database, CREATE, GRANT)
+        assert _snapshot(conn) == reconciled
+        with conn.cursor() as cur:
+            cur.execute(f"DROP TABLE {TABLE}")
+        conn.commit()
+        _apply(database, CREATE, GRANT)
+        assert _snapshot(conn) == reconciled
     finally:
         conn.close()
 
@@ -320,7 +327,19 @@ def test_schema_diff_is_one_table_and_dropping_it_leaves_nothing_behind(
         conn.close()
 
 
-def test_checks_and_key_refuse_malformed_rows(database: EphemeralPostgres) -> None:
+@pytest.mark.parametrize("pre_existing", [False, True])
+def test_checks_and_key_refuse_malformed_rows(
+    database: EphemeralPostgres, pre_existing: bool
+) -> None:
+    if pre_existing:
+        created = database.psql(
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"CREATE TABLE {TABLE} (run_id TEXT, attempt_id TEXT)",
+            dbname=DATABASE,
+        )
+        assert created.returncode == 0, created.stderr
     _apply(database, CREATE, GRANT)
     conn = _connect(database)
     try:
@@ -333,6 +352,31 @@ def test_checks_and_key_refuse_malformed_rows(database: EphemeralPostgres) -> No
             for statement, params in (
                 (_INSERT_STARTED, _start_row("run-1", "attempt-1")),  # duplicate key
                 (_INSERT_STARTED, _start_row("", "attempt-1")),  # empty run id
+                (_INSERT_STARTED, (None, "attempt-1")),
+                (_INSERT_STARTED, ("run-1", None)),
+                (
+                    "UPDATE omninode_internal.transcript_mirror_runs SET state = NULL",
+                    (),
+                ),
+                (
+                    "UPDATE omninode_internal.transcript_mirror_runs SET started_at = NULL",
+                    (),
+                ),
+                *(
+                    (
+                        psycopg2.sql.SQL("UPDATE {} SET {} = %s").format(
+                            psycopg2.sql.Identifier(
+                                "omninode_internal", "transcript_mirror_runs"
+                            ),
+                            psycopg2.sql.Identifier(name),
+                        ),
+                        (value,),
+                    )
+                    for name, _, nullable in EXPECTED_COLUMNS
+                    if nullable == "NO"
+                    and name not in {"run_id", "attempt_id", "state", "started_at"}
+                    for value in (None, -1)
+                ),
                 (_INSERT_STARTED, _start_row("run-1", "")),  # empty attempt id
                 (
                     "INSERT INTO omninode_internal.transcript_mirror_runs "
@@ -438,5 +482,78 @@ def test_the_writer_principal_is_the_runtime_role_and_no_other(
                     with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                         cur.execute(statement)
                 conn.rollback()
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("invalid", ["null-state", "negative-count", "duplicate-key"])
+def test_invalid_existing_rows_refuse_reconciliation_atomically(
+    database: EphemeralPostgres, invalid: str
+) -> None:
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"CREATE TABLE {TABLE} (run_id TEXT, attempt_id TEXT, state TEXT, "
+                "started_at TIMESTAMPTZ, stored BIGINT)"
+            )
+            cur.execute(
+                "INSERT INTO omninode_internal.transcript_mirror_runs VALUES ('run-1', 'attempt-1', %s, now(), %s)",
+                (
+                    None if invalid == "null-state" else "started",
+                    -1 if invalid == "negative-count" else 0,
+                ),
+            )
+            if invalid == "duplicate-key":
+                cur.execute(
+                    "INSERT INTO omninode_internal.transcript_mirror_runs SELECT * FROM omninode_internal.transcript_mirror_runs"
+                )
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE
+        )
+        assert result.returncode != 0
+        assert _snapshot(conn) == before
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM omninode_internal.transcript_mirror_runs")
+            assert cur.fetchone() == ((2 if invalid == "duplicate-key" else 1),)
+    finally:
+        conn.close()
+
+
+def test_reconciliation_preserves_existing_valid_rows(
+    database: EphemeralPostgres,
+) -> None:
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"CREATE TABLE {TABLE} (run_id TEXT, attempt_id TEXT, state TEXT, "
+                "started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ, "
+                "files_seen BIGINT, stored BIGINT)"
+            )
+            cur.execute(
+                "INSERT INTO omninode_internal.transcript_mirror_runs VALUES ('run-1', 'attempt-1', 'completed', "
+                "'2026-11-03T12:00:00Z', '2026-11-03T12:00:01Z', 3, 2)"
+            )
+            cur.execute("SELECT * FROM omninode_internal.transcript_mirror_runs")
+            original = cur.fetchall()
+        conn.commit()
+        _apply(database, CREATE, GRANT)
+        reconciled = _snapshot(conn)
+        _apply(database, CREATE, GRANT)
+        assert _snapshot(conn) == reconciled
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT run_id, attempt_id, state, started_at, finished_at, "
+                "files_seen, stored FROM omninode_internal.transcript_mirror_runs"
+            )
+            assert cur.fetchall() == original
+            cur.execute(
+                "SELECT would_store, unchanged, destination_ahead, refused_stale, "
+                "refused_conflict, source_unreadable, bytes_put FROM omninode_internal.transcript_mirror_runs"
+            )
+            assert cur.fetchall() == [(0, 0, 0, 0, 0, 0, 0)]
     finally:
         conn.close()

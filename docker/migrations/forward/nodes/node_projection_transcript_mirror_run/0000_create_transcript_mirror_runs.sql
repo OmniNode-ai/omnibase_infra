@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS omninode_internal.transcript_mirror_runs (
 );
 
 -- Reconcile a compatible pre-existing transcript_mirror_runs to the declared shape.
+-- Existing required values are never inferred: incompatible rows abort this
+-- transaction rather than leaving a nullable or unconstrained projection.
 ALTER TABLE omninode_internal.transcript_mirror_runs
     ADD COLUMN IF NOT EXISTS run_id TEXT;
 ALTER TABLE omninode_internal.transcript_mirror_runs
@@ -85,6 +87,102 @@ ALTER TABLE omninode_internal.transcript_mirror_runs
     ADD COLUMN IF NOT EXISTS source_unreadable BIGINT DEFAULT 0;
 ALTER TABLE omninode_internal.transcript_mirror_runs
     ADD COLUMN IF NOT EXISTS bytes_put BIGINT DEFAULT 0;
+
+-- ADD COLUMN IF NOT EXISTS does not repair constraints or defaults on columns
+-- that already exist. Apply the same requirements on both creation paths.
+ALTER TABLE omninode_internal.transcript_mirror_runs
+    ALTER COLUMN run_id SET NOT NULL,
+    ALTER COLUMN attempt_id SET NOT NULL,
+    ALTER COLUMN state SET NOT NULL,
+    ALTER COLUMN started_at SET NOT NULL,
+    ALTER COLUMN files_seen SET DEFAULT 0,
+    ALTER COLUMN files_seen SET NOT NULL,
+    ALTER COLUMN stored SET DEFAULT 0,
+    ALTER COLUMN stored SET NOT NULL,
+    ALTER COLUMN would_store SET DEFAULT 0,
+    ALTER COLUMN would_store SET NOT NULL,
+    ALTER COLUMN unchanged SET DEFAULT 0,
+    ALTER COLUMN unchanged SET NOT NULL,
+    ALTER COLUMN destination_ahead SET DEFAULT 0,
+    ALTER COLUMN destination_ahead SET NOT NULL,
+    ALTER COLUMN refused_stale SET DEFAULT 0,
+    ALTER COLUMN refused_stale SET NOT NULL,
+    ALTER COLUMN refused_conflict SET DEFAULT 0,
+    ALTER COLUMN refused_conflict SET NOT NULL,
+    ALTER COLUMN source_unreadable SET DEFAULT 0,
+    ALTER COLUMN source_unreadable SET NOT NULL,
+    ALTER COLUMN bytes_put SET DEFAULT 0,
+    ALTER COLUMN bytes_put SET NOT NULL;
+
+DO $reconcile$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+          AND contype = 'p'
+          AND conkey = ARRAY[
+              (SELECT attnum FROM pg_catalog.pg_attribute
+               WHERE attrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+                 AND attname = 'run_id'),
+              (SELECT attnum FROM pg_catalog.pg_attribute
+               WHERE attrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+                 AND attname = 'attempt_id')
+          ]::smallint[]
+    ) THEN
+        ALTER TABLE omninode_internal.transcript_mirror_runs
+            ADD CONSTRAINT pk_transcript_mirror_runs PRIMARY KEY (run_id, attempt_id);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+          AND conname = 'ck_transcript_mirror_runs_ids_non_empty'
+    ) THEN
+        ALTER TABLE omninode_internal.transcript_mirror_runs
+            ADD CONSTRAINT ck_transcript_mirror_runs_ids_non_empty
+            CHECK (run_id <> '' AND attempt_id <> '');
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+          AND conname = 'ck_transcript_mirror_runs_state'
+    ) THEN
+        ALTER TABLE omninode_internal.transcript_mirror_runs
+            ADD CONSTRAINT ck_transcript_mirror_runs_state
+            CHECK (state IN ('started', 'completed', 'dry-run-completed', 'failed'));
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+          AND conname = 'ck_transcript_mirror_runs_finish_follows_state'
+    ) THEN
+        ALTER TABLE omninode_internal.transcript_mirror_runs
+            ADD CONSTRAINT ck_transcript_mirror_runs_finish_follows_state
+            CHECK ((state = 'started') = (finished_at IS NULL));
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+          AND conname = 'ck_transcript_mirror_runs_counts_non_negative'
+    ) THEN
+        ALTER TABLE omninode_internal.transcript_mirror_runs
+            ADD CONSTRAINT ck_transcript_mirror_runs_counts_non_negative
+            CHECK (files_seen >= 0 AND stored >= 0 AND would_store >= 0 AND unchanged >= 0
+                AND destination_ahead >= 0 AND refused_stale >= 0 AND refused_conflict >= 0
+                AND source_unreadable >= 0 AND bytes_put >= 0);
+    END IF;
+
+    -- Validate previously declared NOT VALID constraints against existing rows too.
+    ALTER TABLE omninode_internal.transcript_mirror_runs
+        VALIDATE CONSTRAINT ck_transcript_mirror_runs_ids_non_empty;
+    ALTER TABLE omninode_internal.transcript_mirror_runs
+        VALIDATE CONSTRAINT ck_transcript_mirror_runs_state;
+    ALTER TABLE omninode_internal.transcript_mirror_runs
+        VALIDATE CONSTRAINT ck_transcript_mirror_runs_finish_follows_state;
+    ALTER TABLE omninode_internal.transcript_mirror_runs
+        VALIDATE CONSTRAINT ck_transcript_mirror_runs_counts_non_negative;
+END;
+$reconcile$;
 
 CREATE INDEX IF NOT EXISTS idx_transcript_mirror_runs_started_at
     ON omninode_internal.transcript_mirror_runs (started_at DESC);
