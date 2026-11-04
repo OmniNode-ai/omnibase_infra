@@ -1,11 +1,11 @@
-TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 88 and seed -8910592708521006774 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /tmp/rsf_w/RuntimeStartFirst.tla
-Parsing file /tmp/tlc-1727230127266285312/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-1727230127266285312/Integers.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-1727230127266285312/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-1727230127266285312/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-1727230127266285312/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 54 and seed -3498941022115346916 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 36423] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmpbdzdnk7i/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11444704946802323163/Naturals.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11444704946802323163/Integers.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11444704946802323163/FiniteSets.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11444704946802323163/TLC.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11444704946802323163/Sequences.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -13,9 +13,9 @@ Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module RuntimeStartFirst
 Linting of module RuntimeStartFirst
-Starting... (2026-11-03 18:50:09)
+Starting... (2026-11-04 02:10:26)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-03 18:50:09.
+Finished computing initial states: 1 distinct state generated at 2026-11-04 02:10:26.
 Error: Invariant NotHolding is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -189,6 +189,6 @@ State 3: <RevAsk(1) line 353, col 5 to line 359, col 75 of module RuntimeStartFi
 /\ legEp = 0
 /\ effects = (0 :> 0)
 
-109 states generated, 80 distinct states found, 38 states left on queue.
+105 states generated, 76 distinct states found, 32 states left on queue.
 The depth of the complete state graph search is 8.
-Finished in 01s at (2026-11-03 18:50:09)
+Finished in 00s at (2026-11-04 02:10:26)

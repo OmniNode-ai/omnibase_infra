@@ -1,11 +1,11 @@
-TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 106 and seed -5511953741256642011 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /tmp/rsf_w/RuntimeStartFirst.tla
-Parsing file /tmp/tlc-16656463815113620226/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-16656463815113620226/Integers.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-16656463815113620226/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-16656463815113620226/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-16656463815113620226/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 78 and seed 8263230910648565957 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 36608] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmpsqv_6lhh/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16080125485062077579/Naturals.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16080125485062077579/Integers.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16080125485062077579/FiniteSets.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16080125485062077579/TLC.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-16080125485062077579/Sequences.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -13,9 +13,9 @@ Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module RuntimeStartFirst
 Linting of module RuntimeStartFirst
-Starting... (2026-11-03 18:50:10)
+Starting... (2026-11-04 02:10:32)
 Computing initial states...
-Finished computing initial states: 2 distinct states generated at 2026-11-03 18:50:11.
+Finished computing initial states: 2 distinct states generated at 2026-11-04 02:10:33.
 Error: Invariant NotRolledBack is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -214,13 +214,13 @@ State 4: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ legEp = 0
 /\ effects = (0 :> 0 @@ 1 :> 0)
 
-State 5: <Exit(0) line 255, col 5 to line 258, col 75 of module RuntimeStartFirst>
+State 5: <IRollback line 483, col 5 to line 488, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
-        proc |-> "exited",
+        proc |-> "stopping",
         ready |-> FALSE,
-        role |-> "passive",
+        role |-> "active",
         lst |-> "detached",
         conf |-> FALSE,
         stop |-> TRUE,
@@ -229,12 +229,12 @@ State 5: <Exit(0) line 255, col 5 to line 258, col 75 of module RuntimeStartFirs
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 0,
-        proc |-> "up",
-        ready |-> TRUE,
+        proc |-> "stopping",
+        ready |-> FALSE,
         role |-> "passive",
         lst |-> "detached",
         conf |-> FALSE,
-        stop |-> FALSE,
+        stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
         infl |-> FALSE ] )
@@ -256,14 +256,14 @@ State 5: <Exit(0) line 255, col 5 to line 258, col 75 of module RuntimeStartFirs
 /\ tAt = 0
 /\ grantTo = 0
 /\ agent = "up"
-/\ ip = "stopl"
+/\ ip = "rb1"
 /\ nCrash = 0
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
 /\ effects = (0 :> 0 @@ 1 :> 0)
 
-State 6: <IRollback line 483, col 5 to line 488, col 75 of module RuntimeStartFirst>
+State 6: <Exit(0) line 255, col 5 to line 258, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -312,7 +312,7 @@ State 6: <IRollback line 483, col 5 to line 488, col 75 of module RuntimeStartFi
 /\ legEp = 0
 /\ effects = (0 :> 0 @@ 1 :> 0)
 
-State 7: <Crash(1) line 234, col 5 to line 244, col 54 of module RuntimeStartFirst>
+State 7: <Exit(1) line 255, col 5 to line 258, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -332,7 +332,7 @@ State 7: <Crash(1) line 234, col 5 to line 244, col 54 of module RuntimeStartFir
         role |-> "passive",
         lst |-> "detached",
         conf |-> FALSE,
-        stop |-> FALSE,
+        stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
         infl |-> FALSE ] )
@@ -355,7 +355,7 @@ State 7: <Crash(1) line 234, col 5 to line 244, col 54 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "rb1"
-/\ nCrash = 1
+/\ nCrash = 0
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
@@ -381,7 +381,7 @@ State 8: <IRb2 line 493, col 5 to line 504, col 55 of module RuntimeStartFirst>
         role |-> "passive",
         lst |-> "detached",
         conf |-> FALSE,
-        stop |-> FALSE,
+        stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
         infl |-> FALSE ] )
@@ -404,7 +404,7 @@ State 8: <IRb2 line 493, col 5 to line 504, col 55 of module RuntimeStartFirst>
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "rb3"
-/\ nCrash = 1
+/\ nCrash = 0
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 1
@@ -430,7 +430,7 @@ State 9: <IRb3 line 507, col 5 to line 512, col 75 of module RuntimeStartFirst>
         role |-> "passive",
         lst |-> "detached",
         conf |-> FALSE,
-        stop |-> FALSE,
+        stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
         infl |-> FALSE ] )
@@ -453,7 +453,7 @@ State 9: <IRb3 line 507, col 5 to line 512, col 75 of module RuntimeStartFirst>
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "rb4"
-/\ nCrash = 1
+/\ nCrash = 0
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 1
@@ -479,7 +479,7 @@ State 10: <Boot(0) line 179, col 5 to line 182, col 75 of module RuntimeStartFir
         role |-> "passive",
         lst |-> "detached",
         conf |-> FALSE,
-        stop |-> FALSE,
+        stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
         infl |-> FALSE ] )
@@ -502,7 +502,7 @@ State 10: <Boot(0) line 179, col 5 to line 182, col 75 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "rb4"
-/\ nCrash = 1
+/\ nCrash = 0
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 1
@@ -528,7 +528,7 @@ State 11: <LegacyServe(0) line 291, col 5 to line 294, col 75 of module RuntimeS
         role |-> "passive",
         lst |-> "detached",
         conf |-> FALSE,
-        stop |-> FALSE,
+        stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
         infl |-> FALSE ] )
@@ -551,7 +551,7 @@ State 11: <LegacyServe(0) line 291, col 5 to line 294, col 75 of module RuntimeS
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "rb4"
-/\ nCrash = 1
+/\ nCrash = 0
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 1
@@ -577,7 +577,7 @@ State 12: <IRbDone line 515, col 5 to line 518, col 75 of module RuntimeStartFir
         role |-> "passive",
         lst |-> "detached",
         conf |-> FALSE,
-        stop |-> FALSE,
+        stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
         infl |-> FALSE ] )
@@ -600,12 +600,12 @@ State 12: <IRbDone line 515, col 5 to line 518, col 75 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "rolledback"
-/\ nCrash = 1
+/\ nCrash = 0
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 1
 /\ effects = (0 :> 0 @@ 1 :> 0)
 
-14565 states generated, 6392 distinct states found, 2028 states left on queue.
+15242 states generated, 6636 distinct states found, 2050 states left on queue.
 The depth of the complete state graph search is 13.
-Finished in 02s at (2026-11-03 18:50:12)
+Finished in 01s at (2026-11-04 02:10:33)

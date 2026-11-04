@@ -59,7 +59,7 @@ CONSTANTS
     WMax, RB, RF,   \* install window, rollback and roll-forward bounds, in ticks
     W, G,           \* systemd watchdog timeout and agent restart time, in ticks
     WBound,         \* the bound WindowBounded claims
-    ClockMax,       \* time stops here; larger than WBound so a breach is reachable
+    ClockMax,       \* time stops here; must reach WBound + 1 (Tick increments by 1)
     MUT
 
 Offsets == 0..LogLen - 1
@@ -623,5 +623,9 @@ NotRolledBack == ip /= "rolledback"
 NotRolledForward == ip /= "rf2"
 NotFailed == ip /= "failed"
 NotTwoAgentFaults == nAg < 2
+\* Two crashes in the same record's effect-to-commit gap permit two replays.
+NotRepeatedX2 == ~(nCrash = 2 /\ \E o \in Offsets : x2[o] = 2 /\ effects[o] = 3)
+\* With the watchdog removed, the window clock can reach its full horizon.
+NotClockHorizon == now < ClockMax
 
 =============================================================================

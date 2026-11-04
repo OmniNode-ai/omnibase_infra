@@ -1,11 +1,11 @@
-TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 91 and seed 7588953272091857790 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /tmp/rsf_w/RuntimeStartFirst.tla
-Parsing file /tmp/tlc-8183107245387144867/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-8183107245387144867/Integers.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-8183107245387144867/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-8183107245387144867/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-8183107245387144867/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 115 and seed 2450466664602663955 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 35740] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmp48fbqv9b/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11533483240111093854/Naturals.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11533483240111093854/Integers.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11533483240111093854/FiniteSets.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11533483240111093854/TLC.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-11533483240111093854/Sequences.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -13,9 +13,9 @@ Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module RuntimeStartFirst
 Linting of module RuntimeStartFirst
-Starting... (2026-11-03 18:50:05)
+Starting... (2026-11-04 02:10:19)
 Computing initial states...
-Finished computing initial states: 2 distinct states generated at 2026-11-03 18:50:05.
+Finished computing initial states: 2 distinct states generated at 2026-11-04 02:10:19.
 Error: Invariant WindowBounded is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -29,7 +29,7 @@ State 1: <Initial predicate>
         conf |-> TRUE,
         stop |-> FALSE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 0,
@@ -47,7 +47,7 @@ State 1: <Initial predicate>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -62,24 +62,24 @@ State 1: <Initial predicate>
 /\ agent = "up"
 /\ ip = "pre"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst>
+State 2: <Process(0) line 186, col 5 to line 191, col 66 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
-        proc |-> "stopping",
-        ready |-> FALSE,
+        proc |-> "up",
+        ready |-> TRUE,
         role |-> "active",
-        lst |-> "detached",
-        conf |-> FALSE,
-        stop |-> TRUE,
+        lst |-> "attached",
+        conf |-> TRUE,
+        stop |-> FALSE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -96,7 +96,56 @@ State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 0,
+  inst |-> 0,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 0
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ Lopen = FALSE
+/\ legEp = 0
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+
+State 3: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst>
+/\ cur = 0
+/\ S = ( 0 :>
+      [ ep |-> 0,
+        proc |-> "stopping",
+        ready |-> FALSE,
+        role |-> "active",
+        lst |-> "detached",
+        conf |-> FALSE,
+        stop |-> TRUE,
+        rev |-> FALSE,
+        pos |-> 0,
+        infl |-> TRUE ] @@
+  1 :>
+      [ ep |-> 0,
+        proc |-> "up",
+        ready |-> TRUE,
+        role |-> "passive",
+        lst |-> "detached",
+        conf |-> FALSE,
+        stop |-> FALSE,
+        rev |-> FALSE,
+        pos |-> 0,
+        infl |-> FALSE ] )
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "idle"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -111,12 +160,12 @@ State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst
 /\ agent = "up"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 3: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 4: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -127,8 +176,8 @@ State 3: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -145,7 +194,7 @@ State 3: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -160,59 +209,10 @@ State 3: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ agent = "up"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
-
-State 4: <AgentFault line 156, col 5 to line 161, col 75 of module RuntimeStartFirst>
-/\ cur = 0
-/\ S = ( 0 :>
-      [ ep |-> 0,
-        proc |-> "stopping",
-        ready |-> FALSE,
-        role |-> "active",
-        lst |-> "detached",
-        conf |-> FALSE,
-        stop |-> TRUE,
-        rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
-  1 :>
-      [ ep |-> 0,
-        proc |-> "up",
-        ready |-> TRUE,
-        role |-> "passive",
-        lst |-> "detached",
-        conf |-> FALSE,
-        stop |-> FALSE,
-        rev |-> FALSE,
-        pos |-> 0,
-        infl |-> FALSE ] )
-/\ handover = FALSE
-/\ now = 1
-/\ pc = "idle"
-/\ faulted = FALSE
-/\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
-  1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
-  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
-/\ rec = [ ep |-> 0,
-  inst |-> 0,
-  src |-> 0,
-  srcg |-> 0,
-  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
-/\ rd = 0
-/\ nAg = 1
-/\ tAt = 1
-/\ grantTo = 0
-/\ agent = "hung"
-/\ ip = "stopl"
-/\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
-/\ Lopen = FALSE
-/\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
 State 5: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
@@ -225,8 +225,8 @@ State 5: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -243,7 +243,7 @@ State 5: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -252,18 +252,18 @@ State 5: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
   srcg |-> 0,
   snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
-/\ nAg = 1
-/\ tAt = 1
+/\ nAg = 0
+/\ tAt = 0
 /\ grantTo = 0
-/\ agent = "hung"
+/\ agent = "up"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 6: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 6: <AgentFault line 156, col 5 to line 161, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -274,8 +274,57 @@ State 6: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
+  1 :>
+      [ ep |-> 0,
+        proc |-> "up",
+        ready |-> TRUE,
+        role |-> "passive",
+        lst |-> "detached",
+        conf |-> FALSE,
+        stop |-> FALSE,
+        rev |-> FALSE,
+        pos |-> 0,
+        infl |-> FALSE ] )
+/\ handover = FALSE
+/\ now = 2
+/\ pc = "idle"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 0,
+  inst |-> 0,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 0
+/\ nAg = 1
+/\ tAt = 2
+/\ grantTo = 0
+/\ agent = "hung"
+/\ ip = "stopl"
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ Lopen = FALSE
+/\ legEp = 0
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+
+State 7: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+/\ cur = 0
+/\ S = ( 0 :>
+      [ ep |-> 0,
+        proc |-> "stopping",
+        ready |-> FALSE,
+        role |-> "active",
+        lst |-> "detached",
+        conf |-> FALSE,
+        stop |-> TRUE,
+        rev |-> FALSE,
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -292,7 +341,7 @@ State 6: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -302,17 +351,17 @@ State 6: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
   snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 1
-/\ tAt = 1
+/\ tAt = 2
 /\ grantTo = 0
 /\ agent = "hung"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 7: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 8: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -323,8 +372,8 @@ State 7: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -341,7 +390,7 @@ State 7: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -351,17 +400,17 @@ State 7: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
   snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 1
-/\ tAt = 1
+/\ tAt = 2
 /\ grantTo = 0
 /\ agent = "hung"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 8: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 9: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -372,8 +421,8 @@ State 8: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -390,7 +439,7 @@ State 8: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -400,17 +449,17 @@ State 8: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
   snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 1
-/\ tAt = 1
+/\ tAt = 2
 /\ grantTo = 0
 /\ agent = "hung"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 9: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 10: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -421,8 +470,8 @@ State 9: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -439,7 +488,7 @@ State 9: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -449,17 +498,17 @@ State 9: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
   snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 1
-/\ tAt = 1
+/\ tAt = 2
 /\ grantTo = 0
 /\ agent = "hung"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 10: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 11: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -470,8 +519,8 @@ State 10: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -488,7 +537,7 @@ State 10: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -498,17 +547,17 @@ State 10: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
   snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 1
-/\ tAt = 1
+/\ tAt = 2
 /\ grantTo = 0
 /\ agent = "hung"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 11: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 12: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -519,8 +568,8 @@ State 11: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -537,7 +586,7 @@ State 11: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -547,17 +596,17 @@ State 11: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
   snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 1
-/\ tAt = 1
+/\ tAt = 2
 /\ grantTo = 0
 /\ agent = "hung"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 12: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 13: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -568,8 +617,8 @@ State 12: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
-        infl |-> FALSE ] @@
+        pos |-> 0,
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -586,7 +635,7 @@ State 12: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -596,16 +645,16 @@ State 12: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
   snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 1
-/\ tAt = 1
+/\ tAt = 2
 /\ grantTo = 0
 /\ agent = "hung"
 /\ ip = "stopl"
 /\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-14884 states generated, 6406 distinct states found, 2141 states left on queue.
+22614 states generated, 9245 distinct states found, 3311 states left on queue.
 The depth of the complete state graph search is 13.
-Finished in 03s at (2026-11-03 18:50:07)
+Finished in 01s at (2026-11-04 02:10:20)

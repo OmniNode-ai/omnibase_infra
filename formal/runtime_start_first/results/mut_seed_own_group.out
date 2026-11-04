@@ -1,11 +1,11 @@
-TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 102 and seed 2766107229458446628 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /tmp/rsf_w/RuntimeStartFirst.tla
-Parsing file /tmp/tlc-17704034070042941119/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-17704034070042941119/Integers.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-17704034070042941119/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-17704034070042941119/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-17704034070042941119/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 41 and seed -3579678857947883690 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 36039] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmpsez4z1iu/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15202625364816688376/Naturals.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15202625364816688376/Integers.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15202625364816688376/FiniteSets.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15202625364816688376/TLC.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-15202625364816688376/Sequences.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -13,9 +13,9 @@ Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module RuntimeStartFirst
 Linting of module RuntimeStartFirst
-Starting... (2026-11-03 18:50:05)
+Starting... (2026-11-04 02:10:20)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-03 18:50:05.
+Finished computing initial states: 1 distinct state generated at 2026-11-04 02:10:20.
 Error: Invariant ReplayOnlyX2 is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -75,7 +75,7 @@ State 1: <Initial predicate>
 /\ legEp = 0
 /\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 2: <Process(1) line 186, col 5 to line 191, col 66 of module RuntimeStartFirst>
+State 2: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "up",
@@ -83,67 +83,10 @@ State 2: <Process(1) line 186, col 5 to line 191, col 66 of module RuntimeStartF
      role |-> "active",
      lst |-> "attached",
      conf |-> TRUE,
-     stop |-> FALSE,
-     rev |-> FALSE,
-     pos |-> 0,
-     infl |-> TRUE ],
-   [ ep |-> 0,
-     proc |-> "none",
-     ready |-> FALSE,
-     role |-> "passive",
-     lst |-> "detached",
-     conf |-> FALSE,
      stop |-> FALSE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
-   [ ep |-> 0,
-     proc |-> "none",
-     ready |-> FALSE,
-     role |-> "passive",
-     lst |-> "detached",
-     conf |-> FALSE,
-     stop |-> FALSE,
-     rev |-> FALSE,
-     pos |-> 0,
-     infl |-> FALSE ] >>
-/\ handover = FALSE
-/\ now = 0
-/\ pc = "idle"
-/\ faulted = FALSE
-/\ nRev = 0
-/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
-  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
-  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
-/\ rec = [ ep |-> 1,
-  inst |-> 1,
-  src |-> 0,
-  srcg |-> 0,
-  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
-/\ rd = 0
-/\ nAg = 0
-/\ tAt = 0
-/\ grantTo = 0
-/\ agent = "up"
-/\ ip = "pre"
-/\ nCrash = 0
-/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ Lopen = TRUE
-/\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-
-State 3: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFirst>
-/\ cur = 1
-/\ S = << [ ep |-> 1,
-     proc |-> "up",
-     ready |-> TRUE,
-     role |-> "active",
-     lst |-> "attached",
-     conf |-> TRUE,
-     stop |-> FALSE,
-     rev |-> FALSE,
-     pos |-> 0,
-     infl |-> TRUE ],
    [ ep |-> 0,
      proc |-> "up",
      ready |-> FALSE,
@@ -187,9 +130,9 @@ State 3: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFirs
 /\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 4: <Boot(2) line 179, col 5 to line 182, col 75 of module RuntimeStartFirst>
+State 3: <Boot(2) line 179, col 5 to line 182, col 75 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "up",
@@ -200,7 +143,7 @@ State 4: <Boot(2) line 179, col 5 to line 182, col 75 of module RuntimeStartFirs
      stop |-> FALSE,
      rev |-> FALSE,
      pos |-> 0,
-     infl |-> TRUE ],
+     infl |-> FALSE ],
    [ ep |-> 0,
      proc |-> "up",
      ready |-> TRUE,
@@ -244,9 +187,9 @@ State 4: <Boot(2) line 179, col 5 to line 182, col 75 of module RuntimeStartFirs
 /\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 5: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirst>
+State 4: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "up",
@@ -257,7 +200,7 @@ State 5: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirst
      stop |-> FALSE,
      rev |-> FALSE,
      pos |-> 0,
-     infl |-> TRUE ],
+     infl |-> FALSE ],
    [ ep |-> 0,
      proc |-> "up",
      ready |-> TRUE,
@@ -301,9 +244,9 @@ State 5: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirst
 /\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 6: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFirst>
+State 5: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "up",
@@ -314,7 +257,7 @@ State 6: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFirs
      stop |-> FALSE,
      rev |-> FALSE,
      pos |-> 0,
-     infl |-> TRUE ],
+     infl |-> FALSE ],
    [ ep |-> 0,
      proc |-> "up",
      ready |-> TRUE,
@@ -358,9 +301,9 @@ State 6: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFirs
 /\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 7: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst>
+State 6: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "stopping",
@@ -371,7 +314,7 @@ State 7: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst>
      stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
-     infl |-> TRUE ],
+     infl |-> FALSE ],
    [ ep |-> 0,
      proc |-> "up",
      ready |-> TRUE,
@@ -415,9 +358,9 @@ State 7: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst>
 /\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 8: <Crash(1) line 234, col 5 to line 244, col 54 of module RuntimeStartFirst>
+State 7: <Exit(1) line 255, col 5 to line 258, col 75 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "exited",
@@ -425,7 +368,7 @@ State 8: <Crash(1) line 234, col 5 to line 244, col 54 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -468,13 +411,13 @@ State 8: <Crash(1) line 234, col 5 to line 244, col 54 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 9: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst>
+State 8: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "exited",
@@ -482,7 +425,7 @@ State 9: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst>
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -525,13 +468,13 @@ State 9: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst>
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 10: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFirst>
+State 9: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -539,7 +482,7 @@ State 10: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -582,13 +525,13 @@ State 10: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 11: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFirst>
+State 10: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -596,7 +539,7 @@ State 11: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -639,13 +582,13 @@ State 11: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 12: <Activate(2) line 221, col 5 to line 229, col 67 of module RuntimeStartFirst>
+State 11: <Activate(2) line 221, col 5 to line 229, col 67 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -653,7 +596,7 @@ State 12: <Activate(2) line 221, col 5 to line 229, col 67 of module RuntimeStar
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -696,13 +639,13 @@ State 12: <Activate(2) line 221, col 5 to line 229, col 67 of module RuntimeStar
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 13: <Process(2) line 186, col 5 to line 191, col 66 of module RuntimeStartFirst>
+State 12: <Process(2) line 186, col 5 to line 191, col 66 of module RuntimeStartFirst>
 /\ cur = 1
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -710,7 +653,7 @@ State 13: <Process(2) line 186, col 5 to line 191, col 66 of module RuntimeStart
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -753,11 +696,68 @@ State 13: <Process(2) line 186, col 5 to line 191, col 66 of module RuntimeStart
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+
+State 13: <CommitDone(2) line 194, col 5 to line 199, col 67 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> TRUE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 1,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_active"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> TRUE, off |-> 1, ep |-> 2] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
 State 14: <RActive line 444, col 5 to line 447, col 75 of module RuntimeStartFirst>
 /\ cur = 2
@@ -767,64 +767,7 @@ State 14: <RActive line 444, col 5 to line 447, col 75 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
-     rev |-> FALSE,
-     pos |-> 0,
-     infl |-> FALSE ],
-   [ ep |-> 2,
-     proc |-> "up",
-     ready |-> TRUE,
-     role |-> "active",
-     lst |-> "detached",
-     conf |-> FALSE,
-     stop |-> FALSE,
-     rev |-> FALSE,
-     pos |-> 0,
-     infl |-> TRUE ],
-   [ ep |-> 0,
-     proc |-> "none",
-     ready |-> FALSE,
-     role |-> "passive",
-     lst |-> "detached",
-     conf |-> FALSE,
-     stop |-> FALSE,
-     rev |-> FALSE,
-     pos |-> 0,
-     infl |-> FALSE ] >>
-/\ handover = FALSE
-/\ now = 0
-/\ pc = "idle"
-/\ faulted = FALSE
-/\ nRev = 0
-/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
-  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
-  2 :> [has |-> TRUE, off |-> 0, ep |-> 2] )
-/\ rec = [ ep |-> 2,
-  inst |-> 2,
-  src |-> 1,
-  srcg |-> 1,
-  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
-/\ rd = 1
-/\ nAg = 0
-/\ tAt = 0
-/\ grantTo = 0
-/\ agent = "up"
-/\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-/\ Lopen = TRUE
-/\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
-
-State 15: <CommitDone(2) line 194, col 5 to line 199, col 67 of module RuntimeStartFirst>
-/\ cur = 2
-/\ S = << [ ep |-> 1,
-     proc |-> "removed",
-     ready |-> FALSE,
-     role |-> "passive",
-     lst |-> "detached",
-     conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -867,13 +810,13 @@ State 15: <CommitDone(2) line 194, col 5 to line 199, col 67 of module RuntimeSt
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 16: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFirst>
+State 15: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -881,7 +824,7 @@ State 16: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -924,13 +867,13 @@ State 16: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 17: <Boot(3) line 179, col 5 to line 182, col 75 of module RuntimeStartFirst>
+State 16: <Boot(3) line 179, col 5 to line 182, col 75 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -938,7 +881,7 @@ State 17: <Boot(3) line 179, col 5 to line 182, col 75 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -981,13 +924,13 @@ State 17: <Boot(3) line 179, col 5 to line 182, col 75 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 18: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirst>
+State 17: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -995,7 +938,7 @@ State 18: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirs
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1038,13 +981,13 @@ State 18: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirs
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 19: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFirst>
+State 18: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -1052,7 +995,7 @@ State 19: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1095,13 +1038,13 @@ State 19: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 20: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst>
+State 19: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -1109,7 +1052,7 @@ State 20: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1152,13 +1095,13 @@ State 20: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 21: <Exit(2) line 255, col 5 to line 258, col 75 of module RuntimeStartFirst>
+State 20: <Exit(2) line 255, col 5 to line 258, col 75 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -1166,7 +1109,7 @@ State 21: <Exit(2) line 255, col 5 to line 258, col 75 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1209,13 +1152,13 @@ State 21: <Exit(2) line 255, col 5 to line 258, col 75 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 22: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst>
+State 21: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -1223,7 +1166,7 @@ State 22: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1266,13 +1209,13 @@ State 22: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 23: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFirst>
+State 22: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -1280,7 +1223,7 @@ State 23: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1323,13 +1266,13 @@ State 23: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 24: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFirst>
+State 23: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -1337,7 +1280,7 @@ State 24: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFir
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1380,13 +1323,13 @@ State 24: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFir
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 25: <Activate(3) line 221, col 5 to line 229, col 67 of module RuntimeStartFirst>
+State 24: <Activate(3) line 221, col 5 to line 229, col 67 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -1394,7 +1337,7 @@ State 25: <Activate(3) line 221, col 5 to line 229, col 67 of module RuntimeStar
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1437,13 +1380,13 @@ State 25: <Activate(3) line 221, col 5 to line 229, col 67 of module RuntimeStar
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 26: <Process(3) line 186, col 5 to line 191, col 66 of module RuntimeStartFirst>
+State 25: <Process(3) line 186, col 5 to line 191, col 66 of module RuntimeStartFirst>
 /\ cur = 2
 /\ S = << [ ep |-> 1,
      proc |-> "removed",
@@ -1451,7 +1394,7 @@ State 26: <Process(3) line 186, col 5 to line 191, col 66 of module RuntimeStart
      role |-> "passive",
      lst |-> "detached",
      conf |-> FALSE,
-     stop |-> FALSE,
+     stop |-> TRUE,
      rev |-> FALSE,
      pos |-> 0,
      infl |-> FALSE ],
@@ -1494,12 +1437,12 @@ State 26: <Process(3) line 186, col 5 to line 191, col 66 of module RuntimeStart
 /\ grantTo = 0
 /\ agent = "up"
 /\ ip = "pre"
-/\ nCrash = 1
-/\ x2 = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 3 @@ 1 :> 0 @@ 2 :> 0)
+/\ effects = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
 
-19557 states generated, 10667 distinct states found, 1215 states left on queue.
-The depth of the complete state graph search is 28.
-Finished in 03s at (2026-11-03 18:50:08)
+19079 states generated, 10389 distinct states found, 1221 states left on queue.
+The depth of the complete state graph search is 27.
+Finished in 01s at (2026-11-04 02:10:21)

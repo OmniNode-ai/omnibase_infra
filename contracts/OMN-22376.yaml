@@ -41,3 +41,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn22376-install-bounds-and-clock-witnesses
+    description: The install configurations cover three records and two runtime crashes with ClockMax 16; a repeated-X2 witness reaches two crashes and three effects on one record, the missing-watchdog mutant breaches WBound 8 at tick 9, and a separate witness reaches the clock horizon. These are bounded single-partition checks without a cutoff theorem or a multi-partition claim.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/formal/test_runtime_start_first_model.py::test_install_checks_repeated_crashes_and_clock_headroom -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2

@@ -1,11 +1,11 @@
-TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 71 and seed 3698585471742749199 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /tmp/rsf_w/RuntimeStartFirst.tla
-Parsing file /tmp/tlc-14006005834420008854/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-14006005834420008854/Integers.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-14006005834420008854/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-14006005834420008854/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-14006005834420008854/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 63 and seed -806835677186380297 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 36241] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmpfxmdg0_c/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-5513164965389821898/Naturals.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-5513164965389821898/Integers.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-5513164965389821898/FiniteSets.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-5513164965389821898/TLC.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-5513164965389821898/Sequences.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -13,9 +13,9 @@ Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module RuntimeStartFirst
 Linting of module RuntimeStartFirst
-Starting... (2026-11-03 18:50:06)
+Starting... (2026-11-04 02:10:24)
 Computing initial states...
-Finished computing initial states: 2 distinct states generated at 2026-11-03 18:50:07.
+Finished computing initial states: 2 distinct states generated at 2026-11-04 02:10:24.
 Error: Invariant NotFailed is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -67,7 +67,56 @@ State 1: <Initial predicate>
 /\ legEp = 0
 /\ effects = (0 :> 0 @@ 1 :> 0)
 
-State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst>
+State 2: <Process(0) line 186, col 5 to line 191, col 66 of module RuntimeStartFirst>
+/\ cur = 0
+/\ S = ( 0 :>
+      [ ep |-> 0,
+        proc |-> "up",
+        ready |-> TRUE,
+        role |-> "active",
+        lst |-> "attached",
+        conf |-> TRUE,
+        stop |-> FALSE,
+        rev |-> FALSE,
+        pos |-> 0,
+        infl |-> TRUE ] @@
+  1 :>
+      [ ep |-> 0,
+        proc |-> "up",
+        ready |-> TRUE,
+        role |-> "passive",
+        lst |-> "detached",
+        conf |-> FALSE,
+        stop |-> FALSE,
+        rev |-> FALSE,
+        pos |-> 0,
+        infl |-> FALSE ] )
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "idle"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 0,
+  inst |-> 0,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 0
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0 @@ 1 :> 0)
+/\ Lopen = FALSE
+/\ legEp = 0
+/\ effects = (0 :> 1 @@ 1 :> 0)
+
+State 3: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -79,7 +128,7 @@ State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst
         stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
-        infl |-> FALSE ] @@
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -114,9 +163,9 @@ State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 0 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0)
 
-State 3: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 4: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -128,7 +177,7 @@ State 3: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
-        infl |-> FALSE ] @@
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -163,9 +212,9 @@ State 3: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 0 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0)
 
-State 4: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 5: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -177,7 +226,7 @@ State 4: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
-        infl |-> FALSE ] @@
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "up",
@@ -212,9 +261,9 @@ State 4: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 0 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0)
 
-State 5: <IRollback line 483, col 5 to line 488, col 75 of module RuntimeStartFirst>
+State 6: <IRollback line 483, col 5 to line 488, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -226,7 +275,7 @@ State 5: <IRollback line 483, col 5 to line 488, col 75 of module RuntimeStartFi
         stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
-        infl |-> FALSE ] @@
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "stopping",
@@ -261,9 +310,9 @@ State 5: <IRollback line 483, col 5 to line 488, col 75 of module RuntimeStartFi
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 0 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0)
 
-State 6: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 7: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -275,7 +324,7 @@ State 6: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
-        infl |-> FALSE ] @@
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "stopping",
@@ -310,9 +359,9 @@ State 6: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 0 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0)
 
-State 7: <IRollForward line 522, col 5 to line 527, col 75 of module RuntimeStartFirst>
+State 8: <IRollForward line 522, col 5 to line 527, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -324,7 +373,7 @@ State 7: <IRollForward line 522, col 5 to line 527, col 75 of module RuntimeStar
         stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
-        infl |-> FALSE ] @@
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "stopping",
@@ -359,9 +408,9 @@ State 7: <IRollForward line 522, col 5 to line 527, col 75 of module RuntimeStar
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 0 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0)
 
-State 8: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
+State 9: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -373,7 +422,7 @@ State 8: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
         stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
-        infl |-> FALSE ] @@
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "stopping",
@@ -408,9 +457,9 @@ State 8: <Tick line 149, col 5 to line 153, col 75 of module RuntimeStartFirst>
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 0 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0)
 
-State 9: <IFail line 549, col 5 to line 552, col 75 of module RuntimeStartFirst>
+State 10: <IFail line 549, col 5 to line 552, col 75 of module RuntimeStartFirst>
 /\ cur = 0
 /\ S = ( 0 :>
       [ ep |-> 0,
@@ -422,7 +471,7 @@ State 9: <IFail line 549, col 5 to line 552, col 75 of module RuntimeStartFirst>
         stop |-> TRUE,
         rev |-> FALSE,
         pos |-> 0,
-        infl |-> FALSE ] @@
+        infl |-> TRUE ] @@
   1 :>
       [ ep |-> 0,
         proc |-> "stopping",
@@ -457,8 +506,8 @@ State 9: <IFail line 549, col 5 to line 552, col 75 of module RuntimeStartFirst>
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 0 @@ 1 :> 0)
+/\ effects = (0 :> 1 @@ 1 :> 0)
 
-4243 states generated, 1949 distinct states found, 787 states left on queue.
-The depth of the complete state graph search is 10.
-Finished in 02s at (2026-11-03 18:50:07)
+4476 states generated, 2050 distinct states found, 823 states left on queue.
+The depth of the complete state graph search is 11.
+Finished in 00s at (2026-11-04 02:10:25)

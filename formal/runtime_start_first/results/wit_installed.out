@@ -1,11 +1,11 @@
-TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 77 and seed -7017724601804994294 with 4 workers on 80 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
-Parsing file /tmp/rsf_w/RuntimeStartFirst.tla
-Parsing file /tmp/tlc-18246061532998699094/Naturals.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-18246061532998699094/Integers.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-18246061532998699094/FiniteSets.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-18246061532998699094/TLC.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-18246061532998699094/Sequences.tla (jar:file:/home/jonah/scratch/bringup-t0/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 84 and seed 5794362664445774546 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 36452] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmp9v40v9z7/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-17355624690962329120/Naturals.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-17355624690962329120/Integers.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-17355624690962329120/FiniteSets.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-17355624690962329120/TLC.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-17355624690962329120/Sequences.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -13,9 +13,9 @@ Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module RuntimeStartFirst
 Linting of module RuntimeStartFirst
-Starting... (2026-11-03 18:50:09)
+Starting... (2026-11-04 02:10:27)
 Computing initial states...
-Finished computing initial states: 2 distinct states generated at 2026-11-03 18:50:10.
+Finished computing initial states: 2 distinct states generated at 2026-11-04 02:10:27.
 Error: Invariant NotInstalled is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -29,7 +29,7 @@ State 1: <Initial predicate>
         conf |-> TRUE,
         stop |-> FALSE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 0,
@@ -47,7 +47,7 @@ State 1: <Initial predicate>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -65,7 +65,7 @@ State 1: <Initial predicate>
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0)
 
 State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst>
 /\ cur = 0
@@ -78,7 +78,7 @@ State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 0,
@@ -96,7 +96,7 @@ State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -114,7 +114,7 @@ State 2: <IStart line 455, col 5 to line 459, col 75 of module RuntimeStartFirst
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0)
 
 State 3: <Exit(0) line 255, col 5 to line 258, col 75 of module RuntimeStartFirst>
 /\ cur = 0
@@ -127,7 +127,7 @@ State 3: <Exit(0) line 255, col 5 to line 258, col 75 of module RuntimeStartFirs
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 0,
@@ -145,7 +145,7 @@ State 3: <Exit(0) line 255, col 5 to line 258, col 75 of module RuntimeStartFirs
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -163,7 +163,7 @@ State 3: <Exit(0) line 255, col 5 to line 258, col 75 of module RuntimeStartFirs
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = FALSE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0)
 
 State 4: <IBind line 462, col 5 to line 465, col 75 of module RuntimeStartFirst>
 /\ cur = 0
@@ -176,7 +176,7 @@ State 4: <IBind line 462, col 5 to line 465, col 75 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 0,
@@ -194,7 +194,7 @@ State 4: <IBind line 462, col 5 to line 465, col 75 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -212,7 +212,7 @@ State 4: <IBind line 462, col 5 to line 465, col 75 of module RuntimeStartFirst>
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0)
 
 State 5: <AttachAtomic(1) line 283, col 5 to line 287, col 75 of module RuntimeStartFirst>
 /\ cur = 0
@@ -225,7 +225,7 @@ State 5: <AttachAtomic(1) line 283, col 5 to line 287, col 75 of module RuntimeS
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 0,
@@ -243,7 +243,7 @@ State 5: <AttachAtomic(1) line 283, col 5 to line 287, col 75 of module RuntimeS
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 0,
@@ -261,7 +261,7 @@ State 5: <AttachAtomic(1) line 283, col 5 to line 287, col 75 of module RuntimeS
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0)
 
 State 6: <ISnap line 469, col 5 to line 473, col 70 of module RuntimeStartFirst>
 /\ cur = 0
@@ -274,7 +274,7 @@ State 6: <ISnap line 469, col 5 to line 473, col 70 of module RuntimeStartFirst>
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 0,
@@ -292,14 +292,14 @@ State 6: <ISnap line 469, col 5 to line 473, col 70 of module RuntimeStartFirst>
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   1 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 1,
   inst |-> 1,
   src |-> 0,
   srcg |-> 0,
-  snap |-> [has |-> TRUE, off |-> 1, ep |-> -1] ]
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 0
 /\ tAt = 0
@@ -310,7 +310,7 @@ State 6: <ISnap line 469, col 5 to line 473, col 70 of module RuntimeStartFirst>
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0)
 
 State 7: <Activate(1) line 221, col 5 to line 229, col 67 of module RuntimeStartFirst>
 /\ cur = 0
@@ -323,7 +323,7 @@ State 7: <Activate(1) line 221, col 5 to line 229, col 67 of module RuntimeStart
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 1,
@@ -334,21 +334,21 @@ State 7: <Activate(1) line 221, col 5 to line 229, col 67 of module RuntimeStart
         conf |-> TRUE,
         stop |-> FALSE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] )
 /\ handover = FALSE
 /\ now = 0
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
-  1 :> [has |-> TRUE, off |-> 1, ep |-> 1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 1,
   inst |-> 1,
   src |-> 0,
   srcg |-> 0,
-  snap |-> [has |-> TRUE, off |-> 1, ep |-> -1] ]
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 0
 /\ tAt = 0
@@ -359,7 +359,7 @@ State 7: <Activate(1) line 221, col 5 to line 229, col 67 of module RuntimeStart
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0)
 
 State 8: <ISettle line 476, col 5 to line 479, col 75 of module RuntimeStartFirst>
 /\ cur = 0
@@ -372,7 +372,7 @@ State 8: <ISettle line 476, col 5 to line 479, col 75 of module RuntimeStartFirs
         conf |-> FALSE,
         stop |-> TRUE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] @@
   1 :>
       [ ep |-> 1,
@@ -383,21 +383,21 @@ State 8: <ISettle line 476, col 5 to line 479, col 75 of module RuntimeStartFirs
         conf |-> TRUE,
         stop |-> FALSE,
         rev |-> FALSE,
-        pos |-> 1,
+        pos |-> 0,
         infl |-> FALSE ] )
 /\ handover = FALSE
 /\ now = 0
 /\ pc = "idle"
 /\ faulted = FALSE
 /\ nRev = 0
-/\ commit = ( 0 :> [has |-> TRUE, off |-> 1, ep |-> -1] @@
-  1 :> [has |-> TRUE, off |-> 1, ep |-> 1] @@
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
   2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
 /\ rec = [ ep |-> 1,
   inst |-> 1,
   src |-> 0,
   srcg |-> 0,
-  snap |-> [has |-> TRUE, off |-> 1, ep |-> -1] ]
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
 /\ rd = 0
 /\ nAg = 0
 /\ tAt = 0
@@ -408,8 +408,8 @@ State 8: <ISettle line 476, col 5 to line 479, col 75 of module RuntimeStartFirs
 /\ x2 = (0 :> 0 @@ 1 :> 0)
 /\ Lopen = TRUE
 /\ legEp = 0
-/\ effects = (0 :> 1 @@ 1 :> 0)
+/\ effects = (0 :> 0 @@ 1 :> 0)
 
-3184 states generated, 1469 distinct states found, 611 states left on queue.
-The depth of the complete state graph search is 10.
-Finished in 01s at (2026-11-03 18:50:10)
+2817 states generated, 1320 distinct states found, 552 states left on queue.
+The depth of the complete state graph search is 9.
+Finished in 01s at (2026-11-04 02:10:28)

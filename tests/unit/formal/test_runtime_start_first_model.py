@@ -81,6 +81,8 @@ WITNESSES = {
     "wit_failed": "NotFailed",
     "wit_two_agent_faults": "NotTwoAgentFaults",
     "wit_single_fault_bound": "WindowBounded",
+    "wit_repeated_x2": "NotRepeatedX2",
+    "wit_clock_horizon": "NotClockHorizon",
 }
 
 
@@ -196,6 +198,30 @@ def test_each_witness_is_violated(witness: str, inv: str) -> None:
     out = _output(witness)
     assert f"Error: Invariant {inv} is violated." in out
     assert out.count("is violated.") == 1
+
+
+@pytest.mark.unit
+def test_install_checks_repeated_crashes_and_clock_headroom() -> None:
+    for name in (
+        "Install",
+        "Install1",
+        "mut_no_watchdog",
+        "wit_repeated_x2",
+        "wit_clock_horizon",
+    ):
+        cfg = (MODEL_DIR / f"{name}.cfg").read_text()
+        assert re.search(r"^    LogLen = 3$", cfg, re.M)
+        assert re.search(r"^    MaxCrash = 2$", cfg, re.M)
+        assert re.search(r"^    ClockMax = 16$", cfg, re.M)
+    out = _output("mut_no_watchdog")
+    assert "Error: Invariant WindowBounded is violated." in out
+    times = [int(value) for value in re.findall(r"^/\\ now = (\d+)$", out, re.M)]
+    cfg = (MODEL_DIR / "mut_no_watchdog.cfg").read_text()
+    constants = dict(re.findall(r"^    (\w+) = (\d+)$", cfg, re.M))
+    assert times and max(times) == int(constants["WBound"]) + 1
+    assert max(times) < int(constants["ClockMax"])
+    assert "/\\ nCrash = 2" in _output("wit_repeated_x2")
+    assert "/\\ now = 16" in _output("wit_clock_horizon")
 
 
 @pytest.mark.unit

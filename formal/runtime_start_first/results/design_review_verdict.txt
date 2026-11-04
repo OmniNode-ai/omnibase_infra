@@ -12,10 +12,12 @@ Two verdicts stand behind this file, and they are different kinds of evidence:
   (HTTP and bus slices) and r14 (install slice), posted as Linear comment
   831a0f81 on OMN-22151. That is a review of the prose design.
 - Model check (this task, T0): TLC over `RuntimeStartFirst.tla`, run on lab host
-  h051 (TLC2 Version 2026.10.30.154139, `-workers 4`, Temurin 17), the output of
+  h101 (TLC2 Version 2026.11.03.180953 rev 309e489, `-workers 4`, Java 20.0.1), the output of
   every cfg committed in this directory and bound to `model.sha256`, the sha256 of
   the spec then each cfg in sorted order. A model check says nothing about
   behaviour the spec leaves out; the list below says what it leaves out.
+
+**This PASS is bounded single-partition model evidence only. It supplies no cutoff or small-scope theorem, no arbitrary-bounds, multi-partition or implementation correctness claim, and no design-wide sign-off. The per-partition abstraction excludes partial multi-partition seeding and cross-partition recovery interleavings.**
 
 ## Results
 
@@ -23,8 +25,8 @@ Two verdicts stand behind this file, and they are different kinds of evidence:
 | --- | --- | --- | --- |
 | Http.cfg | AcceptedIsReady, NoRefusalWithoutFault | No error, 0 left on queue | 21272 |
 | Bus.cfg | AtMostOneConsuming, NoSkip, ReplayOnlyX2 | No error, 0 left on queue | 21559 |
-| Install.cfg | WindowBounded, AtMostOneConsuming, NoSkip, ReplayOnlyX2 | No error, 0 left on queue | 55930 |
-| Install1.cfg | the same, one agent fault, the design's own bound | No error, 0 left on queue | 26769 |
+| Install.cfg | WindowBounded, AtMostOneConsuming, NoSkip, ReplayOnlyX2 | No error, 0 left on queue | 241362 |
+| Install1.cfg | the same, one agent fault, the design's own bound | No error, 0 left on queue | 117241 |
 
 Each property has a mutant (one deliberate break of one rule) that makes TLC
 report a violation of exactly that property; `tests/unit/formal/test_runtime_start_first_model.py`
@@ -42,17 +44,23 @@ fails if one stops failing.
 Further mutants, each failing exactly the property shown: mut_no_grants (A6 grants,
 NoRefusalWithoutFault), mut_no_verify_exit (section 6 exit verification,
 AtMostOneConsuming), mut_first_sight_latest (S3a first start, NoSkip).
-Eleven witnesses (`wit_*.cfg`) are violated on purpose: a redeploy, two redeploys,
+Thirteen witnesses (`wit_*.cfg`) are violated on purpose: a redeploy, two redeploys,
 a revocation hold, a detach grant, an X2 replay, an install, a rollback, a
-roll-forward, `install_failed`, two agent faults all complete, so the passing runs
+roll-forward, `install_failed`, two agent faults all complete, additionally
+wit_repeated_x2 reaches nCrash 2, x2 2 and effects 3 on the same record while
+checking the four Install invariants; wit_clock_horizon uses MUT no_watchdog and
+NotClockHorizon instead of WindowBounded to reach now 16, keeping the bus
+invariants. mut_no_watchdog with LogLen 3, MaxCrash 2, ClockMax 16 violates
+WindowBounded at now 9, before the clock cap. So the passing runs
 are not vacuous.
 
 ## Bounds
 
 Stated in each cfg and in the cfg's first lines: Http 3 runtimes (two redeploys),
 1 record, MaxCrash 2, MaxRevoke 2; Bus 3 runtimes (MaxRedeploy 2), 3 records,
-MaxCrash 2; Install the legacy and N, 2 records, MaxCrash 1, **MaxAgentCrash 2**,
-WMax 2, RB 1, RF 1, W 1, G 1, WBound 8. Time is in ticks of one window clock that
+MaxCrash 2; Install the legacy and N, 3 records, MaxCrash 2, **MaxAgentCrash 2**,
+WMax 2, RB 1, RF 1, W 1, G 1, WBound 8. Install and Install1 have ClockMax 16;
+Install1 has MaxAgentCrash 1 and WBound 6. Time is in ticks of one window clock that
 starts at the legacy stop.
 
 ## Finding on the design (A2, cumulative agent downtime)
@@ -86,7 +94,7 @@ mechanism.
 - X1 (the legacy's auto-commit past a polled batch at the install stop): not
   modelled; the legacy commits only processed positions here, so NoSkip says
   nothing about X1.
-- X2 (the effect-to-commit gap): the one allowed replay, counted per record in
+- X2 (the effect-to-commit gap): each allowed replay is counted per record in
   `x2` by a crash or kill with a commit outstanding; ReplayOnlyX2 allows no other.
 
 Also left out, each for a later task: an aborted redeploy and the agent's crash
