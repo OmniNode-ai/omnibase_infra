@@ -28,16 +28,16 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 141
+        "omnibase_infra": 142
       },
-      "contracts_discovered": 162,
+      "contracts_discovered": 163,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 98,
-      "probe_count": 1121,
-      "registered_dispatchers": 131,
-      "registered_routes": 115,
-      "type_scoped_dispatchers": 78
+      "distinct_subscribe_topics": 99,
+      "probe_count": 1124,
+      "registered_dispatchers": 132,
+      "registered_routes": 116,
+      "type_scoped_dispatchers": 79
     },
-    "snapshot_sha256": "a0d45e161f6d26413ab33abb83290313354372236b21b9838b897ac99d180ade"
+    "snapshot_sha256": "85680da8f5b62332e56f0c0b8322d19c21eb4e074667778c8b893af7c2092eea"
   }
 }

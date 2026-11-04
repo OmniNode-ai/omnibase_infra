@@ -57,6 +57,24 @@ class ProtocolRejoinableConsumer(Protocol):
         """
         ...
 
+    def partitions_for_topic(self, topic: str) -> set[int] | None:
+        """Partitions the broker reports for a topic, or None when unknown.
+
+        OMN-22291: a member holding NO assignment can still say whether its
+        group is behind, but only against the topic's own partitions, which
+        ``assignment()`` cannot supply precisely then.
+        """
+        ...
+
+    async def committed(self, partition: TopicPartition) -> int | None:
+        """The group's committed offset for a partition, or None if none is.
+
+        Asked of the COORDINATOR, so it answers for a partition this member
+        does not hold -- which is what makes a standby member measurable
+        (OMN-22291).
+        """
+        ...
+
     def seek(self, partition: TopicPartition, offset: int) -> None:
         """Move the fetch position."""
         ...
