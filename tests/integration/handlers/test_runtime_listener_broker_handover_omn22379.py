@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import array
 import json
+import os
 import socket
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -56,26 +57,51 @@ class _Client:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(10)
         self.sock.connect(str(path))
-        self.reader = self.sock.makefile("rb")
+        self.listeners: list[socket.socket] = []
 
     def ask(self, **fields: object) -> dict[str, object]:
         self.sock.sendall(json.dumps(fields).encode() + b"\n")
-        parsed: dict[str, object] = json.loads(self.reader.readline())
+        parsed, descriptors = self._receive()
+        assert not descriptors
         return parsed
 
     def get_listener(self, pool: str) -> tuple[dict[str, object], socket.socket | None]:
         self.sock.sendall(json.dumps({"op": "get", "pool": pool}).encode() + b"\n")
-        data, ancillary, _, _ = self.sock.recvmsg(
-            4096, socket.CMSG_SPACE(array.array("i", [0]).itemsize)
-        )
-        answer: dict[str, object] = json.loads(data)
-        if not ancillary:
+        answer, descriptors = self._receive()
+        if not descriptors:
             return answer, None
-        fd = array.array("i", ancillary[0][2][: array.array("i").itemsize])[0]
-        return answer, socket.socket(fileno=fd)
+        assert len(descriptors) == 1
+        listener = socket.socket(fileno=descriptors[0])
+        self.listeners.append(listener)
+        return answer, listener
+
+    def _receive(self) -> tuple[dict[str, object], list[int]]:
+        data = bytearray()
+        descriptors: list[int] = []
+        try:
+            while not data.endswith(b"\n"):
+                chunk, ancillary, flags, _ = self.sock.recvmsg(
+                    1, socket.CMSG_SPACE(array.array("i").itemsize)
+                )
+                for level, kind, payload in ancillary:
+                    if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                        received = array.array("i")
+                        received.frombytes(payload)
+                        descriptors.extend(received)
+                assert not flags & socket.MSG_CTRUNC
+                if not chunk:
+                    raise EOFError("broker closed before a complete response")
+                data.extend(chunk)
+            answer: dict[str, object] = json.loads(data)
+            return answer, descriptors
+        except BaseException:
+            for descriptor in descriptors:
+                os.close(descriptor)
+            raise
 
     def close(self) -> None:
-        self.reader.close()
+        for listener in self.listeners:
+            listener.close()
         self.sock.close()
 
 
@@ -175,3 +201,26 @@ def test_positive_control_a_second_confirmed_runtime_is_required_for_a_grant(
     assert only.ask(op="detach_request", pool=POOL)["verdict"] == "wait"
     broker.handle(_handover(False))
     assert only.ask(op="detach_request", pool=POOL)["verdict"] == "alone"
+
+
+def test_listener_reply_can_arrive_one_byte_at_a_time(
+    served: _Served,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = socket.socket.recvmsg
+
+    def fragmented(
+        self: socket.socket, size: int, ancillary_size: int = 0, flags: int = 0
+    ) -> tuple[bytes, list[tuple[int, int, bytes]], int, object]:
+        return original(self, min(size, 1), ancillary_size, flags)
+
+    monkeypatch.setattr(socket.socket, "recvmsg", fragmented)
+    _, listener, connect = served
+    client = connect()
+    response, received = client.get_listener(POOL)
+    assert response["ok"] is True and received is not None
+    try:
+        assert received.getsockname() == listener.getsockname()
+        assert client.ask(op="attach", pool=POOL, instance="fragmented")["ok"] is True
+    finally:
+        received.close()

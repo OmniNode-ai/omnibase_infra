@@ -685,22 +685,17 @@ class DeployAgent:
         return True
 
     def _await_settle_before_reexec(self) -> None:
-        """``on_before_reexec`` for every self-update boundary (OMN-19501).
+        """Drain the settle before an exec or a systemd restart.
 
-        ``self_update`` calls this immediately before it replaces the process
-        image, and only then. A re-exec kills every thread, so without the wait
-        an update would land in the middle of ``k3s ctr images import`` or of
-        the pin recreate, and the sha's onex-lab-k3s record would never be
-        written. The wait is paid only when a re-exec is actually about to
-        happen, which is what keeps it from re-serializing every slot.
+        Wait for the image import and pin recreate to record their results.
+        Descriptor remapping belongs to the executor's actual exec call: this
+        callback also runs before systemd restart, which can fail or return.
         """
         if self._settle_in_flight():
             logger.info(
                 "self_update: waiting for the settle in flight before re-execing"
             )
         self.drain_settle(timeout=None)
-        if self._runtime_listeners is not None:
-            self._runtime_listeners.prepare_for_reexec()
 
     async def _offload(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run one blocking call on the job thread, not on the event loop.
@@ -777,6 +772,8 @@ class DeployAgent:
             )
 
             self._runtime_listeners = ModelRuntimeListenerRegistry.start()
+            if self._runtime_listeners is not None:
+                self.executor.reexec = self._runtime_listeners.reexec
         gate = getattr(self, "_load_gate", None)
         logger.info(
             "Deploy agent load gate: %s",

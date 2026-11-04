@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import array
 import json
+import os
 import random
 import socket
 from collections.abc import Callable, Iterator
@@ -162,7 +163,8 @@ def _run_sequence(
         action = rng.choice(["open", "confirm", "detach", "detach", "end", "flag"])
         if action == "open":
             table.open_session(name, POOL, name)
-            state[name] = {"confirmed": False, "granted": False}
+            if name not in state:
+                state[name] = {"confirmed": False, "granted": False}
         elif action == "confirm":
             table.confirm_session(name)
             if name in state:
@@ -223,30 +225,57 @@ def test_listener_broker_invariant_check_catches_a_table_that_counts_provisional
 
 
 class _Client:
+    """One runtime's connection to the broker socket."""
+
     def __init__(self, path: Path) -> None:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(10)
         self.sock.connect(str(path))
-        self.reader = self.sock.makefile("rb")
+        self.listeners: list[socket.socket] = []
 
     def ask(self, **fields: object) -> dict[str, object]:
         self.sock.sendall(json.dumps(fields).encode() + b"\n")
-        parsed: dict[str, object] = json.loads(self.reader.readline())
+        parsed, descriptors = self._receive()
+        assert not descriptors
         return parsed
 
     def get_listener(self, pool: str) -> tuple[dict[str, object], socket.socket | None]:
         self.sock.sendall(json.dumps({"op": "get", "pool": pool}).encode() + b"\n")
-        data, ancillary, _, _ = self.sock.recvmsg(
-            4096, socket.CMSG_SPACE(array.array("i", [0]).itemsize)
-        )
-        answer: dict[str, object] = json.loads(data)
-        if not ancillary:
+        answer, descriptors = self._receive()
+        if not descriptors:
             return answer, None
-        fd = array.array("i", ancillary[0][2][: array.array("i").itemsize])[0]
-        return answer, socket.socket(fileno=fd)
+        assert len(descriptors) == 1
+        listener = socket.socket(fileno=descriptors[0])
+        self.listeners.append(listener)
+        return answer, listener
+
+    def _receive(self) -> tuple[dict[str, object], list[int]]:
+        data = bytearray()
+        descriptors: list[int] = []
+        try:
+            while not data.endswith(b"\n"):
+                chunk, ancillary, flags, _ = self.sock.recvmsg(
+                    1, socket.CMSG_SPACE(array.array("i").itemsize)
+                )
+                for level, kind, payload in ancillary:
+                    if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                        received = array.array("i")
+                        received.frombytes(payload)
+                        descriptors.extend(received)
+                assert not flags & socket.MSG_CTRUNC
+                if not chunk:
+                    raise EOFError("broker closed before a complete response")
+                data.extend(chunk)
+            answer: dict[str, object] = json.loads(data)
+            return answer, descriptors
+        except BaseException:
+            for descriptor in descriptors:
+                os.close(descriptor)
+            raise
 
     def close(self) -> None:
-        self.reader.close()
+        for listener in self.listeners:
+            listener.close()
         self.sock.close()
 
 
@@ -385,7 +414,7 @@ def test_listener_broker_refuses_what_a_client_must_not_send(served: _Served) ->
         "a client cannot raise the agent's flag"
     )
     client.sock.sendall(b"not json\n")
-    assert json.loads(client.reader.readline())["error"] == "bad_request"
+    assert client._receive()[0]["error"] == "bad_request"
     assert client.ask(op="attach", pool=POOL, instance="x")["ok"] is True, (
         "the connection survives"
     )
@@ -393,8 +422,7 @@ def test_listener_broker_refuses_what_a_client_must_not_send(served: _Served) ->
 
 def _raw(client: _Client, value: object) -> dict[str, object]:
     client.sock.sendall(json.dumps(value).encode() + b"\n")
-    parsed: dict[str, object] = json.loads(client.reader.readline())
-    return parsed
+    return client._receive()[0]
 
 
 def _flag(begin: bool) -> ModelRuntimeListenerBrokerRequest:
@@ -404,3 +432,60 @@ def _flag(begin: bool) -> ModelRuntimeListenerBrokerRequest:
         else EnumRuntimeListenerBrokerOp.HANDOVER_END,
         pool=EnumRuntimeListenerPool.MAIN,
     )
+
+
+@pytest.mark.parametrize(
+    ("confirmed", "granted"), [(False, False), (True, False), (True, True)]
+)
+def test_listener_broker_repeated_attach_cannot_replace_a_session(
+    confirmed: bool,
+    granted: bool,
+) -> None:
+    table = _table_with(("old", confirmed), ("new", True), handover=True)
+    if granted:
+        assert table.decide_detach("old") == ("granted", "")
+    before = table.confirmed_acceptors(POOL)
+    assert table.open_session("old", "runtime-effects", "replacement") == ""
+    assert table.session_count(POOL) == 2
+    assert table.session_count("runtime-effects") == 0
+    assert table.confirmed_acceptors(POOL) == before
+
+
+def test_listener_broker_repeated_attach_is_refused_on_the_wire(
+    served: _Served,
+) -> None:
+    broker, _, connect = served
+    client = connect()
+    assert client.ask(op="attach", pool=POOL, instance="old")["ok"] is True
+    assert client.ask(op="confirmed", pool=POOL)["ok"] is True
+    response = client.ask(op="attach", pool=POOL, instance="replacement")
+    assert response["ok"] is False and response["error"] == "already_attached"
+    assert broker.sessions.confirmed_acceptors(POOL) == 1
+
+
+def test_listener_broker_socket_directory_is_private(served: _Served) -> None:
+    _, _, connect = served
+    client = connect()
+    from pathlib import Path
+
+    path = Path(client.sock.getpeername())
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_listener_broker_refuses_a_foreign_peer_uid(
+    served: _Served,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    from omnibase_infra.nodes.node_runtime_listener_broker_effect import (
+        runtime_listener_broker as server,
+    )
+
+    broker, _, connect = served
+    uid = os.geteuid()
+    monkeypatch.setattr(server.os, "geteuid", lambda: uid + 1)
+    client = connect()
+    assert client.sock.recv(1) == b""
+    assert broker.sessions.session_count(POOL) == 0

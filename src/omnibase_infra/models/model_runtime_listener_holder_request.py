@@ -18,14 +18,20 @@ class ModelRuntimeListenerHolderRequest(BaseModel):
     reads ``completed`` and the ports are free.
     ``prepare_reexec``: dup2 the listeners onto descriptors 3 and 4 and set the
     LISTEN_* variables, immediately before ``os.execv``.
+    ``reexec``: remap and exec transactionally; restore descriptors and LISTEN_*
+    if exec fails, so the running agent can continue on its current image.
     ``drop``: install rollback; remove from the fd store and close.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     operation: Literal[
-        "install_bind", "recover", "reboot_rebind", "prepare_reexec", "drop"
+        "install_bind", "recover", "reboot_rebind", "prepare_reexec", "reexec", "drop"
     ] = Field(description="The holder operation.")
+    executable: str = Field(
+        default="", description="Executable for the transactional re-exec."
+    )
+    argv: tuple[str, ...] = Field(default=(), description="Arguments for the re-exec.")
     host: str = Field(default="::", description="Bind address (dual-stack).")
     main_port: int = Field(default=8085, ge=0, le=65535, description="runtime-main.")
     effects_port: int = Field(

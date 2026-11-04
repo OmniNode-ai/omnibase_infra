@@ -24,20 +24,20 @@
     "snapshot_sha256": "5509645535394bcd5e81e23c4c5dbc9712cf7b71c26d4f6b3c8b759638ef627f"
   },
   "retired": {
-    "captured_utc": "2026-11-04T08:55:14.563040+00:00",
+    "captured_utc": "2026-11-04T15:30:50.155002+00:00",
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 145
+        "omnibase_infra": 146
       },
-      "contracts_discovered": 166,
+      "contracts_discovered": 167,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 101,
       "probe_count": 1130,
-      "registered_dispatchers": 134,
+      "registered_dispatchers": 135,
       "registered_routes": 118,
-      "type_scoped_dispatchers": 81
+      "type_scoped_dispatchers": 82
     },
-    "snapshot_sha256": "cef5edc111d82fa310b36564d0a3c38f8e6248c408c70ee155f8749b3d1aad11"
+    "snapshot_sha256": "7429905d9c178ac130e32d18eae239f73adbe66d30031fc97798492bb53a429b"
   }
 }

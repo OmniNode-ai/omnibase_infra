@@ -3369,6 +3369,7 @@ class DeployExecutor:
         )
 
     def __init__(self, *, migration_record_dir: Path | None = None) -> None:
+        self.reexec: Callable[[str, list[str]], None] | None = None
         self._migration_record_dir = migration_record_dir
         # OMN-18057: services a phase left in a non-running state, and whether
         # per-container recovery then got them up. Read by the agent when it
@@ -3700,7 +3701,7 @@ class DeployExecutor:
             logger.info(
                 "self_update[boundary=%s]: skipped (kill-switch active)", boundary.value
             )
-            return
+            return None
 
         branch = load_tracking_ref_from_env()
 
@@ -3795,7 +3796,7 @@ class DeployExecutor:
                 boundary.value,
                 status_result.returncode,
             )
-            return
+            return None
         tracked_changes = status_result.stdout.strip()
         if tracked_changes:
             logger.warning(
@@ -3804,7 +3805,7 @@ class DeployExecutor:
                 boundary.value,
                 tracked_changes.replace("\n", "; "),
             )
-            return
+            return None
 
         # Fetch the declared tracking ref.
         fetch_result = _run(
@@ -3818,7 +3819,7 @@ class DeployExecutor:
                 fetch_result.returncode,
                 fetch_result.stderr[:200],
             )
-            return
+            return None
 
         head_result = _run(
             ["git", "-C", agent_dir, "rev-parse", "HEAD"],
@@ -3833,7 +3834,7 @@ class DeployExecutor:
                 "self_update[boundary=%s]: rev-parse failed, skipping update",
                 boundary.value,
             )
-            return
+            return None
 
         disk_sha = head_result.stdout.strip()
         remote_sha = remote_result.stdout.strip()
@@ -3879,7 +3880,7 @@ class DeployExecutor:
                 if not _rebuild_tracking_branch_from_remote(
                     agent_dir, branch, remote_sha, boundary, timeout
                 ):
-                    return
+                    return None
             else:
                 pull_result = _run(
                     ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
@@ -3898,7 +3899,7 @@ class DeployExecutor:
                     if not _rebuild_tracking_branch_from_remote(
                         agent_dir, branch, remote_sha, boundary, timeout
                     ):
-                        return
+                        return None
             # Either path lands HEAD exactly on origin/<branch> (the rebuild
             # verifies it), so the post-update HEAD is known without a second
             # rev-parse here.
@@ -3920,7 +3921,7 @@ class DeployExecutor:
                     check=True,
                     timeout=60,
                 )
-                return
+                return None
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "self_update[boundary=%s]: unit sync/restart failed: %s",
@@ -3928,7 +3929,7 @@ class DeployExecutor:
                 exc,
             )
 
-        # STEP 2 -- decide whether to RE-EXEC, and decide it against the code
+        # Decide whether to RE-EXEC against the code
         # this process actually loaded. The clone being current with the remote
         # says nothing about that: an external reconciler resets this clone to
         # origin/dev every hour at :19 past on the lab host, so past each tick
@@ -3940,7 +3941,7 @@ class DeployExecutor:
                 boundary.value,
                 loaded_sha[:12],
             )
-            return
+            return None
 
         logger.info(
             "self_update[boundary=%s]: loaded code is not the clone's code "
@@ -3950,15 +3951,13 @@ class DeployExecutor:
             disk_sha[:12],
         )
 
-        # Sync deps so new imports are available after re-exec.
         _uv_sync_after_pull(agent_dir, boundary)
 
         # Hand off immediately before the process image is replaced, and ONLY
         # when it is about to be. The PRE_ACCEPT caller rewinds its committed
         # consumer offset here so the replacement process re-reads the command
         # that triggered this update rather than skipping past it; a rewind
-        # followed by no re-exec would hand the same command to a process that
-        # never went away.
+        # followed by no re-exec would redeliver to the same process.
         if on_before_reexec is not None:
             on_before_reexec()
 
@@ -3971,35 +3970,33 @@ class DeployExecutor:
                 boundary.value,
             )
             sys.exit(42)
-        else:
-            launcher = os.environ.get("DEPLOY_AGENT_LAUNCHER")
-            if launcher:
-                # OMN-18073: re-exec THROUGH the launcher, not the bare
-                # interpreter. os.execv replaces the process image but inherits
-                # the caller's environment verbatim, so an interpreter re-exec
-                # carries the environment this process started with forward
-                # forever. On 2026-09-09 that is exactly what happened: the
-                # agent re-execed four times across the day, advancing its code
-                # from b0b46c18 to c65d8a8b normally, while the mangled
-                # ONEXBOT_OCC_PRIVATE_KEY it had inherited from systemd's
-                # EnvironmentFile= at 01:38:54Z survived every one of them.
-                # Only a systemd restart re-read the file. Going through
-                # deploy/deploy-agent-launch.sh re-`source`s the operator env
-                # store, so a repaired or rotated value is picked up at the next
-                # job boundary instead of needing an operator restart.
-                logger.info(
-                    "self_update[boundary=%s]: host mode — re-execing through "
-                    "launcher %s (re-reads the operator env store)",
-                    boundary.value,
-                    launcher,
-                )
-                os.execv(launcher, [launcher, *sys.argv[1:]])  # noqa: S606
-            else:
-                logger.info(
-                    "self_update[boundary=%s]: host mode — re-execing process image",
-                    boundary.value,
-                )
-                os.execv(sys.executable, [sys.executable] + sys.argv)  # noqa: S606
+        launcher = os.environ.get("DEPLOY_AGENT_LAUNCHER")
+        if launcher:
+            # OMN-18073: re-exec THROUGH the launcher, not the bare
+            # interpreter. os.execv replaces the process image but inherits
+            # the caller's environment verbatim, so an interpreter re-exec
+            # carries the environment this process started with forward
+            # forever. On 2026-09-09 that is exactly what happened: the
+            # agent re-execed four times across the day, advancing its code
+            # from b0b46c18 to c65d8a8b normally, while the mangled
+            # ONEXBOT_OCC_PRIVATE_KEY it had inherited from systemd's
+            # EnvironmentFile= at 01:38:54Z survived every one of them.
+            # Only a systemd restart re-read the file. Going through
+            # deploy/deploy-agent-launch.sh re-`source`s the operator env
+            # store, so a repaired or rotated value is picked up at the next
+            # job boundary instead of needing an operator restart.
+            logger.info(
+                "self_update[boundary=%s]: host mode — re-execing through "
+                "launcher %s (re-reads the operator env store)",
+                boundary.value,
+                launcher,
+            )
+            return (self.reexec or os.execv)(launcher, [launcher, *sys.argv[1:]])
+        logger.info(
+            "self_update[boundary=%s]: host mode — re-execing process image",
+            boundary.value,
+        )
+        (self.reexec or os.execv)(sys.executable, [sys.executable] + sys.argv)
 
     def preflight(self, on_phase_update: PhaseCallback) -> None:
         on_phase_update(Phase.PREFLIGHT, PhaseStatus.IN_PROGRESS)

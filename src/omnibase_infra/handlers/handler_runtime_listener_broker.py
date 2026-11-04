@@ -97,6 +97,8 @@ class HandlerRuntimeListenerBroker:
                 state = self._sessions.open_session(
                     str(request.session_id), pool, request.instance
                 )
+                if not state:
+                    return refused("already_attached")
                 return served(state=state, session=True)
             case EnumRuntimeListenerBrokerOp.CONFIRMED:
                 state = self._sessions.confirm_session(str(request.session_id))

@@ -22,6 +22,9 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 from omnibase_infra.models.model_runtime_listener_broker_port import (
     ModelRuntimeListenerBrokerPort,
 )
+from omnibase_infra.models.model_runtime_listener_broker_server_io import (
+    ModelRuntimeListenerBrokerServerIo,
+)
 from omnibase_infra.models.model_runtime_listener_endpoint import (
     ModelRuntimeListenerEndpoint,
 )
@@ -31,11 +34,17 @@ from omnibase_infra.models.model_runtime_listener_environment import (
 from omnibase_infra.models.model_runtime_listener_fd_store import (
     ModelRuntimeListenerFdStore,
 )
+from omnibase_infra.models.model_runtime_listener_holder_io import (
+    ModelRuntimeListenerHolderIo,
+)
 from omnibase_infra.models.model_runtime_listener_holder_request import (
     ModelRuntimeListenerHolderRequest,
 )
 from omnibase_infra.models.model_runtime_listener_holder_result import (
     ModelRuntimeListenerHolderResult,
+)
+from omnibase_infra.models.model_runtime_listener_process_port import (
+    ModelRuntimeListenerProcessPort,
 )
 from omnibase_infra.models.model_runtime_listener_session_table import (
     ModelRuntimeListenerSessionTable,
@@ -73,8 +82,15 @@ class ModelRuntimeListenerRegistry(BaseModel):
         from omnibase_infra.handlers.handler_runtime_listener_broker import (
             HandlerRuntimeListenerBroker,
         )
+        from omnibase_infra.handlers.handler_runtime_listener_holder import (
+            HandlerRuntimeListenerHolder,
+        )
 
         services = cls()
+        services.register(
+            ModelRuntimeListenerProcessPort,
+            ModelRuntimeListenerProcessPort(replace=os.execv),
+        )
         services.register(ModelRuntimeListenerFdStore, ModelRuntimeListenerFdStore())
         services.register(
             ModelRuntimeListenerSessionTable, ModelRuntimeListenerSessionTable()
@@ -82,6 +98,14 @@ class ModelRuntimeListenerRegistry(BaseModel):
         services.register(
             ModelRuntimeListenerEnvironment,
             ModelRuntimeListenerEnvironment(values=environ),
+        )
+        from omnibase_infra.nodes.node_runtime_listener_holder_effect.runtime_listener_holder import (
+            holder_io,
+        )
+
+        services.register(ModelRuntimeListenerHolderIo, holder_io(services))
+        services.register(
+            HandlerRuntimeListenerHolder, HandlerRuntimeListenerHolder(services)
         )
         if socket_path is not None:
             services.register(
@@ -94,6 +118,21 @@ class ModelRuntimeListenerRegistry(BaseModel):
                 serve=HandlerRuntimeListenerBroker(services).handle
             ),
         )
+        if socket_path is not None:
+            from omnibase_infra.handlers.handler_runtime_listener_broker_server import (
+                HandlerRuntimeListenerBrokerServer,
+            )
+            from omnibase_infra.nodes.node_runtime_listener_broker_effect.runtime_listener_broker import (
+                broker_server_io,
+            )
+
+            services.register(
+                ModelRuntimeListenerBrokerServerIo, broker_server_io(services)
+            )
+            services.register(
+                HandlerRuntimeListenerBrokerServer,
+                HandlerRuntimeListenerBrokerServer(services),
+            )
         return services
 
     @classmethod
@@ -113,7 +152,7 @@ class ModelRuntimeListenerRegistry(BaseModel):
         services = cls.assemble(
             env, Path(handover_dir) / "broker.sock" if handover_dir else None
         )
-        holder = HandlerRuntimeListenerHolder(services)
+        holder = services.get_service(HandlerRuntimeListenerHolder)
         result = holder.handle(ModelRuntimeListenerHolderRequest(operation="recover"))
         if not holder.fd_store.pools() and handover_dir:
             result = holder.handle(
@@ -126,16 +165,22 @@ class ModelRuntimeListenerRegistry(BaseModel):
             "runtime listener holder: %s pools=%s", result.outcome, result.pools
         )
         if holder.fd_store.pools() and handover_dir:
-            HandlerRuntimeListenerBrokerServer(services).start()
+            services.get_service(HandlerRuntimeListenerBrokerServer).start()
         return services
 
-    def prepare_for_reexec(self) -> ModelRuntimeListenerHolderResult:
-        """Remap the listeners; the agent calls this immediately before ``os.execv``."""
+    def reexec(self, executable: str, argv: list[str]) -> None:
+        """Remap only at exec; restore descriptors and LISTEN_* if exec fails."""
         from omnibase_infra.handlers.handler_runtime_listener_holder import (
             HandlerRuntimeListenerHolder,
         )
 
-        return HandlerRuntimeListenerHolder(self).prepare_for_reexec()
+        result = self.get_service(HandlerRuntimeListenerHolder).handle(
+            ModelRuntimeListenerHolderRequest(
+                operation="reexec", executable=executable, argv=tuple(argv)
+            )
+        )
+        if not result.ok:
+            raise RuntimeError(result.outcome)
 
 
 __all__: list[str] = ["ModelRuntimeListenerRegistry"]

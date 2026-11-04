@@ -34,8 +34,10 @@ class ModelRuntimeListenerSessionTable(BaseModel):
     _handover: set[str] = PrivateAttr(default_factory=set)
 
     def open_session(self, session_id: str, pool: str, instance: str) -> str:
-        """Record a PROVISIONAL session; return its state."""
+        """Record a new PROVISIONAL session; refuse an existing id with an empty state."""
         with self._lock:
+            if session_id in self._sessions:
+                return ""
             self._sessions[session_id] = ModelRuntimeListenerSession(
                 pool=pool, instance=instance
             )

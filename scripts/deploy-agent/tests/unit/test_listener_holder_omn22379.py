@@ -23,7 +23,7 @@ import socket
 import sys
 import textwrap
 import time
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
@@ -80,13 +80,13 @@ _CHILD = textwrap.dedent(
             conn.close()
 
     mode = sys.argv[1]
-    holder = HandlerRuntimeListenerHolder(ModelRuntimeListenerRegistry.assemble(os.environ))
+    services = ModelRuntimeListenerRegistry.assemble(os.environ)
+    holder = HandlerRuntimeListenerHolder(services)
     if mode == "bind":
         say(holder.handle(Request(operation="install_bind", main_port=0, effects_port=0)))
         sys.stdin.readline()
         if sys.argv[2] == "reexec":
-            holder.prepare_for_reexec()
-            os.execv(sys.executable, [sys.executable, __file__, "serve"])
+            services.reexec(sys.executable, [sys.executable, __file__, "serve"])
     elif mode == "serve":
         result = holder.handle(Request(operation="recover"))
         say(result)
@@ -481,7 +481,7 @@ def test_listener_holder_agent_wiring_is_a_noop_without_listeners(
     assert calls == []
     agent._runtime_listeners = _Holder()
     agent._await_settle_before_reexec()
-    assert calls == ["prepare_for_reexec"]
+    assert calls == [], "settling must not remap descriptors before an exec decision"
 
 
 def test_listener_holder_dev_unit_declares_the_fd_store_keys() -> None:
@@ -498,3 +498,140 @@ def test_listener_holder_dev_unit_declares_the_fd_store_keys() -> None:
     assert service["FileDescriptorStorePreserve"] == "yes"
     assert service["NotifyAccess"] == "all"
     assert "WatchdogSec" in service
+
+
+@pytest.mark.parametrize("failure", ["stage", "dup2", "exec"])
+def test_listener_holder_failed_reexec_preserves_fds_and_environment(
+    failure: str,
+) -> None:
+    import subprocess
+
+    code = r"""
+import fcntl, json, os, socket, sys
+import omnibase_infra.handlers.handler_runtime_listener_holder as module
+from omnibase_infra.nodes.node_runtime_listener_holder_effect import runtime_listener_holder as io_module
+from omnibase_infra.models.model_runtime_listener_registry import ModelRuntimeListenerRegistry
+from omnibase_infra.models.model_runtime_listener_holder_request import ModelRuntimeListenerHolderRequest
+# Occupy the target descriptors with unrelated listeners, just as an agent's
+# event loop or health server can occupy them. Keep their queues intact too.
+targets = [socket.socket(socket.AF_INET, socket.SOCK_STREAM) for _ in range(2)]
+for s in targets:
+    s.bind(("127.0.0.1", 0)); s.listen(8)
+assert [s.fileno() for s in targets] == [3, 4]
+env = {"LISTEN_PID": "before", "LISTEN_FDS": "old", "LISTEN_FDNAMES": "old"}
+services = ModelRuntimeListenerRegistry.assemble(env)
+holder = module.HandlerRuntimeListenerHolder(services)
+assert holder.handle(ModelRuntimeListenerHolderRequest(operation="install_bind", main_port=0, effects_port=0)).ok
+held = [holder.fd_store.socket_for(p) for p in ("runtime-main", "runtime-effects")]
+all_sockets = targets + held
+before = [(s.fileno(), s.getsockname(), s.get_inheritable()) for s in all_sockets]
+clients = [socket.create_connection(("127.0.0.1", s.getsockname()[1]), timeout=3) for s in all_sockets]
+for c in clients: c.sendall(b"queued")
+original_fcntl, original_dup2 = io_module.fcntl.fcntl, io_module.os.dup2
+calls = 0
+failure = sys.argv[1]
+def stage(fd, command, arg=0):
+    global calls
+    if command == fcntl.F_DUPFD_CLOEXEC:
+        calls += 1
+        if calls == 2: raise OSError("injected staging failure")
+    return original_fcntl(fd, command, arg)
+def remap(fd, target, *, inheritable=True):
+    global calls
+    calls += 1
+    if calls == 2: raise OSError("injected remap failure")
+    return original_dup2(fd, target, inheritable=inheritable)
+if failure == "stage": io_module.fcntl.fcntl = stage
+if failure == "dup2": io_module.os.dup2 = remap
+try:
+    if failure == "exec":
+        services.reexec("/this-executable-does-not-exist", ["missing"])
+    else:
+        holder.prepare_for_reexec()
+except OSError:
+    pass
+else:
+    raise AssertionError("fault did not fire")
+finally:
+    io_module.fcntl.fcntl, io_module.os.dup2 = original_fcntl, original_dup2
+assert env == {"LISTEN_PID": "before", "LISTEN_FDS": "old", "LISTEN_FDNAMES": "old"}, env
+assert [(s.fileno(), s.getsockname(), s.get_inheritable()) for s in all_sockets] == before
+for s in all_sockets:
+    s.settimeout(3)
+    accepted, _ = s.accept()
+    assert accepted.recv(6) == b"queued"
+    accepted.close()
+for c in clients: c.close()
+for s in all_sockets: s.close()
+# fcntl copies use the high staging range and must all have been closed.
+for fd in range(100, 120):
+    try: os.fstat(fd)
+    except OSError: continue
+    raise AssertionError(f"leaked descriptor {fd}")
+print("original descriptors, flags, queues and environment preserved")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, failure],
+        env=_env(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        "original descriptors, flags, queues and environment preserved" in result.stdout
+    )
+
+
+@pytest.mark.parametrize("restart", ["none", "succeeded", "failed"])
+def test_listener_holder_executor_remaps_only_at_the_exec_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    declare_loaded_code_sha: Callable[[str], None],
+    restart: str,
+) -> None:
+    import subprocess
+
+    import deploy_agent.executor as module
+    from deploy_agent.events import EnumSelfUpdateBoundary
+    from deploy_agent.executor import DeployExecutor
+
+    declare_loaded_code_sha("a" * 40)
+    monkeypatch.setenv("DEPLOY_AGENT_MODE", "host")
+    monkeypatch.delenv("DEPLOY_AGENT_NO_SELF_UPDATE", raising=False)
+    monkeypatch.delenv("DEPLOY_AGENT_LAUNCHER", raising=False)
+    events: list[str] = []
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        value = "b" * 40 if "rev-parse" in argv else ""
+        return subprocess.CompletedProcess(argv, 0, stdout=value, stderr="")
+
+    def restart_unit(*args: object, **kwargs: object) -> None:
+        events.append("restart")
+        if restart == "failed":
+            raise OSError("restart refused")
+
+    def execute(path: str, argv: list[str]) -> None:
+        assert path == sys.executable and argv[0] == sys.executable
+        events.append("reexec")
+
+    monkeypatch.setattr(module, "_run", run)
+    monkeypatch.setattr(
+        module,
+        "_sync_own_unit_after_pull",
+        lambda _: None if restart == "none" else "agent.service",
+    )
+    monkeypatch.setattr(module, "_uv_sync_after_pull", lambda *_: None)
+    monkeypatch.setattr(module.subprocess, "run", restart_unit)
+    executor = DeployExecutor()
+    executor.reexec = execute
+    executor.self_update(
+        boundary=EnumSelfUpdateBoundary.POST_TERMINAL,
+        on_before_reexec=lambda: events.append("settle"),
+    )
+    expected = {
+        "none": ["settle", "reexec"],
+        "succeeded": ["settle", "restart"],
+        "failed": ["settle", "restart", "settle", "reexec"],
+    }
+    assert events == expected[restart]

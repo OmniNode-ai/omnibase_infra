@@ -30,6 +30,8 @@ handler_routing:
       handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
     - operation: prepare_reexec
       handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
+    - operation: reexec
+      handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
     - operation: drop
       handler: {name: HandlerRuntimeListenerHolder, module: omnibase_infra.handlers.handler_runtime_listener_holder}
 capabilities:
