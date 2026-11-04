@@ -192,3 +192,12 @@ services:
       - /data/scratch/runners/mq-4/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
       - /data/scratch/runners/mq-4/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
       - hp053-ci-mq-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+volumes:
+  hp053-ci-mq-runner-1-creds:
+    name: hp053-ci-mq-runner-1-creds
+  hp053-ci-mq-runner-2-creds:
+    name: hp053-ci-mq-runner-2-creds
+  hp053-ci-mq-runner-3-creds:
+    name: hp053-ci-mq-runner-3-creds
+  hp053-ci-mq-runner-4-creds:
+    name: hp053-ci-mq-runner-4-creds

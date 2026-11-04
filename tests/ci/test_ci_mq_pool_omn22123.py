@@ -57,6 +57,24 @@ def test_every_merge_queue_runner_carries_the_reserved_label_and_no_shared_one(
 
 
 @pytest.mark.parametrize("host", sorted(POOLS))
+def test_every_named_volume_a_runner_mounts_is_declared_at_the_top_level(
+    host: str,
+) -> None:
+    """Compose refuses a project whose service mounts a named volume the file never declares."""
+    _, prefix, _ = POOLS[host]
+    document = _compose(prefix)
+    declared = set(document.get("volumes", {}))
+    mounted = {
+        str(v).split(":", 1)[0]
+        for s in document["services"].values()
+        for v in s["volumes"]
+        if isinstance(v, str) and not str(v).startswith(("/", "."))
+    }
+    assert mounted == {f"{prefix}-{n}-creds" for n in range(1, COUNT + 1)}
+    assert mounted <= declared
+
+
+@pytest.mark.parametrize("host", sorted(POOLS))
 def test_scratch_paths_never_alias_the_general_pool_on_the_same_host(
     host: str,
 ) -> None:
