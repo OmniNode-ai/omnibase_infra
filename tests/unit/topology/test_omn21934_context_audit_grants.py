@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.topology.application_database import render_database_projection
 from omnibase_infra.topology.table_grant_derivation import (
     LEGACY_MIGRATION_TABLE_DECLARATIONS,
     STATE_IO_TABLE_DECLARATIONS,
@@ -91,12 +92,14 @@ def test_the_rendered_catalog_grants_the_writer_on_the_table(catalog: str) -> No
 
 @pytest.mark.unit
 @pytest.mark.parametrize("catalog", _CATALOGS)
-def test_the_rendered_catalog_hash_matches_its_source_instance(catalog: str) -> None:
-    source = yaml.safe_load(
+def test_the_rendered_catalog_matches_a_fresh_projection(catalog: str) -> None:
+    document = yaml.safe_load(
         (_CATALOG_DIR / f"{catalog}.yaml").read_text(encoding="utf-8")
-    )["source"]
+    )
+    source = document["source"]
     instance_bytes = (_ROOT / source["path"]).read_bytes()
     assert source["sha256"] == hashlib.sha256(instance_bytes).hexdigest()
+    assert document == render_database_projection(catalog)
 
 
 @pytest.mark.unit

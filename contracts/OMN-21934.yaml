@@ -44,3 +44,13 @@ dod_evidence:
         check_value: >-
           env PGHOST="${INTEGRATION_POSTGRES_HOST:?}" PGPORT="${INTEGRATION_POSTGRES_PORT:?}" PGUSER="${INTEGRATION_POSTGRES_USER:?}" PGPASSWORD="${INTEGRATION_POSTGRES_PASSWORD:?}" PGDATABASE="${INTEGRATION_POSTGRES_DB:?}" psql -X -v ON_ERROR_STOP=1 -c 'BEGIN' -c "DO \$role\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tenant_projection_writer') THEN CREATE ROLE tenant_projection_writer NOSUPERUSER NOBYPASSRLS; END IF; END \$role\$;" -f docker/migrations/forward/nodes/node_projection_context_audit/0000_add_context_audit_event_key.sql -f docker/migrations/forward/nodes/node_projection_context_audit/0001_grant_tenant_projection_writer_context_audit_events.sql -c 'SET LOCAL ROLE tenant_projection_writer' -c 'SELECT event_key FROM public.context_audit_events LIMIT 0' -c 'ROLLBACK'
         cwd: .
+  - id: dod-omn21934-migration-runtime
+    description: >-
+      Apply the vendored SQL to fresh and drifted PostgreSQL tables, rerun both migrations, and read back an INSERT ON CONFLICT replay as tenant_projection_writer. Missing cluster roles and unexpected sequence dependencies refuse before table grants. Compare all rendered catalogs with fresh projections.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_context_audit_migrations_omn21934.py tests/unit/topology/test_omn21934_context_audit_grants.py -q --no-cov
+        cwd: .
