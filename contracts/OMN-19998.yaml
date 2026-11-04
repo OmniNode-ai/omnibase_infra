@@ -170,6 +170,11 @@ requirements:
     acceptance:
       - id: AC36
         statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
+  - id: req-omn19998-broker-listener-recorded-rows
+    statement: The broker_listener lab alarm must keep raising on the recorded friction rows, a refused connect and an unreachable network on every bootstrap address, and must not read either as INDETERMINATE; the same bootstrap with an answering listener reads OK.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -706,3 +711,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC36
+  - id: dod-omn19998-ac37-broker-listener-recorded-rows
+    description: AC37 drives evaluate_broker_listener with the recorded refused and network-unreachable rows, a mixed two-address bootstrap and an answering positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network"
+        cwd: .
+    binds_ac:
+      - AC37
