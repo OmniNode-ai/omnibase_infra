@@ -180,6 +180,11 @@ requirements:
     acceptance:
       - id: AC38
         statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
+  - id: req-omn19998-error-rule-dispatch-model
+    statement: The orchestrated error-rule workflow's formal model (dispatch key, unique-key claim, effect id, lease, fence, read-back and escalation) must be committed under formal/error_rule_dispatch with its configs, TLC results and content digest, and a unit test must hold the base, question-row and two-subject configs to no error and each mutation to its named violation.
+    acceptance:
+      - id: AC1999821
+        statement: 'AC1999821: the Model, Question and TwoSubjects configs report no error, each of the nine mutation configs reports its named violation, each witness is reached, and the results bind to the spec and cfg digest -- falsifier: uv run pytest tests/unit/formal/test_error_rule_dispatch_model.py -q -n 0 fails on the merge base, which has no formal/error_rule_dispatch model'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -734,3 +739,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-error-rule-dispatch-model
+    description: AC1999821 reads the committed TLC output of every error-rule dispatch config against the digest of the spec and cfg files, asserting no error for the passing configs and the named violation for each mutation and witness.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_error_rule_dispatch_model.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC1999821
