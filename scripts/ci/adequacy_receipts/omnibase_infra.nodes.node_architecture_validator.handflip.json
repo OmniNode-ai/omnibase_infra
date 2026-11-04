@@ -1,0 +1,32 @@
+{
+  "base_ref": "f2b065a5189ed6fb84ebb695cb23a3ad73e16ba0",
+  "canonical_handler_module": "omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation",
+  "legacy_handler_module": "omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation",
+  "node_id": "omnibase_infra.nodes.node_architecture_validator",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:edad4f1d1cbbad69f25ef6bc8e01ddcd7274f19c70dd3ddf5cff6874ec2896a0",
+      "sha256:601289104c62a6ac6945e025f841e1f7fbe6684f09b4feb5ff253086fc0b772b",
+      "sha256:90e99bfead70b41e9494e83bb9d5f0960fc2186c5a131a59290b6fa93deab500"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_architecture_validator/test_handle_typed_request_omn21924.py::TestArchitectureValidationHandle::test_handle_returns_what_validate_architecture_returns[scenario0]",
+      "tests/unit/nodes/node_architecture_validator/test_handle_typed_request_omn21924.py::TestArchitectureValidationHandle::test_handle_returns_what_validate_architecture_returns[scenario1]",
+      "tests/unit/nodes/node_architecture_validator/test_handle_typed_request_omn21924.py::TestArchitectureValidationHandle::test_handle_returns_what_validate_architecture_returns[scenario2]",
+      "tests/unit/nodes/node_architecture_validator/test_handle_typed_request_omn21924.py::TestArchitectureValidationHandle::test_handle_returns_what_validate_architecture_returns[scenario3]",
+      "tests/unit/nodes/node_architecture_validator/test_handle_typed_request_omn21924.py::TestArchitectureValidationHandle::test_handle_returns_what_validate_architecture_returns[scenario4]",
+      "tests/unit/nodes/node_architecture_validator/test_handle_typed_request_omn21924.py::TestArchitectureValidationHandle::test_empty_request_is_valid",
+      "tests/unit/nodes/node_architecture_validator/test_handle_typed_request_omn21924.py::TestArchitectureValidationHandle::test_failing_rule_reports_its_violations",
+      "tests/unit/nodes/node_architecture_validator/test_handle_typed_request_omn21924.py::TestArchitectureValidationHandle::test_fail_fast_stops_at_the_first_violation"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerArchitectureValidation.validate_architecture",
+    "HandlerArchitectureValidation._get_rules_to_check",
+    "HandlerArchitectureValidation._create_violation",
+    "HandlerArchitectureValidation._build_result",
+    "HandlerArchitectureValidation.supported_operations"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

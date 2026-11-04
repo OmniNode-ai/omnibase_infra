@@ -2185,9 +2185,9 @@ repos:
       # per-file plant loop (judges the tree once per compose file) runs in the CI job only.
       - id: stack-shape
         name: Check every compose service is the runtime, a dependency, a one-shot or baselined
-        entry: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k "not every_compose_file"
+        entry: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py tests/unit/docker/test_allowed_commands.py -q --no-cov -k "not every_compose_file"
         language: system
-        files: ^(docker/docker-compose[^/]*\.yml|docker/catalog/.*\.ya?ml|config/validation/stack_shape\.yaml|tests/(unit/validation/test_checker_stack_shape\.py|fixtures/stack_shape/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(docker/docker-compose[^/]*\.yml|docker/catalog/.*\.ya?ml|config/validation/stack_shape\.yaml|pyproject\.toml|uv\.lock|src/omnibase_infra/nodes/node_architecture_validator/.*|tests/(unit/validation/test_checker_stack_shape\.py|unit/docker/test_allowed_commands\.py|fixtures/stack_shape/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: dev-tenant-projection-fold
