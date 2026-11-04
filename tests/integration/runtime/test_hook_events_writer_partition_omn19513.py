@@ -1,17 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19513: discovery, the lane compose environment and the profile filter agree.
-
-The dev lane hands ``projection_claude_hook_events`` to its own writer container.
-This drives the real contract discovery path and the real profile filter with the
-environment the compose files actually render, so a rename on either side (the
-compose variable value, the contract name, the filter) fails here and not in a
-running lane where the projection silently has no owner or two.
-"""
+"""Discovery preserves one hook-events owner across the fold and rollback."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from textwrap import dedent
 
@@ -23,7 +15,11 @@ from omnibase_infra.models.runtime.model_runtime_node_selection import (
 )
 from omnibase_infra.runtime.auto_wiring import filter_manifest_for_runtime_profile
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
-from tests.unit.infra.test_broker_profile_omn19419 import _render
+from scripts.render_runtime_policy_env import load_contract, render_env
+from tests.helpers.lane_overlay_fixtures import load_compose
+from tests.unit.docker.test_dev_tenant_projection_fold_omn21288 import (
+    dev_stack_services,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -61,37 +57,43 @@ def test_lane_environment_gives_the_projection_exactly_one_owner(
     assert manifest.total_errors == 0
     assert {contract.name for contract in manifest.contracts} == {NODE, OTHER}
 
-    # Compose resolves anchors, interpolation and !override across the actual
-    # deployment stack; parsing each YAML file alone cannot prove the handoff.
-    services = _render(
-        "dev",
-        {
-            "COMPOSE_PROJECT_NAME": os.environ.get(
-                "COMPOSE_PROJECT_NAME", "omn19513-render"
-            )
-        },
-    )["services"]
-    main_env = services["omninode-runtime"]["environment"]
-    writer_service = services["projection-claude-hook-events-writer"]
-    writer_env = writer_service["environment"]
-    assert writer_service["profiles"] == ["runtime", "full"]
-    assert writer_env["ONEX_RUNTIME_LANE"] == main_env["ONEX_RUNTIME_LANE"]
-    assert writer_env["ONEX_WIRING_STRICT_MODE"] == "1"
-    assert writer_env["OMNINODE_INTERNAL_DB_URL"].startswith(
-        "postgresql://omninode_runtime:"
-    )
+    services = dev_stack_services()
+    assert "projection-claude-hook-events-writer" not in services
+    main_env = {
+        key: value
+        for key, value in services["omninode-runtime"]["environment"].items()
+        if value != "None"
+    }
+    main_env["ONEX_RUNTIME_FOLDED_PROFILES"] = render_env(load_contract())[
+        "DEV_RUNTIME_MAIN_FOLDED_PROFILES"
+    ]
+    main = filter_manifest_for_runtime_profile(manifest, "main", environ=main_env)
+    assert not main.manifest.errors
+    assert {c.name for c in main.manifest.contracts} == {NODE, OTHER}
+    assert ENV_RUNTIME_NODE_EXCLUSION not in main_env
 
-    main = filter_manifest_for_runtime_profile(
-        manifest, main_env.get("RUNTIME_PROFILE", "main"), environ=main_env
+    # Rollback retains the inert base carrier and its node selection. Restoring
+    # the exclusion hands the node back to it without a second owner.
+    base = load_compose(
+        Path(__file__).resolve().parents[3] / "docker/docker-compose.infra.yml"
     )
-    writer = filter_manifest_for_runtime_profile(
+    writer = base["services"]["projection-claude-hook-events-writer"]
+    assert writer["profiles"] == ["profile-carrier-optin"]
+    writer_env = writer["environment"]
+    rollback_main_env = {**main_env, ENV_RUNTIME_NODE_EXCLUSION: NODE}
+    rollback_main = filter_manifest_for_runtime_profile(
+        manifest, "main", environ=rollback_main_env
+    )
+    rollback_writer = filter_manifest_for_runtime_profile(
         manifest, writer_env["RUNTIME_PROFILE"], environ=writer_env
     )
-
-    assert {c.name for c in main.manifest.contracts} == {OTHER}
-    assert {c.name for c in writer.manifest.contracts} == {NODE}
-    assert main_env[ENV_RUNTIME_NODE_EXCLUSION] == NODE
+    assert not rollback_main.manifest.errors
+    assert not rollback_writer.manifest.errors
+    assert {c.name for c in rollback_main.manifest.contracts} == {OTHER}
+    assert {c.name for c in rollback_writer.manifest.contracts} == {NODE}
     assert writer_env[ENV_RUNTIME_NODE_SELECTION] == NODE
-    # The consumer group id carries KAFKA_INSTANCE_ID; committed offsets only
-    # carry over when the writer shares the main runtime's instance id.
-    assert writer_env["KAFKA_INSTANCE_ID"] == "runtime-main"
+    assert (
+        writer_env["KAFKA_INSTANCE_ID"]
+        == main_env["KAFKA_INSTANCE_ID"]
+        == "runtime-main"
+    )

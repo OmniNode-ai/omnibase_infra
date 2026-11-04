@@ -42,6 +42,7 @@ A failed or raising consumer is replaced on a 30 s retry.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -799,20 +800,44 @@ class ConsumerRejoinSupervisor:
         """Probe leaders for end offsets and compute the backlog."""
         self._position_probe_timed_out = False
         assignment = consumer.assignment()
-        if not assignment:
-            # No assignment to probe. Reachability is asserted True so the
-            # no-assignment stall class is reachable; a client with no
-            # assignment and an unreachable broker is covered by the same
-            # remedy, and recreating it is the correct action either way.
+
+        def observed(
+            *, reachable: bool, backlog: int, measured: bool = True
+        ) -> ModelConsumerPollObservation:
             return ModelConsumerPollObservation(
                 topic=self._topic,
                 consumer_group=self._group_id,
                 seconds_since_last_record=silent_for,
-                assigned_partitions=0,
-                broker_reachable=True,
-                backlog_records=0,
+                assigned_partitions=len(assignment),
+                broker_reachable=reachable,
+                backlog_records=backlog,
+                backlog_measured=measured,
                 seconds_since_last_rejoin=self._since_last_rejoin(now),
             )
+
+        if not assignment:
+            # No assignment of this member's own, so there is nothing for it to
+            # fall behind ON -- but the GROUP can still be behind, and that is
+            # the difference between the 2026-09-18 outage and an ordinary
+            # standby (OMN-22291). A group may hold more members than the topic
+            # has partitions, which on a laptop is every topic: the local
+            # partition cap leaves one partition, one member takes it, and the
+            # rest sync cleanly to an empty assignment. Those members were
+            # graded STALLED_NO_ASSIGNMENT, rejoined into the same empty
+            # assignment, and under the rejoin cooldown reported
+            # not_stalled_within_cooldown with a stall clock that only grew, so
+            # the runtime's consumer_sync dimension stayed CRITICAL for as long
+            # as the stack ran and `make up-local` could never see it healthy.
+            #
+            # So measure the GROUP against the TOPIC: committed offsets from the
+            # coordinator against the leaders' end offsets. Zero means every
+            # record on the topic is consumed and this member has nothing to do;
+            # positive means records are waiting and nobody is taking them,
+            # which is the outage. Reachability stays asserted True, as before,
+            # so an unreachable broker keeps the no-assignment remedy; what a
+            # failed probe loses is only the right to call the group caught up.
+            group_backlog, measured = await self._group_backlog(consumer)
+            return observed(reachable=True, backlog=group_backlog, measured=measured)
 
         leaders_answered = False
         try:
@@ -822,15 +847,7 @@ class ConsumerRejoinSupervisor:
                 positions = {tp: await consumer.position(tp) for tp in assignment}
         except TimeoutError:
             self._position_probe_timed_out = leaders_answered
-            return ModelConsumerPollObservation(
-                topic=self._topic,
-                consumer_group=self._group_id,
-                seconds_since_last_record=silent_for,
-                assigned_partitions=len(assignment),
-                broker_reachable=leaders_answered,
-                backlog_records=0,
-                seconds_since_last_rejoin=self._since_last_rejoin(now),
-            )
+            return observed(reachable=leaders_answered, backlog=0)
         except Exception as probe_error:  # noqa: BLE001 — boundary: an unreachable probe is a verdict, not a crash
             logger.debug(
                 "consumer_stall_probe_failed topic=%s group=%s error=%s",
@@ -839,15 +856,7 @@ class ConsumerRejoinSupervisor:
                 probe_error,
                 exc_info=True,
             )
-            return ModelConsumerPollObservation(
-                topic=self._topic,
-                consumer_group=self._group_id,
-                seconds_since_last_record=silent_for,
-                assigned_partitions=len(assignment),
-                broker_reachable=False,
-                backlog_records=0,
-                seconds_since_last_rejoin=self._since_last_rejoin(now),
-            )
+            return observed(reachable=False, backlog=0)
 
         backlog = 0
         for tp in assignment:
@@ -856,16 +865,33 @@ class ConsumerRejoinSupervisor:
             if end is None or position is None:
                 continue
             backlog += max(0, int(end) - int(position))
+        return observed(reachable=True, backlog=backlog)
 
-        return ModelConsumerPollObservation(
-            topic=self._topic,
-            consumer_group=self._group_id,
-            seconds_since_last_record=silent_for,
-            assigned_partitions=len(assignment),
-            broker_reachable=True,
-            backlog_records=backlog,
-            seconds_since_last_rejoin=self._since_last_rejoin(now),
-        )
+    async def _group_backlog(
+        self, consumer: ProtocolRejoinableConsumer
+    ) -> tuple[int, bool]:
+        """The GROUP's backlog over the whole topic, and whether it was measured."""
+        # OMN-22291. Asked only when this member holds no assignment, where its
+        # own fetch position says nothing. The committed offsets come from the
+        # COORDINATOR, so they answer for partitions this member does not hold;
+        # the end offsets come from the leaders, as everywhere else in this
+        # file. A topic with no partition at all reports zero MEASURED: nothing
+        # is waiting, and a replacement would be handed the same nothing.
+        # Anything unread reports zero UNMEASURED, because a zero nobody
+        # measured must never be read as caught up.
+        backlog = 0
+        measured = False
+        with contextlib.suppress(Exception):
+            async with asyncio.timeout(self._probe_timeout_seconds):
+                partitions = consumer.partitions_for_topic(self._topic)
+                tps = [TopicPartition(self._topic, p) for p in sorted(partitions or ())]
+                ends = await consumer.end_offsets(tps)
+                committed = {tp: await consumer.committed(tp) for tp in tps}
+            backlog = sum(
+                max(0, int(ends[tp]) - int(committed.get(tp) or 0)) for tp in tps
+            )
+            measured = partitions is not None
+        return backlog, measured
 
     def _since_last_rejoin(self, now: float) -> float | None:
         if self._last_rejoin_at is None:
