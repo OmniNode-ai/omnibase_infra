@@ -47,12 +47,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/event_bus/test_omn21229_subscription_lifecycle.py tests/integration/event_bus/test_consume_loop_survival_integration.py tests/integration/event_bus/test_consumer_rejoin_after_coordinator_loss_integration.py tests/integration/event_bus/test_consumer_sync_readiness_integration.py -q -p no:cacheprovider -k "paused_handle or survives or recovers or never_recreated or unhealthy or keeps_the_container"
   - id: dod-005
-    description: "The extracted group-less reader keeps its existing constructor name at the bus module, reads committed host state events, resolves positions before returning and stops without leaving a consumer group."
+    description: "Bus close completes the in-flight callback from a fetched batch, commits only that completed record and releases the unstarted records. The extracted group-less reader also keeps its existing constructor name at the bus module, reads committed host state events, resolves positions before returning and stops without leaving a consumer group."
     source: generated
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/event_bus/test_read_committed_omn22430.py tests/unit/event_bus/test_subscribe_ungrouped_omn17427.py -q -p no:cacheprovider -k "ungrouped or kafka_close_stops"
+        check_value: uv run pytest tests/unit/event_bus/test_read_committed_omn22430.py tests/unit/event_bus/test_subscribe_ungrouped_omn17427.py tests/unit/event_bus/test_omn21229_subscription_lifecycle.py -q -p no:cacheprovider -k "ungrouped or kafka_close_stops or shutdown_with_a_fetched_batch"
   - id: dod-deploy
     description: "Deploy probe: the handle module GitHub serves at the PR branch defines the drain step. The live proof of the SIGTERM case against a real broker is the lab comment on the PR; this probe proves source identity only."
     source: generated
