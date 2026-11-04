@@ -143,3 +143,6 @@ class HandlerRegistrationBootstrap:
                 asyncpg.exceptions.DuplicateObjectError,
             ),
         )
+
+
+__all__ = ["HandlerRegistrationBootstrap", "Pool"]

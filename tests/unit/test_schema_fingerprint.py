@@ -7,6 +7,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import asyncpg
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -477,6 +478,9 @@ class TestPluginFingerprintPropagation:
     @pytest.mark.asyncio
     async def test_mismatch_error_propagates_from_plugin(self) -> None:
         """SchemaFingerprintMismatchError escapes plugin.validate_handshake()."""
+        from omnibase_infra.handlers.handler_registration_bootstrap import (
+            HandlerRegistrationBootstrap,
+        )
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
             ServiceRegistration,
         )
@@ -487,6 +491,7 @@ class TestPluginFingerprintPropagation:
         plugin = ServiceRegistration()
         config = MagicMock(spec=ModelDomainPluginConfig)
         config.correlation_id = uuid4()
+        config.container = MagicMock()
 
         mismatch = SchemaFingerprintMismatchError(
             "schema drift",
@@ -499,7 +504,15 @@ class TestPluginFingerprintPropagation:
 
         with (
             patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x/y"}),
-            patch(f"{_plugin_mod}.ModelPostgresPoolConfig.validate_dsn"),
+            patch(
+                "omnibase_infra.handlers.handler_registration_bootstrap.ModelPostgresPoolConfig.validate_dsn"
+            ),
+            patch.object(
+                HandlerRegistrationBootstrap,
+                "from_container",
+                new_callable=AsyncMock,
+                return_value=HandlerRegistrationBootstrap(MagicMock()),
+            ),
             patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
             patch.object(
                 ServiceRegistration,
@@ -526,7 +539,7 @@ class TestPluginFingerprintPropagation:
                 side_effect=mismatch,
             ),
         ):
-            mock_create_pool.return_value = MagicMock()
+            mock_create_pool.return_value = MagicMock(spec=asyncpg.Pool)
 
             # initialize() succeeds (creates pool) -- B1-B3 checks moved to validate_handshake()
             init_result = await plugin.initialize(config)
@@ -541,6 +554,9 @@ class TestPluginFingerprintPropagation:
     @pytest.mark.asyncio
     async def test_missing_error_propagates_from_plugin(self) -> None:
         """SchemaFingerprintMissingError escapes plugin.validate_handshake()."""
+        from omnibase_infra.handlers.handler_registration_bootstrap import (
+            HandlerRegistrationBootstrap,
+        )
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
             ServiceRegistration,
         )
@@ -551,6 +567,7 @@ class TestPluginFingerprintPropagation:
         plugin = ServiceRegistration()
         config = MagicMock(spec=ModelDomainPluginConfig)
         config.correlation_id = uuid4()
+        config.container = MagicMock()
 
         missing = SchemaFingerprintMissingError(
             "fingerprint not found",
@@ -561,7 +578,15 @@ class TestPluginFingerprintPropagation:
 
         with (
             patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x/y"}),
-            patch(f"{_plugin_mod}.ModelPostgresPoolConfig.validate_dsn"),
+            patch(
+                "omnibase_infra.handlers.handler_registration_bootstrap.ModelPostgresPoolConfig.validate_dsn"
+            ),
+            patch.object(
+                HandlerRegistrationBootstrap,
+                "from_container",
+                new_callable=AsyncMock,
+                return_value=HandlerRegistrationBootstrap(MagicMock()),
+            ),
             patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
             patch.object(
                 ServiceRegistration,
@@ -588,7 +613,7 @@ class TestPluginFingerprintPropagation:
                 side_effect=missing,
             ),
         ):
-            mock_create_pool.return_value = MagicMock()
+            mock_create_pool.return_value = MagicMock(spec=asyncpg.Pool)
 
             # initialize() succeeds (creates pool) -- B1-B3 checks moved to validate_handshake()
             init_result = await plugin.initialize(config)

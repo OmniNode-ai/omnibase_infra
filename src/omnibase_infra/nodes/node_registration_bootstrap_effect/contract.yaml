@@ -31,5 +31,6 @@ capabilities:
   - name: registration.bootstrap
     description: Acquire registration resources and resolve bootstrap configuration.
 metadata:
+  description: Acquires the registration PostgreSQL pool and resolves bootstrap environment and contract/schema files before dispatch starts.
   ticket: OMN-22446
   tags: [effect, registration, bootstrap]

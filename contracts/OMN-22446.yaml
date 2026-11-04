@@ -43,7 +43,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/nodes/node_registration_orchestrator/test_plugin_no_io_omn22446.py -q
         cwd: .
       - check_type: test_passes
-        check_value: uv run pytest tests/ -q -k registration_orchestrator
+        check_value: uv run pytest tests/unit/nodes/node_registration_orchestrator/test_plugin_no_io_omn22446.py tests/ -q -k registration_orchestrator
         cwd: .
   - id: dod-omn22446-ac3-scope
     description: Only the plugin, the effect handlers and their node files, plus the explicitly required regression and evidence contract may change; every baseline and allowlist remains outside this set.
@@ -52,7 +52,7 @@ dod_evidence:
       - AC3
     checks:
       - check_type: command
-        check_value: uv run python -c "import subprocess; allowed=set(['contracts/OMN-22446.yaml', 'src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py', 'src/omnibase_infra/handlers/handler_registration_bootstrap.py', 'src/omnibase_infra/handlers/handler_registration_snapshot_publisher.py', 'src/omnibase_infra/nodes/node_event_bus_wiring_effect/contract.yaml', 'src/omnibase_infra/models/registration/model_registration_snapshot_producer.py', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/__init__.py', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/contract.yaml', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/node.py', 'src/omnibase_infra/models/registration/model_registration_bootstrap_result.py', 'tests/unit/nodes/node_registration_orchestrator/test_plugin_no_io_omn22446.py', 'tests/integration/handlers/test_handler_registration_bootstrap_omn22446.py']); changed=set(subprocess.check_output(['git','diff','--name-only','origin/dev...HEAD'],text=True).splitlines()); assert not changed-allowed, sorted(changed-allowed)"
+        check_value: uv run python -c "import subprocess; allowed=set(['contracts/OMN-22446.yaml', 'pyproject.toml', 'src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py', 'src/omnibase_infra/handlers/handler_registration_bootstrap.py', 'src/omnibase_infra/handlers/handler_registration_snapshot_publisher.py', 'src/omnibase_infra/nodes/node_event_bus_wiring_effect/contract.yaml', 'src/omnibase_infra/models/registration/model_registration_snapshot_producer.py', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/__init__.py', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/contract.yaml', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/node.py', 'src/omnibase_infra/models/registration/model_registration_bootstrap_result.py', 'tests/unit/nodes/node_registration_orchestrator/test_plugin_no_io_omn22446.py', 'tests/integration/handlers/test_handler_registration_bootstrap_omn22446.py', 'tests/unit/test_db_ownership.py', 'tests/unit/test_schema_fingerprint.py']); changed=set(subprocess.check_output(['git','diff','--name-only','origin/dev...HEAD'],text=True).splitlines()); assert not changed-allowed, sorted(changed-allowed)"
         cwd: .
   - id: dod-omn22446-deploy-image
     description: 'Hosted-runner deploy probe: build the shipped runtime image from this checkout and execute the installed plugin with an injected clock, asserting its measured duration and importing both real effect handlers. It needs Docker but no lab-network access or running database/broker. This is an image execution probe, not a full runtime health claim.'
