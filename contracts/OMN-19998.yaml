@@ -180,6 +180,11 @@ requirements:
     acceptance:
       - id: AC38
         statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
+  - id: req-omn19998-nuc-trusted-routing-policy
+    statement: The permanently unparked repository's trusted-CI policy must require arch-amd64 so its jobs cannot select NUC runners, with fresh activation evidence and the audit retaining its single-value comparison.
+    acceptance:
+      - id: AC39
+        statement: 'AC39: the declared NUC exclusion requires self-hosted,omnibase-ci,arch-amd64 and fresh ninety-minute activation evidence; the production audit accepts that shadow and rejects broad, arm64, nested dual-value and missing shadows -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy fails on the merge-base policy'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -734,3 +739,21 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-ac39-nuc-trusted-routing-policy
+    description: AC39 exercises the shipped policy through the production variable comparator with an eligible shadow and broad, arm64, nested dual-value and missing-shadow controls. Activation assertions require fresh evidence for the eligible pool.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy
+        cwd: .
+    binds_ac:
+      - AC39
+  - id: dod-omn19998-ac39-routing-policy-artifact
+    description: Hosted-runner artifact check for AC39. Loads this checkout's routing YAML and drives the production audit comparator without a live API, broker or variable mutation. Live runner controls and ninety-minute samples remain pending after the separate repository-variable write.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy
+        cwd: .
+    binds_ac:
+      - AC39

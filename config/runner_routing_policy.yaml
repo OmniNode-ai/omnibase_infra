@@ -476,22 +476,26 @@ trusted_runner_variable:
           This repository publishes no OCC companion and calls neither publisher reusable -- its only cross-repository delegation is the kb-doc-gate reusable itself -- so there is no companion whose fate this shadow could share. Stated rather than left absent, on the omni_home entry's terms.
         positive_control_acceptance: >-
           Acceptance is a named fleet runner, not an absence of red: the next `kb-doc-gate / kb-doc-gate` run on a pull request here reporting conclusion success with a populated `runner_name` matching `omninode-runner-*` and labels self-hosted,omnibase-ci. The positive control that the fleet itself is healthy is a fleet-literal job in the SAME run -- `Lint & Format` -- staying green, which is the discriminator that already distinguishes this repository's failing job from its passing ones today.
+    # OMN-19998: the permanently unparked repository must exclude NUC
+    # runners. Publish this declaration before the separate repository-variable
+    # write. The audit accepts one value, so the old shadow (or a missing one)
+    # remains a finding until that write; there is no dual-value transition.
     omniweb:
-      expected_json: '["self-hosted","omnibase-ci"]'
+      expected_json: '["self-hosted","omnibase-ci","arch-amd64"]'
       revert_when: >-
-        Revert to '["ubuntu-latest"]' only once omniweb is no longer a private repository, or if a job routed by this shadow fails on a named fleet runner for a fleet-caused reason. This entry DECLARES a value that has been live since 2026-09-01T12:39:22Z; it does not create one, so there is nothing to revert to a prior state.
+        Retain arch-amd64 while repairing a fleet-caused failure, capacity breach or maintenance-roll failure. Revert to '["ubuntu-latest"]' only when hosted placement is permitted and actually executes. Never restore the broad self-hosted,omnibase-ci route: it admits the excluded NUC runners.
       activation_gate:
         sustained_samples: >-
-          Not applicable prospectively: the value has been live for thirteen days. The sustained sample is the historical record -- omniweb's workflow runs over that window, 833 in the last seven days alone, with no fleet-attributed failure and no saturation event traced to this repository.
-        sustained_min_span_seconds: 1123200
+          Take four job-level samples immediately before the repository-variable write and at thirty, sixty and ninety minutes afterward. Record eligible online/busy/idle runners and org-wide queue depth each time, filtering eligibility by all three labels self-hosted,omnibase-ci,arch-amd64. Historical samples of the broader fleet do not accept this narrower route.
+        sustained_min_span_seconds: 5400
         capacity_budget: >-
-          Twelve seam-driven job definitions plus two fleet literals. Same 88-runner group and the same `min_idle_runners` floor as the omninode_infra entry above; this repository has never been a named contributor to a saturation reading.
+          Before the write, count affected job definitions from parsed runs-on on the repository's default branch and record eligible online/busy/idle runners matching self-hosted,omnibase-ci,arch-amd64. The eligible pool must keep at least the min_idle_runners floor of route below free at every sample. Two consecutive breaches require repair of the eligible fleet or a permitted, executing hosted placement; do not restore the broad route.
         maintenance_roll_convergence: >-
-          Unchanged by this entry. No roll has failed to converge for a reason attributed to omniweb in the thirteen days the value has been live.
+          Record one completed maintenance roll, or the eligible pool returning inside the capacity budget, within the ninety-minute sampling window. Historical convergence of the broader fleet does not accept this narrower route.
         evidence_companion_fate_isolation: >-
-          This repository's OCC autobind and companion-effect publishers read OMNI_OCC_AUTOBIND_RUNS_ON_JSON, which stays UNSET, so they are isolated from this seam by the same construction as omninode_infra above. Observed live: omniweb run 34780241951 companion path SUCCESS.
+          The OCC autobind and companion-effect publishers read OMNI_OCC_AUTOBIND_RUNS_ON_JSON, which this change leaves untouched. Verify that the companion path still executes independently of the trusted seam during activation; historical companion success is not current activation evidence.
         positive_control_acceptance: >-
-          Already satisfied and cited rather than promised: omniweb run 34780281040, `pr-title / check-title`, conclusion success on `omninode-runner-20` with labels self-hosted,omnibase-ci, against the control of run 34780242070 in the same repository landing hosted on `GitHub Actions 1000000036` because its definition routes dev-targeting pull requests to the public class.
+          Record two conclusive successful PR runs and two conclusive successful merge-queue runs where that event is configured, with populated runner_name and labels self-hosted,omnibase-ci,arch-amd64. Verify a NUC runner is ineligible for this selector and record a fleet control job in the same window. An absence of red is not acceptance.
 # OMN-18205, 2026-09-12: THE EXCLUSION ABOVE RESTS ON PRE-FIX EVIDENCE, and
 # this entry is the correction. The 5-of-5 self-hosted failures of "Customer
 # Path Boundary (OMN-18012)" recorded above all predate commit

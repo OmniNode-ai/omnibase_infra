@@ -22,6 +22,67 @@ SCRIPT = REPO_ROOT / "scripts" / "audit-runner-routing.py"
 POLICY = REPO_ROOT / "config" / "runner_routing_policy.yaml"
 
 
+def _nuc_policy_override(policy):
+    """Find the declared NUC exclusion without repeating private inventory."""
+    exclusions = [
+        (repo, entry)
+        for repo, entry in policy["trusted_runner_variable"][
+            "repository_overrides"
+        ].items()
+        if "NUC" in entry["revert_when"]
+    ]
+    assert len(exclusions) == 1
+    return exclusions[0]
+
+
+def test_nuc_policy_requires_amd64_and_fresh_activation_evidence() -> None:
+    policy = _load_script()._load_policy(POLICY)
+    _, override = _nuc_policy_override(policy)
+    assert json.loads(override["expected_json"]) == [
+        "self-hosted",
+        "omnibase-ci",
+        "arch-amd64",
+    ]
+    gate = override["activation_gate"]
+    assert gate["sustained_min_span_seconds"] == 5400
+    for criterion in (
+        "sustained_samples",
+        "capacity_budget",
+        "positive_control_acceptance",
+    ):
+        assert "arch-amd64" in gate[criterion]
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        ["self-hosted", "omnibase-ci", "arch-amd64"],
+        ["self-hosted", "omnibase-ci"],
+        ["self-hosted", "omnibase-ci", "arch-arm64"],
+        [["self-hosted", "omnibase-ci"], ["self-hosted", "omnibase-ci", "arch-amd64"]],
+        None,
+    ],
+    ids=["eligible", "broad", "arm64", "both-values", "missing-shadow"],
+)
+def test_nuc_policy_audit_accepts_only_amd64_shadow(monkeypatch, labels) -> None:
+    module = _load_script()
+    policy = module._load_policy(POLICY)
+    name = policy["trusted_runner_variable"]["name"]
+    repo, _ = _nuc_policy_override(policy)
+
+    def variables(args):
+        if args == ["--org", "OmniNode-ai"]:
+            return [{"name": name, "value": '["ubuntu-latest"]'}]
+        assert args == ["--repo", f"OmniNode-ai/{repo}"]
+        return [] if labels is None else [{"name": name, "value": json.dumps(labels)}]
+
+    monkeypatch.setattr(module, "_variables", variables)
+    findings = module._audit_trusted_style_variable(
+        policy["trusted_runner_variable"], [repo]
+    )
+    assert (findings == []) == (labels == ["self-hosted", "omnibase-ci", "arch-amd64"])
+
+
 def _load_script():
     spec = importlib.util.spec_from_file_location("audit_runner_routing", SCRIPT)
     assert spec and spec.loader
