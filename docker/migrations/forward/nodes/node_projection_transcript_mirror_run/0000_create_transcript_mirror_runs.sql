@@ -261,6 +261,28 @@ BEGIN
 END;
 $reconcile$;
 
+-- CREATE INDEX IF NOT EXISTS skips any relation holding the name. Accept it
+-- only when it is the declared index on this table; refuse anything else
+-- rather than drop or rebuild it.
+DO $index_shape$
+DECLARE
+    actual_definition TEXT;
+BEGIN
+    SELECT pg_catalog.pg_get_indexdef(c.oid)
+    INTO actual_definition
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'omninode_internal'
+      AND c.relname = 'idx_transcript_mirror_runs_started_at';
+    IF FOUND AND actual_definition IS DISTINCT FROM
+        'CREATE INDEX idx_transcript_mirror_runs_started_at ON omninode_internal.transcript_mirror_runs USING btree (started_at DESC)'
+    THEN
+        RAISE EXCEPTION 'transcript_mirror_runs: incompatible index idx_transcript_mirror_runs_started_at; found %',
+            actual_definition;
+    END IF;
+END;
+$index_shape$;
+
 CREATE INDEX IF NOT EXISTS idx_transcript_mirror_runs_started_at
     ON omninode_internal.transcript_mirror_runs (started_at DESC);
 

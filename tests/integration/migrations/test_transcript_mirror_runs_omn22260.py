@@ -767,3 +767,41 @@ def test_incompatible_column_type_refuses_reconciliation_atomically(
             assert cur.fetchall() == original
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize(
+    "index_definition",
+    [
+        "(started_at)",
+        "(finished_at DESC)",
+        "(started_at DESC) WHERE state = 'started'",
+    ],
+)
+def test_divergent_started_at_index_refuses_reconciliation_atomically(
+    database: EphemeralPostgres,
+    index_definition: str,
+) -> None:
+    first = database.psql("-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE)
+    assert first.returncode == 0, first.stderr
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DROP INDEX omninode_internal.idx_transcript_mirror_runs_started_at"
+            )
+            cur.execute(
+                "CREATE INDEX idx_transcript_mirror_runs_started_at "
+                f"ON {TABLE} {index_definition}"
+            )
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE
+        )
+        assert result.returncode != 0
+        assert (
+            "incompatible index idx_transcript_mirror_runs_started_at" in result.stderr
+        )
+        assert _snapshot(conn) == before
+    finally:
+        conn.close()
