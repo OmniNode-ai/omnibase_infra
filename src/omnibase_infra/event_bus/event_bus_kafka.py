@@ -298,7 +298,9 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import ModelReadCommittedTopics
 from omnibase_infra.models.event_bus.model_kafka_ungrouped_reader import (
     UNGROUPED_AUTO_OFFSET_RESET,
-    ModelKafkaUngroupedReader,
+)
+from omnibase_infra.models.event_bus.model_kafka_ungrouped_reader import (
+    ModelKafkaUngroupedReader as KafkaUngroupedReader,
 )
 from omnibase_infra.models.event_bus.model_live_dispatch_settler import (
     ModelLiveDispatchSettler,
@@ -590,7 +592,7 @@ class EventBusKafka(
         self._group_consumers: dict[tuple[str, str], AIOKafkaConsumer] = {}
         # OMN-17427: group-less reads (subscribe_ungrouped) hold no group, so
         # nothing on the broker names them; close() must find them here.
-        self._ungrouped_readers: set[ModelKafkaUngroupedReader] = set()
+        self._ungrouped_readers: set[KafkaUngroupedReader] = set()
         # OMN-18640: one rejoin supervisor per (topic, group). Holds the
         # per-consumer stall state and the typed rejoin history a readiness
         # probe reads.
@@ -2307,7 +2309,7 @@ class EventBusKafka(
             **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
-        reader = ModelKafkaUngroupedReader(
+        reader = KafkaUngroupedReader(
             consumer=consumer,
             topic=topic,
             on_message=on_message,
