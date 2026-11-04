@@ -31,6 +31,7 @@ from tests.helpers.lane_census_fixtures import (
     NEUTRAL_HOST_ID,
     NEUTRAL_MANIFEST,
     NEUTRAL_OPTIONAL_LANE,
+    NEUTRAL_REGISTRY,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -44,6 +45,14 @@ from desired_state import (
 pytestmark = pytest.mark.integration
 
 _HOST = NEUTRAL_HOST_ID
+
+
+@pytest.fixture(autouse=True)
+def _lane_census_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-22152: the host registry is the file LANE_CENSUS_REGISTRY names."""
+    monkeypatch.setenv("LANE_CENSUS_REGISTRY", str(NEUTRAL_REGISTRY))
+
+
 _LANE = NEUTRAL_OPTIONAL_LANE
 
 
