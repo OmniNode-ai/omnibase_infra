@@ -605,6 +605,7 @@ exclude_lines = [
 ]
 
 [project.entry-points."onex.nodes"]
+node_api_fixture_record_effect = "omnibase_infra.nodes.node_api_fixture_record_effect"
 node_architecture_validator = "omnibase_infra.nodes.node_architecture_validator"
 node_artifact_change_detector_effect = "omnibase_infra.nodes.node_artifact_change_detector_effect"
 node_artifact_reconciliation_orchestrator = "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator"

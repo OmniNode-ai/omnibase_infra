@@ -21,22 +21,23 @@ class ModelHttpClientConfig(BaseModel):
     Used by ProviderHttpClient to create shared httpx.AsyncClient instances.
 
     Attributes:
-        timeout_seconds: Request timeout in seconds (1--300, default 30).
+        timeout_seconds: Request timeout in seconds (positive, at most 300).
         follow_redirects: Whether to follow HTTP redirects (default True).
+        trust_env: Whether environment proxy and TLS settings apply (default True).
+        max_keepalive_connections: Idle connection limit (default 20; 0 disables reuse).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     timeout_seconds: float = Field(
         default=30.0,
-        ge=1.0,
+        gt=0.0,
         le=300.0,
         description="Request timeout in seconds",
     )
-    follow_redirects: bool = Field(
-        default=True,
-        description="Follow HTTP redirects",
-    )
+    follow_redirects: bool = Field(default=True, description="Follow HTTP redirects")
+    trust_env: bool = True
+    max_keepalive_connections: int = Field(default=20, ge=0)
 
     @classmethod
     def from_env(cls) -> ModelHttpClientConfig:
@@ -54,8 +55,7 @@ class ModelHttpClientConfig(BaseModel):
                 in _TRUTHY_VALUES,
             )
         except (ValueError, TypeError) as e:
-            msg = f"Invalid HTTP client configuration: {e}"
-            raise ValueError(msg) from e
+            raise ValueError(f"Invalid HTTP client configuration: {e}") from e
 
 
 __all__ = ["ModelHttpClientConfig"]
