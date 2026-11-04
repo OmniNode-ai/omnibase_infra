@@ -32,6 +32,18 @@ dependencies:
   - postgres
   - redpanda
   - valkey
+# OMN-22393 (one-runtime plan task T26): a service the runtime cannot carry, kept outside it. An
+# entry names the service, the compose files that may declare it (each must declare it, and the
+# service is refused in any other judged file), the ticket and a non-empty reason that names the
+# second bus connection or failure domain the runtime lacks. The entry only grows by an operator
+# decision; folding the service into the runtime deletes it.
+kept_outside_runtime:
+  - service: gateway-forwarder
+    files:
+      - docker/docker-compose.gateway.yml
+    ticket: OMN-22393
+    reason: >-
+      T26 decision: KEEP outside the runtime. onex-gateway-forwarder needs a second bus connection the runtime does not provide. The runtime's container resolves exactly one event bus (service_kernel registers one ProtocolEventBusPublisher and one ProtocolEventBusSubscriber), while the forwarder opens its own KafkaTransport to every other broker it bridges: the cloud MSK leg, authenticated with IAM credentials from a credential process behind a TPM-held key on the edge host, and the lane_mirror_buses legs, authenticated with the SASL principal of an operator-mounted lane-credential map. Only the lane-mirror source leg folds (OMN-21950 lets it read the container's bus); the destination legs do not. It is also a separate failure domain: docker-compose.gateway.yml holds the forwarder and its DNS sidecar beside no runtime, so a broker outage on a bridged leg ends this process and never stalls a runtime's own bus. The laptop catalog service lane-mirror-forwarder runs the same entry point for the same reason. Revisit when the runtime can bind named additional buses from a contract.
 one_shots:
   - cloud-migration
   - cloud-migration-files
