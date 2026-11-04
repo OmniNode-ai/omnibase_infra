@@ -32,8 +32,21 @@ _ANCHOR = re.compile(r"^x-[\w-]*runtime-env: &[\w-]+$")
 # policy pins, so no form satisfies both without a policy change outside A3. That lane
 # names no kernel plugin until a follow-up adds the line; the two assertions below name
 # it exactly, so they fail when it is fixed and this entry cannot outlive the fix.
-_AWAITING_FOLLOW_UP_FILE = "docker-compose.lakshman.yml"
-_AWAITING_FOLLOW_UP_ANCHOR = f"{_AWAITING_FOLLOW_UP_FILE}::x-lakshman-runtime-env"
+# Resolve the collaborator identity from the policy's existing profile map instead
+# of duplicating a person's name in this public test. Standard deployment profiles
+# and test profiles are covered; exactly one collaborator profile is pending.
+_COLLABORATOR_PROFILES = [
+    name
+    for name, prefix in renderer._PROFILE_ENV_PREFIX.items()
+    if prefix not in {"DEV", "JUDGE", "PROD", "DOGFOOD"}
+    and not prefix.endswith("_TEST")
+]
+assert len(_COLLABORATOR_PROFILES) == 1
+_COLLABORATOR_PROFILE = _COLLABORATOR_PROFILES[0]
+_AWAITING_FOLLOW_UP_FILE = f"docker-compose.{_COLLABORATOR_PROFILE}.yml"
+_AWAITING_FOLLOW_UP_ANCHOR = (
+    f"{_AWAITING_FOLLOW_UP_FILE}::x-{_COLLABORATOR_PROFILE}-runtime-env"
+)
 
 
 def _carriers(root: Path = _REPO) -> list[Path]:
