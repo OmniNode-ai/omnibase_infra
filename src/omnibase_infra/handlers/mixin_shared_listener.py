@@ -107,4 +107,4 @@ class MixinSharedListener:
             logger.warning("shared listener drain failed: %r", exc)
 
 
-__all__: list[str] = ["MixinSharedListener"]
+__all__: list[str] = ["HANDOVER_MOUNT", "MixinSharedListener"]
