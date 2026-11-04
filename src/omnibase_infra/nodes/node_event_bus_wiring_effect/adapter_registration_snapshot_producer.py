@@ -14,7 +14,7 @@ class AdapterRegistrationSnapshotProducer:
     """Acquire the authenticated producer used by registration snapshots."""
 
     @staticmethod
-    def create(bootstrap_servers: str) -> AIOKafkaProducer:
+    def create(bootstrap_servers: str | None) -> AIOKafkaProducer:
         """Construct the producer with the existing Kafka auth boundary."""
         from aiokafka import AIOKafkaProducer
 

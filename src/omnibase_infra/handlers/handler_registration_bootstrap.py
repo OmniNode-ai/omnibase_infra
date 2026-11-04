@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
+from importlib.metadata import entry_points
 from pathlib import Path
+from typing import cast
 
 from omnibase_core.errors.error_service_resolution import ServiceResolutionError
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -21,8 +23,8 @@ from omnibase_infra.models.registration.model_registration_bootstrap_result impo
     ModelRegistrationBootstrapResult,
     Pool,
 )
-from omnibase_infra.nodes.node_registration_bootstrap_effect.adapter_registration_bootstrap import (
-    AdapterRegistrationBootstrap,
+from omnibase_infra.protocols.protocol_registration_bootstrap_resources import (
+    ProtocolRegistrationBootstrapResources,
 )
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
@@ -50,6 +52,22 @@ class HandlerRegistrationBootstrap:
         except ServiceResolutionError:
             await registry.register_instance(interface=cls, instance=cls(container))
             return await container.get_service_async(cls)
+
+    @staticmethod
+    def resources() -> ProtocolRegistrationBootstrapResources:
+        """Resolve the effect provider through its registered public backend port."""
+        providers = tuple(
+            entry_points(group="onex.backends", name="registration_bootstrap_resources")
+        )
+        if len(providers) != 1:
+            raise ContainerWiringError(
+                "Expected one onex.backends provider for registration_bootstrap_resources",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="resolve_registration_bootstrap_backend",
+                ),
+            )
+        return cast("ProtocolRegistrationBootstrapResources", providers[0].load())
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -104,18 +122,18 @@ class HandlerRegistrationBootstrap:
                 context=pool_error_context,
             ) from exc
 
-        pool = await AdapterRegistrationBootstrap.create_pool(postgres_dsn)
+        pool = await HandlerRegistrationBootstrap.resources().create_pool(postgres_dsn)
         return ModelRegistrationBootstrapResult(pool=pool)
 
     @staticmethod
     def read_schema(path: Path) -> str:
         """Read the schema file; the caller retains its existing failure policy."""
-        return AdapterRegistrationBootstrap.read_schema(path)
+        return HandlerRegistrationBootstrap.resources().read_schema(path)
 
     @staticmethod
     def is_duplicate_schema_error(error: Exception) -> bool:
         """Classify the two database-driver errors bootstrap treats as idempotent."""
-        return AdapterRegistrationBootstrap.is_duplicate_schema_error(error)
+        return HandlerRegistrationBootstrap.resources().is_duplicate_schema_error(error)
 
 
 __all__ = ["HandlerRegistrationBootstrap", "Pool"]

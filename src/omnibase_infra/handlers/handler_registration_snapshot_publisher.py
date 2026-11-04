@@ -4,14 +4,22 @@
 
 from __future__ import annotations
 
+from importlib.metadata import entry_points
+from typing import cast
+
 from omnibase_core.errors.error_service_resolution import ServiceResolutionError
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import ContainerWiringError, ModelInfraErrorContext
 from omnibase_infra.models.registration.model_registration_snapshot_producer import (
     ModelRegistrationSnapshotProducer,
 )
-from omnibase_infra.nodes.node_event_bus_wiring_effect.adapter_registration_snapshot_producer import (
-    AdapterRegistrationSnapshotProducer,
+from omnibase_infra.protocols.protocol_registration_snapshot_producer import (
+    ProtocolRegistrationSnapshotProducer,
 )
 from omnibase_infra.runtime.protocol_domain_plugin import ModelDomainPluginConfig
 
@@ -36,6 +44,22 @@ class HandlerRegistrationSnapshotPublisher:
             await registry.register_instance(interface=cls, instance=cls(container))
             return await container.get_service_async(cls)
 
+    @staticmethod
+    def resources() -> ProtocolRegistrationSnapshotProducer:
+        """Resolve the effect provider through its registered public backend port."""
+        providers = tuple(
+            entry_points(group="onex.backends", name="registration_snapshot_producer")
+        )
+        if len(providers) != 1:
+            raise ContainerWiringError(
+                "Expected one onex.backends provider for registration_snapshot_producer",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="resolve_registration_snapshot_backend",
+                ),
+            )
+        return cast("ProtocolRegistrationSnapshotProducer", providers[0].load())
+
     @property
     def handler_type(self) -> EnumHandlerType:
         """Classify bootstrap resource acquisition as infrastructure handling."""
@@ -51,7 +75,5 @@ class HandlerRegistrationSnapshotPublisher:
     ) -> ModelRegistrationSnapshotProducer:
         """Construct the snapshot producer with the existing Kafka auth boundary."""
         return ModelRegistrationSnapshotProducer(
-            producer=AdapterRegistrationSnapshotProducer.create(
-                request.kafka_bootstrap_servers
-            )
+            producer=self.resources().create(request.kafka_bootstrap_servers)
         )

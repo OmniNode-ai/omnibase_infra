@@ -199,6 +199,8 @@ profile = "omnibase_infra.cli.cli_profile:profile_group"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
 [project.entry-points."onex.backends"]
+registration_bootstrap_resources = "omnibase_infra.nodes.node_registration_bootstrap_effect.adapter_registration_bootstrap:AdapterRegistrationBootstrap"
+registration_snapshot_producer = "omnibase_infra.nodes.node_event_bus_wiring_effect.adapter_registration_snapshot_producer:AdapterRegistrationSnapshotProducer"
 event_bus_kafka = "omnibase_infra.event_bus.event_bus_kafka:EventBusKafka"
 state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
 

@@ -66,9 +66,6 @@ from omnibase_infra.handlers.handler_registration_snapshot_publisher import (
     HandlerRegistrationSnapshotPublisher,
 )
 from omnibase_infra.models.dispatch.model_system_clock import SYSTEM_CLOCK
-from omnibase_infra.nodes.node_registration_bootstrap_effect.adapter_registration_bootstrap import (
-    AdapterRegistrationBootstrap,
-)
 from omnibase_infra.protocols.protocol_clock import ProtocolClock
 
 # Build topic router from contract published_events at module import time.
@@ -76,7 +73,7 @@ from omnibase_infra.protocols.protocol_clock import ProtocolClock
 # DispatchResultApplier can publish each output event to the correct topic
 # instead of the single fallback output_topic. (OMN-4881/OMN-4883)
 _CONTRACT_PATH = Path(__file__).parent / "contract.yaml"
-_TOPIC_ROUTER = AdapterRegistrationBootstrap.topic_router(_CONTRACT_PATH)
+_TOPIC_ROUTER = HandlerRegistrationBootstrap.resources().topic_router(_CONTRACT_PATH)
 
 if TYPE_CHECKING:
     from uuid import UUID

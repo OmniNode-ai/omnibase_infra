@@ -407,3 +407,51 @@ def test_registration_effect_files_pass_the_pinned_no_io_validator() -> None:
         targets.extend((ROOT / "src/omnibase_infra/nodes" / node).rglob("*.py"))
     result = ValidatorNoIoOutsideEffects(root=ROOT).validate(targets)
     assert result.is_valid, result.issues
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["bootstrap", "snapshot_publisher"])
+def test_registration_resource_backends_are_registered_typed_ports(name: str) -> None:
+    from importlib import import_module
+
+    from omnibase_infra.protocols.protocol_registration_bootstrap_resources import (
+        ProtocolRegistrationBootstrapResources,
+    )
+    from omnibase_infra.protocols.protocol_registration_snapshot_producer import (
+        ProtocolRegistrationSnapshotProducer,
+    )
+
+    module = import_module(f"omnibase_infra.handlers.handler_registration_{name}")
+    handler_name = "HandlerRegistration" + "".join(
+        part.title() for part in name.split("_")
+    )
+    port = getattr(module, handler_name).resources()
+    expected = (
+        ProtocolRegistrationBootstrapResources
+        if name == "bootstrap"
+        else ProtocolRegistrationSnapshotProducer
+    )
+    assert isinstance(port, expected)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["bootstrap", "snapshot_publisher"])
+@pytest.mark.parametrize("provider_count", [0, 2])
+def test_registration_resource_backend_requires_one_provider(
+    monkeypatch: pytest.MonkeyPatch, name: str, provider_count: int
+) -> None:
+    from importlib import import_module
+
+    from omnibase_infra.errors import ContainerWiringError
+
+    module = import_module(f"omnibase_infra.handlers.handler_registration_{name}")
+    handler_name = "HandlerRegistration" + "".join(
+        part.title() for part in name.split("_")
+    )
+    monkeypatch.setattr(
+        module, "entry_points", lambda **kwargs: (object(),) * provider_count
+    )
+    with pytest.raises(
+        ContainerWiringError, match=r"Expected one onex\.backends provider"
+    ):
+        getattr(module, handler_name).resources()
