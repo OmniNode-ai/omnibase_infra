@@ -45,8 +45,6 @@ dependencies = [
     # floor lacks that contract-backed gate surface.
     "omnibase-core>=0.47.58,<0.48.0",
     "omnibase-spi==0.23.12",
-    # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
-    "omnibase-compat==0.5.7",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -194,7 +192,6 @@ identity = "omnibase_infra.cli.cli_identity:identity_group"
 kafka = "omnibase_infra.cli.cli_kafka:kafka"
 ledger = "omnibase_infra.cli.cli_ledger:ledger_group"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
-occ = "omnibase_infra.cli.cli_occ:occ"
 profile = "omnibase_infra.cli.cli_profile:profile_group"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
@@ -264,7 +261,6 @@ dev = [
 [tool.uv]
 override-dependencies = [
     "omnibase-spi==0.23.12",
-    "omnibase-compat==0.5.7",
 ]
 
 [tool.uv.sources]
