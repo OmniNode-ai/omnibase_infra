@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+inmemory:
+  backend: inmemory
+  environment: test
+  timeout_seconds: 15
+redpanda:
+  backend: kafka
+  environment: test
+  bootstrap_env: KAFKA_BOOTSTRAP_SERVERS
+  security_protocol: PLAINTEXT
+  timeout_seconds: 30
