@@ -170,6 +170,11 @@ requirements:
     acceptance:
       - id: AC36
         statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
+  - id: req-omn19998-refresh-recovery-census
+    statement: The dev refresh completion must run the existing closing lane census after recovery as well as success, while preserving the failed refresh's result and exit code.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: the refresh completion removes only declared same-lane recreate leftovers after recovery, preserves failure results and exit codes, records remaining drift or unreadable inventory, and retains success census exit codes -- falsifier: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q fails ten recovery cases against the merge-base refresh_dev_lane.sh.'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -713,3 +718,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q
         cwd: .
+    binds_ac:
+      - AC37
