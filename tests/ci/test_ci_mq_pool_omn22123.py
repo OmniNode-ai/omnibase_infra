@@ -10,6 +10,7 @@ runner and scratch name of their own, and no change to the ``action`` count the 
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,6 +20,7 @@ import yaml
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     load_runner_fleet_config,
 )
+from tests.ci._runner_compose_text import resolve_runner_compose_defaults
 
 pytestmark = pytest.mark.unit
 
@@ -89,7 +91,85 @@ def test_every_runner_reads_the_host_timezone_database_read_only(host: str) -> N
         assert mounts[0]["read_only"] is True, name
 
 
-@pytest.mark.parametrize("host", sorted(POOLS))
+# Hosts whose merge-queue runners keep their job directories on disk under /data/scratch. h051 is not one: see below.
+DISK_SCRATCH_HOSTS = ("h053",)
+MEMORY_HOSTS = ("h051",)
+RUNNER_HOME = "/home/runner"
+RUNNER_TMPDIR_NAME = "tmp"  # the runner's TMPDIR, a directory of its home
+# What a runner keeps in memory: the job workspace, TMPDIR and the six package caches (OMN-22123).
+IN_MEMORY_TARGETS = {
+    f"{RUNNER_HOME}/actions-runner/_work",
+    f"{RUNNER_HOME}/{RUNNER_TMPDIR_NAME}",
+    f"{RUNNER_HOME}/.cache/pip",
+    f"{RUNNER_HOME}/.cache/pre-commit",
+    f"{RUNNER_HOME}/.cache/pnpm",
+    f"{RUNNER_HOME}/.cache/ms-playwright",
+    f"{RUNNER_HOME}/.cache/omni/ci-envs",
+    f"{RUNNER_HOME}/.npm",
+}
+# The only mounts, besides the tmpfs ones, a memory-host runner may have: the socket, its own hooks, the pause directory, the credentials, the
+# host table and the timezone database. None is a job directory or a cache.
+ALLOWED_BIND_TARGETS = {
+    "/var/run/docker.sock",
+    "/opt/onex-runner-hooks",
+    f"{RUNNER_HOME}/.onex-disk-admission-pause",
+    f"{RUNNER_HOME}/.lab-credentials",
+    "/etc/onex/lab_run_hosts.yaml",
+    "/usr/share/zoneinfo",
+    f"{RUNNER_HOME}/.runner-creds",
+}
+
+
+def test_every_pool_has_exactly_one_storage_policy() -> None:
+    """A new pool must opt into the disk or memory assertions above and below."""
+    assert set(DISK_SCRATCH_HOSTS).isdisjoint(MEMORY_HOSTS)
+    assert set(DISK_SCRATCH_HOSTS) | set(MEMORY_HOSTS) == set(POOLS)
+
+
+def _bytes(limit: str | int) -> int:
+    """Read Compose byte values, including bare bytes and optional ``b`` suffixes."""
+    match = re.fullmatch(r"(\d+)([kmg]b?|b)?", str(limit), flags=re.IGNORECASE)
+    if match is None:
+        raise ValueError(f"Invalid Compose byte value: {limit!r}")
+    unit = (match[2] or "").lower().removesuffix("b")
+    return int(match[1]) << {"": 0, "k": 10, "m": 20, "g": 30}[unit]
+
+
+def _target(volume: Any) -> str:
+    """The container path of a short or long volume entry, with the runner home resolved."""
+    if isinstance(volume, dict):
+        return resolve_runner_compose_defaults(str(volume["target"]))
+    parts = resolve_runner_compose_defaults(str(volume)).split(":")
+    return parts[1] if len(parts) > 1 else parts[0]
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [("10gb", 10 << 30), ("512k", 512 << 10), ("512KB", 512 << 10), (1024, 1024)],
+)
+def test_compose_byte_values_accept_units_and_bare_bytes(
+    limit: str | int,
+    expected: int,
+) -> None:
+    assert _bytes(limit) == expected
+
+
+@pytest.mark.parametrize(
+    ("volume", "expected"),
+    [
+        ("/cache", "/cache"),
+        ("cache:/cache:ro", "/cache"),
+        ({"target": "/cache", "read_only": True}, "/cache"),
+    ],
+)
+def test_compose_volume_targets_accept_anonymous_and_read_only_mounts(
+    volume: Any,
+    expected: str,
+) -> None:
+    assert _target(volume) == expected
+
+
+@pytest.mark.parametrize("host", DISK_SCRATCH_HOSTS)
 def test_scratch_paths_never_alias_the_general_pool_on_the_same_host(
     host: str,
 ) -> None:
@@ -108,6 +188,108 @@ def test_scratch_paths_never_alias_the_general_pool_on_the_same_host(
     }
     assert mq_paths and not (mq_paths & general_paths)
     assert all("/mq-" in p for p in mq_paths)
+
+
+def _ram_dirs(service: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """The service-level ``tmpfs:`` entries, container path -> option map."""
+    out: dict[str, dict[str, str]] = {}
+    for entry in service.get("tmpfs", []):
+        path, _, options = resolve_runner_compose_defaults(str(entry)).partition(":")
+        out[path] = {
+            o.partition("=")[0]: o.partition("=")[2] for o in options.split(",") if o
+        }
+    return out
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_every_merge_queue_job_directory_is_a_tmpfs_and_no_disk_path_is_bound(
+    host: str,
+) -> None:
+    """OMN-22123, operator RULING 2026-11-04T07:03:44Z: the queue runners run on the memory drive, not the data disk.
+
+    Work, TMPDIR and the six caches are tmpfs mounts of the container, each with a size ceiling, so a recreate cannot
+    bring a disk directory back and no host unit has to recreate a path after a reboot. Every other mount is one the
+    runner needs and none of them is a job directory or a cache.
+    """
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        ram = _ram_dirs(service)
+        assert set(ram) == IN_MEMORY_TARGETS, name
+        for target, options in ram.items():
+            assert options.get("size"), (name, target)
+        mounts = {_target(v) for v in service["volumes"]}
+        assert not (mounts & IN_MEMORY_TARGETS), name
+        assert mounts <= ALLOWED_BIND_TARGETS, (name, mounts - ALLOWED_BIND_TARGETS)
+        text = repr(service["volumes"])
+        assert "/data/scratch" not in text and "/mq-" not in text, name
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_every_in_memory_directory_allows_exec(host: str) -> None:
+    """Docker mounts a tmpfs noexec unless ``exec`` is given, and the workspace holds interpreters and extensions.
+
+    Measured 2026-11-04 on the first in-memory runners: ``./python: Permission denied`` in setup-python and an
+    ImportError loading pydantic_core's shared object turned both merge groups red.
+    """
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        ram = _ram_dirs(service)
+        assert set(ram) == IN_MEMORY_TARGETS, name
+        for target, options in ram.items():
+            assert "exec" in options and "noexec" not in options, (name, target)
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_the_job_directories_leave_the_free_space_the_lane_probe_requires(
+    host: str,
+) -> None:
+    """The repository's tests run the lane probe, which refuses a volume with under 10 GiB free: ``disk free 8.0G < 10G``.
+
+    Measured 2026-11-04 on the first in-memory runners, whose workspace was an 8 GiB tmpfs. A tmpfs size is a ceiling and
+    the memory limit bounds what it holds, so the workspace and TMPDIR are sized well past the bar.
+    """
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        ram = _ram_dirs(service)
+        for target in (
+            f"{RUNNER_HOME}/actions-runner/_work",
+            f"{RUNNER_HOME}/{RUNNER_TMPDIR_NAME}",
+        ):
+            assert _bytes(ram[target]["size"]) >= 12 << 30, (name, target)
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_the_cpu_quota_matches_the_slower_host_cores(host: str) -> None:
+    """A shard on h051 ran 15 to 19 minutes against 5 to 8 on the primary host with the same 2.0 quota.
+
+    The disk read idle, the runner cgroups were throttled in over half their periods, and the same test file ran 2.5 times
+    slower on the Ivy Bridge Xeon than on the primary host's Ryzen, so the pool is given more of the host's 80 threads.
+    """
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        assert float(service["cpus"]) >= 4.0, name
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_the_memory_limit_covers_the_tmpfs_working_set_it_is_charged_for(
+    host: str,
+) -> None:
+    """A tmpfs page is charged to the container, so the limit must hold the workspace beside the job's own memory.
+
+    Measured 2026-11-04 on h051: a shard holds 3.2 to 3.5 GiB in its job workspace and the old 4 GiB limit was reached
+    4400 to 6200 times per runner. Budget the general pool's job memory plus 4 GiB for that measured workspace,
+    rounded up to a whole GiB. The tmpfs sizes are independent ceilings, not simultaneous reservations; the memory
+    limit bounds their combined working set and the job. Equal swap and memory limits prevent swapping to disk.
+    """
+    general, prefix, _ = POOLS[host]
+    job_memory = max(
+        _bytes(s["mem_limit"]) for s in _compose(general)["services"].values()
+    )
+    measured_workspace_budget = 4 << 30
+    for name, service in _compose(prefix)["services"].items():
+        limit = _bytes(service["mem_limit"])
+        assert limit >= max(10 << 30, job_memory + measured_workspace_budget), name
+        assert _bytes(service["memswap_limit"]) == limit, name
 
 
 def test_the_fleet_declares_four_merge_queue_runners_on_each_host() -> None:
