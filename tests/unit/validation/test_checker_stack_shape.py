@@ -175,6 +175,40 @@ def effective_data(
         entries.extend(
             {"file": file, "service": name, "ticket": ticket} for file, name in hits
         )
+    kept = data.get("kept_outside_runtime") or []
+    assert isinstance(kept, list)
+    for item in kept:
+        service = str(item["service"])
+        ticket = str(item.get("ticket") or "")
+        if not str(item.get("reason") or "").strip():
+            issues.append(
+                _issue(
+                    _DATA,
+                    f"kept service {service} carries no reason: name the second bus connection "
+                    "or failure domain the runtime does not provide.",
+                )
+            )
+        for file in item["files"]:
+            declared = services.get(file)
+            if (
+                declared is None
+            ):  # not judged as a stack (not_a_stack): read the file itself
+                path = root / file
+                declared = (
+                    _services_of(path.read_text(encoding="utf-8"))
+                    if path.is_file()
+                    else {}
+                )
+            if service not in declared:
+                issues.append(
+                    _issue(
+                        _DATA,
+                        f"kept service {service} names {file}, which declares no service "
+                        f"{service}: delete the entry or correct its files.",
+                    )
+                )
+            elif file in services:
+                entries.append({"file": file, "service": service, "ticket": ticket})
     effective = {
         "runtime": runtime,
         "dependencies": _strings(data, "dependencies"),
@@ -547,6 +581,104 @@ def test_report_host_page_file_judged_as_a_stack_is_refused() -> None:
     assert "service cost-estimator-web is declared in 2 compose files" in refused
     assert _REPORT_HOST_COMPOSE in refused
     assert _judge(_REPO, text=text) == ()
+
+
+# -- OMN-22393 (T26): the lane-mirror forwarder is kept outside the runtime, with its reason -------
+
+_FORWARDER = "gateway-forwarder"
+_FORWARDER_COMPOSE = "docker/docker-compose.gateway.yml"
+_KEPT_FIXTURE = (
+    "kept_outside_runtime:\n"
+    "  - service: fixture-bridge\n"
+    "    files:\n"
+    "      - docker/docker-compose.overlay.yml\n"
+    "    ticket: OMN-22393\n"
+    "    reason: a second bus connection the fixture runtime does not hold\n"
+)
+_BRIDGE = (
+    "  fixture-bridge:\n    image: example/runtime:tag\n    restart: unless-stopped\n"
+)
+
+
+def _kept(text: str) -> dict[str, Mapping[str, object]]:
+    items = _data(text).get("kept_outside_runtime") or []
+    assert isinstance(items, list)
+    return {str(i["service"]): i for i in items}
+
+
+def test_forwarder_decision_is_recorded_with_its_reason() -> None:
+    """AC1: the allowlist entry names the forwarder and the second bus connection or failure domain."""
+    entry = _kept(_real_text()).get(_FORWARDER)
+    assert entry is not None, f"{_DATA} records no decision for {_FORWARDER}"
+    reason = str(entry.get("reason") or "").strip()
+    assert reason, "the forwarder entry carries an empty reason"
+    assert "second bus connection" in reason or "failure domain" in reason, reason
+    assert entry.get("ticket") == "OMN-22393"
+    assert entry.get("files") == [_FORWARDER_COMPOSE]
+
+
+def test_every_kept_entry_names_a_service_its_files_declare() -> None:
+    """The entry is about a real service: each listed file declares it."""
+    kept = _kept(_real_text())
+    assert kept, "the data file records no kept service"
+    for service, entry in kept.items():
+        files = entry["files"]
+        assert isinstance(files, list) and files, service
+        for file in files:
+            declared = _services_of((_REPO / str(file)).read_text(encoding="utf-8"))
+            assert service in declared, f"{file} declares no service {service}"
+
+
+def test_forwarder_is_absent_from_every_judged_dev_compose_file() -> None:
+    """AC2: the dev file set holds no forwarder service and judges clean; the edge file is the one home."""
+    data = _data(_real_text())
+    holders = [
+        f
+        for f in _judged(_REPO, data)
+        if _FORWARDER in _services_of((_REPO / f).read_text(encoding="utf-8"))
+    ]
+    assert holders == []
+    assert _FORWARDER_COMPOSE in _strings(data, "not_a_stack")
+    assert _judge(_REPO) == ()
+
+
+def test_kept_entry_with_an_empty_reason_fails() -> None:
+    """AC1 falsifier: blanking the reason of the real forwarder entry is refused."""
+    data = _data(_real_text())
+    kept = data["kept_outside_runtime"]
+    assert isinstance(kept, list)
+    blanked = yaml.safe_dump(
+        {
+            **data,
+            "kept_outside_runtime": [
+                {**i, "reason": "  "} if i["service"] == _FORWARDER else i for i in kept
+            ],
+        }
+    )
+    refused = _text(_judge(_REPO, text=blanked))
+    assert f"kept service {_FORWARDER} carries no reason" in refused
+
+
+def test_kept_service_is_allowed_only_in_the_files_its_entry_names(
+    tmp_path: Path,
+) -> None:
+    """A kept service passes in its named file and is refused by name in any other judged file."""
+    root = _stack(tmp_path)
+    data = root / _DATA
+    data.write_text(data.read_text(encoding="utf-8") + _KEPT_FIXTURE, encoding="utf-8")
+    # control: no listed file declares it yet, so the entry is stale
+    assert "declares no service fixture-bridge" in _text(_judge(root))
+    _plant(root / _OVERLAY, _BRIDGE)
+    assert _judge(root) == ()
+    _plant(root / _INFRA, _BRIDGE)
+    assert f"service fixture-bridge in {_INFRA}" in _text(_judge(root))
+
+
+def test_kept_service_without_an_entry_is_refused(tmp_path: Path) -> None:
+    """Control: the same service with no kept entry is refused by name."""
+    root = _stack(tmp_path)
+    _plant(root / _OVERLAY, _BRIDGE)
+    assert f"service fixture-bridge in {_OVERLAY}" in _text(_judge(root))
 
 
 # -- the wiring: the hook and the unconditional CI job -------------------------------------------

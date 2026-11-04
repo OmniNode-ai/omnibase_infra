@@ -42,6 +42,7 @@ import psycopg2
 import pytest
 import yaml
 
+from tests.helpers.util_migration_shape import without_guarded_column_additions
 from tests.integration.migrations.conftest import EphemeralPostgres
 
 REPO_ROOT = Path(__file__).parent.parent.parent.parent
@@ -845,3 +846,89 @@ def test_the_provisioned_role_reads_back_the_attested_identity_tuple(
 
     assert identity is not None
     assert identity[0] == PRINCIPAL
+
+
+# =============================================================================
+# OMN-21920: the agent_* create migration converges a drifted agent_status_events
+# =============================================================================
+#
+# These two proofs sit here, not in the OMN-15376 shape-drift module, on
+# purpose. That module is collected and skipped in the sharded test splits, and
+# the Skip Count Ratchet (OMN-18776) holds the skipped set to a shrink-only
+# baseline, so a case added there turns the ratchet red. ``ephemeral_pg`` makes
+# the splits deselect these two and the Migration Integration Test job execute
+# them with ONEX_MIGRATION_PROOF_REQUIRE_PG=1, where a missing backend fails.
+
+AGENT_ACTIONS_CREATE = (
+    REPO_ROOT
+    / "docker/migrations/forward/nodes/node_projection_agent_actions"
+    / "0000_create_agent_observability_tables.sql"
+)
+
+# agent_status_events as it stood before correlation_id existed.
+_DRIFTED_AGENT_STATUS_EVENTS = """
+CREATE TABLE public.agent_status_events (
+    agent_name VARCHAR(255),
+    session_id VARCHAR(255),
+    state VARCHAR(50),
+    message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
+
+def _seed_drifted_agent_status_events(pg: EphemeralPostgres) -> None:
+    seeded = pg.psql("-v", "ON_ERROR_STOP=1", "-c", _DRIFTED_AGENT_STATUS_EVENTS)
+    assert seeded.returncode == 0, seeded.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.ephemeral_pg
+def test_unfixed_agent_actions_create_is_red_on_a_drifted_agent_status_events(
+    ephemeral_postgres: EphemeralPostgres, tmp_path: Path
+) -> None:
+    """RED: with the guarded column additions removed, the index fails."""
+    _seed_drifted_agent_status_events(ephemeral_postgres)
+    unfixed_sql, removed = without_guarded_column_additions(
+        AGENT_ACTIONS_CREATE.read_text(encoding="utf-8")
+    )
+    assert removed > 0, "no guarded column addition found - RED would be vacuous"
+    unfixed = tmp_path / AGENT_ACTIONS_CREATE.name
+    unfixed.write_text(unfixed_sql, encoding="utf-8")
+
+    result = ephemeral_postgres.psql("-v", "ON_ERROR_STOP=1", "-f", str(unfixed))
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert 'column "correlation_id" does not exist' in output, output
+
+
+@pytest.mark.integration
+@pytest.mark.ephemeral_pg
+def test_agent_actions_create_converges_a_drifted_agent_status_events(
+    ephemeral_postgres: EphemeralPostgres,
+) -> None:
+    """GREEN: the real file adds correlation_id and its index on the same table."""
+    _seed_drifted_agent_status_events(ephemeral_postgres)
+
+    result = ephemeral_postgres.psql(
+        "-v", "ON_ERROR_STOP=1", "-f", str(AGENT_ACTIONS_CREATE)
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    conn = ephemeral_postgres.connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = 'agent_status_events' "
+                "AND column_name = 'correlation_id'"
+            )
+            assert cur.fetchone() == (1,)
+            cur.execute(
+                "SELECT count(*) FROM pg_indexes "
+                "WHERE indexname = 'idx_agent_status_correlation'"
+            )
+            assert cur.fetchone() == (1,)
+    finally:
+        conn.close()
