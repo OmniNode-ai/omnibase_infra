@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# A test double of the pre-merge runtime pool driver's contract overlay
+# (scripts/runtime_build/prepr_runtime_pool.py, pool_setting). The real overlay
+# lives in the workspace config root of whoever runs the pool (OMN-22153).
+schema_version: 1
+git_host: git.example.invalid
+ssh_connect_timeout_s: 10
+probe_timeout_s: 30
+lease_call_timeout_s: 30
+remote_setup_timeout_s: 30
+fact_publish_timeout_s: 120
+check_run_dispatch_timeout_s: 60
+git_resolve_timeout_s: 60
+probe_poll_s: 15
+remote_command_prefix: "export PATH=/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH; "
+local_command_prefix: 'cd "$HOME" || exit 1; '

@@ -1,0 +1,121 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeLaneEntryPointCensusEffect
+#
+# Records each runtime-image container of each lane with its entrypoint and cmd as
+# run, and reports a command outside the declared allowed list as an entry point to
+# remove. Read-only: it reads a recorded docker inspection or the daemon's read-only
+# ps and inspect, and the policy data file (deploy/lane-census/runtime-entry-points.yaml).
+#
+# Related Tickets:
+#   - OMN-21923: this node (one-runtime plan T24)
+name: "node_lane_entry_point_census_effect"
+contract_name: "node_lane_entry_point_census_effect"
+node_name: "node_lane_entry_point_census_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Record every runtime-image container of each lane with the command it runs and grade the command against the declared allowed list, read-only.
+
+runtime_profiles:
+  - main
+input: "omnibase_infra.models.lane_entry_point_census.model_lane_entry_point_census_request.ModelLaneEntryPointCensusRequest"
+input_model:
+  name: "ModelLaneEntryPointCensusRequest"
+  module: "omnibase_infra.models.lane_entry_point_census.model_lane_entry_point_census_request"
+  description: "A policy DI overlay and inline inspection, or host-local policy, manifest and inspection sources."
+output_model:
+  name: "ModelLaneEntryPointCensusResult"
+  module: "omnibase_infra.models.lane_entry_point_census.model_lane_entry_point_census_result"
+  description: "One typed census record per lane, and the table regenerated from them."
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.lane-entry-point-census.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.lane-entry-point-censused.v1"
+terminal_event: "onex.evt.omnibase-infra.lane-entry-point-censused.v1"
+published_events:
+  - topic: "onex.evt.omnibase-infra.lane-entry-point-censused.v1"
+    event_type: "ModelLaneEntryPointCensusResult"
+    message_category: "EVENT"
+    description: "Runtime-image commands and entry points to remove, or a read refusal."
+handler_routing:
+  routing_strategy: "operation_match"
+  default_handler: "omnibase_infra.handlers.handler_lane_entry_point_census:HandlerLaneEntryPointCensus"
+  handlers:
+    - operation: "lane_entry_point_census.run"
+      handler:
+        name: "HandlerLaneEntryPointCensus"
+        module: "omnibase_infra.handlers.handler_lane_entry_point_census"
+      description: >
+        Read container inspection, keep the runtime-image containers, record their commands and grade them against the allowed list.
+
+      event_model:
+        name: "ModelLaneEntryPointCensusRequest"
+        module: "omnibase_infra.models.lane_entry_point_census.model_lane_entry_point_census_request"
+      output_events: [ModelLaneEntryPointCensusResult]
+      supported_operations:
+        - "lane_entry_point_census.run"
+      input_model:
+        name: "ModelLaneEntryPointCensusRequest"
+        module: "omnibase_infra.models.lane_entry_point_census.model_lane_entry_point_census_request"
+        description: "Typed def-B request for one census run."
+      output_fields:
+        - success
+        - error_message
+        - censuses
+        - table_markdown
+io_operations:
+  - operation: "lane_entry_point_census.run"
+    description: "Census inline or host-local runtime-image inspection by command."
+    input_fields:
+      - policy
+      - policy_path
+      - inspection
+      - manifest_path
+      - inspect_json_path
+      - docker_host
+    output_fields:
+      - success
+      - error_message
+      - censuses
+      - table_markdown
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: true
+capabilities:
+  - name: "lane_entry_point_census.run"
+    description: "Census runtime-image containers by command and flag entry points to remove."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  description: >
+    Read-only census of runtime-image commands, wired to the main runtime through contract-declared command and result topics.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-11-01"
+  updated: "2026-11-02"
+  tags:
+    - effect
+    - census
+    - entry-points
+  related_tickets:
+    - "OMN-21923"

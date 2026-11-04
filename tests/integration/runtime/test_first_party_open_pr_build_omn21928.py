@@ -85,7 +85,7 @@ def _install(home: Path, workspace: Path, site: Path, tmp_path: Path) -> None:
             "--no-build-isolation",
             "--no-cache",
             "--no-sources",
-            f"{repo.replace('_', '-')} @ {source.as_uri()}",
+            f"{shared.distribution(repo)} @ {source.as_uri()}",
             cwd=tmp_path,
         )
         assert installed.returncode == 0, installed.stdout + installed.stderr
@@ -104,7 +104,7 @@ def _audit(
         f"m = runpy.run_path({str(shared.CHECKER)!r}); "
         f"sys.exit(m['run_audit'](Path({str(staging)!r}), "
         f"record_into=Path({str(manifest)!r}), search_paths=[{str(site)!r}], "
-        f"require={[name.replace('_', '-') for name in shared.INSTALLED]!r}, "
+        f"require={[shared.distribution(name) for name in shared.INSTALLED]!r}, "
         f"context={context!r}, declared_pr={declared_pr!r}))"
     )
     return shared._run(sys.executable, "-c", code, cwd=site)
