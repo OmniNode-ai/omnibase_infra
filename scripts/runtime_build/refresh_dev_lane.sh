@@ -69,6 +69,8 @@
 #      the lane label. The census's own drift code, passed through unchanged.
 #   4/5 the closing census could not run (inventory unobservable / host
 #      undeclared); the census's own codes, passed through unchanged.
+#      After a failed refresh, its original exit code (1/2) takes precedence;
+#      lane_census in the receipt records the closing census's own code.
 #   64 usage / precondition error, including a --ref whose commit is not
 #      contained in origin/dev (OMN-21272; refused before the lane lock)
 
@@ -1266,21 +1268,21 @@ if [[ "${RESULT}" == "SUCCESS" && "${DEPLOY_EXIT}" -eq "${CLOUD_MIGRATION_FAILED
 fi
 
 # --- close with the lane census (OMN-20876) ----------------------------------
-# A refresh that landed is only done when the lane it landed on matches its
-# manifest: the census is read last, and its exit code is the refresh's.
-CENSUS_RAN=false
-if [[ "${RESULT}" == "SUCCESS" ]]; then
-    CENSUS_RAN=true
-    log "=== Lane census ==="
-    lane_census_close || CENSUS_EXIT=$?
-    if [[ "${CENSUS_EXIT}" -ne 0 ]]; then
-        RESULT="FAILED_CENSUS_DRIFT"
-        err "=============================================================="
-        err "STOP AND REPORT: the health-gate passed but the lane census exited"
-        err "${CENSUS_EXIT} -- the dev lane does not match its manifest (findings"
-        err "above). The refresh does not certify a lane that has drifted."
-        err "=============================================================="
-    fi
+# Reconcile leftover recreates after recovery too (OMN-19998). A failed refresh
+# keeps its result and exit code; the receipt also records any remaining drift
+# or unreadable inventory. Only a SUCCESS can become FAILED_CENSUS_DRIFT.
+CENSUS_RAN=true
+log "=== Lane census ==="
+lane_census_close || CENSUS_EXIT=$?
+if [[ "${RESULT}" == "SUCCESS" && "${CENSUS_EXIT}" -ne 0 ]]; then
+    RESULT="FAILED_CENSUS_DRIFT"
+    err "=============================================================="
+    err "STOP AND REPORT: the health-gate passed but the lane census exited"
+    err "${CENSUS_EXIT} -- the dev lane does not match its manifest (findings"
+    err "above). The refresh does not certify a lane that has drifted."
+    err "=============================================================="
+elif [[ "${CENSUS_EXIT}" -ne 0 ]]; then
+    err "STOP AND REPORT: recovery census exited ${CENSUS_EXIT} (findings above); preserving refresh result ${RESULT}."
 fi
 if [[ "${#CENSUS_REMOVED[@]}" -gt 0 ]]; then
     CENSUS_REMOVED_JSON="$(printf '%s\n' "${CENSUS_REMOVED[@]}" | jq -Rn '[inputs]')"
