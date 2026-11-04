@@ -16,7 +16,7 @@ requirements:
           AC5: the omninode_runtime principal holds SELECT, INSERT and UPDATE on omninode_internal.compaction_ab_rows and omninode_internal.compaction_ab_build_series in the three topology instances, and the auto-wiring projection-binding check resolves both tables on every shipped profile -- falsifier: the focused test calls the real resolver on a contract-spelled declaration of each table and it raises "lacks declared read privileges"
 evidence_requirements:
   - kind: tests
-    description: The vendored bytes, ledger rows and classes, the interim declarations, and the real projection-binding resolver on every shipped profile.
+    description: The vendored bytes and forward repair, ledger rows and classes, CREATE-time constraint parity, SQL privileges against every shipped topology profile, the interim declarations, and the real projection-binding resolver.
     command: uv run pytest tests/unit/migrations/test_omn21994_compaction_ab_vendor.py -q --no-cov
 emergency_bypass:
   enabled: false
@@ -24,7 +24,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn21994-ac5-topology-grants
-    description: The vendored bytes are bound to ledger rows and classes, both tables are declared by the interim bridge, and the real _resolve_projection_database_target resolves both tables to the omninode_runtime principal for read and write on every shipped profile. It fails at 69e235149, where the resolver raises "lacks declared read privileges" for compaction_ab_rows.
+    description: The original vendor digests are preserved; the forward repair restores legacy constraints and delivers UPDATE on the build series. Tests compare the SQL chain with the grants in every shipped profile and resolve both tables to omninode_runtime through _resolve_projection_database_target. The resolver fails at 69e235149, where it raises "lacks declared read privileges" for compaction_ab_rows.
     source: manual
     binds_ac:
       - AC5

@@ -9,9 +9,13 @@ contract is in the pinned omnimarket release, the two SQL files are held here:
 the digests pin the byte-for-byte copy of the reviewed bytes, and the
 ``omninode_runtime`` table grants are derived from the interim declarations, then
 proved through the same resolver the auto-wiring gate calls.
+
+The local 0002 repair adds the missing legacy constraints and UPDATE grant;
+0000/0001 retain their original digests and migration identities.
 """
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -37,20 +41,25 @@ _LEDGER = _FORWARD / "_ledger/application-migrations.tsv"
 _NODE = "node_projection_compaction_ab"
 _CREATE = "0000_create_compaction_ab.sql"
 _GRANT = "0001_grant_omninode_runtime_compaction_ab.sql"
+_REPAIR = "0002_repair_compaction_ab_constraints_and_grants.sql"
 _VENDORED = [
     (_CREATE, "934d8b2aff324f0be7ab2836fab8547769dd1f3bea451220a27a5746a7b3e97e"),
     (_GRANT, "3bc2e87ba848872098ef2f4b358943a7dd788201482ddc431041ba0cbaeade15"),
 ]
-_CLASSES = {_CREATE: "forward-only", _GRANT: "expand-only"}
+_MIGRATIONS = [
+    *_VENDORED,
+    (_REPAIR, "071308cf11402f2979a7d02ad3c1ed2fb048b0ae5784e07dd25a5cee1df61c5a"),
+]
+_CLASSES = {_CREATE: "forward-only", _GRANT: "expand-only", _REPAIR: "forward-only"}
 _TABLES = ("compaction_ab_rows", "compaction_ab_build_series")
 
 
-def test_only_the_create_and_grant_files_are_vendored() -> None:
+def test_vendor_history_and_local_repair_are_the_complete_chain() -> None:
     names = sorted(path.name for path in (_FORWARD / "nodes" / _NODE).glob("*"))
-    assert names == [_CREATE, _GRANT]
+    assert names == [_CREATE, _GRANT, _REPAIR]
 
 
-@pytest.mark.parametrize(("name", "sha256"), _VENDORED)
+@pytest.mark.parametrize(("name", "sha256"), _MIGRATIONS)
 def test_vendor_bytes_and_manifest_binding_are_exact(name: str, sha256: str) -> None:
     artifact = f"nodes/{_NODE}/{name}"
     assert hashlib.sha256((_FORWARD / artifact).read_bytes()).hexdigest() == sha256
@@ -67,16 +76,16 @@ def test_vendor_bytes_and_manifest_binding_are_exact(name: str, sha256: str) -> 
     ]
 
 
-@pytest.mark.parametrize(("name", "sha256"), _VENDORED)
+@pytest.mark.parametrize(("name", "sha256"), _MIGRATIONS)
 def test_the_vendor_is_declared_with_its_class(name: str, sha256: str) -> None:
     classes = yaml.safe_load((_ROOT / "config/migration_classes.yaml").read_text())
     assert classes["migrations"][f"forward/nodes/{_NODE}/{name}"] == _CLASSES[name]
 
 
-def test_neither_migration_is_fenced() -> None:
+def test_no_migration_in_the_chain_is_fenced() -> None:
     fenced = yaml.safe_load((_FORWARD / "fenced-node-migrations.yaml").read_text())
     ids = {entry["id"] for entry in fenced["fenced_node_migrations"]}
-    for name, _ in _VENDORED:
+    for name, _ in _MIGRATIONS:
         assert f"node:{_NODE}:{name}" not in ids
 
 
@@ -88,36 +97,115 @@ def test_the_interim_declaration_names_the_vendored_create(table_name: str) -> N
         if declaration.table.name == table_name
     ]
     table = declaration.table
-    assert table.database_ref == "application"
-    assert table.schema == "omninode_internal"
-    assert table.access == "read_write"
-    assert table.role == table_name
+    expected = _resolver_input(table_name)
+    assert table.model_dump(exclude={"migration"}) == expected.model_dump(
+        exclude={"migration"}
+    )
     assert table.migration == f"docker/migrations/forward/nodes/{_NODE}/{_CREATE}"
 
 
-def _contract_declaration(table_name: str) -> ModelDbTableDeclaration:
-    """The declaration omnimarket's node contract carries, spelled independently."""
-    return ModelDbTableDeclaration(
-        name=table_name,
-        database_ref="application",
-        schema="omninode_internal",
-        migration=_CREATE,
-        access="read_write",
-        role=table_name,
-    )
+def _resolver_input(table_name: str) -> ModelDbTableDeclaration:
+    """Resolver input; migration is node-relative, unlike the vendored bridge.
+
+    This exercises admission privileges, not discovery of an upstream contract
+    or resolution of its migration path. The bridge path is checked separately.
+    """
+    return {
+        "compaction_ab_rows": ModelDbTableDeclaration(
+            name="compaction_ab_rows",
+            database_ref="application",
+            schema="omninode_internal",
+            migration="0000_create_compaction_ab.sql",
+            access="read_write",
+            role="compaction_ab_rows",
+        ),
+        "compaction_ab_build_series": ModelDbTableDeclaration(
+            name="compaction_ab_build_series",
+            database_ref="application",
+            schema="omninode_internal",
+            migration="0000_create_compaction_ab.sql",
+            access="read_write",
+            role="compaction_ab_build_series",
+        ),
+    }[table_name]
 
 
 @pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
 @pytest.mark.parametrize("table_name", _TABLES)
-def test_runtime_principal_resolves_the_contract_declared_table(
+def test_runtime_principal_resolves_the_expected_table(
     profile: str, table_name: str
 ) -> None:
     """The gate's own check, on the shipped topology: read and write succeed."""
     target = _resolve_projection_database_target(
-        [_contract_declaration(table_name)], load_topology_profile(profile)
+        [_resolver_input(table_name)], load_topology_profile(profile)
     )
     (resolved,) = target.table_targets
     assert resolved.table.name == table_name
     for binding in (resolved.read_binding, resolved.write_binding):
         assert binding is not None
         assert binding.principal == "omninode_runtime"
+
+
+def _sql_privileges(sql: str, table_name: str) -> set[str]:
+    """Read the explicit table grants in this node's small migration chain."""
+    statements = re.sub(r"--[^\n]*", "", sql)
+    privileges: set[str] = set()
+    for match in re.finditer(
+        rf"GRANT\s+([A-Z,\s]+)\s+ON\s+(?:TABLE\s+)?"
+        rf"omninode_internal\.{table_name}\s+TO\s+omninode_runtime\s*;",
+        statements,
+        re.IGNORECASE,
+    ):
+        privileges.update(value.strip().upper() for value in match[1].split(","))
+    return privileges
+
+
+@pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
+@pytest.mark.parametrize("table_name", _TABLES)
+def test_sql_grants_deliver_every_topology_privilege(
+    profile: str, table_name: str
+) -> None:
+    topology = load_topology_profile(profile)
+    principal = topology.databases["application"].principals["omninode_runtime"]
+    expected = {
+        privilege.value
+        for grant in principal.grants
+        if grant.schema == "omninode_internal" and table_name in grant.objects
+        for privilege in grant.privileges
+    }
+    sql = "\n".join(
+        path.read_text() for path in sorted((_FORWARD / "nodes" / _NODE).glob("*.sql"))
+    )
+    assert expected == {"SELECT", "INSERT", "UPDATE"}
+    assert _sql_privileges(sql, table_name) == expected
+
+
+def test_sql_privilege_reader_does_not_invent_missing_update() -> None:
+    sql = (_FORWARD / "nodes" / _NODE / _GRANT).read_text()
+    assert _sql_privileges(sql, "compaction_ab_rows") == {"SELECT", "INSERT", "UPDATE"}
+    assert _sql_privileges(sql, "compaction_ab_build_series") == {"SELECT", "INSERT"}
+
+
+@pytest.mark.parametrize("table_name", _TABLES)
+def test_repair_restores_the_create_time_constraints(table_name: str) -> None:
+    create = (_FORWARD / "nodes" / _NODE / _CREATE).read_text()
+    repair = (_FORWARD / "nodes" / _NODE / _REPAIR).read_text()
+    match = re.search(
+        rf"CREATE TABLE IF NOT EXISTS omninode_internal\.{table_name} \((.*?)\n\);",
+        create,
+        re.DOTALL,
+    )
+    assert match is not None
+    body = match[1]
+    not_null = set(re.findall(r"^\s*(\w+)\s+\w+\s+NOT NULL", body, re.MULTILINE))
+    assert not_null
+    alter = re.search(
+        rf"ALTER TABLE omninode_internal\.{table_name}\s+(.*?);", repair, re.DOTALL
+    )
+    assert alter is not None
+    assert set(re.findall(r"ALTER COLUMN (\w+) SET NOT NULL", alter[1])) == not_null
+    primary_key = re.search(r"PRIMARY KEY \([^)]+\)", body)
+    assert primary_key is not None
+    assert f"ADD {primary_key[0]}" in repair
+    for constraint in re.findall(r"CHECK \([^)]+\)", body):
+        assert constraint in repair
