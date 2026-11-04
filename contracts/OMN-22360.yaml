@@ -2,13 +2,13 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-22360"
 title: "Core validator: cross-repository dependency pins follow the declared layer order, form no cycle, and stay at the newest release"
-summary: "omnibase_infra calls omnibase_core's dependency-pins reusable workflow at dev-20261103173624-74e0b0f12767 from ci.yml (job dependency-pins) and registers its context dependency-pins / Dependency Pins in STRICT_GATE_JOBS so CI Summary fails closed on it. Every omnibase_core hook revision in .pre-commit-config.yaml and the CI twins of those revisions move to the same tag. omnibase-spi moves to a range that admits the newest release (>=0.23.12,<0.24.0) in the project table and the uv override, with uv.lock and the version-matrix fallback regenerated. The omnibase-compat lines stay byte-identical to dev under the binding ledger MSGs of 2026-11-03T18:08:20Z and 2026-11-03T18:34:39Z: the edge is owned by the OCC retirement lane that deletes src/omnibase_infra/cli/cli_occ.py and every compat line."
+summary: "omnibase_infra calls omnibase_core's dependency-pins reusable workflow at dev-20261103173624-74e0b0f12767 from ci.yml (job dependency-pins) and registers its context dependency-pins / Dependency Pins in STRICT_GATE_JOBS so CI Summary fails closed on it. Every omnibase_core hook revision in .pre-commit-config.yaml and the CI twins of those revisions move to the same tag. omnibase-spi moves to a range that admits the newest release (>=0.23.12,<0.24.0) in the project table and the uv override, with uv.lock and the version-matrix fallback regenerated. The omnibase-compat dependency is already deleted on dev by omnibase_infra#5648, so with dev merged in the validator reports no finding on this tree."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-omn22360-infra-dependency-pins-wired
-    statement: "omnibase_infra runs the core dependency-pin check as a CI Summary member and its pins and core hook revisions satisfy it, apart from the omnibase-compat lines owned by the OCC retirement lane."
+    statement: "omnibase_infra runs the core dependency-pin check as a CI Summary member and its pins and core hook revisions satisfy it."
     acceptance:
       - id: AC7
         statement: "AC7: every registry repository with a dependency manifest runs the check as a required context on its landing branch, and the check refuses a canary branch that adds an upward pin -- falsifier: gh api repos/OmniNode-ai/omnibase_core/contents/.github/workflows/dependency-pins.yml plus a canary run of uv run python -m omnibase_core.nodes.node_dependency_pins_check_effect.runtime_dependency_pins_check on the canary tree exiting 1"
@@ -30,14 +30,12 @@ dod_evidence:
       - check_type: command
         check_value: 'uv run --frozen pytest tests/ci/test_dependency_pins_wired_omn22360.py tests/ci/test_ci_summary_gate.py -q -p no:cacheprovider'
   - id: dod-002
-    description: "Pin findings fixed at their source: omnibase-spi is a range that admits the newest release in the project table and the uv override, uv.lock resolves it, and the version-matrix fallback agrees. The omnibase-compat lines are unchanged and owned by the OCC retirement lane, so the validator still reports the compat exact pin on this head."
+    description: "Pin findings fixed at their source: omnibase-spi is a range that admits the newest release in the project table and the uv override, uv.lock resolves it, the version-matrix fallback agrees, and the core validator run over this tree exits 0. The omnibase-compat dependency is deleted on dev by omnibase_infra#5648, so the validator reports nothing on this head."
     source: generated
     binds_ac: [AC8]
     checks:
       - check_type: command
-        check_value: 'uv lock --check && uv run python scripts/update_version_matrix.py --check && uv run pytest tests/unit/runtime/test_version_compatibility.py -q -p no:cacheprovider'
-      - check_type: command
-        check_value: 'uv run python -c "import importlib.metadata as m; v = m.version(\"omnibase-spi\"); assert v == \"0.23.12\", v"'
+        check_value: 'uv run --frozen check-dependency-pins .'
   - id: dod-003
     description: "Deploy-scope readback, bound to no criterion: the landing branch's ci.yml calls the dependency-pins reusable at the core dev-merge tag; read through the GitHub contents API on dev, it exits non-zero until this change has merged. A hosted runner can run it."
     source: manual

@@ -66,3 +66,22 @@ def test_dependency_pins_job_is_unconditional() -> None:
 
 def test_ci_summary_requires_the_dependency_pins_context() -> None:
     assert CONTEXT in STRICT_GATE_JOBS
+
+
+def test_ac8_is_bound_to_the_validator_itself() -> None:
+    """AC8 is bound to a check that runs the validator over this tree.
+
+    A pin or lock check that already passes on the merge base is carried
+    evidence, not a check that fails against the control; only the validator
+    fails there until the pin findings are fixed.
+    """
+    contract = yaml.safe_load(
+        (ROOT / "contracts/OMN-22360.yaml").read_text(encoding="utf-8")
+    )
+    commands = [
+        str(check["check_value"])
+        for entry in contract["dod_evidence"]
+        if "AC8" in entry.get("binds_ac", [])
+        for check in entry["checks"]
+    ]
+    assert any("check-dependency-pins" in command for command in commands)
