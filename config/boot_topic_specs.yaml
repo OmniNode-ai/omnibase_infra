@@ -31,5 +31,7 @@ lanes:
     specs_per_boot: 2300
     read_at: "2026-11-01T23:29:24Z"
     source: "boot log of the dev runtime container: topic provisioning (contract-first) - total: 2300, skill-manifest topics: 427"
-    repo_specs: 213
-    repo_specs_measured_at: "14f5e39e258cf6f117d4d23f55504022f9727272"
+    # OMN-22158 raised repo_specs by 2: node_api_fixture_record_effect is meant
+    # to add its command and terminal topics (api-fixture-record, -recorded).
+    repo_specs: 217
+    repo_specs_measured_at: "bab5f913ade0ec0df5721df9e36e5991c960f3ce"

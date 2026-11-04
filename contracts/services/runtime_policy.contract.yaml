@@ -217,6 +217,11 @@ profiles:
           projection-writer-savings: projection-savings-writer
           projection-writer-tenant-credentials: projection-tenant-credentials-writer
           projection-writer-tenant-registry: projection-tenant-registry-writer
+        # OMN-21288: the claude hook-events projection node runs in main with no
+        # profile of its own; its writer container of the previous revision is
+        # retired by name, from this list, by the deploy agent and handler.
+        retired_services:
+          - projection-claude-hook-events-writer
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof

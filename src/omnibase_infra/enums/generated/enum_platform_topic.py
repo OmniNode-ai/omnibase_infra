@@ -20,6 +20,8 @@ class EnumPlatformTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_API_FIXTURE_RECORD_V1 = contract_topic_value('nodes/node_api_fixture_record_effect/contract.yaml', 'platform', 'CMD_API_FIXTURE_RECORD_V1')  # onex.cmd.platform.api-fixture-record.v1
+    CMD_ARCHITECTURE_VALIDATE_V1 = contract_topic_value('nodes/node_architecture_validator/contract.yaml', 'platform', 'CMD_ARCHITECTURE_VALIDATE_V1')  # onex.cmd.platform.architecture-validate.v1
     CMD_CI_LIVE_CONTACT_CHECK_V1 = contract_topic_value('nodes/node_ci_live_contact_effect/contract.yaml', 'platform', 'CMD_CI_LIVE_CONTACT_CHECK_V1')  # onex.cmd.platform.ci-live-contact-check.v1
     CMD_HOTPATCH_LEDGER_RECONCILE_V1 = contract_topic_value('nodes/node_hotpatch_ledger_reconcile_effect/contract.yaml', 'platform', 'CMD_HOTPATCH_LEDGER_RECONCILE_V1')  # onex.cmd.platform.hotpatch-ledger-reconcile.v1
     CMD_LEDGER_APPEND_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_APPEND_V1')  # onex.cmd.platform.ledger-append.v1
@@ -28,6 +30,8 @@ class EnumPlatformTopic(str, Enum):
     CMD_REQUEST_INTROSPECTION_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'CMD_REQUEST_INTROSPECTION_V1')  # onex.cmd.platform.request-introspection.v1
     CMD_TICKET_CONTRACT_COMPOSE_V1 = contract_topic_value('nodes/node_ticket_contract_compose_effect/contract.yaml', 'platform', 'CMD_TICKET_CONTRACT_COMPOSE_V1')  # onex.cmd.platform.ticket-contract-compose.v1
     CMD_TOPIC_CATALOG_QUERY_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'CMD_TOPIC_CATALOG_QUERY_V1')  # onex.cmd.platform.topic-catalog-query.v1
+    EVT_API_FIXTURE_RECORDED_V1 = contract_topic_value('nodes/node_api_fixture_record_effect/contract.yaml', 'platform', 'EVT_API_FIXTURE_RECORDED_V1')  # onex.evt.platform.api-fixture-recorded.v1
+    EVT_ARCHITECTURE_VALIDATED_V1 = contract_topic_value('nodes/node_architecture_validator/contract.yaml', 'platform', 'EVT_ARCHITECTURE_VALIDATED_V1')  # onex.evt.platform.architecture-validated.v1
     EVT_CI_LIVE_CONTACT_CHECKED_V1 = contract_topic_value('nodes/node_ci_live_contact_effect/contract.yaml', 'platform', 'EVT_CI_LIVE_CONTACT_CHECKED_V1')  # onex.evt.platform.ci-live-contact-checked.v1
     EVT_CONTRACT_DEREGISTERED_V1 = contract_topic_value('nodes/node_contract_registry_reducer/contract.yaml', 'platform', 'EVT_CONTRACT_DEREGISTERED_V1')  # onex.evt.platform.contract-deregistered.v1
     EVT_CONTRACT_REGISTERED_V1 = contract_topic_value('nodes/node_contract_loader_effect/contract.yaml', 'platform', 'EVT_CONTRACT_REGISTERED_V1')  # onex.evt.platform.contract-registered.v1

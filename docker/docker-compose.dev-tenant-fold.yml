@@ -16,3 +16,10 @@ services:
   # break every reader that loads the overlays with SafeLoader.
   tenant-projection-writer:
     profiles: !override ["folded-tenant-projection"]
+  # OMN-21288: the claude hook-events projection runs inside main. Main no
+  # longer excludes the node, and the writer, which shares main's
+  # KAFKA_INSTANCE_ID (so the group id and committed offsets are unchanged),
+  # starts under no profile a lane bring-up requests. The deploy handler retires
+  # a container of the previous revision before main is recreated.
+  projection-claude-hook-events-writer:
+    profiles: !override ["folded-hook-events"]
