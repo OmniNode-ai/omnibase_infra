@@ -28,6 +28,10 @@ node_version:
   patch: 1
 # Node type
 node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on
+# it. The handler descriptor model defaults the rest.
+descriptor:
+  node_archetype: effect
 # Description
 description: >
   Two-stage effect node for decision store persistence. Stage 1 normalises and upserts the decision record into decision_store, committing independently of Stage 2. Stage 2 runs structural conflict detection against ACTIVE decisions in the same scope_domain + scope_layer, writing pairs >= 0.3 confidence to decision_conflicts and enforcing the ACTIVE invariant for pairs >= 0.9. Stage 2 failure never rolls back Stage 1. Supports two intent types: write_decision (two-stage) and write_conflict (idempotent pair insert). Contract patch 1 records handler-internal dataclass annotations only; runtime behavior, topics, payloads, and storage semantics are unchanged.
@@ -44,6 +48,8 @@ output_model:
 # =============================================================================
 # HANDLER ROUTING (Declarative Handler Dispatch)
 # =============================================================================
+# OMN-21536: handlers take the typed payload alone.
+# The payload carries correlation_id for database operations and tracing.
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:

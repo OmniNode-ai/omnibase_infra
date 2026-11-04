@@ -87,7 +87,7 @@ class HandlerUpsertMetrics(MixinPostgresOpExecutor):
     Example:
         >>> pool = await asyncpg.create_pool(dsn="...")
         >>> handler = HandlerUpsertMetrics(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
     """
@@ -113,18 +113,17 @@ class HandlerUpsertMetrics(MixinPostgresOpExecutor):
     async def handle(
         self,
         payload: ModelPayloadUpsertMetrics,
-        correlation_id: UUID,
     ) -> ModelBackendResult:
         """Upsert a metrics rollup contribution.
 
         Args:
             payload: Metrics upsert payload from bundle completion signal.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with success=True on successful upsert.
             Returns success=False only on infrastructure errors.
         """
+        correlation_id = payload.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             correlation_id=correlation_id,

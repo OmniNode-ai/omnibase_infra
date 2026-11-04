@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
     AdapterLinearGraphQLProjectTracker,
@@ -131,7 +131,7 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
     Example:
         >>> pool = await asyncpg.create_pool(dsn="...")
         >>> handler = HandlerUpsertMergeGate(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
     """
@@ -169,18 +169,17 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
     async def handle(
         self,
         payload: ModelMergeGateResult,
-        correlation_id: UUID,
     ) -> ModelBackendResult:
         """Execute merge gate decision upsert and optional quarantine ticket.
 
         Args:
             payload: Merge gate decision payload from Kafka event.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with success=True when upsert committed.
             Linear ticket failures are logged but do not cause success=False.
         """
+        correlation_id = payload.correlation_id or uuid4()
         if self._pool is None:
             logger.warning(
                 "HandlerUpsertMergeGate: db pool not configured, skipping upsert "
@@ -196,17 +195,15 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
                 correlation_id=correlation_id,
             )
 
-        # Resolve a single effective correlation ID used end-to-end
-        effective_cid = payload.correlation_id or correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
-            correlation_id=effective_cid,
+            correlation_id=correlation_id,
             log_context={
                 "pr_ref": payload.pr_ref,
                 "head_sha": payload.head_sha,
                 "decision": payload.decision,
             },
-            fn=lambda: self._upsert_and_quarantine(payload, effective_cid),
+            fn=lambda: self._upsert_and_quarantine(payload, correlation_id),
         )
 
     async def _upsert_and_quarantine(
