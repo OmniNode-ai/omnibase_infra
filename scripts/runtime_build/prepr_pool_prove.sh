@@ -24,9 +24,9 @@
 #               prepr_teardown_slot.sh, both from the test-merge tree. Neither
 #               takes a lane argument; the project is derived from the slot.
 #
-# Params (sourced): TAG W [INFRA_PR INFRA_HEAD [INFRA_TAG] | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE] | INFRA_REF_SHA] [MARKET_PR MARKET_HEAD [MARKET_TAG] | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE] | MARKET_REF_SHA]
+# Params (sourced): TAG W [CLONE_BASE_URL, set by the driver from the repository layer map; the clone, build and tests phases read it] [INFRA_PR INFRA_HEAD [INFRA_TAG] | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE] | INFRA_REF_SHA] [MARKET_PR MARKET_HEAD [MARKET_TAG] | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE] | MARKET_REF_SHA]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS SUITE_REPO SUITE_WORKERS DEV_CONTROL_MAX CORE_REF SPI_REF INFRA_DEV_TAG STAGE_DEV_TAGS
-#   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
+#   PROBE_POLL_S DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
 #   POSITIVE_CONTROL REASON OVERLAY_FILE POST_UP_COMMAND POST_BRINGUP_CMD]
 #
 # The id and file lists below ($C $V $N $IMGS $FILES and the like) are word-split
@@ -280,7 +280,7 @@ fetch_pr() { # dir repo pr expected [tag] -> merges PR head into dev (no-ff), fa
   # pull ref; the head it resolves to is still compared with the expected one below.
   local d=$1 repo=$2 pr=$3 exp=$4 tag=${5:-} ref
   ref=pull/$pr/head; [ -z "$tag" ] || ref=refs/tags/$tag
-  git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
+  git clone -q --branch dev "$CLONE_BASE_URL/$repo.git" "$d"
   git -C "$d" fetch -q origin "$ref"
   local h; h=$(git -C "$d" rev-parse FETCH_HEAD)
   echo "$repo#$pr fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
@@ -289,7 +289,7 @@ fetch_pr() { # dir repo pr expected [tag] -> merges PR head into dev (no-ff), fa
 }
 fetch_ref() { # dir repo sha -> merges a branch head, named by its full sha, into dev; no PR (OMN-20085)
   local d=$1 repo=$2 sha=$3
-  git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
+  git clone -q --branch dev "$CLONE_BASE_URL/$repo.git" "$d"
   git -C "$d" fetch -q origin "$sha"
   local h; h=$(git -C "$d" rev-parse FETCH_HEAD)
   echo "$repo@${sha:0:12} fetched head $h expected $sha match=$([ "$h" = "$sha" ] && echo yes || echo NO)"
@@ -310,7 +310,7 @@ fetch_ref() { # dir repo sha -> merges a branch head, named by its full sha, int
 GROUP_GIT_ENV="GIT_AUTHOR_NAME=lab-pool-group GIT_AUTHOR_EMAIL=lab-pool-group@lab.invalid GIT_COMMITTER_NAME=lab-pool-group GIT_COMMITTER_EMAIL=lab-pool-group@lab.invalid GIT_AUTHOR_DATE=2026-01-01T00:00:00+0000 GIT_COMMITTER_DATE=2026-01-01T00:00:00+0000"
 fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
   local d=$1 repo=$2 members=$3 base=${4:-} want=${5:-} m n exp h
-  git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
+  git clone -q --branch dev "$CLONE_BASE_URL/$repo.git" "$d"
   if [ -n "$base" ]; then
     git -C "$d" switch -q --detach "$base" || { echo "group-base-missing $repo $base"; return 1; }
   fi
@@ -445,28 +445,28 @@ snap-pre|snap-post)
   ;;
 clone)
   drop_source_trees
-  echo "clone start $(ts)"; mkdir -p "$R" "$T"
+  echo "clone start $(ts)"; mkdir -p "$R" "$T"; : "${CLONE_BASE_URL:?CLONE_BASE_URL is set by the driver from the repository layer map}"
   if [ -n "${INFRA_GROUP:-}" ]; then
     fetch_group "$R/omnibase_infra" omnibase_infra "$INFRA_GROUP" "${INFRA_GROUP_BASE:-}" "${INFRA_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
     # the focused tests run against the group commit itself
-    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q "$R/omnibase_infra" HEAD; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+    git clone -q "$CLONE_BASE_URL/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q "$R/omnibase_infra" HEAD; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   elif [ -n "${INFRA_REF_SHA:-}" ]; then fetch_ref "$R/omnibase_infra" omnibase_infra "$INFRA_REF_SHA"
-    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "$INFRA_REF_SHA"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+    git clone -q "$CLONE_BASE_URL/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "$INFRA_REF_SHA"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   elif [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD" "${INFRA_TAG:-}"
-    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "${INFRA_TAG:+refs/tags/}${INFRA_TAG:-pull/$INFRA_PR/head}"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
-  elif [ -n "${INFRA_DEV_TAG:-}" ]; then git clone -q --branch "$INFRA_DEV_TAG" https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra" || exit 1  # OMN-17427: the image audit takes a clean dev-merge-tag tree, never a test merge
-  else git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra"; fi
+    git clone -q "$CLONE_BASE_URL/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "${INFRA_TAG:+refs/tags/}${INFRA_TAG:-pull/$INFRA_PR/head}"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+  elif [ -n "${INFRA_DEV_TAG:-}" ]; then git clone -q --branch "$INFRA_DEV_TAG" "$CLONE_BASE_URL/omnibase_infra.git" "$R/omnibase_infra" || exit 1  # OMN-17427: the image audit takes a clean dev-merge-tag tree, never a test merge
+  else git clone -q --branch dev "$CLONE_BASE_URL/omnibase_infra.git" "$R/omnibase_infra"; fi
   if [ -n "${MARKET_GROUP:-}" ]; then
     fetch_group "$R/omnimarket" omnimarket "$MARKET_GROUP" "${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
     # the focused tests run against the group commit itself
-    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q "$R/omnimarket" HEAD; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
+    git clone -q "$CLONE_BASE_URL/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q "$R/omnimarket" HEAD; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
   elif [ -n "${MARKET_REF_SHA:-}" ]; then fetch_ref "$R/omnimarket" omnimarket "$MARKET_REF_SHA"
-    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "$MARKET_REF_SHA"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
+    git clone -q "$CLONE_BASE_URL/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "$MARKET_REF_SHA"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
   elif [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD" "${MARKET_TAG:-}"
-    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "${MARKET_TAG:+refs/tags/}${MARKET_TAG:-pull/$MARKET_PR/head}"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
-  else git clone -q --branch dev https://github.com/OmniNode-ai/omnimarket.git "$R/omnimarket"; fi
-  git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_core.git "$R/omnibase_core"
-  git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_spi.git "$R/omnibase_spi"
+    git clone -q "$CLONE_BASE_URL/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "${MARKET_TAG:+refs/tags/}${MARKET_TAG:-pull/$MARKET_PR/head}"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
+  else git clone -q --branch dev "$CLONE_BASE_URL/omnimarket.git" "$R/omnimarket"; fi
+  source "$R/omnibase_infra/scripts/runtime_build/sibling_clone_manifest.sh" || exit 1  # OMN-22153: the tree under test names the vendored set
+  for repo in "${SIBLING_VENDORED_REPOS[@]}"; do [ -d "$R/$repo" ] || git clone -q --branch dev "$CLONE_BASE_URL/$repo.git" "$R/$repo" || exit 1; done
   # The workspace build vendors each sibling from these clones, not from the PR's
   # pin, so a PR that moves a sibling pin names the ref here (CORE_REF=v0.47.24).
   for pair in "omnibase_core:${CORE_REF:-}" "omnibase_spi:${SPI_REF:-}"; do
@@ -516,7 +516,7 @@ build)
   cd "$R/omnibase_infra" || exit 1
   echo "stage start $(ts)"
   # STAGE_DEV_TAGS: every sibling at its newest dev-merge tag (omnibase_infra#5472); a sha pin records no tag and the audit refuses it
-  REFS=(--repo-ref omnibase_core="$(git -C "$R/omnibase_core" rev-parse HEAD)" --repo-ref omnibase_spi="$(git -C "$R/omnibase_spi" rev-parse HEAD)" --repo-ref omnimarket="$(git -C "$R/omnimarket" rev-parse HEAD)"); DR=
+  source scripts/runtime_build/sibling_clone_manifest.sh || exit 1; REFS=(); for repo in "${SIBLING_VENDORED_REPOS[@]}"; do REFS+=(--repo-ref "$repo=$(git -C "$R/$repo" rev-parse HEAD)"); done; DR=
   [ -z "${STAGE_DEV_TAGS:-}" ] || { REFS=(); DR=origin/dev; }
   OMNI_HOME="$R" CONSUMER_LOCK="$R/omnimarket/uv.lock" DEPLOY_REF=$DR bash scripts/runtime_build/stage_workspace.sh ${REFS[@]+"${REFS[@]}"} 2>&1 | tail -5
   echo "stage rc=${PIPESTATUS[0]} $(ts)"
@@ -588,7 +588,7 @@ probe)
     c2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "localhost:$EFF/health")
     if [ "$starting" = 0 ] && [ "$c1" != 000 ] && [ "$c2" != 000 ]; then break; fi
     if [ "$(date +%s)" -ge "$end" ]; then echo "health wait timed out"; break; fi
-    sleep 15
+    sleep "${PROBE_POLL_S:?PROBE_POLL_S is set by the driver from the pool overlay}"
   done
   echo "health wait $(( $(date +%s) - start ))s ended $(ts) starting=$starting $MAIN=$c1 $EFF=$c2"
   if [ "$KIND" = prepr-slot ]; then slot_ports_readback; fi
@@ -721,7 +721,7 @@ teardown)
     else
       TD="$R/omnibase_infra/scripts/runtime_build/prepr_teardown_slot.sh"
       if [ ! -f "$TD" ]; then
-        git clone -q --depth 1 --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$W/td"
+        git clone -q --depth 1 --branch dev "$CLONE_BASE_URL/omnibase_infra.git" "$W/td"
         TD="$W/td/scripts/runtime_build/prepr_teardown_slot.sh"
       fi
       bash "$TD" --slot "$PREPR_SLOT" --reason "${REASON:-lab pool teardown $TAG}" --report-out "/tmp/$TAG-slot-teardown.json" > "/tmp/$TAG-slot-teardown.log" 2>&1

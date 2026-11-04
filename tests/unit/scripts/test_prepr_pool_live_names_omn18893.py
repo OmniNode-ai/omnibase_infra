@@ -25,8 +25,9 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 
 _BASE = Path(__file__).with_name("test_prepr_pool_pr_head_receipt_omn19566.py")
 
