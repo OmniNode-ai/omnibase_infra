@@ -15,6 +15,13 @@
 # (config/runner_fleet.yaml, classes `action` and `action-multiarch`). There is no `hp-canary` pin: that label belongs
 # to the h051 canary. h051 stays on the opt-in label alone until no repository that needs AVX2 can be placed there.
 #
+# KNOWN LIMIT (OMN-19998, measured 2026-11-04). The cores here are about 3.5 times slower per thread than the primary
+# host's (a fixed single-thread Python benchmark: 0.71 s against 0.20 s). The private plugin repository's
+# validator-tests shards 1/4 and 2/4, which name `arch-amd64`, hold one test each that runs under a fixed 300 second
+# subprocess timeout; all 10 such shards that finished on this pool failed on that timeout, and the same shards passed
+# on the primary host in 8 to 13 minutes. No timeout may be changed to get a job through, so whether that repository's
+# jobs may land here is an open decision, not a property of this file.
+#
 # SAME RUNNER, OTHER HOST. The anchors below are docker-compose.runners-hp051-ci-runner.yml's, with these changes,
 # each deliberate:
 #   - ONEX_LANE_HOST is h053 and the docker GID is 988 (both read on the host 2026-11-02). The label set is above.
