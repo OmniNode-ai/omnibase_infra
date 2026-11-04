@@ -242,7 +242,12 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - agent_actions
+              - agent_detection_failures
+              - agent_execution_logs
               - agent_routing_decisions
+              - agent_status_events
+              - agent_transformation_events
               - capability_scores
               - context_roi_scores
               - delegation_budget_applied_events
@@ -268,6 +273,7 @@ databases:
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - provider_quota_state
+              - router_performance_metrics
               - run_trace
               - savings_estimates
               - skill_execution_snapshots
