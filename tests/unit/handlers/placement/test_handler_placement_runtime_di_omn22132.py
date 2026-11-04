@@ -188,8 +188,8 @@ async def test_handler_runs_on_injected_fakes(profile: str) -> None:
         lock=asyncio.Lock(),
         min_serving=settings.min_serving,
         keepalive_interval_s=settings.keepalive_interval_s,
-        campaign_interval_s=0.01,
-        fence_tick_s=0.01,
+        campaign_interval_s=settings.campaign_interval_s,
+        fence_tick_s=settings.fence_tick_s,
     )
     await runtime.start()
     try:
@@ -317,12 +317,20 @@ async def test_handler_copies_the_nodes_and_elections_mappings() -> None:
     real, ghost = FakeElection(wins=True), FakeElection(wins=True)
     elections = {"primary_node": real}
     nodes = _nodes(FakeNode(), FakeNode())
+    expected: list[tuple[str, ...]] = []
+
+    async def recording_reader(
+        *, expected_nodes: Sequence[str], min_serving: int
+    ) -> ModelPlacementServingReport:
+        expected.append(tuple(expected_nodes))
+        return evaluate_serving_health([], min_serving=min_serving)
+
     runtime = HandlerPlacementRuntime(
         runtime_id="rt-1",
         session=FakeSession(),
         elections=elections,
         nodes=nodes,
-        serving_reader=_no_serving,
+        serving_reader=recording_reader,
         lock=asyncio.Lock(),
         min_serving=1,
         keepalive_interval_s=0.1,
@@ -338,6 +346,8 @@ async def test_handler_copies_the_nodes_and_elections_mappings() -> None:
                 break
             await asyncio.sleep(0.01)
         assert runtime.started_nodes() == {"any_node": 0, "primary_node": 11}
+        await runtime.serving_report()
+        assert expected == [("any_node", "primary_node")]
         assert ghost.campaigns == 0
         assert not runtime.may_publish("ghost")
     finally:
@@ -404,3 +414,36 @@ async def test_serving_report_rejects_non_positive_min_serving(bad: int) -> None
     )
     with pytest.raises(ProtocolConfigurationError, match="min_serving"):
         await runtime.serving_report(min_serving=bad)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"keepalive_interval_s": 0.0},
+        {"campaign_interval_s": -1.0},
+        {"fence_tick_s": float("inf")},
+        {"fence_tick_s": float("nan")},
+        {"min_serving": 0},
+    ],
+)
+def test_handler_rejects_non_positive_timings(bad: dict[str, float]) -> None:
+    timings = {
+        "min_serving": 1,
+        "keepalive_interval_s": 0.1,
+        "campaign_interval_s": 0.01,
+        "fence_tick_s": 0.01,
+        **bad,
+    }
+    with pytest.raises(ProtocolConfigurationError, match="timings"):
+        HandlerPlacementRuntime(
+            runtime_id="rt-1",
+            session=FakeSession(),
+            elections={"primary_node": FakeElection(wins=True)},
+            nodes=_nodes(FakeNode(), FakeNode()),
+            serving_reader=_no_serving,
+            lock=asyncio.Lock(),
+            min_serving=int(timings["min_serving"]),
+            keepalive_interval_s=timings["keepalive_interval_s"],
+            campaign_interval_s=timings["campaign_interval_s"],
+            fence_tick_s=timings["fence_tick_s"],
+        )

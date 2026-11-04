@@ -113,6 +113,19 @@ class HandlerPlacementRuntime:
                 "session and handler disagree on runtime_id or node set",
                 context=context,
             )
+        timings = {
+            "keepalive_interval_s": keepalive_interval_s,
+            "campaign_interval_s": campaign_interval_s,
+            "fence_tick_s": fence_tick_s,
+        }
+        invalid = sorted(k for k, v in timings.items() if not 0 < v < float("inf"))
+        if min_serving <= 0:
+            invalid.append("min_serving")
+        if invalid:
+            raise ProtocolConfigurationError(
+                f"timings must be positive and finite: {invalid}",
+                context=context,
+            )
         self._runtime_id = runtime_id
         self._session = session
         self._elections = {**elections}
