@@ -3434,3 +3434,11 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q -n 0 --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427700001, AC17427700002]
+  - id: dod-omn17427-release-notes-effect-deploy
+    description: Hosted-runner deploy check validates the effect contract with the core I/O validator and runs the real node CLI against disposable local checkouts. Reads every staged path from the runtime receipt through the cut job's shell expression, including a checkout path with spaces. Requires Bash and jq but no Docker daemon, credentials, broker or deployed lane.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/integration/cli/test_release_notes_apply_node_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac: [AC17427700001, AC17427700002]

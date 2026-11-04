@@ -13,6 +13,7 @@ exercised through the runtime and not only by calling the handler.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -105,13 +106,76 @@ def _run_node(
             str(tmp_path / "state"),
             "--timeout",
             "60",
+            "--output",
+            "receipt",
         ],
     )
-    return result.exit_code, result.output
+    return result.exit_code, result.stdout
+
+
+def _read_staged_paths(
+    tmp_path: Path, receipt: str
+) -> subprocess.CompletedProcess[bytes]:
+    (tmp_path / "release-notes-receipt.json").write_text(receipt, encoding="utf-8")
+    workflow = (
+        _REPO_ROOT / ".github" / "workflows" / "release-train-nightly.yml"
+    ).read_text(encoding="utf-8")
+    start = workflow.index("          if ! staged_lines=")
+    end = workflow.index('          if [ "${NEEDS_BUMP}"', start)
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail\nRUNNER_TEMP="$1"\n'
+            + workflow[start:end]
+            + '\nprintf "%s\\0" "${staged[@]}"',
+            "release-notes-readback",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        check=False,
+    )
 
 
 class TestRunThroughTheNodeCli:
     """The cut job runs ``onex node node_release_notes_apply_effect``; so do these."""
+
+    def test_the_cut_job_reads_every_path_from_the_runtime_receipt(
+        self, tmp_path: Path
+    ) -> None:
+        clone = _readme_only_clone(tmp_path / "clone with spaces")
+        (clone / "CHANGELOG.md").write_text("stale notes\n", encoding="utf-8")
+        entry = tmp_path / "entry with spaces.md"
+        entry.write_text(_ENTRY, encoding="utf-8")
+        code, output = _run_node(tmp_path, clone, entry, repo_name="omnibase_core")
+        assert code == 0, output
+        json.loads(output)
+        result = _read_staged_paths(tmp_path, output)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.split(b"\0") == [
+            b"README.md",
+            b"CHANGELOG.md",
+            b"contracts/OMN-18595.yaml",
+            b"tests/ci/test_release_cut_identity_omn18595.py",
+            b"",
+        ]
+        assert not (clone / "CHANGELOG.md").exists()
+
+    @pytest.mark.parametrize(
+        "receipt",
+        [
+            "{",
+            '{"result": {"success": false, "staged": ["README.md"]}}',
+            '{"result": {"success": true, "staged": []}}',
+        ],
+        ids=["malformed", "refused", "empty"],
+    )
+    def test_the_cut_job_refuses_an_unusable_receipt(
+        self, tmp_path: Path, receipt: str
+    ) -> None:
+        result = _read_staged_paths(tmp_path, receipt)
+        assert result.returncode == 1
+        assert b"does not report success with staged paths" in result.stdout
 
     def test_the_node_writes_a_readme_only_clone_and_exits_zero(
         self, tmp_path: Path

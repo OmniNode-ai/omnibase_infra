@@ -28,6 +28,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_core.validation.validator_no_io_outside_effects import (
+    ValidatorNoIoOutsideEffects,
+)
 from omnibase_infra.handlers.handler_release_notes_apply import (
     HandlerReleaseNotesApply,
     apply_release_notes,
@@ -313,6 +316,10 @@ class TestHandler:
 
 @pytest.mark.unit
 class TestCutJobWiring:
+    def test_the_contract_is_admitted_as_an_effect(self) -> None:
+        result = ValidatorNoIoOutsideEffects(root=_REPO_ROOT).validate_file(_CONTRACT)
+        assert result.is_valid, result.issues
+
     def test_the_node_is_a_packaged_entry_point(self) -> None:
         manifest = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text("utf-8"))
         nodes = manifest["project"]["entry-points"]["onex.nodes"]
