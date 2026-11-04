@@ -1,0 +1,41 @@
+schema_version: 1.0.0
+ticket_id: OMN-21487
+title: The dev deploy agent builds the estimator page image before recreation
+summary: >-
+  Deploy-side portion only. The host build effect resolves the web dev head in an isolated checkout and builds its Dockerfile when the tagged image is absent, stale or unstamped. Source labels are verified before the existing recreate. The dev compose declaration passes the runtime gate settings from the host environment. The web repository owns the merge publisher; end-to-end merge delivery, credential materialization and serving-host readback remain live verification obligations and are not represented as unit-test evidence.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21487-estimator-image-delivery
+    statement: Deploy-side statements for the ticket acceptance criteria; the ticket's live falsifiers remain unchanged and open until deployment readback.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the deploy agent builds the newest declared web development branch revision before recreating the estimator page, reusing an image only when its source labels match that revision.'
+      - id: AC2
+        statement: 'AC2: the deploy agent builds an absent estimator page image before recreation, and a failed source checkout, build or revision readback refuses recreation.'
+evidence_requirements:
+  - kind: tests
+    description: Exercise the real deploy-agent build boundary with controlled Git and Docker responses, including absent images, advanced source revisions and refusal controls.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21487-ac1-deploy-side-build
+    description: >-
+      Deploy-side mechanism for AC1: a changed web revision is built and stamped, an unchanged revision is reused, and non-dev or disabled instances do no estimator work. This does not certify the web repository's merge publisher or a live serving container.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov -p no:randomly
+  - id: dod-omn21487-ac2-missing-image
+    description: >-
+      Deploy-agent build-boundary regression for AC2: an absent local image causes a build, source/build failures abort and mismatched labels refuse progress. All subprocesses are controlled; this hosted-runner check needs no Docker daemon, credential or lab host. Live image removal is not claimed.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov -p no:randomly

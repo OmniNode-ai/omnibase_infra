@@ -1,0 +1,212 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Build the foreign-source page before the dev agent's existing recreate.
+
+The source checkout is disposable: neither a canonical clone nor another lane's
+working tree is checked out or reset. Git uses the host's existing credential
+helper. No credentials are added to a command, image label or build argument.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import subprocess
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+from types import ModuleType
+
+import yaml
+
+from omnibase_core.container import ModelONEXContainer
+from omnibase_core.utils.util_run_coro_sync import run_coro_sync
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.model_cost_estimator_build_config import (
+    ModelCostEstimatorBuildConfig,
+)
+from omnibase_infra.models.model_cost_estimator_build_request import (
+    ModelCostEstimatorBuildRequest,
+)
+from omnibase_infra.models.model_cost_estimator_build_result import (
+    ModelCostEstimatorBuildResult,
+)
+
+logger = logging.getLogger(__name__)
+SOURCE_LABEL = "ai.omninode.image.source-repo"
+REVISION_LABEL = "org.opencontainers.image.revision"
+
+
+def _checked(argv: list[str], timeout: int) -> str:
+    result = subprocess.run(
+        argv, timeout=timeout, capture_output=True, text=True, check=False
+    )
+    if result.returncode:
+        # Tool output can contain credentials; the failed operation is enough.
+        raise RuntimeError(f"estimator {argv[0]} {argv[1]} exited {result.returncode}")
+    return result.stdout.strip()
+
+
+def _matches(image: str, repository: str, revision: str, timeout: int) -> bool:
+    result = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", image],
+        timeout=timeout,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        return False
+    try:
+        labels = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return False
+    return (
+        isinstance(labels, dict)
+        and labels.get(SOURCE_LABEL) == repository
+        and labels.get(REVISION_LABEL) == revision
+    )
+
+
+class HandlerCostEstimatorBuild:
+    """Stateless host effect called only under the deploy agent's lane lock."""
+
+    def __init__(self, container: ModelONEXContainer) -> None:
+        self._recipe = container.get_service(ModelCostEstimatorBuildConfig)
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
+
+    def handle(
+        self, request: ModelCostEstimatorBuildRequest
+    ) -> ModelCostEstimatorBuildResult:
+        if request.lane != "dev" or not request.enabled:
+            return ModelCostEstimatorBuildResult(status="not-applicable")
+        recipe = self._recipe
+        image = request.image or recipe.image
+        with tempfile.TemporaryDirectory(prefix="estimator-build-") as temporary:
+            source = str(Path(temporary) / "source")
+            _checked(
+                [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--single-branch",
+                    "--branch",
+                    recipe.branch,
+                    recipe.repository_url,
+                    source,
+                ],
+                recipe.clone_timeout_seconds,
+            )
+            revision = _checked(
+                ["git", "-C", source, "rev-parse", "HEAD"], recipe.read_timeout_seconds
+            )
+            if not re.fullmatch(r"[0-9a-f]{40}", revision):
+                raise RuntimeError("estimator source revision is not a full commit SHA")
+            if _matches(
+                image, recipe.repository, revision, recipe.read_timeout_seconds
+            ):
+                return ModelCostEstimatorBuildResult(
+                    status="current", image=image, revision=revision
+                )
+            _checked(
+                [
+                    "docker",
+                    "build",
+                    "--label",
+                    f"{SOURCE_LABEL}={recipe.repository}",
+                    "--label",
+                    f"{REVISION_LABEL}={revision}",
+                    "--tag",
+                    image,
+                    source,
+                ],
+                recipe.build_timeout_seconds,
+            )
+            if not _matches(
+                image, recipe.repository, revision, recipe.read_timeout_seconds
+            ):
+                raise RuntimeError(
+                    "estimator image revision readback differs from the source"
+                )
+        logger.info("estimator image %s built at web revision %s", image, revision)
+        return ModelCostEstimatorBuildResult(
+            status="built", image=image, revision=revision
+        )
+
+
+def build_dev_lane_services(
+    execution: ModuleType,
+    build_images: Callable[..., None],
+    git_sha: str,
+    on_phase_update: Callable[..., None],
+    *,
+    build_source: str,
+    lane: str,
+    git_ref: str,
+) -> None:
+    """Keep the existing dev image build, then deliver the foreign-source page."""
+    if lane != execution.EnumRuntimeLane.DEV or not execution.DEV_LANE_BUILD_SERVICES:
+        return
+    build_images(
+        execution.Scope.RUNTIME,
+        git_sha,
+        on_phase_update,
+        build_source=build_source,
+        runtime_lane=lane,
+        git_ref=git_ref,
+        compose_files=execution.lane_config_for(lane).compose_files,
+        services=execution.DEV_LANE_BUILD_SERVICES,
+        stage_workspace=False,
+    )
+    config = execution.lane_config_for(lane)
+    if "cost-estimator-web" in config.disabled_services:
+        return
+    module_file = execution.__file__
+    if not module_file:
+        raise RuntimeError("estimator build requires the deploy agent source location")
+    contract = (
+        Path(module_file).resolve().parents[3]
+        / "src/omnibase_infra/nodes/node_cost_estimator_build_effect/contract.yaml"
+    )
+    environment = execution._compose_env()
+    build = yaml.safe_load(contract.read_text(encoding="utf-8"))["build"]
+    for field in ("repository", "repository_url"):
+        name = build.pop(f"{field}_env")
+        value = environment.get(name, "").strip()
+        if not value:
+            raise RuntimeError(f"estimator source setting {name} is required")
+        build[field] = value
+    recipe = ModelCostEstimatorBuildConfig.model_validate(build)
+    container = ModelONEXContainer()
+    try:
+        run_coro_sync(
+            container.service_registry.register_instance(
+                ModelCostEstimatorBuildConfig,
+                recipe,
+            )
+        )
+        run_coro_sync(
+            container.service_registry.register_instance(
+                HandlerCostEstimatorBuild,
+                HandlerCostEstimatorBuild(container),
+            )
+        )
+        handler = container.get_service(HandlerCostEstimatorBuild)
+        handler.handle(
+            ModelCostEstimatorBuildRequest(
+                lane="dev",
+                enabled=True,
+                image=environment.get("COST_ESTIMATOR_WEB_IMAGE"),
+            )
+        )
+    finally:
+        container.close()

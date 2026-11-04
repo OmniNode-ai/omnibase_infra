@@ -161,13 +161,13 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 """
 
 
-def load_dev_boot_guard() -> ModuleType:
+def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
     """Load the repo's canonical host effect beside this standalone agent.
 
     The agent has its own published-infra venv; its host effect must come from
     the same checkout as the agent, without waiting for a package release.
     """
-    name = "omnibase_infra.handlers.handler_dev_boot_guard"
+    name = f"omnibase_infra.handlers.{effect}"
     if name in sys.modules:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
@@ -183,6 +183,10 @@ def load_dev_boot_guard() -> ModuleType:
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
+        "models/model_cost_estimator_build_config.py",
+        "models/model_cost_estimator_build_request.py",
+        "models/model_cost_estimator_build_result.py",
+        "handlers/handler_cost_estimator_build.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
@@ -5116,41 +5120,15 @@ class DeployExecutor:
         lane: EnumRuntimeLane,
         git_ref: str,
     ) -> None:
-        """Build the DEV lane's own runtime services (OMN-18108). No-op elsewhere.
-
-        The lane-only services are declared in ``docker/docker-compose.dev-lane.yml``,
-        which the lane-agnostic build above never passes, so without this command the
-        up phase recreates them from whatever image they already carry and
-        reports success. That is exactly what left eight services ~35 commits
-        behind on the .201 dev lane while the deploy agent's own terminal event
-        said the deploy succeeded.
-
-        OMN-21279 also rebuilds base-file services on the composed image via the overlay.
-
-        Additive and explicit: a SECOND build naming the services, rather than
-        widening the first one's compose files, so prod and stability-test issue
-        a byte-identical command to before. The tag-referenced services are
-        excluded by ``DEV_LANE_ONLY_BUILDABLE_SERVICES`` -- ``docker compose
-        build`` has nothing to do for a service that carries only an ``image:``.
-        """
-        if lane != EnumRuntimeLane.DEV or not DEV_LANE_BUILD_SERVICES:
-            return
-        logger.info(
-            "_build_dev_lane_only_services: building %d dev-lane services "
-            "with the lane overlay: %s",
-            len(DEV_LANE_BUILD_SERVICES),
-            ", ".join(DEV_LANE_BUILD_SERVICES),
-        )
-        self._compose_build(
-            Scope.RUNTIME,
+        """Build dev images through the host effect before the existing recreate."""
+        load_dev_boot_guard("handler_cost_estimator_build").build_dev_lane_services(
+            sys.modules[__name__],
+            self._compose_build,
             git_sha,
             on_phase_update,
             build_source=build_source,
-            runtime_lane=lane,
+            lane=lane,
             git_ref=git_ref,
-            compose_files=lane_config_for(lane).compose_files,
-            services=DEV_LANE_BUILD_SERVICES,
-            stage_workspace=False,
         )
 
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:

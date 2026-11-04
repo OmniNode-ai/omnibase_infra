@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_cost_estimator_build_effect
+contract_name: node_cost_estimator_build_effect
+node_name: node_cost_estimator_build_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Host-local build leg of the bus-driven deploy agent. Resolve the web dev head in an isolated checkout, build its own Dockerfile when the local image is absent or stale, and certify source labels before the existing recreate.
+input_model:
+  name: ModelCostEstimatorBuildRequest
+  module: omnibase_infra.models.model_cost_estimator_build_request
+  description: Lane, enabled service and optional image override; no secrets.
+output_model:
+  name: ModelCostEstimatorBuildResult
+  module: omnibase_infra.models.model_cost_estimator_build_result
+  description: Build outcome and web revision.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: build
+      handler:
+        name: HandlerCostEstimatorBuild
+        module: omnibase_infra.handlers.handler_cost_estimator_build
+build:
+  repository_env: COST_ESTIMATOR_WEB_SOURCE_REPOSITORY
+  repository_url_env: COST_ESTIMATOR_WEB_SOURCE_URL
+  branch: dev
+  image: omnibase-infra-cost-estimator-web:dev-lane
+  clone_timeout_seconds: 120
+  read_timeout_seconds: 30
+  build_timeout_seconds: 1800
+metadata:
+  ticket: OMN-21487
+  description: >-
+    Invoked synchronously by the host deploy agent while its lane lock is held, within its existing rebuild command consumer. No second consumer, runtime dependency or prod admission. The web repository owns its merge publisher.
+  tags: [effect, deployment, dev]

@@ -2179,16 +2179,12 @@ services:
   # service carries only the web front end's page and its thin /api/estimator/*
   # proxy to onex-api over the lane network.
   #
-  # TAG-REFERENCED, like onex-api, and for the same reason: the image is built
-  # out of a different repository, the web front end's, with that repository's
-  # own Dockerfile, on the lab host:
-  #   docker build \
-  #     --label ai.omninode.image.source-repo=<web front-end repository> \
-  #     --label org.opencontainers.image.revision="$(git -C <its clone> rev-parse HEAD)" \
-  #     -t omnibase-infra-cost-estimator-web:dev-lane <its clone>
-  # Those two labels are what the RT-6 readback certifies a recreated container
-  # by: a foreign source repository at a stated revision. An image built without
-  # them fails that readback by name, never silently.
+  # The deploy agent's node_cost_estimator_build_effect builds the web dev head
+  # with its own Dockerfile before recreate (OMN-21487). A missing or stale
+  # image is built automatically, stamped with source-repo and revision labels,
+  # then read back; RT-6 certifies that foreign-source revision on the container.
+  # The build stamps --label ai.omninode.image.source-repo=<source>
+  # and --label org.opencontainers.image.revision=<web revision>.
   #
   # ITS OWN PROFILE, `cost-estimator`, and not `runtime`. The other dev
   # instances layer this file and bring up `--profile runtime`; a runtime
@@ -2202,12 +2198,7 @@ services:
   # `pull_policy: never`: the image exists in no registry, and a pull attempt
   # would only replace a clear "no such image" with a registry error.
   #
-  # FAILURE MODE, stated: because every dev-lane deploy names this service, a
-  # lab host on which the image is absent fails that deploy's recreate step with
-  # "No such image: ...cost-estimator-web:dev-lane", the same way onex-api fails
-  # when its pinned tag has been collected. Image GC removes only images no
-  # container uses, so a running page keeps its image. Recovery is the build
-  # above followed by the deploy again; nothing else in the lane depends on it.
+  # The image stays tag-referenced because its source belongs to the web repo.
   #
   # The lane has no login, so the next-auth names carry non-secret
   # placeholders that pass the front end's own validators: AUTH_URL must not be
@@ -2233,6 +2224,11 @@ services:
       - "3080:3000"
     environment:
       FEATURE_ESTIMATOR_ENABLED: "true"
+      # Infisical's materialized host env -> DEPLOY_AGENT_ENV_FILE -> the
+      # agent's _compose_env() re-read -> compose -> the page's runtime gate.
+      # No password default; an absent value leaves the page gate closed.
+      FEATURE_ESTIMATOR_GATE_ENABLED: ${FEATURE_ESTIMATOR_GATE_ENABLED:-true}
+      ESTIMATOR_GATE_PASSWORD: ${ESTIMATOR_GATE_PASSWORD:-}
       # A production build of the front end redirects any host it does not know
       # to its public origin; visitors reach this lane at the lab host's own
       # name and port, so the lane opts in to serving that host (OMN-21481).

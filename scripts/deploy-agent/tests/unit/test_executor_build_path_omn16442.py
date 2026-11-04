@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from uuid import uuid4
 
@@ -262,6 +263,10 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: list[dict[str, object]] = []
+    effect = executor_mod.load_dev_boot_guard("handler_cost_estimator_build")
+    monkeypatch.setattr(
+        effect.HandlerCostEstimatorBuild, "handle", lambda self, request: None
+    )
 
     def fake_compose_build(
         self: DeployExecutor,
@@ -274,10 +279,18 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
 
     monkeypatch.setattr(DeployExecutor, "_compose_build", fake_compose_build)
     monkeypatch.setattr(DeployExecutor, "_compose_up", lambda *a, **k: None)
-
-    # No self_update stub: OMN-16442 (#3331) removed self-update from this
-    # path entirely, so reaching it would be a defect rather than a call to
-    # neutralise. test_self_update_job_boundary_omn16442.py owns that.
+    monkeypatch.setattr(
+        executor_mod, "_hold_build_context", lambda purpose: nullcontext()
+    )
+    monkeypatch.setattr(
+        executor_mod,
+        "_compose_env",
+        lambda *a, **k: {
+            "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": "web-front-end",
+            "COST_ESTIMATOR_WEB_SOURCE_URL": "https://example.invalid/web-front-end.git",
+        },
+    )
+    monkeypatch.setattr(DeployExecutor, "_preflight_runtime_boot", lambda *a, **k: None)
     DeployExecutor().rebuild_scope(
         Scope.RUNTIME,
         [],
@@ -288,11 +301,6 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
         lane=EnumRuntimeLane.DEV,
     )
 
-    # OMN-18108: a DEV runtime rebuild issues a SECOND, additive build for the
-    # services declared only in the lane overlay. Both builds carry the same
-    # lane and ref, which is what this test is about; the second names its
-    # services explicitly and skips re-staging the siblings the first already
-    # vendored.
     assert captured[0] == {
         "build_source": BuildSource.WORKSPACE,
         "runtime_lane": EnumRuntimeLane.DEV,
