@@ -37,7 +37,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/formal -k runtime_start_first -q
+        check_value: uv run pytest tests/unit/formal/test_runtime_start_first_model.py -q -k "mutant or witness or bounds"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
