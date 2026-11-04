@@ -15,10 +15,16 @@
 #     `omnibase-ci-multiarch`, so no pull-request job can land here and the pool serves only the jobs that name the
 #     reserved label. The runner group is still omnibase-ci, the group the private repositories can use.
 #   - its own container, runner and volume names (hp051-ci-mq-runner-N) and its own compose project (`-p hp051-ci-mq-runner`).
-#   - 4 GiB per runner (memswap 8 GiB), not 6: the jobs are validator tests and a plugin validation, not builds. The pool
-#     shares the host's omnirunners.slice (96G high, 112G max); its four runners add at most 16 GiB of limits to it.
-#   - the per-runner cache and work directories are /data/scratch/{cache/,}runners/mq-<N>/..., a path of their own, so
-#     they never alias a runner of the hp051-ci-runner pool on the same host. Create them owned by uid 1001 (tmp mode 1777) first.
+#   - 10 GiB per runner (memswap the same, so nothing swaps), not 6: the job directories are tmpfs mounts charged to the
+#     container (next item). The pool shares the host's omnirunners.slice (96G high, 112G max); its four runners add at
+#     most 40 GiB of limits to it, beside the general pool's 24.
+#   - the per-runner cache, work and tmp directories are in memory (OMN-22123, operator RULING 2026-11-04T07:03:44Z: the
+#     runners were to be on the memory drive, not on the spinning data volume). Each is a tmpfs mount of the container,
+#     so there is no host path to create, own or refill after a reboot, and a recreate cannot bring a disk path back.
+#     A tmpfs is a ceiling, not a reservation, and its pages are charged to the runner's own memory limit, which is why
+#     the limit is 10 GiB and not 4: a shard measured 3.2 to 3.5 GiB of job workspace on 2026-11-04 (checkout 1.1,
+#     runner temp 1.1 to 1.3, uv cache 0.6, tool Python 0.4), more than the 3 GiB work slot of the host RAM pool, and
+#     the 4 GiB limit had been reached 4400 to 6200 times per runner. memswap equals the limit so none of it swaps to disk.
 #
 # DEPLOYING. From a machine with ssh to the host and an org-admin registration token supplied to the installer through
 # its environment or stdin, never on a command line:
@@ -64,14 +70,57 @@ x-runner-host-zoneinfo: &runner-host-zoneinfo
   read_only: true
   bind:
     create_host_path: false
+# In-memory job directories (see the header). Long form, one anchor per path, shared by the four runners.
+x-runner-ram-work: &runner-ram-work
+  type: tmpfs
+  target: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+  tmpfs:
+    size: 8gb
+    mode: 0o1777
+x-runner-ram-tmp: &runner-ram-tmp
+  type: tmpfs
+  target: ${RUNNER_USER_HOME:-/home/runner}/tmp
+  tmpfs:
+    size: 1gb
+    mode: 0o1777
+x-runner-ram-pip: &runner-ram-pip
+  type: tmpfs
+  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/pip
+  tmpfs:
+    size: 2gb
+x-runner-ram-pre-commit: &runner-ram-pre-commit
+  type: tmpfs
+  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
+  tmpfs:
+    size: 2gb
+x-runner-ram-pnpm: &runner-ram-pnpm
+  type: tmpfs
+  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
+  tmpfs:
+    size: 2gb
+x-runner-ram-ms-playwright: &runner-ram-ms-playwright
+  type: tmpfs
+  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
+  tmpfs:
+    size: 2gb
+x-runner-ram-ci-envs: &runner-ram-ci-envs
+  type: tmpfs
+  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
+  tmpfs:
+    size: 2gb
+x-runner-ram-npm: &runner-ram-npm
+  type: tmpfs
+  target: ${RUNNER_USER_HOME:-/home/runner}/.npm
+  tmpfs:
+    size: 2gb
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
-  mem_limit: 4g
-  # This is a per-container upper bound (RAM plus swap). The parent slice's 2G swap cap is shared by all four
-  # runners, so aggregate swap can never reach four times this allowance. The 96G/112G parent RAM bounds leave
-  # room for docker-socket job containers in the slice; the four runner containers themselves total at most 24G.
-  memswap_limit: 8g
+  mem_limit: 10g
+  # RAM plus swap, and equal to mem_limit, so the runner has no swap: its job directories are tmpfs mounts and must
+  # stay in memory. The 96G/112G parent RAM bounds leave room for docker-socket job containers in the slice; the four
+  # runner containers themselves total at most 40G.
+  memswap_limit: 10g
   cpus: "2.0"
   pids_limit: 4096
   cgroup_parent: omnirunners.slice
@@ -129,14 +178,14 @@ services:
       - *runner-lab-credentials
       - *lab-host-table
       - *runner-host-zoneinfo
-      - /data/scratch/cache/runners/mq-1/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/mq-1/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/mq-1/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/mq-1/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/mq-1/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/mq-1/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/mq-1/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/mq-1/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-ram-pip
+      - *runner-ram-pre-commit
+      - *runner-ram-pnpm
+      - *runner-ram-ms-playwright
+      - *runner-ram-ci-envs
+      - *runner-ram-npm
+      - *runner-ram-work
+      - *runner-ram-tmp
       - hp051-ci-mq-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp051-ci-mq-runner-2:
     !!merge <<: *runner-base
@@ -152,14 +201,14 @@ services:
       - *runner-lab-credentials
       - *lab-host-table
       - *runner-host-zoneinfo
-      - /data/scratch/cache/runners/mq-2/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/mq-2/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/mq-2/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/mq-2/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/mq-2/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/mq-2/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/mq-2/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/mq-2/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-ram-pip
+      - *runner-ram-pre-commit
+      - *runner-ram-pnpm
+      - *runner-ram-ms-playwright
+      - *runner-ram-ci-envs
+      - *runner-ram-npm
+      - *runner-ram-work
+      - *runner-ram-tmp
       - hp051-ci-mq-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp051-ci-mq-runner-3:
     !!merge <<: *runner-base
@@ -175,14 +224,14 @@ services:
       - *runner-lab-credentials
       - *lab-host-table
       - *runner-host-zoneinfo
-      - /data/scratch/cache/runners/mq-3/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/mq-3/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/mq-3/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/mq-3/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/mq-3/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/mq-3/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/mq-3/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/mq-3/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-ram-pip
+      - *runner-ram-pre-commit
+      - *runner-ram-pnpm
+      - *runner-ram-ms-playwright
+      - *runner-ram-ci-envs
+      - *runner-ram-npm
+      - *runner-ram-work
+      - *runner-ram-tmp
       - hp051-ci-mq-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp051-ci-mq-runner-4:
     !!merge <<: *runner-base
@@ -198,14 +247,14 @@ services:
       - *runner-lab-credentials
       - *lab-host-table
       - *runner-host-zoneinfo
-      - /data/scratch/cache/runners/mq-4/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-      - /data/scratch/cache/runners/mq-4/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-      - /data/scratch/cache/runners/mq-4/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-      - /data/scratch/cache/runners/mq-4/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-      - /data/scratch/cache/runners/mq-4/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-      - /data/scratch/cache/runners/mq-4/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
-      - /data/scratch/runners/mq-4/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - /data/scratch/runners/mq-4/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - *runner-ram-pip
+      - *runner-ram-pre-commit
+      - *runner-ram-pnpm
+      - *runner-ram-ms-playwright
+      - *runner-ram-ci-envs
+      - *runner-ram-npm
+      - *runner-ram-work
+      - *runner-ram-tmp
       - hp051-ci-mq-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
 volumes:
   hp051-ci-mq-runner-1-creds:

@@ -19,6 +19,7 @@ import yaml
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     load_runner_fleet_config,
 )
+from tests.ci._runner_compose_text import resolve_runner_compose_defaults
 
 pytestmark = pytest.mark.unit
 
@@ -89,7 +90,48 @@ def test_every_runner_reads_the_host_timezone_database_read_only(host: str) -> N
         assert mounts[0]["read_only"] is True, name
 
 
-@pytest.mark.parametrize("host", sorted(POOLS))
+# Hosts whose merge-queue runners keep their job directories on disk under /data/scratch. h051 is not one: see below.
+DISK_SCRATCH_HOSTS = ("h053",)
+MEMORY_HOSTS = ("h051",)
+RUNNER_HOME = "/home/runner"
+RUNNER_TMPDIR_NAME = "tmp"  # the runner's TMPDIR, a directory of its home
+# What a runner keeps in memory: the job workspace, TMPDIR and the six package caches (OMN-22123).
+IN_MEMORY_TARGETS = {
+    f"{RUNNER_HOME}/actions-runner/_work",
+    f"{RUNNER_HOME}/{RUNNER_TMPDIR_NAME}",
+    f"{RUNNER_HOME}/.cache/pip",
+    f"{RUNNER_HOME}/.cache/pre-commit",
+    f"{RUNNER_HOME}/.cache/pnpm",
+    f"{RUNNER_HOME}/.cache/ms-playwright",
+    f"{RUNNER_HOME}/.cache/omni/ci-envs",
+    f"{RUNNER_HOME}/.npm",
+}
+# The only mounts, besides the tmpfs ones, a memory-host runner may have: the socket, its own hooks, the pause directory, the credentials, the
+# host table and the timezone database. None is a job directory or a cache.
+ALLOWED_BIND_TARGETS = {
+    "/var/run/docker.sock",
+    "/opt/onex-runner-hooks",
+    f"{RUNNER_HOME}/.onex-disk-admission-pause",
+    f"{RUNNER_HOME}/.lab-credentials",
+    "/etc/onex/lab_run_hosts.yaml",
+    "/usr/share/zoneinfo",
+    f"{RUNNER_HOME}/.runner-creds",
+}
+
+
+def _bytes(limit: str) -> int:
+    units = {"g": 1 << 30, "m": 1 << 20}
+    return int(str(limit)[:-1]) * units[str(limit)[-1].lower()]
+
+
+def _target(volume: Any) -> str:
+    """The container path of a short or long volume entry, with the runner home resolved."""
+    if isinstance(volume, dict):
+        return resolve_runner_compose_defaults(str(volume["target"]))
+    return resolve_runner_compose_defaults(str(volume)).split(":")[1]
+
+
+@pytest.mark.parametrize("host", DISK_SCRATCH_HOSTS)
 def test_scratch_paths_never_alias_the_general_pool_on_the_same_host(
     host: str,
 ) -> None:
@@ -108,6 +150,59 @@ def test_scratch_paths_never_alias_the_general_pool_on_the_same_host(
     }
     assert mq_paths and not (mq_paths & general_paths)
     assert all("/mq-" in p for p in mq_paths)
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_every_merge_queue_job_directory_is_a_tmpfs_and_no_disk_path_is_bound(
+    host: str,
+) -> None:
+    """OMN-22123, operator RULING 2026-11-04T07:03:44Z: the queue runners run on the memory drive, not the data disk.
+
+    Work, TMPDIR and the six caches are tmpfs mounts of the container, each with a size ceiling, so a recreate cannot
+    bring a disk directory back and no host unit has to recreate a path after a reboot. Every other bind is one the
+    runner needs and none of them is a job directory or a cache.
+    """
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        tmpfs = {
+            _target(v): v
+            for v in service["volumes"]
+            if isinstance(v, dict) and v.get("type") == "tmpfs"
+        }
+        assert set(tmpfs) == IN_MEMORY_TARGETS, name
+        for target, mount in tmpfs.items():
+            assert mount["tmpfs"]["size"], (name, target)
+        binds = {
+            _target(v)
+            for v in service["volumes"]
+            if not (isinstance(v, dict) and v.get("type") == "tmpfs")
+        }
+        assert binds <= ALLOWED_BIND_TARGETS, (name, binds - ALLOWED_BIND_TARGETS)
+        text = repr(service["volumes"])
+        assert "/data/scratch" not in text and "/mq-" not in text, name
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_the_memory_limit_covers_the_tmpfs_ceilings_it_is_charged_for(
+    host: str,
+) -> None:
+    """A tmpfs page is charged to the container, so the limit must hold the workspace beside the job's own memory.
+
+    Measured 2026-11-04 on h051: a shard holds 3.2 to 3.5 GiB in its job workspace and the old 4 GiB limit was reached
+    4400 to 6200 times per runner. The limit is the general pool's 6 GiB plus the workspace, and swap equals the limit so
+    the in-memory directories never reach the disk.
+    """
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        limit = _bytes(service["mem_limit"])
+        assert limit >= 10 << 30, name
+        assert _bytes(service["memswap_limit"]) == limit, name
+        work = next(
+            v
+            for v in service["volumes"]
+            if isinstance(v, dict) and _target(v).endswith("/_work")
+        )
+        assert _bytes(str(work["tmpfs"]["size"]).replace("gb", "g")) < limit, name
 
 
 def test_the_fleet_declares_four_merge_queue_runners_on_each_host() -> None:
