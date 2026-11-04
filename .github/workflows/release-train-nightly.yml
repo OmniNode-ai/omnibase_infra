@@ -389,11 +389,13 @@ jobs:
             echo "::error::release notes were not applied: $(jq -r '(.result.handler_result // .result).error_message // "no receipt"' "${RUNNER_TEMP}/release-notes-receipt.json" 2>&1 | head -c 2000)"
             exit 1
           fi
-          read -r -d '' -a staged < <(jq -r '(.result.handler_result // .result).staged[]' "${RUNNER_TEMP}/release-notes-receipt.json") || true
-          if [ "${#staged[@]}" -eq 0 ]; then
-            echo "::error::the release-notes node reported success and staged nothing"
+          # One path per line. The receipt must say success and carry at least one
+          # path; jq -e fails on anything else, so a malformed receipt fails here.
+          if ! staged_lines=$(jq -er '(.result.handler_result // .result) | select(.success == true) | .staged[]' "${RUNNER_TEMP}/release-notes-receipt.json"); then
+            echo "::error::the release-notes receipt does not report success with staged paths"
             exit 1
           fi
+          mapfile -t staged <<<"${staged_lines}"
           if [ "${NEEDS_BUMP}" = "true" ]; then
             # The manifest and the lockfile move together: uv.lock records the
             # root package's own version, so a bump of pyproject.toml alone

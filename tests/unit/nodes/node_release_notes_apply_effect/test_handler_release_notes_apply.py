@@ -332,6 +332,15 @@ class TestCutJobWiring:
         )
         assert "staged=(CHANGELOG.md)" not in body
 
+    def test_the_cut_job_reads_the_staged_paths_without_masking_a_bad_receipt(
+        self,
+    ) -> None:
+        body = _WORKFLOW.read_text(encoding="utf-8")
+        assert "mapfile -t staged" in body
+        assert "jq -er '(.result.handler_result // .result)" in body
+        assert "select(.success == true)" in body
+        assert "read -r -d '' -a staged < <(jq" not in body
+
     def test_the_node_runs_from_the_train_checkout_without_the_app_token(
         self,
     ) -> None:

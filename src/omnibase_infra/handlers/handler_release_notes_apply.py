@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 import yaml
 
@@ -42,9 +42,6 @@ from omnibase_infra.models.model_release_notes_apply_request import (
 from omnibase_infra.models.model_release_notes_apply_result import (
     ModelReleaseNotesApplyResult,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
 
 README_ONLY_DOCS_FILE: Final = ".readme-only-docs.yaml"
 _CHANGELOG_PATH: Final = "CHANGELOG.md"
@@ -257,9 +254,6 @@ def apply_release_notes(
 
 class HandlerReleaseNotesApply:
     """Place a rendered release block under the target repo's documentation policy."""
-
-    def __init__(self, container: ModelONEXContainer | None = None) -> None:
-        self._container = container
 
     @property
     def handler_type(self) -> EnumHandlerType:
