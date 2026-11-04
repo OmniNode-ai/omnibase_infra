@@ -399,7 +399,13 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     assert "DELETE" not in memory_window_live
     # OMN-19513: 0001 from omnimarket#3050 explicitly grants the runtime
     # SELECT/INSERT/UPDATE on both work-ledger tables, with no DELETE.
-    for work_ledger_table in ("work_ledger_rows", "work_ledger_state"):
+    # OMN-21947: 0008 grants the runtime SELECT/INSERT/UPDATE on the immutable
+    # citation table, with no DELETE.
+    for work_ledger_table in (
+        "work_ledger_rows",
+        "work_ledger_state",
+        "ledger_line_citation",
+    ):
         work_ledger_declared = {
             privilege
             for principal, relation, privilege in declared_acl(
