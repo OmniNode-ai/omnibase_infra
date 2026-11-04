@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Exercise both C28 collectors against recorded and real PostgreSQL replies."""
+"""Exercise the C28 node collector against recorded and real PostgreSQL replies."""
 
 from __future__ import annotations
 
@@ -40,36 +40,41 @@ _SCAN_SQL = (
 )
 
 
-def test_recorded_live_groups_reaches_both_collectors(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("project", ["omnibase-infra", "omnibase-infra-stability"])
+def test_recorded_live_groups_reaches_node_collector(
+    project: str,
 ) -> None:
     """The SQL sent to psql must match the reply's recorded index-backed query."""
     recording = json.loads(_RECORDING.read_text())["response"]
     calls: list[list[str]] = []
+    containers = ModelConsumerFlowLane.from_compose_project(project)
 
     def runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
-        assert argv[:5] == ["recorded-docker", "exec", script.PG_CONTAINER, "sh", "-c"]
+        assert argv[:5] == [
+            "recorded-docker",
+            "exec",
+            containers.postgres_container,
+            "sh",
+            "-c",
+        ]
         assert f'-c "{recording["index_backed"]["sql"]}"' in argv[5]
         assert kwargs["timeout"] == 120
         return subprocess.CompletedProcess(
             argv, 0, "\n".join(recording["index_backed"]["stdout_lines"]), ""
         )
 
-    monkeypatch.setattr(script.subprocess, "run", runner)
     node_lane = ConsumerFlowLane(
-        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        containers=containers,
         docker="recorded-docker",
         base_url="http://projection.test",
         runner=runner,
     )
-    script_lane = script.Lane(docker="recorded-docker")
     expected = sorted(set(recording["whole_table"]["stdout_lines"]))
 
     assert len(expected) == 533
     assert node_lane.live_groups() == expected
-    assert script_lane.live_groups() == expected
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 @pytest.mark.postgres
