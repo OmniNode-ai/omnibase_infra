@@ -1,0 +1,61 @@
+# OMN-21229 contract file for omnibase_infra: bus subscription lifecycle (pause, drain, stop) with completion-based commits.
+schema_version: "1.0.0"
+ticket_id: "OMN-21229"
+title: "Contract hot loading H3b: Completion-based subscription commits with pause, drain and stop"
+summary: "EventBusKafka.subscribe and EventBusInmemory.subscribe return a ModelSubscriptionHandle whose pause, drain and stop run in that order. No Kafka consumer auto-commits: the serial path commits each record once it has completed. close() and the kernel's shutdown pause every subscription, drain the in-flight callbacks and stop, instead of cancelling consume tasks. The failed-subscribe cleanup the plan describes was already present at the base head (the retry test passes there); this change pins it with a test."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn21229-subscription-lifecycle
+    statement: "A subscription has a lifecycle the runtime can trust: a failed start leaves no callback, stop after drain lets the in-flight callback finish, and only completed records are committed."
+    acceptance:
+      - id: AC1
+        statement: "AC1: a start failure after callback insertion leaves no callback, and a retry dispatches once -- falsifier: the test counts two dispatches. Stop after drain completes the in-flight callback, and a SIGTERM to a runtime with a fetched batch in flight commits exactly the completed records before exit -- falsifier: the callback is cancelled, or the committed offset covers an unfinished record."
+evidence_requirements:
+  - kind: tests
+    description: "The lifecycle tests and the neighbouring bus tests pass."
+    command: "uv run pytest tests/unit/event_bus/test_omn21229_subscription_lifecycle.py tests/unit/event_bus/test_omn20117_redeploy_keeps_in_flight_records.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "A start failure leaves the subscriber registry empty and a cancelled start does too; after the retry the one record is dispatched once."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_omn21229_subscription_lifecycle.py -q -p no:cacheprovider -k "failed_start or cancelled_start"
+  - id: dod-002
+    description: "The handle pauses, drains and stops in order, stop runs even when drain raises, and stop after drain lets the in-flight callback complete instead of cancelling it."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_omn21229_subscription_lifecycle.py -q -p no:cacheprovider -k "handle or stop_lets or stop_removes"
+  - id: dod-003
+    description: "The serial path commits each completed record and no consumer is built with auto-commit; close() with a fetched batch of three in flight commits exactly the one completed record and leaves the other two uncommitted."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_omn21229_subscription_lifecycle.py -q -p no:cacheprovider -k "serial_path or no_consumer_is_built or shutdown_with_a_fetched_batch"
+  - id: dod-004
+    description: "Pause is per subscription: with two subscriptions on one topic in one consumer group, a paused-and-drained handle is handed no further record while its sibling still receives it, on the Kafka bus and the in-memory bus; and the integration fakes of the consumer expose the pause and commit the lifecycle calls."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_omn21229_subscription_lifecycle.py tests/integration/event_bus/test_consume_loop_survival_integration.py tests/integration/event_bus/test_consumer_rejoin_after_coordinator_loss_integration.py tests/integration/event_bus/test_consumer_sync_readiness_integration.py -q -p no:cacheprovider -k "paused_handle or survives or recovers or never_recreated or unhealthy or keeps_the_container"
+  - id: dod-005
+    description: "Bus close completes the in-flight callback from a fetched batch, commits only that completed record and releases the unstarted records. The extracted group-less reader also keeps its existing constructor name at the bus module, reads committed host state events, resolves positions before returning and stops without leaving a consumer group."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_read_committed_omn22430.py tests/unit/event_bus/test_subscribe_ungrouped_omn17427.py tests/unit/event_bus/test_omn21229_subscription_lifecycle.py -q -p no:cacheprovider -k "ungrouped or kafka_close_stops or shutdown_with_a_fetched_batch"
+  - id: dod-deploy
+    description: "Deploy probe: the handle module GitHub serves at the PR branch defines the drain step. The live proof of the SIGTERM case against a real broker is the lab comment on the PR; this probe proves source identity only."
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/event_bus/model_subscription_handle.py?ref=omn-21229-subscription-lifecycle" | grep -q ''async def drain'''
