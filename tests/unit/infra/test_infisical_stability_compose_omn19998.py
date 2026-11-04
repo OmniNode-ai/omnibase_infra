@@ -15,21 +15,21 @@ _COMPOSE = (
     Path(__file__).resolve().parents[3]
     / "docker/docker-compose.infisical-stability.yml"
 )
-_REQUIRED = (
-    "POSTGRES_PASSWORD_URLENC",
-    "VALKEY_PASSWORD",
-    "INFISICAL_ENCRYPTION_KEY",
-    "INFISICAL_AUTH_SECRET",
-    "INFISICAL_SMTP_HOST",
-    "INFISICAL_SMTP_USERNAME",
-    "INFISICAL_SMTP_PASSWORD",
-    "INFISICAL_SMTP_FROM_ADDRESS",
-    "INFISICAL_STABILITY_SITE_URL",
-    "INFISICAL_POSTGRES_HOST",
-    "INFISICAL_VALKEY_HOST",
-    "INFISICAL_NETWORK_NAME",
-    "INFISICAL_LANE_LABEL",
-)
+_REQUIRED = {
+    "POSTGRES_PASSWORD_URLENC": "stability POSTGRES_PASSWORD_URLENC required",
+    "VALKEY_PASSWORD": "stability VALKEY_PASSWORD required",
+    "INFISICAL_ENCRYPTION_KEY": "stability INFISICAL_ENCRYPTION_KEY required",
+    "INFISICAL_AUTH_SECRET": "stability INFISICAL_AUTH_SECRET required",
+    "INFISICAL_SMTP_HOST": "INFISICAL_SMTP_HOST required",
+    "INFISICAL_SMTP_USERNAME": "INFISICAL_SMTP_USERNAME required",
+    "INFISICAL_SMTP_PASSWORD": "INFISICAL_SMTP_PASSWORD required",
+    "INFISICAL_SMTP_FROM_ADDRESS": "INFISICAL_SMTP_FROM_ADDRESS required",
+    "INFISICAL_STABILITY_SITE_URL": "stability invite-link SITE_URL required",
+    "INFISICAL_POSTGRES_HOST": "existing Postgres host required",
+    "INFISICAL_VALKEY_HOST": "existing Valkey host required",
+    "INFISICAL_NETWORK_NAME": "existing external network required",
+    "INFISICAL_LANE_LABEL": "existing lane label required",
+}
 
 
 def _render(missing: str = "") -> subprocess.CompletedProcess[str]:
@@ -99,4 +99,7 @@ def test_standalone_store_preserves_identity_and_mail() -> None:
 def test_missing_required_input_refuses_render(missing: str) -> None:
     rendered = _render(missing)
     assert rendered.returncode != 0
-    assert missing in rendered.stderr
+    assert (
+        f"required variable {missing} is missing a value: {_REQUIRED[missing]}"
+        in rendered.stderr
+    ), rendered.stderr
