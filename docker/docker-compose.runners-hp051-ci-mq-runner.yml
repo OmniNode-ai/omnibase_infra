@@ -1,0 +1,218 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-22123 -- the reserved merge-queue pool `omnibase-ci-mq` on h051.
+#
+# WHY IT EXISTS. A merge_group job of a private repository asks for [self-hosted, omnibase-ci-mq], a label no
+# pull-request job names, so pull-request CI can never take its runner (OMN-14074). The runners that carried that label
+# lived on another lab host and are gone while it is in repair, and config/runner_fleet.yaml declared none. The merge queue of
+# a private repository then waited 14 to 60 minutes per job and a group took hours, with more than ten green fix pull
+# requests held behind it. This pool declares four runners here (four more on the other lab host) so a group's four
+# validator-tests shards, validate-plugin and the two small jobs find a runner at once.
+#
+# SAME RUNNER, ONE LABEL SET. The anchors are hp051-ci-runner's with these changes, each deliberate:
+#   - RUNNER_LABELS is self-hosted,omnibase-ci-mq,linux,x64,arch-amd64 and nothing else. There is no `omnibase-ci` and no
+#     `omnibase-ci-multiarch`, so no pull-request job can land here and the pool serves only the jobs that name the
+#     reserved label. The runner group is still omnibase-ci, the group the private repositories can use.
+#   - its own container, runner and volume names (hp051-ci-mq-runner-N) and its own compose project (`-p hp051-ci-mq-runner`).
+#   - 4 GiB per runner (memswap 8 GiB), not 6: the jobs are validator tests and a plugin validation, not builds. The pool
+#     shares the host's omnirunners.slice (96G high, 112G max); its four runners add at most 16 GiB of limits to it.
+#   - the per-runner cache and work directories are /data/scratch/{cache/,}runners/mq-<N>/..., a path of their own, so
+#     they never alias a runner of the hp051-ci-runner pool on the same host. Create them owned by uid 1001 (tmp mode 1777) first.
+#
+# DEPLOYING. From a machine with ssh to the host and an org-admin registration token supplied to the installer through
+# its environment or stdin, never on a command line:
+#   scripts/deploy-runners.sh --host=h051 --pool=hp051-ci-mq-runner [--limit=N]
+# --limit=1 is the canary step. Nothing registers until an org-admin registration token exists. GITHUB_ORG_URL and
+# UV_HTTP_TIMEOUT go in the host's ~/.omnibase/runners/docker/.env (mode 600) beside the keys already there.
+# OMN-18829: the same host-owned declaration is read by native jobs and CI.
+# Two values are read from the host's docker/.env here, GITHUB_ORG_URL (the organisation URL the runners register
+# against) and UV_HTTP_TIMEOUT (600 seconds on the other pools), because the hardcoded-config ratchet refuses a new file
+# that spells an organisation URL or an operational number.
+# Container paths use ${RUNNER_USER_HOME:-<runner image home>}, as docker-compose.runners.yml does, so no
+# machine path is spelled in this file (the local-path hook and the suppression ratchet both refuse one).
+# Refuse container creation when it is absent; never create an empty directory.
+x-lab-host-table: &lab-host-table
+  type: bind
+  source: ${RUNNER_LAB_HOST_TABLE:?RUNNER_LAB_HOST_TABLE must name the host's lab host table file (runner host docker/.env)}
+  target: /etc/onex/lab_run_hosts.yaml
+  read_only: true
+  bind:
+    create_host_path: false
+# Long-form bind mounts keep variable defaults out of Compose's short-volume parser.
+# This also lets `compose config --no-interpolate` validate the shipped declaration.
+x-runner-disk-admission-pause: &runner-disk-admission-pause
+  type: bind
+  source: ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}
+  target: ${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+  bind:
+    create_host_path: true
+x-runner-lab-credentials: &runner-lab-credentials
+  type: bind
+  source: ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}
+  target: ${RUNNER_USER_HOME:-/home/runner}/.lab-credentials
+  read_only: true
+  bind:
+    create_host_path: true
+# The runner image carries no timezone database, and a merge_group job of a private repository runs tests that resolve
+# `America/New_York` (zoneinfo.ZoneInfoNotFoundError otherwise, measured 2026-11-04 on the first mq-pool jobs). The host
+# has tzdata, so each runner reads it read-only instead of the shared image growing a package for one pool.
+x-runner-host-zoneinfo: &runner-host-zoneinfo
+  type: bind
+  source: /usr/share/zoneinfo
+  target: /usr/share/zoneinfo
+  read_only: true
+  bind:
+    create_host_path: false
+x-runner-base: &runner-base
+  image: omninode-runner:latest
+  restart: unless-stopped
+  mem_limit: 4g
+  # This is a per-container upper bound (RAM plus swap). The parent slice's 2G swap cap is shared by all four
+  # runners, so aggregate swap can never reach four times this allowance. The 96G/112G parent RAM bounds leave
+  # room for docker-socket job containers in the slice; the four runner containers themselves total at most 24G.
+  memswap_limit: 8g
+  cpus: "2.0"
+  pids_limit: 4096
+  cgroup_parent: omnirunners.slice
+  environment: &runner-env
+    # OMN-18829: the host row, not the container install identity, owns lab delegations.
+    ONEX_LANE_HOST: h051
+    ONEX_LAB_RUN_HOSTS: /etc/onex/lab_run_hosts.yaml
+    RUNNER_LABELS: self-hosted,omnibase-ci-mq,linux,x64,arch-amd64
+    GITHUB_ORG_URL: ${GITHUB_ORG_URL:?GITHUB_ORG_URL must be set (runner host docker/.env)}
+    KUBECONFIG: ${RUNNER_USER_HOME:-/home/runner}/.lab-credentials/lab-ci-reader.kubeconfig
+    LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}
+    LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
+    RUNNER_TOKEN: ${RUNNER_TOKEN}
+    RUNNER_GROUP: omnibase-ci
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
+    UV_CONCURRENT_DOWNLOADS: "1"
+    UV_CONCURRENT_BUILDS: "1"
+    UV_CONCURRENT_INSTALLS: "1"
+    UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:?UV_HTTP_TIMEOUT must be set (runner host docker/.env)}
+    # OMN-19998: the uv cache lives INSIDE the job-workspace mount (/data/scratch/runners/<N>/work),
+    # so uv hardlinks wheel contents into a venv instead of copying them. See the header.
+    UV_CACHE_DIR: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/.uv-cache
+    TMPDIR: ${RUNNER_USER_HOME:-/home/runner}/tmp
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./runners:/opt/onex-runner-hooks:ro
+    - *runner-disk-admission-pause
+    - *runner-lab-credentials
+    - *lab-host-table
+  group_add:
+    - "988" # h051 docker group GID (getent group docker on the host, read 2026-10-29)
+  healthcheck:
+    test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
+    interval: 30s
+    timeout: 12s
+    retries: 3
+    start_period: 120s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+services:
+  hp051-ci-mq-runner-1:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-mq-runner-1
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-mq-runner-1
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
+      - *lab-host-table
+      - *runner-host-zoneinfo
+      - /data/scratch/cache/runners/mq-1/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
+      - /data/scratch/cache/runners/mq-1/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
+      - /data/scratch/cache/runners/mq-1/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
+      - /data/scratch/cache/runners/mq-1/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
+      - /data/scratch/cache/runners/mq-1/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
+      - /data/scratch/cache/runners/mq-1/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
+      - /data/scratch/runners/mq-1/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - /data/scratch/runners/mq-1/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - hp051-ci-mq-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+  hp051-ci-mq-runner-2:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-mq-runner-2
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-mq-runner-2
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
+      - *lab-host-table
+      - *runner-host-zoneinfo
+      - /data/scratch/cache/runners/mq-2/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
+      - /data/scratch/cache/runners/mq-2/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
+      - /data/scratch/cache/runners/mq-2/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
+      - /data/scratch/cache/runners/mq-2/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
+      - /data/scratch/cache/runners/mq-2/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
+      - /data/scratch/cache/runners/mq-2/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
+      - /data/scratch/runners/mq-2/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - /data/scratch/runners/mq-2/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - hp051-ci-mq-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+  hp051-ci-mq-runner-3:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-mq-runner-3
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-mq-runner-3
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
+      - *lab-host-table
+      - *runner-host-zoneinfo
+      - /data/scratch/cache/runners/mq-3/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
+      - /data/scratch/cache/runners/mq-3/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
+      - /data/scratch/cache/runners/mq-3/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
+      - /data/scratch/cache/runners/mq-3/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
+      - /data/scratch/cache/runners/mq-3/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
+      - /data/scratch/cache/runners/mq-3/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
+      - /data/scratch/runners/mq-3/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - /data/scratch/runners/mq-3/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - hp051-ci-mq-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+  hp051-ci-mq-runner-4:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-mq-runner-4
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-mq-runner-4
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
+      - *lab-host-table
+      - *runner-host-zoneinfo
+      - /data/scratch/cache/runners/mq-4/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
+      - /data/scratch/cache/runners/mq-4/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
+      - /data/scratch/cache/runners/mq-4/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
+      - /data/scratch/cache/runners/mq-4/ms-playwright:${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
+      - /data/scratch/cache/runners/mq-4/ci-envs:${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
+      - /data/scratch/cache/runners/mq-4/npm:${RUNNER_USER_HOME:-/home/runner}/.npm
+      - /data/scratch/runners/mq-4/work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
+      - /data/scratch/runners/mq-4/tmp:${RUNNER_USER_HOME:-/home/runner}/tmp
+      - hp051-ci-mq-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+volumes:
+  hp051-ci-mq-runner-1-creds:
+    name: hp051-ci-mq-runner-1-creds
+  hp051-ci-mq-runner-2-creds:
+    name: hp051-ci-mq-runner-2-creds
+  hp051-ci-mq-runner-3-creds:
+    name: hp051-ci-mq-runner-3-creds
+  hp051-ci-mq-runner-4-creds:
+    name: hp051-ci-mq-runner-4-creds

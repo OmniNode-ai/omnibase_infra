@@ -307,14 +307,14 @@ _DEV_RUNTIME_WRITERS = (
 def test_committed_dev_fold_retires_every_writer_before_main_and_keeps_the_rest() -> (
     None
 ):
-    """The committed dev policy retires the five writers and the tenant carrier."""
+    """The committed dev policy retires the five writers, the tenant carrier and the hook-events writer."""
     harness = (
         _harness(
             "effects",
             DEV_PROJECT,
             dev_profiles=_policy("DEV_RUNTIME_MAIN_FOLDED_PROFILES"),
         )
-        + "\n"
+        + f"\nDEV_RUNTIME_MAIN_RETIRED_SERVICES={_policy('DEV_RUNTIME_MAIN_RETIRED_SERVICES')}\n"
         + _function("restart_services")
         + r"""
 log_step() { :; }
@@ -343,15 +343,18 @@ restart_services /tmp "$PROJECT"
     )
     lines = result.stdout.splitlines()
     up = next(i for i, line in enumerate(lines) if line.startswith("UP "))
-    for service in (*_DEV_RUNTIME_WRITERS, "tenant-projection-writer"):
+    for service in (
+        *_DEV_RUNTIME_WRITERS,
+        "tenant-projection-writer",
+        "projection-claude-hook-events-writer",
+    ):
         assert (
             lines.index(f"stop --time 30 {service}-id")
             < lines.index(f"rm {service}-id")
             < up
         )
         assert f" {service}" not in lines[up]
-    # Writers that still run their own consume loop are recreated as before.
+    # The writer that still runs its own consume loop is recreated as before.
     assert "projection-delegation-writer" in lines[up]
-    assert "projection-claude-hook-events-writer" in lines[up]
     assert "omninode-runtime" in lines[up]
     assert " -v" not in result.stdout

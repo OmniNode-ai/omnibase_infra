@@ -100,17 +100,30 @@ class FakeConsumer:
         leaders_reachable: bool = True,
         assigned: bool = True,
         pending_records: Sequence[Any] = (),
+        topic_partitions: Collection[int] | None = (0,),
+        group_committed: int | None = None,
     ) -> None:
         self.member_id = member_id
         self.stopped = False
         self.getmany_calls = 0
         self.end_offset_probes = 0
+        self.committed_probes = 0
         self._position = position
         self._end_offsets = list(end_offsets)
         self._wedged = wedged
         self._leaders_reachable = leaders_reachable
         self._assigned = assigned
         self._pending: list[Any] = list(pending_records)
+        # OMN-22291. ``partitions_for_topic`` is what the broker reports for the
+        # topic, which is the only way a member holding NO assignment can say
+        # whether its group is behind; ``committed`` is the GROUP's offset, read
+        # from the coordinator, so it answers for a partition this member does
+        # not hold. ``group_committed`` defaults to this member's own position,
+        # which is what every pre-existing test's consumer means.
+        self._topic_partitions = (
+            None if topic_partitions is None else set(topic_partitions)
+        )
+        self._group_committed = group_committed
 
     async def getmany(
         self,
@@ -139,7 +152,23 @@ class FakeConsumer:
             raise ConnectionError("leaders unreachable")
         self.end_offset_probes += 1
         index = min(self.end_offset_probes - 1, len(self._end_offsets) - 1)
-        return {PARTITION: self._end_offsets[index]}
+        # Keyed by what was ASKED for, not by this module's one partition: the
+        # OMN-22291 caller asks about the topic's partitions rather than about
+        # its own assignment, and a fake that answers a different key than the
+        # one it was handed reads as an unreachable leader.
+        asked = list(partitions) or [PARTITION]
+        return dict.fromkeys(asked, self._end_offsets[index])
+
+    def partitions_for_topic(self, topic: str) -> set[int] | None:
+        return None if self._topic_partitions is None else set(self._topic_partitions)
+
+    async def committed(self, partition: TopicPartition) -> int | None:
+        self.committed_probes += 1
+        if not self._leaders_reachable:
+            raise ConnectionError("coordinator unreachable")
+        return (
+            self._position if self._group_committed is None else self._group_committed
+        )
 
     def seek(self, partition: TopicPartition, offset: int) -> None:
         self._position = offset
@@ -154,6 +183,7 @@ def _observation(
     assigned: int = 1,
     reachable: bool = True,
     backlog: int = 0,
+    backlog_measured: bool = True,
     since_rejoin: float | None = None,
 ) -> ModelConsumerPollObservation:
     return ModelConsumerPollObservation(
@@ -161,6 +191,7 @@ def _observation(
         consumer_group=GROUP,
         seconds_since_last_record=silent_for,
         assigned_partitions=assigned,
+        backlog_measured=backlog_measured,
         broker_reachable=reachable,
         backlog_records=backlog,
         seconds_since_last_rejoin=since_rejoin,
@@ -230,9 +261,34 @@ def test_an_unreachable_broker_is_not_a_client_wedge() -> None:
 
 
 def test_an_empty_assignment_is_its_own_stall_class() -> None:
-    """The second outage shape: the group reads Empty while the topic advances."""
+    """The second outage shape: the group reads Empty while the topic advances.
+
+    "While the topic advances" is the whole premise, and it is now in the
+    data: the backlog is the GROUP's, measured over the topic from the
+    coordinator's committed offsets, so records waiting with nobody taking
+    them is what makes an empty assignment a fault (OMN-22291). An empty
+    assignment with nothing waiting is a standby, which
+    ``tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py`` owns.
+    """
     verdict = evaluate_consumer_stall(
-        _observation(silent_for=3_000.0, assigned=0, backlog=0),
+        _observation(silent_for=3_000.0, assigned=0, backlog=24),
+        POLICY,
+        prior_consecutive_stalls=2,
+    )
+    assert verdict.reason is EnumConsumerStallReason.STALLED_NO_ASSIGNMENT
+    assert verdict.should_rejoin
+
+
+def test_an_empty_assignment_with_an_unmeasurable_backlog_still_stalls() -> None:
+    """A zero nobody measured is unknown, and unknown falls toward the remedy.
+
+    The no-assignment branch reports zero when it could not read the group's
+    committed offsets at all, which is indistinguishable from caught up by the
+    number alone. Reading that as health is the failure mode the OMN-22291 fix
+    must not introduce while removing the one it was built for.
+    """
+    verdict = evaluate_consumer_stall(
+        _observation(silent_for=3_000.0, assigned=0, backlog=0, backlog_measured=False),
         POLICY,
         prior_consecutive_stalls=2,
     )

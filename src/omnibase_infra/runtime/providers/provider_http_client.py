@@ -13,9 +13,7 @@ import logging
 
 import httpx
 
-from omnibase_infra.runtime.models.model_http_client_config import (
-    ModelHttpClientConfig,
-)
+from omnibase_infra.runtime.models.model_http_client_config import ModelHttpClientConfig
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +47,14 @@ class ProviderHttpClient:
             },
         )
 
-        client = httpx.AsyncClient(
+        return httpx.AsyncClient(
             timeout=httpx.Timeout(self._config.timeout_seconds),
             follow_redirects=self._config.follow_redirects,
+            trust_env=self._config.trust_env,
+            limits=httpx.Limits(
+                max_keepalive_connections=self._config.max_keepalive_connections
+            ),
         )
-
-        logger.info("HTTP client created successfully")
-        return client
 
     @staticmethod
     async def close(resource: httpx.AsyncClient | None) -> None:
