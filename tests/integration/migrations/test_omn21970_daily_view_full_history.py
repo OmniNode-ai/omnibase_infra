@@ -10,7 +10,8 @@ ENABLE + FORCE row level security and the tenant_isolation policy), seeds it, ap
 forward runner does (``psql -v ON_ERROR_STOP=1 -f``) and reads the result back. Failure modes, one test each:
 
   R1 600 runs over 20 days serve 20 days whose runs sum to 600, more than the 500-row cap could hold, with each day's
-     passed and failed counts as the view's rules give them, and no unrecorded run (the gate column is NOT NULL);
+     passed and failed counts and token sums as the view's rules give them, and no unrecorded or unmeasured run
+     (the gate and token columns are NOT NULL);
   R3 every row, existing and inserted after 0065, has a distinct non-null cursor;
   R4 0065 applied a second time succeeds and leaves exactly one cursor sequence (the hostile review asked);
   R5 control through the view itself: with only the newest 500 runs in the source, the same whole-history check
@@ -186,6 +187,13 @@ def test_r1_600_runs_over_20_days_are_served_whole(cluster: EphemeralPostgres) -
             unrecorded,
         ), day
         assert day["passed"] + day["failed"] + day["unrecorded"] == day["runs"] == 30
+        # Every run carries its token counts (the columns are NOT NULL DEFAULT 0), so each day's sums are exact
+        # and nothing is unmeasured.
+        assert (day["tokensIn"], day["tokensOut"]) == (
+            sum(100 + r for r in range(30)),
+            sum(10 + r for r in range(30)),
+        ), day
+        assert (day["tokensInUnmeasured"], day["tokensOutUnmeasured"]) == (0, 0), day
 
 
 def test_r3_every_row_has_a_distinct_cursor(cluster: EphemeralPostgres) -> None:
