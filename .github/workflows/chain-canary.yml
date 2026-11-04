@@ -61,7 +61,9 @@
 #   PUBLISHES a real delegation command, which is a lane mutation; this
 #   ticket is the one that authorises it on the stability lane. The lane's
 #   addresses and its bus_lane come from vars.LAB_PROOF_LANES_JSON, and its
-#   credentials from the STABILITY_* repository secrets, never the dev ones.
+#   credentials from the stability environment's secrets.
+#   Configure all four credential names there before enabling the proof;
+#   GitHub otherwise falls back to a same-named repository secret.
 #   It makes no claim about the dev lane, judge or prod.
 #
 # WHAT OMN-16931 CHANGED
@@ -181,6 +183,7 @@ env:
 jobs:
   chain-canary:
     name: Chain Canary (stability lane)
+    environment: stability
     # See "WHERE IT RUNS" above before changing this. OMN-18408 moved the job
     # off the single deploy runner; OMN-19894 moved it off the one host.
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
@@ -444,14 +447,14 @@ jobs:
           TERMINAL_BOOTSTRAP_OVERRIDE: ${{ github.event.inputs.terminal_bootstrap_servers }}
           # OMN-17926: the lane declares its transport in the CI bus lane
           # table. OMN-21485: the credentials are the STABILITY lane's own
-          # SCRAM login (repository secrets STABILITY_KAFKA_SASL_*), never the
-          # dev broker's, injected as ENVIRONMENT
+          # SCRAM login (stability environment secrets KAFKA_SASL_*), injected
+          # as ENVIRONMENT
           # so that no credential reaches argv, the process list, or this log.
           # build_aiokafka_auth_kwargs_from_env reads them together with the
           # KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_MECHANISM the resolve step
           # exported.
-          KAFKA_SASL_USERNAME: ${{ secrets.STABILITY_KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.STABILITY_KAFKA_SASL_PASSWORD }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
           # OMN-18060: link 2's Postgres DSN, injected as ENVIRONMENT under the
           # literal name the lane declares in the CI overlay's
           # config/ci_bus_lanes.yaml (`projection_readback.dsn_env`). GitHub
@@ -467,8 +470,8 @@ jobs:
           # argv is world-readable through /proc, and the dispatch step echoes
           # its own broker values into this log.
           # OMN-21485: the value is the stability lane's reader, never the dev
-          # lane's (repository secret STABILITY_CHAIN_CANARY_PROJECTION_DSN).
-          CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.STABILITY_CHAIN_CANARY_PROJECTION_DSN }}
+          # lane's (stability environment secret CHAIN_CANARY_PROJECTION_DSN).
+          CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
           # OMN-18421: the gateway API key, injected as ENVIRONMENT under the
           # literal name the probe is told to read, exactly like the two DSNs
           # above and for the same reason — argv is world-readable through
@@ -495,7 +498,7 @@ jobs:
           # NOT fall back to the tenant-less route: a probe that quietly submits
           # the unattributed way reports green on a chain that projects nothing,
           # which is the exact false-clean this ticket exists to remove.
-          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.STABILITY_CHAIN_CANARY_GATEWAY_API_KEY }}
+          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
           # OMN-16964: what a COMPLETE chain must carry, end to end. Declared
           # here rather than inferred from whatever the ledger returned,
           # because the scope's own wording is "no gaps tolerated silently" --

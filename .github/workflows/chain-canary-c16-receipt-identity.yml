@@ -42,11 +42,12 @@
 #   A lane listed for this probe must honour the credentials below.
 #
 # THE CREDENTIALS: LANE-LOCAL, THE STABILITY LANE'S OWN (OMN-21485)
-#   `STABILITY_CHAIN_CANARY_GATEWAY_API_KEY` and `STABILITY_KAFKA_SASL_*` are
-#   the stability lane's repository secrets, injected under the names the
+#   `CHAIN_CANARY_GATEWAY_API_KEY` and `KAFKA_SASL_*` are
+#   the stability environment's secrets, injected under the names the
 #   probe reads, exactly as chain-canary.yml injects them; the broker and its
-#   transport come from the bus_lane the resolved lane declares. No dev-lane
-#   credential reaches the stability lane. The API key is
+#   transport come from the bus_lane the resolved lane declares. Configure all
+#   three names in that environment before enabling the proof; GitHub otherwise
+#   falls back to a same-named repository secret. The API key is
 #   given to the probe by NAME, never by value.
 #
 # WHY THE BUS AND NOT THE DATABASE, FOR THE ROUTE
@@ -110,6 +111,7 @@ env:
 jobs:
   c16-receipt-identity:
     name: C16 receipt identity (stability lane)
+    environment: stability
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     # OMN-19811: 15 -> 55. The added 40 minutes is the deploy_wait_seconds
     # default of 2400 s (the chain canary's budget), spent only while the deploy
@@ -203,9 +205,9 @@ jobs:
           RUNNER_IDENTITY: gha-${{ github.run_id }}-${{ github.run_attempt }}
           # The NAMES are what the probe is told; the VALUES reach it only
           # here, as environment. See the header note.
-          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.STABILITY_CHAIN_CANARY_GATEWAY_API_KEY }}
-          KAFKA_SASL_USERNAME: ${{ secrets.STABILITY_KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.STABILITY_KAFKA_SASL_PASSWORD }}
+          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
           # The healthy run's terminal, read off the bus for R-DELEG-12. Named
           # here, as chain-canary.yml names its hops, never in the script.
           TERMINAL_TOPIC: onex.evt.omnimarket.delegate-skill-completed.v1
