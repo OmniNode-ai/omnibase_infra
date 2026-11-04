@@ -1,0 +1,41 @@
+{
+  "chain": "E10",
+  "kind": "error",
+  "title": "stale record",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "runtime",
+      "action": "observe",
+      "note": "holds node_x at v2"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 1,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "register",
+        "owner": "lab-deploy",
+        "registration_request_id": "268df769-68b9-597b-bb3c-0680eb4b5bdd",
+        "contract_yaml": "name: node_x\nnode_version: 1.0.0\n"
+      },
+      "key": "node_x",
+      "note": "at or below the held version"
+    },
+    {
+      "step": 3,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "result": "tombstone",
+      "note": "a null (tombstone) for the key"
+    }
+  ],
+  "ends_in": "ignored with a counter",
+  "note": "expects_no_records_on: applied"
+}

@@ -48,6 +48,8 @@ tables:
     status: identical
   capability_scores:
     status: identical
+  context_audit_events:
+    status: identical
   evidence_correlation_trace_projection:
     status: identical
   evidence_dashboard_projection:

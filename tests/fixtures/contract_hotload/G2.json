@@ -1,0 +1,58 @@
+{
+  "chain": "G2",
+  "kind": "golden",
+  "title": "restart",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "runtime",
+      "action": "observe",
+      "note": "a runtime serving node_x v1 restarts; incarnation changes"
+    },
+    {
+      "step": 2,
+      "actor": "runtime",
+      "action": "replay",
+      "topic_role": "accepted",
+      "note": "replays the accepted topic to its captured offsets"
+    },
+    {
+      "step": 3,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "state",
+      "model": "ModelRuntimeHotloadState",
+      "record": {
+        "entity_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "655cd2fd-1b1e-5e3e-b7bb-8fb1a7d5da27",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f",
+        "bootstrap_ready": true,
+        "serving_ready": true,
+        "names": {
+          "node_x": {
+            "observed": {
+              "registry_version": 1,
+              "status": "materialized",
+              "reason": null
+            },
+            "served": {
+              "registry_version": 1,
+              "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87"
+            }
+          }
+        }
+      },
+      "key": "8c242722-5f7b-5b52-86f1-0961206fa958",
+      "note": "bootstrap and serving true under the new incarnation"
+    },
+    {
+      "step": 4,
+      "actor": "client",
+      "action": "observe",
+      "note": "a command is answered with no resend"
+    }
+  ],
+  "ends_in": "the state record of the new incarnation lists node_x served at v1"
+}
