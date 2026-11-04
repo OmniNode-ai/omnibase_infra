@@ -121,7 +121,7 @@ class HandlerRegistrationBootstrap:
                 context=pool_error_context,
             ) from exc
 
-        pool = await asyncpg.create_pool(
+        pool = await asyncpg.create_pool(  # no-contract-check: effect handler owns the pool
             postgres_dsn,
             min_size=2,
             max_size=10,

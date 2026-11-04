@@ -54,7 +54,7 @@ class HandlerRegistrationSnapshotPublisher:
         )
 
         return ModelRegistrationSnapshotProducer(
-            producer=AIOKafkaProducer(
+            producer=AIOKafkaProducer(  # no-contract-check: effect handler owns the producer
                 bootstrap_servers=request.kafka_bootstrap_servers,
                 **build_aiokafka_auth_kwargs_from_env(),
             )
