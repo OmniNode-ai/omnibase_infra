@@ -107,14 +107,8 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_activations": "omnimarket OMN-21115 (node_context_install_confirm_trigger_effect)",
-    "delegation_budget_readings": "omnimarket OMN-17427 (node_projection_delegation_budget_readings)",
-    "delegation_capability_cells": "omnimarket#4380",
-    "delegation_lab_jobs": "omnimarket#4277",
-    "delegation_lab_job_outbox": "omnimarket#4277",
     "compaction_current_context": "omnimarket OMN-21090 (node_projection_compaction_current_context)",
-    "compaction_receipts": "omnimarket OMN-21336 (node_projection_compaction_receipts)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
-    "local_environment": "omnimarket OMN-19988 (node_projection_local_environment)",
     "agent_actions": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_transformation_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "router_performance_metrics": "omnimarket OMN-21920 (node_projection_agent_actions)",
