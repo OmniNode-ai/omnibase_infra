@@ -118,6 +118,26 @@ def _string_end(sql: str, start: int) -> int:
     return n
 
 
+def without_guarded_column_additions(sql: str) -> tuple[str, int]:
+    """Remove top-level guarded column adds for a migration's RED control.
+
+    Reconciliation SQL need not carry the OMN-15376 comment markers. Masking
+    preserves offsets while excluding comments, literals and DO bodies, so a
+    semicolon in a DEFAULT cannot truncate the statement being removed.
+    Leave every other statement, especially the failing index, in place.
+    """
+    masked = mask_literals(sql)
+    spans: list[tuple[int, int]] = []
+    for match in _ADD_COLUMN_GUARDED.finditer(masked):
+        end = masked.find(";", match.end())
+        if end == -1:
+            raise ValueError("guarded column addition has no terminating semicolon")
+        spans.append((match.start(), end + 1))
+    for start, end in reversed(spans):
+        sql = sql[:start] + sql[end:]
+    return sql, len(spans)
+
+
 def _balanced(text: str, start: int) -> int:
     """Index just past the balanced paren group opening at ``text[start]``."""
     depth = 0
