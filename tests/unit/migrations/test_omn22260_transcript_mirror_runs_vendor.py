@@ -27,7 +27,7 @@ _CREATE = "0000_create_transcript_mirror_runs.sql"
 _GRANT = "0001_grant_omninode_runtime_transcript_mirror_runs.sql"
 _SHA256 = {
     _CREATE: "77e5fbdb36ac1609c5d4e3892350d6a4d0008653275d2e77ee1be00efc3c40e3",
-    _GRANT: "a2252fd70e10dbe920392dafa8c16ef2e95e94e9a575e84fa980331404339414",
+    _GRANT: "605228f9bd72f97eaeb0ac17a83672b1515b44e90f14b5c87d6eb026097b2e86",
 }
 _COUNT_COLUMNS = (
     "files_seen",

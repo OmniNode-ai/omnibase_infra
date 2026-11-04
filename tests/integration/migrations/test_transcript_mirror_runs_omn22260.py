@@ -79,6 +79,7 @@ _SNAPSHOT_QUERIES = {
         SELECT n.nspname || '.' || c.relname || '.' || a.attname,
                format_type(a.atttypid, a.atttypmod) || ' notnull=' || a.attnotnull::text
                || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '')
+               || ' acl=' || coalesce(a.attacl::text, '')
         FROM pg_catalog.pg_attribute a
         JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -499,6 +500,75 @@ def test_the_writer_principal_is_the_runtime_role_and_no_other(
                     with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                         cur.execute(statement)
                 conn.rollback()
+    finally:
+        conn.close()
+
+
+def test_grant_failure_does_not_leave_schema_usage(
+    database: EphemeralPostgres,
+) -> None:
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"REVOKE USAGE ON SCHEMA omninode_internal FROM {WRITER}")
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(GRANT), dbname=DATABASE
+        )
+        assert result.returncode != 0
+        assert (
+            'relation "omninode_internal.transcript_mirror_runs" does not exist'
+            in result.stderr
+        )
+        assert _snapshot(conn) == before
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "unsafe_grant",
+    [
+        f"GRANT {privilege} ON {TABLE} TO {WRITER}"
+        for privilege in ("DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
+    ]
+    + [
+        f"GRANT SELECT ON {TABLE} TO {WRITER} WITH GRANT OPTION",
+        f"GRANT SELECT ON {TABLE} TO PUBLIC",
+        f"GRANT UPDATE ON {TABLE} TO {OTHER_ROLES[0]}",
+        f"GRANT SELECT (run_id) ON {TABLE} TO {OTHER_ROLES[0]}",
+        f"GRANT UPDATE (state) ON {TABLE} TO PUBLIC",
+        f"GRANT SELECT (run_id) ON {TABLE} TO {WRITER} WITH GRANT OPTION",
+        f"GRANT REFERENCES (run_id) ON {TABLE} TO {WRITER}",
+        f"ALTER TABLE {TABLE} OWNER TO {WRITER}",
+        f"GRANT postgres TO {WRITER}",
+        f"ALTER ROLE {WRITER} SUPERUSER",
+    ],
+)
+def test_unsafe_existing_grants_refuse_atomically(
+    database: EphemeralPostgres,
+    unsafe_grant: str,
+) -> None:
+    _apply(database, CREATE)
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(unsafe_grant)
+            cur.execute(f"REVOKE USAGE ON SCHEMA omninode_internal FROM {WRITER}")
+            cur.execute(_INSERT_STARTED, _start_row("preserved", "attempt"))
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(GRANT), dbname=DATABASE
+        )
+        assert result.returncode != 0, "unsafe pre-existing grant was accepted"
+        assert "transcript_mirror_runs: incompatible privileges" in result.stderr
+        assert _snapshot(conn) == before
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT run_id, attempt_id FROM omninode_internal.transcript_mirror_runs"
+            )
+            assert cur.fetchall() == [("preserved", "attempt")]
     finally:
         conn.close()
 
