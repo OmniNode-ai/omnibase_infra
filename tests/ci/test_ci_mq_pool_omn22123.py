@@ -10,6 +10,7 @@ runner and scratch name of their own, and no change to the ``action`` count the 
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -119,16 +120,53 @@ ALLOWED_BIND_TARGETS = {
 }
 
 
-def _bytes(limit: str) -> int:
-    units = {"g": 1 << 30, "m": 1 << 20}
-    return int(str(limit)[:-1]) * units[str(limit)[-1].lower()]
+def test_every_pool_has_exactly_one_storage_policy() -> None:
+    """A new pool must opt into the disk or memory assertions above and below."""
+    assert set(DISK_SCRATCH_HOSTS).isdisjoint(MEMORY_HOSTS)
+    assert set(DISK_SCRATCH_HOSTS) | set(MEMORY_HOSTS) == set(POOLS)
+
+
+def _bytes(limit: str | int) -> int:
+    """Read Compose byte values, including bare bytes and optional ``b`` suffixes."""
+    match = re.fullmatch(r"(\d+)([kmg]b?|b)?", str(limit), flags=re.IGNORECASE)
+    if match is None:
+        raise ValueError(f"Invalid Compose byte value: {limit!r}")
+    unit = (match[2] or "").lower().removesuffix("b")
+    return int(match[1]) << {"": 0, "k": 10, "m": 20, "g": 30}[unit]
 
 
 def _target(volume: Any) -> str:
     """The container path of a short or long volume entry, with the runner home resolved."""
     if isinstance(volume, dict):
         return resolve_runner_compose_defaults(str(volume["target"]))
-    return resolve_runner_compose_defaults(str(volume)).split(":")[1]
+    parts = resolve_runner_compose_defaults(str(volume)).split(":")
+    return parts[1] if len(parts) > 1 else parts[0]
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [("10gb", 10 << 30), ("512k", 512 << 10), ("512KB", 512 << 10), (1024, 1024)],
+)
+def test_compose_byte_values_accept_units_and_bare_bytes(
+    limit: str | int,
+    expected: int,
+) -> None:
+    assert _bytes(limit) == expected
+
+
+@pytest.mark.parametrize(
+    ("volume", "expected"),
+    [
+        ("/cache", "/cache"),
+        ("cache:/cache:ro", "/cache"),
+        ({"target": "/cache", "read_only": True}, "/cache"),
+    ],
+)
+def test_compose_volume_targets_accept_anonymous_and_read_only_mounts(
+    volume: Any,
+    expected: str,
+) -> None:
+    assert _target(volume) == expected
 
 
 @pytest.mark.parametrize("host", DISK_SCRATCH_HOSTS)
@@ -233,19 +271,24 @@ def test_the_cpu_quota_matches_the_slower_host_cores(host: str) -> None:
 
 
 @pytest.mark.parametrize("host", MEMORY_HOSTS)
-def test_the_memory_limit_covers_the_tmpfs_ceilings_it_is_charged_for(
+def test_the_memory_limit_covers_the_tmpfs_working_set_it_is_charged_for(
     host: str,
 ) -> None:
     """A tmpfs page is charged to the container, so the limit must hold the workspace beside the job's own memory.
 
     Measured 2026-11-04 on h051: a shard holds 3.2 to 3.5 GiB in its job workspace and the old 4 GiB limit was reached
-    4400 to 6200 times per runner. The limit is the general pool's 6 GiB plus the workspace, and swap equals the limit so
-    the in-memory directories never reach the disk.
+    4400 to 6200 times per runner. Budget the general pool's job memory plus 4 GiB for that measured workspace,
+    rounded up to a whole GiB. The tmpfs sizes are independent ceilings, not simultaneous reservations; the memory
+    limit bounds their combined working set and the job. Equal swap and memory limits prevent swapping to disk.
     """
-    _, prefix, _ = POOLS[host]
+    general, prefix, _ = POOLS[host]
+    job_memory = max(
+        _bytes(s["mem_limit"]) for s in _compose(general)["services"].values()
+    )
+    measured_workspace_budget = 4 << 30
     for name, service in _compose(prefix)["services"].items():
         limit = _bytes(service["mem_limit"])
-        assert limit >= 10 << 30, name
+        assert limit >= max(10 << 30, job_memory + measured_workspace_budget), name
         assert _bytes(service["memswap_limit"]) == limit, name
 
 
