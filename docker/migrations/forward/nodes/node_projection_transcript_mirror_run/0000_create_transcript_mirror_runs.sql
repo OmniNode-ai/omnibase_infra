@@ -115,6 +115,9 @@ ALTER TABLE omninode_internal.transcript_mirror_runs
     ALTER COLUMN bytes_put SET NOT NULL;
 
 DO $reconcile$
+DECLARE
+    expected_check RECORD;
+    existing_check RECORD;
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_constraint
@@ -129,9 +132,45 @@ BEGIN
                  AND attname = 'attempt_id')
           ]::smallint[]
     ) THEN
+        IF EXISTS (
+            SELECT 1 FROM pg_catalog.pg_constraint
+            WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+              AND (contype = 'p' OR conname = 'pk_transcript_mirror_runs')
+        ) THEN
+            RAISE EXCEPTION 'transcript_mirror_runs: incompatible primary key; expected (run_id, attempt_id)';
+        END IF;
         ALTER TABLE omninode_internal.transcript_mirror_runs
             ADD CONSTRAINT pk_transcript_mirror_runs PRIMARY KEY (run_id, attempt_id);
     END IF;
+
+    -- Compare PostgreSQL's deparsed expressions, not just constraint names.
+    -- A divergent definition is incompatible: refuse atomically rather than
+    -- silently keeping weaker checks or removing an existing constraint.
+    FOR expected_check IN
+        SELECT * FROM (VALUES
+            ('ck_transcript_mirror_runs_ids_non_empty',
+             $expr$((run_id <> ''::text) AND (attempt_id <> ''::text))$expr$),
+            ('ck_transcript_mirror_runs_state',
+             $expr$(state = ANY (ARRAY['started'::text, 'completed'::text, 'dry-run-completed'::text, 'failed'::text]))$expr$),
+            ('ck_transcript_mirror_runs_finish_follows_state',
+             $expr$((state = 'started'::text) = (finished_at IS NULL))$expr$),
+            ('ck_transcript_mirror_runs_counts_non_negative',
+             $expr$((files_seen >= 0) AND (stored >= 0) AND (would_store >= 0) AND (unchanged >= 0) AND (destination_ahead >= 0) AND (refused_stale >= 0) AND (refused_conflict >= 0) AND (source_unreadable >= 0) AND (bytes_put >= 0))$expr$)
+        ) AS checks(name, expression)
+    LOOP
+        SELECT contype, pg_catalog.pg_get_expr(conbin, conrelid) AS expression
+        INTO existing_check
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+          AND conname = expected_check.name;
+        IF FOUND AND (
+            existing_check.contype <> 'c'
+            OR existing_check.expression IS DISTINCT FROM expected_check.expression
+        ) THEN
+            RAISE EXCEPTION 'transcript_mirror_runs: incompatible constraint %; expected CHECK (%)',
+                expected_check.name, expected_check.expression;
+        END IF;
+    END LOOP;
 
     IF NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_constraint

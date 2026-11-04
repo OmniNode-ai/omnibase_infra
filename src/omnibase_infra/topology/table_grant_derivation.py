@@ -240,23 +240,13 @@ def _vendored_read_write(
 # generated YAML: ``--check`` continues to prove every shipped instance and
 # rendered catalog against one auditable derivation source.
 LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    ContractTableDeclaration(
-        node="legacy_migration:tenant_inference_credentials",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-            "0000_create_tenant_inference_credentials.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="tenant_inference_credentials",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-                "0000_create_tenant_inference_credentials.sql"
-            ),
-            access="write",
-            role="credentials",
-        ),
+    _vendored_read_write(
+        "tenant_inference_credentials",
+        "node_projection_tenant_credentials",
+        "0000_create_tenant_inference_credentials.sql",
+        schema="public",
+        access="write",
+        role="credentials",
     ),
     # OMN-18159: the four delegation aggregate READ VIEWS, in this manifest for
     # exactly the reason the docstring above gives -- the migration that
@@ -383,23 +373,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # INSERT, UPDATE. Retired by the omnimarket OMN-19861
     # node_projection_demo_readiness pull request merging and the pin advancing
     # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:demo_readiness_latest",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-            "0000_create_demo_readiness_latest.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="demo_readiness_latest",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-                "0000_create_demo_readiness_latest.sql"
-            ),
-            access="read_write",
-            role="demo_readiness",
-        ),
+    _vendored_read_write(
+        "demo_readiness_latest",
+        "node_projection_demo_readiness",
+        "0000_create_demo_readiness_latest.sql",
+        role="demo_readiness",
     ),
     # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.

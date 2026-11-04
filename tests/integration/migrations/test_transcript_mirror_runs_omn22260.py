@@ -13,9 +13,8 @@ The proofs:
 * applied twice, the second pass changes nothing (schema, ACL and rows),
 * a table that already exists with only its key columns converges to the same
   columns,
-* a schema diff across the pass shows exactly one table, its key index and its
-  start-time index, and dropping the table by hand leaves the catalog as it was
-  (nothing is left behind, so the expand-only class has no rollback barrier),
+* a schema diff shows exactly one table and its two indexes; dropping a newly
+  created table restores the catalog, but reconciliation is forward-only,
 * the declared checks and key refuse malformed rows, and
 * the writer principal is the runtime role and no other: it holds SELECT, INSERT
   and UPDATE and is refused DELETE and TRUNCATE, and every other role with schema
@@ -424,10 +423,22 @@ def _privileges(conn: psycopg2.extensions.connection, role: str) -> set[str]:
     return found
 
 
+@pytest.mark.parametrize("owner", ["postgres", "mirror_projection_owner"])
 def test_the_writer_principal_is_the_runtime_role_and_no_other(
     database: EphemeralPostgres,
+    owner: str,
 ) -> None:
-    _apply(database, CREATE, GRANT)
+    _apply(database, CREATE)
+    if owner != "postgres":
+        changed = database.psql(
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"CREATE ROLE {owner}; ALTER TABLE {TABLE} OWNER TO {owner}",
+            dbname=DATABASE,
+        )
+        assert changed.returncode == 0, changed.stderr
+    _apply(database, GRANT)
     conn = _connect(database)
     try:
         assert _privileges(conn, WRITER) == {"SELECT", "INSERT", "UPDATE"}
@@ -443,7 +454,13 @@ def test_the_writer_principal_is_the_runtime_role_and_no_other(
                 (TABLE,),
             )
             grantees = {row[0] for row in cur.fetchall()}
-            assert grantees == {"postgres", WRITER}
+            cur.execute(
+                "SELECT relowner::regrole::text FROM pg_catalog.pg_class "
+                "WHERE oid = %s::regclass",
+                (TABLE,),
+            )
+            table_owner = cur.fetchone()[0]
+            assert grantees == {table_owner, WRITER}
         conn.rollback()
         # The runtime role writes the way the reducer does: insert the start row, then
         # update it with the terminal state and the counts.
@@ -482,6 +499,154 @@ def test_the_writer_principal_is_the_runtime_role_and_no_other(
                     with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                         cur.execute(statement)
                 conn.rollback()
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("missing", ["run_id", "attempt_id", "state", "started_at"])
+def test_missing_required_values_refuse_reconciliation_atomically(
+    database: EphemeralPostgres,
+    missing: str,
+) -> None:
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            definitions = {
+                "run_id": "TEXT",
+                "attempt_id": "TEXT",
+                "state": "TEXT",
+                "started_at": "TIMESTAMPTZ",
+            }
+            columns = ", ".join(
+                f"{name} {kind}"
+                for name, kind in definitions.items()
+                if name != missing
+            )
+            cur.execute(f"CREATE TABLE {TABLE} ({columns})")
+            values = {
+                "run_id": "r",
+                "attempt_id": "a",
+                "state": "started",
+                "started_at": "2026-11-04T00:00:00Z",
+            }
+            cur.execute(
+                "INSERT INTO omninode_internal.transcript_mirror_runs VALUES (%s, %s, %s)",
+                [value for name, value in values.items() if name != missing],
+            )
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE
+        )
+        assert result.returncode != 0
+        assert f'column "{missing}"' in result.stderr
+        assert _snapshot(conn) == before
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM omninode_internal.transcript_mirror_runs")
+            assert cur.fetchone() == (1,)
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "constraint",
+    [
+        "CONSTRAINT other_pk PRIMARY KEY (attempt_id, run_id)",
+        "CONSTRAINT other_pk PRIMARY KEY (run_id)",
+        "CONSTRAINT pk_transcript_mirror_runs UNIQUE (run_id)",
+    ],
+)
+def test_incompatible_primary_key_refuses_reconciliation_atomically(
+    database: EphemeralPostgres,
+    constraint: str,
+) -> None:
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"CREATE TABLE {TABLE} (run_id TEXT, attempt_id TEXT, {constraint})"
+            )
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE
+        )
+        assert result.returncode != 0
+        assert "incompatible primary key" in result.stderr
+        assert _snapshot(conn) == before
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("suffix", "definition"),
+    [
+        ("ids_non_empty", "CHECK (run_id <> '')"),
+        ("state", "CHECK (state IN ('started', 'completed'))"),
+        ("state", "CHECK (true)"),
+        ("state", "UNIQUE (state)"),
+        ("finish_follows_state", "CHECK (finished_at IS NULL)"),
+        ("counts_non_negative", "CHECK (stored >= 0)"),
+    ],
+)
+def test_divergent_named_constraint_refuses_reconciliation_atomically(
+    database: EphemeralPostgres,
+    suffix: str,
+    definition: str,
+) -> None:
+    _apply(database, CREATE)
+    conn = _connect(database)
+    try:
+        name = f"ck_transcript_mirror_runs_{suffix}"
+        with conn.cursor() as cur:
+            cur.execute(f"ALTER TABLE {TABLE} DROP CONSTRAINT {name}")
+            cur.execute(f"ALTER TABLE {TABLE} ADD CONSTRAINT {name} {definition}")
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE
+        )
+        assert result.returncode != 0
+        assert f"incompatible constraint {name}" in result.stderr
+        assert _snapshot(conn) == before
+    finally:
+        conn.close()
+
+
+def test_matching_unvalidated_checks_and_alternate_key_name_reconcile(
+    database: EphemeralPostgres,
+) -> None:
+    _apply(database, CREATE)
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT conname, pg_get_constraintdef(oid) FROM pg_catalog.pg_constraint "
+                "WHERE conrelid = %s::regclass AND contype = 'c'",
+                (TABLE,),
+            )
+            checks = cur.fetchall()
+            for name, definition in checks:
+                cur.execute(f"ALTER TABLE {TABLE} DROP CONSTRAINT {name}")
+                cur.execute(
+                    f"ALTER TABLE {TABLE} ADD CONSTRAINT {name} {definition} NOT VALID"
+                )
+            cur.execute(
+                f"ALTER TABLE {TABLE} RENAME CONSTRAINT pk_transcript_mirror_runs TO legacy_pk"
+            )
+            cur.execute(_INSERT_STARTED, _start_row("run-1", "attempt-1"))
+        conn.commit()
+        _apply(database, CREATE, GRANT)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT convalidated FROM pg_catalog.pg_constraint "
+                "WHERE conrelid = %s::regclass AND contype = 'c'",
+                (TABLE,),
+            )
+            assert cur.fetchall() == [(True,)] * 4
+        reconciled = _snapshot(conn)
+        _apply(database, CREATE, GRANT)
+        assert _snapshot(conn) == reconciled
     finally:
         conn.close()
 
