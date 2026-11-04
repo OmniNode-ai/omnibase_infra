@@ -1189,7 +1189,16 @@ def check_omnimarket_drift(
         # was just fixed.
         importlib.invalidate_caches()
         installed = installed_omnimarket_commit()
-        if installed == canonical:
+        # Re-read the canonical side too. The reconcile installs from, and its
+        # readback proves against, the clone HEAD as it stands when they run;
+        # another actor (pull-all.sh, the periodic tick) may have advanced the
+        # clone since the read above. Comparing the refreshed install against
+        # that earlier HEAD refused a readback-proven repair as a contradiction.
+        # A clone that can no longer be read proves nothing, so it refuses.
+        refreshed_canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
+        if refreshed_canonical is not None:
+            canonical = refreshed_canonical
+        if refreshed_canonical is not None and installed == canonical:
             logger.info(
                 "omnimarket drift reconciled in-flight to %s; continuing.",
                 canonical[:12],
