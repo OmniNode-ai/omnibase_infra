@@ -112,6 +112,35 @@ class ContractTableDeclaration:
     table: ModelDbTableDeclaration
 
 
+def _declared_table(
+    node: str,
+    table: str,
+    migration: str,
+    *,
+    role: str,
+    database_ref: str = "application",
+    access: str = "read_write",
+) -> ContractTableDeclaration:
+    """A public-schema relation whose migration already lives in the repo.
+
+    ``contract_path`` is the migration path itself (a bridge has no contract),
+    ``database_ref`` defaults to ``application`` and ``access`` defaults to
+    ``read_write``; a caller that needs a narrower mode passes it explicitly.
+    """
+    return ContractTableDeclaration(
+        node=node,
+        contract_path=Path(migration),
+        table=ModelDbTableDeclaration(
+            name=table,
+            database_ref=database_ref,
+            schema="public",
+            migration=migration,
+            access=access,
+            role=role,
+        ),
+    )
+
+
 # ``state_io`` (OMN-14208, ``handler_wiring._read_state_io``) is a legacy
 # contract subcontract that pre-dates ``ModelDbTableDeclaration`` and has no
 # core model of its own -- ``load_contract_declarations`` only scans
@@ -122,21 +151,12 @@ class ContractTableDeclaration:
 # exists to prevent. This is the sanctioned, checked-in way a state_io table
 # still participates in derivation (OMN-15337 / operator ruling R-q).
 STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    ContractTableDeclaration(
-        node="state_io:delegation_workflow_state",
-        contract_path=Path(
-            "docker/migrations/forward/090_create_delegation_workflow_state.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_workflow_state",
-            database_ref="omnibase_infra",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/090_create_delegation_workflow_state.sql"
-            ),
-            access="read_write",
-            role="state",
-        ),
+    _declared_table(
+        "state_io:delegation_workflow_state",
+        "delegation_workflow_state",
+        "docker/migrations/forward/090_create_delegation_workflow_state.sql",
+        database_ref="omnibase_infra",
+        role="state",
     ),
     # OMN-16924. Same seam, same classification: durable REDUCER state for
     # node_session_phase_reducer, keyed on ``session_id`` rather than
@@ -144,40 +164,24 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # provenance extracted from the opaque payload, never an authorization key,
     # so operator ruling R-q's OMNINODE_INTERNAL classification carries over
     # unchanged.
-    ContractTableDeclaration(
-        node="state_io:session_phase_state",
-        contract_path=Path(
-            "docker/migrations/forward/102_create_session_phase_state.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="session_phase_state",
-            database_ref="omnibase_infra",
-            schema="public",
-            migration="docker/migrations/forward/102_create_session_phase_state.sql",
-            access="read_write",
-            role="state",
-        ),
+    _declared_table(
+        "state_io:session_phase_state",
+        "session_phase_state",
+        "docker/migrations/forward/102_create_session_phase_state.sql",
+        database_ref="omnibase_infra",
+        role="state",
     ),
     # OMN-19829. Same seam, same classification: durable per-PR landing
     # workflow state for omnimarket's node_pr_landing_orchestrator, keyed on
     # ``landing_key`` (``owner/repo#<number>``). Its ``tenant_id`` column is
     # denormalized provenance from the opaque payload, never an authorization
     # key, so operator ruling R-q's OMNINODE_INTERNAL classification holds.
-    ContractTableDeclaration(
-        node="state_io:pr_landing_workflow_state",
-        contract_path=Path(
-            "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="pr_landing_workflow_state",
-            database_ref="omnibase_infra",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
-            ),
-            access="read_write",
-            role="state",
-        ),
+    _declared_table(
+        "state_io:pr_landing_workflow_state",
+        "pr_landing_workflow_state",
+        "docker/migrations/forward/108_create_pr_landing_workflow_state.sql",
+        database_ref="omnibase_infra",
+        role="state",
     ),
     # OMN-21935. The omnibase_infra database's grants are derived from this
     # manifest alone, and omnimarket's node_projection_infra_routing_decisions
@@ -188,19 +192,12 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # the topology. Once the pinned omnimarket contracts carry the node the
     # same relation derives from the contract too, and the derivation is
     # idempotent per relation, so this entry may then be deleted.
-    ContractTableDeclaration(
-        node="state_io:infra_routing_decisions",
-        contract_path=Path(
-            "docker/migrations/forward/080_create_infra_routing_decisions.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="infra_routing_decisions",
-            database_ref="omnibase_infra",
-            schema="public",
-            migration="docker/migrations/forward/080_create_infra_routing_decisions.sql",
-            access="read_write",
-            role="state",
-        ),
+    _declared_table(
+        "state_io:infra_routing_decisions",
+        "infra_routing_decisions",
+        "docker/migrations/forward/080_create_infra_routing_decisions.sql",
+        database_ref="omnibase_infra",
+        role="state",
     ),
 )
 
@@ -380,6 +377,20 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "node_projection_demo_readiness",
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
+    ),
+    # OMN-21934: the context-audit projection node precedes the omnimarket
+    # contract pin. The table is created by the infra migration 053 (the
+    # retired context-audit consumer wrote it), so the declaration names that
+    # migration; node_projection_context_audit adds only its event_key column
+    # and unique index. The vendor delivers exactly SELECT/INSERT/UPDATE to
+    # tenant_projection_writer; expire this bridge when
+    # node_projection_context_audit reaches the pin. The OMN-18863 expiry
+    # module names this bridge.
+    _declared_table(
+        "legacy_migration:context_audit_events",
+        "context_audit_events",
+        "docker/migrations/forward/053_create_context_audit_events.sql",
+        role="context_audit_events",
     ),
     # The four bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
