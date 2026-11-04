@@ -269,7 +269,12 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
         "tenant-projection": SERVICE,
         **RUNTIME_WRITERS,
     }
-    assert _overlay_gates() == {SERVICE: "tenant-projection"}
+    # The hook-events writer has no runtime profile: the policy retires it by name.
+    assert process.retired_services == ("projection-claude-hook-events-writer",)
+    assert _overlay_gates() == {
+        SERVICE: "tenant-projection",
+        "projection-claude-hook-events-writer": "hook-events",
+    }
     definitions = load_compose(DEV_COMPOSE_FILES[1])["services"]
     for profile, service in RUNTIME_WRITERS.items():
         assert service not in load_compose(OVERLAY)["services"]
@@ -281,11 +286,10 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
         assert rendered[f"{key}_RUNTIME_PROFILE"] == f"folded-{profile}-runtime"
         assert rendered[f"{key}_FULL_PROFILE"] == f"folded-{profile}-full"
         assert service not in dev_stack_services()
-    for service in (
-        "projection-delegation-writer",
-        "projection-claude-hook-events-writer",
-    ):
-        assert service in dev_stack_services()
+    assert "projection-delegation-writer" in dev_stack_services()
+    # Retired by name (retired_services), not folded by profile: the fold
+    # overlay's gate keeps the inert carrier out of every bring-up.
+    assert "projection-claude-hook-events-writer" not in dev_stack_services()
 
 
 def test_deploy_handler_retires_exactly_the_policy_services() -> None:

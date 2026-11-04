@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-21924: the first omnibase-core release tag that contains each omnibase_core
+# module the node_architecture_validator node imports. Read from the omnibase_core
+# clone with `git tag --contains` on the commit that first added the file; a module
+# whose release is read for the first time goes here in the same change as its import.
+# test_core_floor_omn21924.py reads the declared floor from pyproject.toml and
+# refuses a floor below the newest release listed here.
+omnibase_core.errors.model_onex_error: "0.1.0"
+omnibase_core.models.contracts.subcontracts.model_validator_rule: "0.6.6"
+omnibase_core.models.container: "0.1.0"
+omnibase_core.models.container.model_onex_container: "0.1.0"
+omnibase_core.nodes: "0.1.0"
+omnibase_core.nodes.node_compute: "0.1.0"
+omnibase_core.utils.util_safe_yaml_loader: "0.3.2"
+omnibase_core.validation.checker_stack_shape: "0.47.62"
+omnibase_core.validation.validator_stack_shape: "0.47.62"

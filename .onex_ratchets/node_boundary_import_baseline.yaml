@@ -247,8 +247,6 @@ edges:
   - omnibase_infra.verification.workflow_receipt.verifier -> omnibase_infra.nodes.node_kafka_replay_compute.handlers.handler_replay:HandlerKafkaReplay
   - omnibase_infra.verification.workflow_receipt.verifier -> omnibase_infra.nodes.node_kafka_replay_compute.models:ModelKafkaReplayInput
   - omnibase_infra.verification.workflow_receipt.verifier -> omnibase_infra.nodes.node_kafka_replay_compute.protocols:ConsumerFactory
-  - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_architecture_validator.handlers:'
-  - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_architecture_validator:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_build_loop_write_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_bus_forwarder_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_chain_orchestrator:'

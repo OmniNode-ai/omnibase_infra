@@ -1,0 +1,114 @@
+# Design-review verdict: finding publication protocol (OMN-22258)
+
+Verdict: **PASS with conditions.** The finding publication protocol of plan task
+T0 (transcript intent-to-outcome graph plan) may be built as T9, under the five
+conditions below. The model is `formal/finding_publication/`
+(`FindingPublication.tla`); T9 cites it by that path.
+
+Reviewed against the committed TLC output in `results/`, bound to
+`model.sha256` (the sha256 of `FindingPublication.tla`, then each cfg in sorted
+order). TLC2 Version 2026.11.02.164701 (rev: dc6a944), `-workers 4`, Java
+Adoptium 17.0.20.1 in `eclipse-temurin:17-jre-alpine` on lab host h053,
+tla2tools.jar sha256 `c57d4d7bbee3ed2c89c32cb9c60cac728f751e80e2570bc4b7368ae39291fc21`
+(the tlaplus v1.8.0 release asset).
+
+| Config | Expected | TLC result | Distinct states |
+| --- | --- | --- | --- |
+| Model.cfg | pass five invariants and both properties | No error has been found, 0 states left on queue | 239 |
+| mut_lookup_then_create.cfg | counterexample | AtMostOnePr violated | 235 |
+| mut_branch_is_done.cfg | counterexample | BranchGetsPr violated | 26 |
+| mut_branch_is_done_liveness.cfg | counterexample | BranchGetsPrEventually violated | 59 |
+| mut_stage_by_arrival.cfg | counterexample | RecordedNeverBack violated | 133 |
+| mut_no_fairness.cfg | counterexample | BranchGetsPrEventually violated (stuttering) | 239 |
+| mut_no_fairness_recorded.cfg | counterexample | PrGetsRecorded violated (stuttering) | 239 |
+| wit_adopt_branch.cfg | witness violated | AdoptBranchWitness violated | 132 |
+| wit_adopt_pr.cfg | witness violated | AdoptPrWitness violated | 214 |
+| wit_reorder.cfg | witness violated | ReorderWitness violated | 107 |
+
+Distinct-state counts of a violated config are where TLC stopped, and vary
+with the worker count; the Model.cfg count does not. Command, per cfg, on a
+copy of the model: `docker run --rm -v <copy>:/w -v <jar dir>:/tlc -w /w
+eclipse-temurin:17-jre-alpine java -XX:+UseParallelGC -cp
+/tlc/tla2tools.jar tlc2.TLC -noGenerateSpecTE -config <cfg> -workers 4
+-metadir /tmp/states FindingPublication.tla`. Control runs were made before the
+passing run.
+
+## Findings
+
+1. AC7. Two runs for one finding, one crash of either run at any point, and
+   stage events delivered in any order: with the branch and the pull request as
+   two separate atomic create-or-adopt calls, at most one pull request exists
+   (`AtMostOnePr`), a branch that exists is given its pull request by the
+   surviving run (`BranchGetsPr` at rest, `BranchGetsPrEventually` under
+   fairness), a recorded stage is never lower than one recorded before
+   (`RecordedNeverBack`) and a recorded stage is backed by the forge object it
+   names (`RecordedBackedByForge`). No counterexample.
+2. The control that looks up the pull request and later creates without adopting
+   makes two pull requests in nine states: both runs create the branch, both
+   look up and find none, both create (`mut_lookup_then_create`).
+3. The control that treats an existing branch as finished leaves no pull
+   request, in four states: r2 creates the branch, r1 finds it and ends, r2 dies
+   before the pull request (`mut_branch_is_done`). `mut_branch_is_done_liveness`
+   shows the same as an eventuality: no pull request is ever opened.
+4. A reducer that takes the stage of the last event moves a recorded finding
+   from `pr` back to `branch` when the events arrive in reverse
+   (`mut_stage_by_arrival`); the passing reducer keeps the higher stage and
+   ignores the older event (`wit_reorder`).
+5. `wit_adopt_branch` and `wit_adopt_pr` show the two recoveries in the passing
+   model: a run died after the branch and the other run made the pull request
+   and it is recorded; a run died after the pull request and before recording
+   it, and the other run adopted it and recorded it.
+6. The plan's protocol (branch name derived from the finding id, two separate
+   create-or-adopt steps, stage events) has no counterexample under the bounds.
+   No flaw in the plan is reported; the conditions below state what the
+   implementation must keep.
+
+## Codex review (h053, thread 01a19f67-6ccc-7820-a395-ea3473bb03bb, read-only, high effort)
+
+Codex reviewed the four models before this verdict; the models were then
+strengthened where noted and every cfg re-run, so the committed output is of
+the revised models. Its findings on this model, and the disposition of each:
+
+- B13 (tagged BLOCKER by Codex) the duplicate-pull-request control changes the
+  forge's contract as well as the client algorithm: the passing model's `StepP`
+  assumes the forge's create-or-adopt is atomic, and the control's create lets a
+  second pull request through. Disposition: kept, and stated. The criterion's
+  falsifier asks for a counterexample with two pull requests from a client that
+  looks up and creates without adopting, which needs a forge that accepts the
+  second; the module header now states the assumed forge contract, and
+  condition 1 puts the burden on T9. Not a flaw in the plan.
+- W14 the adoption witnesses fired before the recovery they name. Fixed: a ghost
+  `crashedAt` records where the dead run stood, and the witnesses require the
+  crash, the other run's pull request and the recorded stage 2.
+- W15 one Boolean branch and one pull-request count assume both runs address the
+  same finding-derived objects. Accepted: condition 2.
+- N16 `BranchGetsPr` is a check at rest; `BranchGetsPrEventually` is the
+  eventuality; the surviving run must be scheduled. Accepted: condition 4.
+
+## Conditions on T9
+
+1. Each of the two forge steps is one create-or-adopt call whose uniqueness the
+   forge enforces for the branch name: creating a pull request for a head branch
+   that already has one returns the existing one (or a refusal the run reads as
+   `adopt`). T9 proves that on the forge adapter. A client that looks up first
+   and creates later relies on nothing and is the failing control.
+2. The branch name is derived from the finding id alone, with the same repository
+   and base for every run; two runs of one finding name the same branch and the
+   same pull request. The model does not check the derivation.
+3. A run that finds the branch already there continues to the pull request. It
+   never treats the branch as the end of the work, whoever made it.
+4. Every run executes branch, then pull request, then records; a run that finds
+   the pull request already there adopts it and still records stage `pr`. A
+   finding with a branch and no pull request is picked up by the next run, so the
+   next run must be started (a schedule or a retry); the model has the second run
+   already running.
+5. The reducer records a stage with a monotonic compare-and-update: the higher of
+   the recorded stage and the event's, an older event is a no-op. The stage
+   events are emitted after the forge call they name returns.
+
+## Not modelled
+
+- A second crash, or both runs dying; a closed or merged pull request; a finding
+  with more than one branch.
+- Forge outages and rate limits (a failed call is a crash).
+- The content of the branch and of the pull request; the reducer's persistence.
