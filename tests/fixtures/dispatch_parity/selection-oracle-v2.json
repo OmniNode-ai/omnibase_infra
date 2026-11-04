@@ -2954,6 +2954,20 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_placement_runtime_effect.HandlerPlacementRuntime.placement_serving_report_ea4f183a": {
+      "category": "event",
+      "contract_name": "node_placement_runtime_effect",
+      "event_model_module": "omnibase_infra.models.model_placement_serving_request",
+      "event_model_name": "ModelPlacementServingRequest",
+      "handler_id": "dispatcher.auto.node_placement_runtime_effect.HandlerPlacementRuntime.placement_serving_report_ea4f183a",
+      "handler_module": "omnibase_infra.handlers.placement.handler_placement_runtime",
+      "handler_name": "HandlerPlacementRuntime",
+      "message_types": [
+        "ModelPlacementServingRequest"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_registration_orchestrator.HandlerCatalogRequest": {
       "category": "command",
       "contract_name": "node_registration_orchestrator",

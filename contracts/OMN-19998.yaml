@@ -165,6 +165,11 @@ requirements:
     acceptance:
       - id: AC35
         statement: 'AC35: the test-parallel job runs one step, with a timeout-minutes ceiling and no pytest, before both of its pytest steps, that installs the verifier at the caller tag through install_verifier and fails when the install fails -- falsifier: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0 fails at the merge base, where the step does not exist'
+  - id: req-omn19998-wrapper-venv-peer-floor
+    statement: The onex wrapper must wait while either a host reconcile or a venv-only reconcile can prove the floor, including overlapping locks and a handoff between them, and must refuse a floor that remains stale without reclaiming either lock.
+    acceptance:
+      - id: AC36
+        statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
   - id: req-omn19998-oneshot-completion-bound
     statement: The lane census grades a running oneshot against the deploy agent's declared completion bound and automatically samples pending executions without suppressing exit, health or restart alarms.
     acceptance:
@@ -688,6 +693,24 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC35
+  - id: dod-omn19998-ac36-wrapper-venv-peer-floor
+    description: AC36 runs the actual wrapper in a disposable workspace with a stale or proven floor and a stub dispatch entrypoint. A deterministic poll clock drives both lock release orders and both handoff directions, and checks refusal without lock reclamation when the floor stays stale.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC36
+  - id: dod-omn19998-ac36-wrapper-deploy-probe
+    description: Hosted-runner wrapper artifact probe for AC36. Executes scripts/onex from this checkout against disposable floor metadata, lock directories and a stub CLI, requiring successful dispatch only after proof and refusal while the floor remains stale. Uses Bash and Python without a live lane, broker, credentials or Docker; this checks the shipped wrapper rather than live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC36
   - id: dod-omn19998-ac36-oneshot-completion-bound
     description: AC36 replays the recorded fresh-start rows and the declared deadline, unknown timing, nonzero exit and concurrent health/restart controls. The node contract retains the deploy agent's 300-second bound.
     source: manual
