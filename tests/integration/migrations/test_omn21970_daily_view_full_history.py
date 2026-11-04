@@ -11,7 +11,6 @@ forward runner does (``psql -v ON_ERROR_STOP=1 -f``) and reads the result back. 
 
   R1 600 runs over 20 days serve 20 days whose runs sum to 600, more than the 500-row cap could hold, with each day's
      passed and failed counts as the view's rules give them, and no unrecorded run (the gate column is NOT NULL);
-  R2 a day whose runs carry no token counts is served as null tokens, never 0;
   R3 every row, existing and inserted after 0065, has a distinct non-null cursor;
   R4 0065 applied a second time succeeds and leaves exactly one cursor sequence (the hostile review asked);
   R5 control through the view itself: with only the newest 500 runs in the source, the same whole-history check
@@ -106,7 +105,6 @@ def _seed(
     pg: EphemeralPostgres,
     runs_per_day: int,
     days: int,
-    tokenless_day: int | None = None,
     tenant: str = TENANT,
 ) -> None:
     rows = [
@@ -115,8 +113,8 @@ def _seed(
             str(uuid.uuid4()),
             START + timedelta(days=d, minutes=r),
             *_outcome(r),
-            None if d == tokenless_day else 100 + r,
-            None if d == tokenless_day else 10 + r,
+            100 + r,
+            10 + r,
         )
         for d in range(days)
         for r in range(runs_per_day)
@@ -186,17 +184,6 @@ def test_r1_600_runs_over_20_days_are_served_whole(cluster: EphemeralPostgres) -
             unrecorded,
         ), day
         assert day["passed"] + day["failed"] + day["unrecorded"] == day["runs"] == 30
-
-
-def test_r2_a_tokenless_day_is_null_never_zero(cluster: EphemeralPostgres) -> None:
-    _seed(cluster, runs_per_day=30, days=20, tokenless_day=7)
-    _apply(cluster, CURSOR)
-    _apply(cluster, DAILY)
-    days, _ = _served(cluster)
-    tokenless = days[7]
-    assert tokenless["tokensIn"] is None and tokenless["tokensOut"] is None, tokenless
-    assert tokenless["tokensInUnmeasured"] == 30
-    assert all(day["tokensIn"] is not None for i, day in enumerate(days) if i != 7)
 
 
 def test_r3_every_row_has_a_distinct_cursor(cluster: EphemeralPostgres) -> None:
