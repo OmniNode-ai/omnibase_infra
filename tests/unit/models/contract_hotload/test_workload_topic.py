@@ -80,10 +80,26 @@ def test_the_applied_topic_is_declared_time_retained(workload: str) -> None:
 
 @pytest.mark.parametrize(
     "workload",
-    ["", "  ", "Has Capitals", "dot.ted", "-leading", "a_b", " main", "main "],
+    [
+        "",
+        "  ",
+        "Has Capitals",
+        "dot.ted",
+        "-leading",
+        "trailing-",
+        "two--parts",
+        "a_b",
+        " main",
+        "main ",
+        "main\n",
+        "UPPER",
+        "café",
+    ],
 )
+@pytest.mark.parametrize("channel", ["applied", "state"])
 def test_planted_violation_a_workload_that_is_not_kebab_case_is_refused(
     workload: str,
+    channel: str,
 ) -> None:
     with pytest.raises(ValueError):
-        _ = ModelContractHotloadWorkloadTopic.state(workload).suffix
+        ModelContractHotloadWorkloadTopic(workload=workload, channel=channel)

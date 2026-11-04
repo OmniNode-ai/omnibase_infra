@@ -16,6 +16,7 @@ section to carry a ``topic_config`` and the provisioner takes a caller-supplied 
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -58,7 +59,7 @@ class ModelContractHotloadWorkloadTopic(BaseModel):
             raise ValueError("workload must be a non-empty string")
         # Each workload owns its topic. Normalizing here would silently alias
         # distinct workload identities (for example, a_b and a-b).
-        if value != value.strip() or "_" in value:
+        if re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", value) is None:
             raise ValueError("workload must already be in canonical kebab-case")
         return value
 

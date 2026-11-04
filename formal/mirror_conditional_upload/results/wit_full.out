@@ -1,0 +1,81 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 38 and seed -6918800836777296646 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/MirrorConditionalUpload.tla
+Parsing file /tmp/tlc-8512528274778186704/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-8512528274778186704/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-8512528274778186704/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-8512528274778186704/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module MirrorConditionalUpload
+Linting of module MirrorConditionalUpload
+Starting... (2026-11-03 03:21:00)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:21:00.
+Error: Invariant FullWitness is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 0, B |-> 0]
+/\ taken = {}
+/\ pc = [A |-> "idle", B |-> "idle"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 0, B |-> 0]
+/\ local = 1
+
+State 2: <Grow line 71, col 9 to line 73, col 91 of module MirrorConditionalUpload>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 0, B |-> 0]
+/\ taken = {}
+/\ pc = [A |-> "idle", B |-> "idle"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 0, B |-> 0]
+/\ local = 2
+
+State 3: <Grow line 71, col 9 to line 73, col 91 of module MirrorConditionalUpload>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 0, B |-> 0]
+/\ taken = {}
+/\ pc = [A |-> "idle", B |-> "idle"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 0, B |-> 0]
+/\ local = 3
+
+State 4: <Read("A") line 75, col 12 to line 81, col 77 of module MirrorConditionalUpload>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 1, B |-> 0]
+/\ taken = {3}
+/\ pc = [A |-> "read", B |-> "idle"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 3, B |-> 0]
+/\ local = 3
+
+State 5: <Put("A") line 93, col 3 to line 104, col 50 of module MirrorConditionalUpload>
+/\ store = 3
+/\ maxPut = 3
+/\ refusedShort = FALSE
+/\ hiStore = 3
+/\ snaps = [A |-> 1, B |-> 0]
+/\ taken = {3}
+/\ pc = [A |-> "idle", B |-> "idle"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 3, B |-> 0]
+/\ local = 3
+
+59 states generated, 48 distinct states found, 21 states left on queue.
+The depth of the complete state graph search is 6.
+Finished in 00s at (2026-11-03 03:21:00)

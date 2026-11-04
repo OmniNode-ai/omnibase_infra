@@ -1,8 +1,8 @@
 schema_version: "1.0.0"
 ticket_id: OMN-21226
-title: "Contract hot loading H1 (omnibase_infra piece): the per-workload topic declarations, the chain fixtures and the strict xfail end-to-end test"
+title: "Contract hot loading H1 (omnibase_infra piece): the per-workload topic declarations, the chain fixtures and the first-assertion end-to-end expectation"
 summary: >-
-  The runtime declarations of the per-workload hot-loading topics (the applied topic and the compacted state topic, whose expansions for every lane workload pass core's topic validator), the golden and error chain fixtures G1 to G8 and E1 to E17, and the end-to-end test, marked xfail with strict set, whose first assertion fails because no accepted record exists. The record models are in omnibase_core and are not importable here before a core release, so the fixtures are checked for shape here and parsed against the models in the follow-up that moves the pin.
+  The runtime declarations of the per-workload hot-loading topics (the applied topic and the compacted state topic, whose expansions for every lane workload pass core's topic validator), the golden and error chain fixtures G1 to G8 and E1 to E17, and the end-to-end test, whose executable expectation accepts only the exact missing-accepted-record failure at its first assertion and fails on any other assertion or on full success. The record models are in omnibase_core and are not importable here before a core release, so the fixtures are checked for shape here and parsed against the models in the follow-up that moves the pin.
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:
