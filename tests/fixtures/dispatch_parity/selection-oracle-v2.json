@@ -16,6 +16,22 @@
       "package": "omnibase_core",
       "type_scoped": false
     },
+    "dispatcher.auto.node_api_fixture_record_effect.HandlerApiFixtureRecord.api_fixture_record_485d89b7": {
+      "category": "command",
+      "contract_name": "node_api_fixture_record_effect",
+      "event_model_module": "omnibase_infra.models.model_api_fixture_record_request",
+      "event_model_name": "ModelApiFixtureRecordRequest",
+      "handler_id": "dispatcher.auto.node_api_fixture_record_effect.HandlerApiFixtureRecord.api_fixture_record_485d89b7",
+      "handler_module": "omnibase_infra.handlers.handler_api_fixture_record",
+      "handler_name": "HandlerApiFixtureRecord",
+      "message_types": [
+        "ModelApiFixtureRecordRequest",
+        "${topic:contract:platform.CMD_API_FIXTURE_RECORD_V1}",
+        "platform.api-fixture-record"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_artifact_change_detector_effect.HandlerManualTrigger.artifact_manual_trigger_842dca34": {
       "category": "event",
       "contract_name": "node_artifact_change_detector_effect",
@@ -4323,6 +4339,21 @@
       },
       "topic": "${topic:contract:omnimarket.CMD_REDEPLOY_START_V1}"
     },
+    "P1a::${topic:contract:platform.CMD_API_FIXTURE_RECORD_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.api-fixture-record",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.api-fixture-record",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_API_FIXTURE_RECORD_V1}"
+    },
     "P1a::${topic:contract:platform.CMD_CI_LIVE_CONTACT_CHECK_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -5821,6 +5852,21 @@
       },
       "topic": "${topic:contract:omnimarket.CMD_REDEPLOY_START_V1}"
     },
+    "P1b::${topic:contract:platform.CMD_API_FIXTURE_RECORD_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_API_FIXTURE_RECORD_V1}"
+    },
     "P1b::${topic:contract:platform.CMD_CI_LIVE_CONTACT_CHECK_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6885,6 +6931,26 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:synthetic:P2_unparseable_category}"
+    },
+    "P4::dispatcher.auto.node_api_fixture_record_effect.HandlerApiFixtureRecord.api_fixture_record_485d89b7::${topic:contract:platform.CMD_API_FIXTURE_RECORD_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_api_fixture_record_effect.HandlerApiFixtureRecord.api_fixture_record_485d89b7",
+      "event_model": "omnibase_infra.models.model_api_fixture_record_request.ModelApiFixtureRecordRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.api-fixture-record",
+        "payload": "ModelApiFixtureRecordRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_api_fixture_record_effect.HandlerApiFixtureRecord.api_fixture_record_485d89b7"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.api-fixture-record",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_API_FIXTURE_RECORD_V1}"
     },
     "P4::dispatcher.auto.node_artifact_reconciliation_orchestrator.HandlerPlanToPRComment::${topic:contract:artifact.EVT_UPDATE_PLAN_CREATED_V1}": {
       "construct_only": true,
@@ -25290,6 +25356,16 @@
       "topic": "${topic:contract:core.CMD_COMPLIANCE_SCAN_REQUESTED_V1}",
       "topic_pattern": "*.cmd.core.compliance-scan-requested.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_api_fixture_record_effect",
+      "dispatcher_id": "dispatcher.auto.node_api_fixture_record_effect.HandlerApiFixtureRecord.api_fixture_record_485d89b7",
+      "handler_id": "dispatcher.auto.node_api_fixture_record_effect.HandlerApiFixtureRecord.api_fixture_record_485d89b7",
+      "message_category": "command",
+      "route_id": "route.auto.node_api_fixture_record_effect.HandlerApiFixtureRecord.api_fixture_record_485d89b7.onex_cmd_platform_api_fixture_record_v1",
+      "topic": "${topic:contract:platform.CMD_API_FIXTURE_RECORD_V1}",
+      "topic_pattern": "*.cmd.platform.api-fixture-record.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_artifact_change_detector_effect",

@@ -295,6 +295,7 @@ from omnibase_infra.handlers.kafka_transactional_producer import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.event_bus import ModelReadCommittedTopics
 from omnibase_infra.models.event_bus.model_kafka_ungrouped_reader import (
     UNGROUPED_AUTO_OFFSET_RESET,
     ModelKafkaUngroupedReader,
@@ -610,6 +611,7 @@ class EventBusKafka(
         # the ``subscribe`` that starts the loop; read once when the loop
         # starts.
         self._consume_concurrency: dict[tuple[str, str], int] = {}
+        self._read_committed = ModelReadCommittedTopics.load()
 
         # OMN-20117: every subscriber dispatch that has not settled, on every
         # path. ``close()`` waits for these with the producer still open, so a
@@ -2301,6 +2303,7 @@ class EventBusKafka(
             enable_auto_commit=False,
             retry_backoff_ms=self._config.reconnect_backoff_ms,
             max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
+            **self._read_committed.consumer_kwargs(topic),
             **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
@@ -2658,6 +2661,7 @@ class EventBusKafka(
             # and for why the OMN-16267 ">= max_request_size" coupling is not
             # required against a KIP-74 broker.
             max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
+            **self._read_committed.consumer_kwargs(topic),
             **self._build_client_version_kwargs(AIOKafkaConsumer),
             **self._build_auth_kwargs(),
         )
@@ -5303,19 +5307,8 @@ class EventBusKafka(
         """
         if not servers:
             return "unknown"
-
-        # Split by comma for multiple servers
-        server_list = [s.strip() for s in servers.split(",")]
-        sanitized = []
-
-        for server in server_list:
-            # Remove any user:pass@ prefix (credentials)
-            if "@" in server:
-                # Keep only the part after @
-                server = server.split("@", 1)[1]
-            sanitized.append(server)
-
-        return ",".join(sanitized)
+        # Keep only the part after any user:pass@ prefix of each server.
+        return ",".join(s.strip().split("@", 1)[-1] for s in servers.split(","))
 
     def _validate_topic_name(self, topic: str, correlation_id: UUID) -> None:
         """Validate Kafka topic name according to Kafka naming rules.
