@@ -225,16 +225,18 @@ def test_registration_contract_read_remains_best_effort(
     tmp_path: Path,
     content: str,
 ) -> None:
-    from omnibase_infra.nodes.node_registration_bootstrap_effect.adapter_registration_bootstrap import (
-        AdapterRegistrationBootstrap,
+    from omnibase_infra.nodes.node_registration_bootstrap_effect.handler_registration_bootstrap_resources import (
+        HandlerRegistrationBootstrapResources,
     )
 
     path = tmp_path / "contract.yaml"
-    assert AdapterRegistrationBootstrap.load_contract(path) == {}
+    assert HandlerRegistrationBootstrapResources.read_declarations(path) == {}
     path.write_text(content)
-    assert AdapterRegistrationBootstrap.load_contract(path) == {}
+    assert HandlerRegistrationBootstrapResources.read_declarations(path) == {}
     path.write_text("published_events: []")
-    assert AdapterRegistrationBootstrap.load_contract(path) == {"published_events": []}
+    assert HandlerRegistrationBootstrapResources.read_declarations(path) == {
+        "published_events": []
+    }
 
 
 @pytest.mark.unit
@@ -318,7 +320,12 @@ async def test_registration_effect_contracts_resolve_real_handlers_and_boot_mani
             "node_event_bus_wiring_effect",
         )
     )
-    expected = {"HandlerRegistrationBootstrap", "HandlerRegistrationSnapshotPublisher"}
+    expected = {
+        "HandlerRegistrationBootstrap",
+        "HandlerRegistrationBootstrapResources",
+        "HandlerRegistrationSnapshotProducer",
+        "HandlerRegistrationSnapshotPublisher",
+    }
     resolved = set()
     for contract in contracts:
         for entry in contract.handler_routing.handlers:

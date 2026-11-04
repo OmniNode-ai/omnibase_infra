@@ -16,3 +16,6 @@ class ModelRegistrationBootstrapResult(BaseModel):
     )
 
     pool: Pool | None = None
+
+
+__all__ = ["ModelRegistrationBootstrapResult", "Pool"]

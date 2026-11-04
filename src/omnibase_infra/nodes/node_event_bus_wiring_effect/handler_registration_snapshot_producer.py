@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from aiokafka import AIOKafkaProducer
 
 
-class AdapterRegistrationSnapshotProducer:
+class HandlerRegistrationSnapshotProducer:
     """Acquire the authenticated producer used by registration snapshots."""
 
     @staticmethod
@@ -22,7 +22,7 @@ class AdapterRegistrationSnapshotProducer:
             build_aiokafka_auth_kwargs_from_env,
         )
 
-        return AIOKafkaProducer(
+        return AIOKafkaProducer(  # no-contract-check: effect-node producer seam
             bootstrap_servers=bootstrap_servers,
             **build_aiokafka_auth_kwargs_from_env(),
         )

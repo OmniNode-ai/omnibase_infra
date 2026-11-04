@@ -18,20 +18,20 @@ from omnibase_infra.runtime.contract_topic_router import (
 logger = logging.getLogger(__name__)
 
 
-class AdapterRegistrationBootstrap:
+class HandlerRegistrationBootstrapResources:
     """Perform the resource operations coordinated by the bootstrap handler."""
 
     @staticmethod
     async def create_pool(postgres_dsn: str) -> Pool:
         """Acquire the original 2..10 connection pool after handler validation."""
-        return await asyncpg.create_pool(
+        return await asyncpg.create_pool(  # no-contract-check: effect-node pool seam
             postgres_dsn,
             min_size=2,
             max_size=10,
         )
 
     @staticmethod
-    def load_contract(path: Path) -> dict[str, object]:
+    def read_declarations(path: Path) -> dict[str, object]:
         """Read routing declarations with the original best-effort fallback."""
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -48,7 +48,7 @@ class AdapterRegistrationBootstrap:
     def topic_router(path: Path) -> dict[str, str]:
         """Read the registration routing declarations at the effect boundary."""
         return build_topic_router_from_contract(
-            AdapterRegistrationBootstrap.load_contract(path)
+            HandlerRegistrationBootstrapResources.read_declarations(path)
         )
 
     @staticmethod
