@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# A synthetic pre-merge runtime pool for the driver's tests (OMN-20934). It has
+# the shape scripts/runtime_build/prepr_runtime_pool.py reads and configures no
+# real machine: every address is in the RFC 5737 documentation range. A lab's
+# own pool lives under its workspace config root at
+# config/lab/prepr_runtime_pool.yaml, never in this repository.
+schema_version: 1
+slot:
+  compose_project: omnibase-infra-local
+  ports: [5436, 19092, 16379, 8085, 8086]
+  lease_dir: .onex-prepr-pool/lease
+  work_root_prefix: prove-pool-
+  model_endpoint: "http://192.0.2.10:8000/v1/chat/completions"
+  max_load_ratio: 1.0
+hosts:
+  - name: pool-a
+    ssh_target: "192.0.2.11"
+    surface: a-runtime
+    os: macos
+    status: pool
+  - name: pool-e
+    ssh_target: "192.0.2.15"
+    surface: e-runtime
+    os: macos
+    status: excluded
+    reason: >-
+      synthetic exclusion, so the tests see an excluded member with its reason
+  - name: pool-b
+    ssh_target: "192.0.2.20"
+    surface: b-runtime
+    os: macos
+    status: pool
+    docker_config: isolated
+  - name: pool-c-slot-1
+    machine: pool-c
+    ssh_target: "192.0.2.21"
+    surface: c-slot-1
+    os: linux
+    status: pool
+    kind: prepr-slot
+    slot: 1
+    positive_control: omnibase-infra
+  - name: pool-c-slot-2
+    machine: pool-c
+    ssh_target: "192.0.2.21"
+    surface: c-slot-2
+    os: linux
+    status: pool
+    kind: prepr-slot
+    slot: 2
+    positive_control: omnibase-infra
+  - name: pool-c
+    ssh_target: "192.0.2.21"
+    surface: c-runtime
+    os: linux
+    status: excluded
+    reason: >-
+      the isolated slot's fixed ports are taken on this machine, so it takes part through its two pre-PR slots above instead
+  - name: pool-d
+    ssh_target: "192.0.2.22"
+    surface: d-runtime
+    os: linux
+    status: pool
+    positive_control: omnibase-infra-lane-d

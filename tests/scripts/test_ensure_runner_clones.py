@@ -52,6 +52,7 @@ EXPECTED_REPOS = (
     "omnibase_core",
     "omnibase_spi",
     "omnimarket",
+    "omniintelligence",
 )
 
 
