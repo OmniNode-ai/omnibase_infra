@@ -22,11 +22,9 @@ from omnibase_infra.handlers.deploy_agent_branch_trial_effect import effect
 from omnibase_infra.handlers.deploy_agent_branch_trial_effect.effect import (
     supervise_trial,
 )
+from omnibase_infra.handlers.handler_deploy_agent_branch_trial import queue_from_host
 from omnibase_infra.models.model_deploy_agent_branch_trial_request import (
     ModelDeployAgentBranchTrialRequest,
-)
-from omnibase_infra.nodes.node_deploy_agent_branch_trial_effect.runtime import (
-    queue_from_host,
 )
 
 NON_DEV_LANES = tuple(

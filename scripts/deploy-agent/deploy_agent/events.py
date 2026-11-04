@@ -939,8 +939,7 @@ def load_agent_branch_trial() -> ModuleType:
         "handlers/deploy_agent_branch_trial_effect/__init__.py",
         "handlers/deploy_agent_branch_trial_effect/effect.py",
         "handlers/handler_deploy_agent_branch_trial.py",
-        "nodes/node_deploy_agent_branch_trial_effect/__init__.py",
-        "nodes/node_deploy_agent_branch_trial_effect/runtime.py",
+        "handlers/deploy_agent_branch_trial_effect/composition.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").removesuffix(
             "/__init__"
@@ -950,9 +949,6 @@ def load_agent_branch_trial() -> ModuleType:
             raise RuntimeError(f"Cannot load agent branch trial effect: {relative}")
         module = sys.modules[module_name] = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-    sys.modules[name].__dict__["runtime"] = sys.modules[
-        "omnibase_infra.nodes.node_deploy_agent_branch_trial_effect.runtime"
-    ]
     return sys.modules[name]
 
 

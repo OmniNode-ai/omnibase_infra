@@ -60,11 +60,11 @@ _HOST: ContextVar[ModelDeployAgentBranchTrialHost] = ContextVar(
 
 
 def configure_host(environment: dict[str, str]) -> None:
+    from omnibase_infra.handlers.deploy_agent_branch_trial_effect.composition import (
+        load_policy,
+    )
     from omnibase_infra.models.model_deploy_agent_branch_trial_host import (
         ModelDeployAgentBranchTrialHost,
-    )
-    from omnibase_infra.nodes.node_deploy_agent_branch_trial_effect.runtime import (
-        load_policy,
     )
 
     _HOST.set(
@@ -773,7 +773,12 @@ def validate_rebuild_command(command: ModelRebuildRequested) -> ModelRebuildRequ
 
 
 def queue_agent_trial(
-    host: ProtocolDeployAgentBranchQueue, cmd: ModelRebuildRequested, state_dir: Path
+    host: ProtocolDeployAgentBranchQueue,
+    cmd: ModelRebuildRequested,
+    state_dir: Path,
+    queue: Callable[
+        [Path, ModelDeployAgentBranchTrialRequest], ModelDeployAgentBranchTrialResult
+    ],
 ) -> None:
     """Adapt the signed bus command to the canonical host effect.
 
@@ -803,11 +808,7 @@ def queue_agent_trial(
             installer=cmd.agent_installer,
         )
 
-        from omnibase_infra.nodes.node_deploy_agent_branch_trial_effect.runtime import (
-            queue_from_host,
-        )
-
-        result = queue_from_host(state_dir, request)
+        result = queue(state_dir, request)
         host.job_store.complete(cmd.correlation_id, status="success")
         host._publish_trial_result(result.model_dump(mode="json"))
     except Exception as exc:

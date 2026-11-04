@@ -1808,8 +1808,9 @@ class DeployAgent:
         try:
             with single_flight_lock():
                 if cmd.scope is Scope.AGENT_TRIAL:
-                    load_agent_branch_trial().effect.queue_agent_trial(
-                        self, cmd, STATE_DIR
+                    trial = load_agent_branch_trial()
+                    trial.effect.queue_agent_trial(
+                        self, cmd, STATE_DIR, trial.queue_from_host
                     )
                     return
                 self._run_deploy(cmd)
@@ -1831,7 +1832,7 @@ class DeployAgent:
 
     def _publish_trial_result(self, payload: dict[str, object]) -> None:
         load_agent_branch_trial()
-        from omnibase_infra.nodes.node_deploy_agent_branch_trial_effect.runtime import (
+        from omnibase_infra.handlers.deploy_agent_branch_trial_effect.composition import (
             trial_result_topic,
         )
 
