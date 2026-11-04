@@ -6,6 +6,7 @@ name: node_deploy_agent_image_prune_effect
 contract_name: node_deploy_agent_image_prune_effect
 node_name: node_deploy_agent_image_prune_effect
 node_type: EFFECT_GENERIC
+runtime_profiles: [effects]
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 description: "OMN-19998: retain rollback references while pruning aged, unreferenced deploy-agent runtime images."
