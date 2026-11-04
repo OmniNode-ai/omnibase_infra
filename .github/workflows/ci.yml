@@ -2106,6 +2106,14 @@ jobs:
           uv run python scripts/validation/check_topic_literals.py \
             --baseline scripts/validation/topic_literal_baseline.txt
 
+      - name: Lane entry-point census fixtures and bus wiring (OMN-21923)
+        run: >-
+          uv run --frozen pytest
+          tests/unit/nodes/node_lane_entry_point_census_effect/test_handler_lane_entry_point_census.py
+          tests/unit/nodes/node_lane_entry_point_census_effect/test_dev_lane_recorded_census.py
+          tests/integration/runtime/test_lane_entry_point_census_omn21923.py
+          -m "not kafka" -q --no-cov
+
       - name: Operator script topic namespace gate (OMN-18913)
         run: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
 
@@ -6362,6 +6370,7 @@ jobs:
           # for where that one stands.
           uv run pytest \
             tests/integration/event_bus/test_kafka_event_bus_integration.py \
+            tests/integration/runtime/test_lane_entry_point_census_omn21923.py \
             tests/integration/handlers/test_handler_qdrant_integration.py \
             tests/integration/event_bus/test_dlq_integration.py \
             tests/integration/nodes/test_node_reward_binder_effect.py \
