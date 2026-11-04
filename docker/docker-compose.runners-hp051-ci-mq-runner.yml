@@ -19,7 +19,7 @@
 #     container (next item). The pool shares the host's omnirunners.slice (96G high, 112G max); its four runners add at
 #     most 40 GiB of limits to it, beside the general pool's 24.
 #   - the per-runner cache, work and tmp directories are in memory (OMN-22123, operator RULING 2026-11-04T07:03:44Z: the
-#     runners were to be on the memory drive, not on the spinning data volume). Each is a tmpfs mount of the container,
+#     runners were to be on the memory drive, not on the spinning data volume). Each is a tmpfs mount of the container (with `exec`, below),
 #     so there is no host path to create, own or refill after a reboot, and a recreate cannot bring a disk path back.
 #     A tmpfs is a ceiling, not a reservation, and its pages are charged to the runner's own memory limit, which is why
 #     the limit is 10 GiB and not 4: a shard measured 3.2 to 3.5 GiB of job workspace on 2026-11-04 (checkout 1.1,
@@ -70,49 +70,20 @@ x-runner-host-zoneinfo: &runner-host-zoneinfo
   read_only: true
   bind:
     create_host_path: false
-# In-memory job directories (see the header). Long form, one anchor per path, shared by the four runners.
-x-runner-ram-work: &runner-ram-work
-  type: tmpfs
-  target: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-  tmpfs:
-    size: 8gb
-    mode: 0o1777
-x-runner-ram-tmp: &runner-ram-tmp
-  type: tmpfs
-  target: ${RUNNER_USER_HOME:-/home/runner}/tmp
-  tmpfs:
-    size: 1gb
-    mode: 0o1777
-x-runner-ram-pip: &runner-ram-pip
-  type: tmpfs
-  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/pip
-  tmpfs:
-    size: 2gb
-x-runner-ram-pre-commit: &runner-ram-pre-commit
-  type: tmpfs
-  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
-  tmpfs:
-    size: 2gb
-x-runner-ram-pnpm: &runner-ram-pnpm
-  type: tmpfs
-  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
-  tmpfs:
-    size: 2gb
-x-runner-ram-ms-playwright: &runner-ram-ms-playwright
-  type: tmpfs
-  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright
-  tmpfs:
-    size: 2gb
-x-runner-ram-ci-envs: &runner-ram-ci-envs
-  type: tmpfs
-  target: ${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs
-  tmpfs:
-    size: 2gb
-x-runner-ram-npm: &runner-ram-npm
-  type: tmpfs
-  target: ${RUNNER_USER_HOME:-/home/runner}/.npm
-  tmpfs:
-    size: 2gb
+# In-memory job directories (see the header), one list shared by the four runners. They are the service-level `tmpfs:`
+# form, not the long `type: tmpfs` volume, because only this form can pass `exec`: Docker mounts a tmpfs noexec unless told
+# otherwise, and the job workspace holds the interpreters and the compiled extensions the jobs run (measured 2026-11-04
+# on the first in-memory runners: `./python: Permission denied` in setup-python and an ImportError on pydantic_core's
+# shared object, so both merge groups went red). Each entry is `<container path>:<options>`; `size` is a ceiling.
+x-runner-ram-dirs: &runner-ram-dirs
+  - ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work:exec,mode=1777,size=8g
+  - ${RUNNER_USER_HOME:-/home/runner}/tmp:exec,mode=1777,size=1g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pip:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.npm:exec,mode=1777,size=2g
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
@@ -171,6 +142,7 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp051-ci-mq-runner-1
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
@@ -178,14 +150,6 @@ services:
       - *runner-lab-credentials
       - *lab-host-table
       - *runner-host-zoneinfo
-      - *runner-ram-pip
-      - *runner-ram-pre-commit
-      - *runner-ram-pnpm
-      - *runner-ram-ms-playwright
-      - *runner-ram-ci-envs
-      - *runner-ram-npm
-      - *runner-ram-work
-      - *runner-ram-tmp
       - hp051-ci-mq-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp051-ci-mq-runner-2:
     !!merge <<: *runner-base
@@ -194,6 +158,7 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp051-ci-mq-runner-2
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
@@ -201,14 +166,6 @@ services:
       - *runner-lab-credentials
       - *lab-host-table
       - *runner-host-zoneinfo
-      - *runner-ram-pip
-      - *runner-ram-pre-commit
-      - *runner-ram-pnpm
-      - *runner-ram-ms-playwright
-      - *runner-ram-ci-envs
-      - *runner-ram-npm
-      - *runner-ram-work
-      - *runner-ram-tmp
       - hp051-ci-mq-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp051-ci-mq-runner-3:
     !!merge <<: *runner-base
@@ -217,6 +174,7 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp051-ci-mq-runner-3
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
@@ -224,14 +182,6 @@ services:
       - *runner-lab-credentials
       - *lab-host-table
       - *runner-host-zoneinfo
-      - *runner-ram-pip
-      - *runner-ram-pre-commit
-      - *runner-ram-pnpm
-      - *runner-ram-ms-playwright
-      - *runner-ram-ci-envs
-      - *runner-ram-npm
-      - *runner-ram-work
-      - *runner-ram-tmp
       - hp051-ci-mq-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp051-ci-mq-runner-4:
     !!merge <<: *runner-base
@@ -240,6 +190,7 @@ services:
       !!merge <<: *runner-env
       RUNNER_NAME: hp051-ci-mq-runner-4
     entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
@@ -247,14 +198,6 @@ services:
       - *runner-lab-credentials
       - *lab-host-table
       - *runner-host-zoneinfo
-      - *runner-ram-pip
-      - *runner-ram-pre-commit
-      - *runner-ram-pnpm
-      - *runner-ram-ms-playwright
-      - *runner-ram-ci-envs
-      - *runner-ram-npm
-      - *runner-ram-work
-      - *runner-ram-tmp
       - hp051-ci-mq-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
 volumes:
   hp051-ci-mq-runner-1-creds:

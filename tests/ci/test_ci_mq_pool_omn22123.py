@@ -152,6 +152,17 @@ def test_scratch_paths_never_alias_the_general_pool_on_the_same_host(
     assert all("/mq-" in p for p in mq_paths)
 
 
+def _ram_dirs(service: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """The service-level ``tmpfs:`` entries, container path -> option map."""
+    out: dict[str, dict[str, str]] = {}
+    for entry in service.get("tmpfs", []):
+        path, _, options = resolve_runner_compose_defaults(str(entry)).partition(":")
+        out[path] = {
+            o.partition("=")[0]: o.partition("=")[2] for o in options.split(",") if o
+        }
+    return out
+
+
 @pytest.mark.parametrize("host", MEMORY_HOSTS)
 def test_every_merge_queue_job_directory_is_a_tmpfs_and_no_disk_path_is_bound(
     host: str,
@@ -159,27 +170,35 @@ def test_every_merge_queue_job_directory_is_a_tmpfs_and_no_disk_path_is_bound(
     """OMN-22123, operator RULING 2026-11-04T07:03:44Z: the queue runners run on the memory drive, not the data disk.
 
     Work, TMPDIR and the six caches are tmpfs mounts of the container, each with a size ceiling, so a recreate cannot
-    bring a disk directory back and no host unit has to recreate a path after a reboot. Every other bind is one the
+    bring a disk directory back and no host unit has to recreate a path after a reboot. Every other mount is one the
     runner needs and none of them is a job directory or a cache.
     """
     _, prefix, _ = POOLS[host]
     for name, service in _compose(prefix)["services"].items():
-        tmpfs = {
-            _target(v): v
-            for v in service["volumes"]
-            if isinstance(v, dict) and v.get("type") == "tmpfs"
-        }
-        assert set(tmpfs) == IN_MEMORY_TARGETS, name
-        for target, mount in tmpfs.items():
-            assert mount["tmpfs"]["size"], (name, target)
-        binds = {
-            _target(v)
-            for v in service["volumes"]
-            if not (isinstance(v, dict) and v.get("type") == "tmpfs")
-        }
-        assert binds <= ALLOWED_BIND_TARGETS, (name, binds - ALLOWED_BIND_TARGETS)
+        ram = _ram_dirs(service)
+        assert set(ram) == IN_MEMORY_TARGETS, name
+        for target, options in ram.items():
+            assert options.get("size"), (name, target)
+        mounts = {_target(v) for v in service["volumes"]}
+        assert not (mounts & IN_MEMORY_TARGETS), name
+        assert mounts <= ALLOWED_BIND_TARGETS, (name, mounts - ALLOWED_BIND_TARGETS)
         text = repr(service["volumes"])
         assert "/data/scratch" not in text and "/mq-" not in text, name
+
+
+@pytest.mark.parametrize("host", MEMORY_HOSTS)
+def test_every_in_memory_directory_allows_exec(host: str) -> None:
+    """Docker mounts a tmpfs noexec unless ``exec`` is given, and the workspace holds interpreters and extensions.
+
+    Measured 2026-11-04 on the first in-memory runners: ``./python: Permission denied`` in setup-python and an
+    ImportError loading pydantic_core's shared object turned both merge groups red.
+    """
+    _, prefix, _ = POOLS[host]
+    for name, service in _compose(prefix)["services"].items():
+        ram = _ram_dirs(service)
+        assert set(ram) == IN_MEMORY_TARGETS, name
+        for target, options in ram.items():
+            assert "exec" in options and "noexec" not in options, (name, target)
 
 
 @pytest.mark.parametrize("host", MEMORY_HOSTS)
@@ -197,12 +216,8 @@ def test_the_memory_limit_covers_the_tmpfs_ceilings_it_is_charged_for(
         limit = _bytes(service["mem_limit"])
         assert limit >= 10 << 30, name
         assert _bytes(service["memswap_limit"]) == limit, name
-        work = next(
-            v
-            for v in service["volumes"]
-            if isinstance(v, dict) and _target(v).endswith("/_work")
-        )
-        assert _bytes(str(work["tmpfs"]["size"]).replace("gb", "g")) < limit, name
+        work = _ram_dirs(service)[f"{RUNNER_HOME}/actions-runner/_work"]
+        assert _bytes(work["size"]) < limit, name
 
 
 def test_the_fleet_declares_four_merge_queue_runners_on_each_host() -> None:
