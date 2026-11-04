@@ -20,10 +20,10 @@ requirements:
       - id: AC3
         statement: Each of the four runner services in both merge-queue compose files mounts the host /usr/share/zoneinfo at the same path in the container, read-only.
   - id: req-lane-tmp-age-bound
-    statement: Lane scratch under the temporary directory is age bound by a tmpfiles rule file, so the root filesystem cannot refill with idle pytest trees and finished lane scratch.
+    statement: Retired pytest scratch under the temporary directory is age bound without sweeping live test, lane or service trees.
     acceptance:
       - id: AC4
-        statement: deploy/disk-gc/onex-lane-tmp.tmpfiles.conf holds only age rules under the temporary directory, with pytest trees bound at 12h and the catch-all at 3d.
+        statement: deploy/disk-gc/onex-lane-tmp.tmpfiles.conf bounds retired pytest garbage trees at 12h and leaves numbered pytest runs, lane trees and unrelated service directories untouched.
 evidence_requirements:
   - kind: tests
     description: The merge-queue pool declaration test and the existing pool and fleet tests pass.
@@ -67,7 +67,7 @@ dod_evidence:
           bash -o pipefail -c 'for p in hp051 hp053; do gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-${p}-ci-mq-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "${p}-ci-mq-runner-4" > /dev/null; done'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-lane-tmp-age-bound
-    description: The tmpfiles rule file holds only age rules under the temporary directory and bounds pytest trees tighter than the catch-all.
+    description: The tmpfiles rule file bounds only retired pytest garbage trees; the real cleaner removes retired contents and preserves live and unrelated trees.
     source: manual
     binds_ac: [AC4]
     checks:

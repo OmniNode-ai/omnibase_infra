@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -78,10 +81,43 @@ def test_a_malformed_age_is_refused() -> None:
             _seconds(bad)
 
 
-def test_the_three_rules_are_bound_tightest_first() -> None:
-    ages = _ages()
-    assert set(ages) == {_ROOT + "/pytest-of-*", _ROOT + "/claude-*", _ROOT + "/*"}
-    assert ages[_ROOT + "/pytest-of-*"] < ages[_ROOT + "/claude-*"] < ages[_ROOT + "/*"]
-    assert ages[_ROOT + "/pytest-of-*"] == 12 * 3600
-    assert ages[_ROOT + "/claude-*"] == 2 * 86400
-    assert ages[_ROOT + "/*"] == 3 * 86400
+def test_only_retired_pytest_trees_have_an_age_bound() -> None:
+    # pytest's numbered directories and generic lane/service roots may be live.
+    assert _ages() == {_ROOT + "/pytest-of-*/garbage-*": 12 * 3600}
+
+
+def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
+    """Run the shipped rules against a private filesystem root, never the host temp."""
+    root = tmp_path / "root"
+    scratch = root / "tmp"
+    fixtures = {
+        "pytest-of-lane/pytest-0/input.db": "live fixture",
+        "pytest-of-lane/pytest-0/.lock": str(os.getpid()),
+        "pytest-of-lane/garbage-retired/input.db": "retired fixture",
+        "claude-lane/input.db": "live lane",
+        "service-worker/input.db": "service state",
+    }
+    for relative, contents in fixtures.items():
+        path = scratch / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
+    config = tmp_path / "cleanup.conf"
+    # Scale only the age; retain the shipped rule types and path globs.
+    config.write_text(
+        "\n".join(" ".join([*rule[:5], "1s"]) for rule in _rules()) + "\n"
+    )
+    # ctime cannot be set with utime: let every fixture age beyond the test bound.
+    time.sleep(2)
+    cleaned = subprocess.run(
+        ["systemd-tmpfiles", "--clean", f"--root={root}", str(config)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert cleaned.returncode == 0, cleaned.stdout + cleaned.stderr
+    for relative, contents in fixtures.items():
+        if "garbage-retired" in relative:
+            assert not (scratch / relative).exists(), "retired scratch must be cleaned"
+        else:
+            assert (scratch / relative).read_text() == contents
