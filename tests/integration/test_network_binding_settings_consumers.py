@@ -145,21 +145,51 @@ def test_a_health_host_environment_override_still_wins(
     )
 
 
-def test_the_registration_storage_port_default_is_the_declared_port() -> None:
-    import inspect
+async def test_the_registration_storage_port_is_the_declared_port() -> None:
+    # OMN-22131: the handler takes only its container; the port lives in the
+    # settings the registration plugin binds there, read from the declared file.
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from uuid import uuid4
 
-    from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
-        HandlerRegistrationStoragePostgres,
+    from omnibase_infra.models.registration_storage import (
+        ModelRegistrationStoragePostgresConfig,
+    )
+    from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
+        ServiceRegistration,
     )
 
-    default = (
-        inspect.signature(HandlerRegistrationStoragePostgres.__init__)
-        .parameters["port"]
-        .default
-    )
+    plugin = ServiceRegistration()
+    plugin._pool = MagicMock()
+    config = MagicMock()
+    config.correlation_id = uuid4()
+    config.container.service_registry.register_instance = AsyncMock()
+    handler = MagicMock()
+    handler._ensure_pool = AsyncMock()
 
-    assert default == _PINNED_POSTGRES_PORT
-    assert default == load_network_binding_settings().postgres_port
+    with (
+        patch(
+            "omnibase_infra.handlers.registration_storage"
+            ".handler_registration_storage_postgres"
+            ".HandlerRegistrationStoragePostgres",
+            return_value=handler,
+        ),
+        patch(
+            "omnibase_infra.nodes.node_registration_storage_effect"
+            ".registry.registry_infra_registration_storage"
+            ".RegistryInfraRegistrationStorage.register_handler",
+        ),
+        patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://h/db"}),
+    ):
+        await plugin._wire_registration_storage(config)
+
+    bound = [
+        c.kwargs["instance"]
+        for c in config.container.service_registry.register_instance.await_args_list
+        if c.kwargs["interface"] is ModelRegistrationStoragePostgresConfig
+    ]
+    assert len(bound) == 1
+    assert bound[0].port == _PINNED_POSTGRES_PORT
+    assert bound[0].port == load_network_binding_settings().postgres_port
 
 
 def test_the_declared_port_bounds_gate_the_kernel_and_the_domain_validator() -> None:

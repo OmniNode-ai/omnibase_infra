@@ -5,7 +5,7 @@ summary: The handler-di-gate check reported five findings in handlers/registrati
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - HandlerRegistrationStoragePostgres.__init__
+  - public_api
 requirements:
   - id: req-omn22131-regstore-pg-di
     statement: HandlerRegistrationStoragePostgres takes its dependencies by constructor injection through the container, holds no timeout or connection literal, and its handler-di-gate baseline entry is deleted.
@@ -41,3 +41,10 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn22131-deploy-runtime-constructor
+    description: Deploy half. It reads the runtime container after a dev image carrying this change is deployed, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion. It fails while the running image still has the twelve-parameter constructor.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import inspect; from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import HandlerRegistrationStoragePostgres as H; assert list(inspect.signature(H.__init__).parameters) == [\"self\", \"container\"]; print(\"DI-CTOR-OK\")' | grep -E '^DI-CTOR-OK$'"
