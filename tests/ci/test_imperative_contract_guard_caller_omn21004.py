@@ -25,7 +25,6 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github/workflows"
 CALLER = WORKFLOWS / "imperative-contract-guard.yml"
 ALLOWLIST = ROOT / "imperative-contract-allowlist.yaml"
-CORE_SHA_PREFIX = "031148215"
 CANONICAL_SHAPE_TAG = re.compile(r"dev-\d{14}-[0-9a-f]{12}")
 CORE_USES = "OmniNode-ai/omnibase_core/.github/workflows/imperative-contract-guard.yml"
 RECORDED_PATHS = [
@@ -136,8 +135,7 @@ def _caller_sha() -> str:
     assert isinstance(uses, str)
     repository, sha = uses.split("@")
     assert repository == CORE_USES
-    assert re.fullmatch(r"[0-9a-f]{40}", sha)
-    assert sha.startswith(CORE_SHA_PREFIX)
+    assert CANONICAL_SHAPE_TAG.fullmatch(sha)
     return sha
 
 
@@ -185,9 +183,17 @@ def test_canonical_shape_uses_the_node_entry_tag() -> None:
     assert any(
         ".pre-commit-config.yaml" in str(step.get("run", "")) for step in shape_steps
     )
-    assert jobs["node-boundary-imports"]["env"]["NODE_BOUNDARY_CORE"].endswith(
-        f"@{_caller_sha()}"
-    )
+    # OMN-22360: the job carries no pin of its own; it reads the hook's rev.
+    boundary_job = jobs["node-boundary-imports"]
+    assert "env" not in boundary_job
+    reads = [
+        str(step.get("run", ""))
+        for step in boundary_job["steps"]
+        if step.get("name") == "Read the core pin from .pre-commit-config.yaml"
+    ]
+    assert len(reads) == 1
+    assert '"id"] == "check-node-boundary-imports"' in reads[0]
+    assert 'NODE_BOUNDARY_CORE=${spec}" >> "$GITHUB_ENV"' in reads[0]
 
 
 def test_own_allowlist_matches_the_recorded_paths() -> None:
