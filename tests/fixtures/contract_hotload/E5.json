@@ -1,0 +1,38 @@
+{
+  "chain": "E5",
+  "kind": "error",
+  "title": "baseline",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "deploy",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "replace",
+        "contract_name": "node_base",
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "registration_request_id": "684876ad-b8e2-598d-a4ce-af867789a7bb",
+        "expected_version": 1,
+        "owner": "lab-deploy"
+      },
+      "key": "node_base"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:684876ad-b8e2-598d-a4ce-af867789a7bb",
+        "outcome": "rejected",
+        "reason": "BASELINE_PROTECTED",
+        "registry_version": 0
+      },
+      "key": "lab-deploy:684876ad-b8e2-598d-a4ce-af867789a7bb"
+    }
+  ],
+  "ends_in": "BASELINE_PROTECTED; no row change"
+}
