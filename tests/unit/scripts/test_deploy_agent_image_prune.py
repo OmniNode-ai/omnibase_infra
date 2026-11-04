@@ -27,7 +27,7 @@ from omnibase_infra.models.model_deploy_agent_image_prune_request import (
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACT = (
-    ROOT / "src/omnibase_infra/nodes/node_deploy_agent_image_prune_effect/contract.yaml"
+    ROOT / "src/omnibase_infra/handlers/deploy_agent_image_prune_effect/contract.yaml"
 )
 NOW = datetime(2026, 11, 4, 13, tzinfo=UTC)
 IMAGE_ID = "sha256:" + "a" * 64
@@ -197,7 +197,10 @@ def test_timer_and_service_are_declared_with_node_installer() -> None:
         name = f"onex-deploy-agent-image-prune.{suffix}"
         entry = next(item for item in entries if item["name"] == name)
         assert entry["hosts"] == agent_hosts
-        assert entry["installer_args"][:2] == ["node", CONTRACT.parent.name]
+        assert entry["installer_args"][:2] == [
+            "node",
+            "node_deploy_agent_image_prune_effect",
+        ]
         assert (ROOT / entry["tracked"]).is_file()
     service = (
         ROOT / "scripts/deploy-agent/deploy/onex-deploy-agent-image-prune.service"

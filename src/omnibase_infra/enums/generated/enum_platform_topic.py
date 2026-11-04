@@ -23,7 +23,6 @@ class EnumPlatformTopic(str, Enum):
     CMD_API_FIXTURE_RECORD_V1 = contract_topic_value('nodes/node_api_fixture_record_effect/contract.yaml', 'platform', 'CMD_API_FIXTURE_RECORD_V1')  # onex.cmd.platform.api-fixture-record.v1
     CMD_ARCHITECTURE_VALIDATE_V1 = contract_topic_value('nodes/node_architecture_validator/contract.yaml', 'platform', 'CMD_ARCHITECTURE_VALIDATE_V1')  # onex.cmd.platform.architecture-validate.v1
     CMD_CI_LIVE_CONTACT_CHECK_V1 = contract_topic_value('nodes/node_ci_live_contact_effect/contract.yaml', 'platform', 'CMD_CI_LIVE_CONTACT_CHECK_V1')  # onex.cmd.platform.ci-live-contact-check.v1
-    CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1 = contract_topic_value('nodes/node_deploy_agent_image_prune_effect/contract.yaml', 'platform', 'CMD_DEPLOY_AGENT_IMAGE_PRUNE_V1')  # onex.cmd.platform.deploy-agent-image-prune.v1
     CMD_HOTPATCH_LEDGER_RECONCILE_V1 = contract_topic_value('nodes/node_hotpatch_ledger_reconcile_effect/contract.yaml', 'platform', 'CMD_HOTPATCH_LEDGER_RECONCILE_V1')  # onex.cmd.platform.hotpatch-ledger-reconcile.v1
     CMD_LEDGER_APPEND_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_APPEND_V1')  # onex.cmd.platform.ledger-append.v1
     CMD_LEDGER_QUERY_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_QUERY_V1')  # onex.cmd.platform.ledger-query.v1
@@ -36,7 +35,6 @@ class EnumPlatformTopic(str, Enum):
     EVT_CI_LIVE_CONTACT_CHECKED_V1 = contract_topic_value('nodes/node_ci_live_contact_effect/contract.yaml', 'platform', 'EVT_CI_LIVE_CONTACT_CHECKED_V1')  # onex.evt.platform.ci-live-contact-checked.v1
     EVT_CONTRACT_DEREGISTERED_V1 = contract_topic_value('nodes/node_contract_registry_reducer/contract.yaml', 'platform', 'EVT_CONTRACT_DEREGISTERED_V1')  # onex.evt.platform.contract-deregistered.v1
     EVT_CONTRACT_REGISTERED_V1 = contract_topic_value('nodes/node_contract_loader_effect/contract.yaml', 'platform', 'EVT_CONTRACT_REGISTERED_V1')  # onex.evt.platform.contract-registered.v1
-    EVT_DEPLOY_AGENT_IMAGE_PRUNED_V1 = contract_topic_value('nodes/node_deploy_agent_image_prune_effect/contract.yaml', 'platform', 'EVT_DEPLOY_AGENT_IMAGE_PRUNED_V1')  # onex.evt.platform.deploy-agent-image-pruned.v1
     EVT_DLQ_MESSAGE_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_DLQ_MESSAGE_V1')  # onex.evt.platform.dlq-message.v1
     EVT_FEATURE_FLAG_CHANGED_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_FEATURE_FLAG_CHANGED_V1')  # onex.evt.platform.feature-flag-changed.v1
     EVT_FSM_STATE_TRANSITIONS_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'EVT_FSM_STATE_TRANSITIONS_V1')  # onex.evt.platform.fsm-state-transitions.v1

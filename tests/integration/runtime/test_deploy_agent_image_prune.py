@@ -5,6 +5,9 @@
 from __future__ import annotations
 
 import json
+import shlex
+import subprocess
+from importlib.metadata import entry_points
 from pathlib import Path
 
 import pytest
@@ -56,3 +59,33 @@ def test_actual_runtime_dispatches_contract_handler(
     assert any(call[:2] == ["image", "prune"] for call in calls) is (
         operation == "deploy_agent.images.prune" and not fail
     )
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_host_service_uses_its_explicit_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail: bool
+) -> None:
+    """Run the shipped timer command without attaching host Docker I/O at boot."""
+    node_name = "node_deploy_agent_image_prune_effect"
+    assert node_name not in {ep.name for ep in entry_points(group="onex.nodes")}
+    log = docker_stub(tmp_path, monkeypatch)
+    if fail:
+        monkeypatch.setenv("FAIL_INVENTORY", "1")
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.setenv("DEPLOY_AGENT_GC_REPO", str(root))
+    unit = root / "scripts/deploy-agent/deploy/onex-deploy-agent-image-prune.service"
+    command = next(
+        line.removeprefix("ExecStart=")
+        for line in unit.read_text().splitlines()
+        if line.startswith("ExecStart=")
+    )
+    # systemd expands these escapes before invoking the declared shell.
+    command = command.replace("$$", "$").replace("%h", str(tmp_path))
+    argv = shlex.split(command)
+    assert "--contract " in argv[-1]
+    result = subprocess.run(
+        argv, capture_output=True, text=True, timeout=30, check=False
+    )
+    assert result.returncode == int(fail), result.stdout + result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert any(call[:2] == ["image", "prune"] for call in calls) is not fail

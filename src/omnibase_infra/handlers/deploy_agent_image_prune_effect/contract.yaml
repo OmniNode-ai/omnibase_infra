@@ -1,1 +1,70 @@
-../../nodes/node_deploy_agent_image_prune_effect/contract.yaml
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Host-local RuntimeLocal contract: the timer selects it with --contract.
+# Keep host Docker maintenance out of shared runtime discovery and provisioning.
+name: node_deploy_agent_image_prune_effect
+contract_name: node_deploy_agent_image_prune_effect
+node_name: node_deploy_agent_image_prune_effect
+node_type: EFFECT_GENERIC
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: "OMN-19998: retain rollback references while pruning aged, unreferenced deploy-agent runtime images."
+input_model:
+  name: ModelDeployAgentImagePruneRequest
+  module: omnibase_infra.models.model_deploy_agent_image_prune_request
+  description: Plan by default, or explicitly prune or install the host units.
+output_model:
+  name: ModelDeployAgentImagePruneResult
+  module: omnibase_infra.models.model_deploy_agent_image_prune_result
+  description: Removal plan, refusal or installed-unit readback.
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.deploy-agent-image-prune.v1"]
+  publish_topics: ["onex.evt.platform.deploy-agent-image-pruned.v1"]
+terminal_event: "onex.evt.platform.deploy-agent-image-pruned.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: deploy_agent.images.plan
+      handler: &image_handler
+        name: HandlerDeployAgentImagePrune
+        module: omnibase_infra.handlers.handler_deploy_agent_image_prune
+      event_model: &image_request
+        name: ModelDeployAgentImagePruneRequest
+        module: omnibase_infra.models.model_deploy_agent_image_prune_request
+      output_events: [ModelDeployAgentImagePruneResult]
+    - operation: deploy_agent.images.prune
+      handler: *image_handler
+      event_model: *image_request
+      output_events: [ModelDeployAgentImagePruneResult]
+    - operation: deploy_agent.images.install
+      handler: *image_handler
+      event_model: *image_request
+      output_events: [ModelDeployAgentImagePruneResult]
+config:
+  image_prune:
+    minimum_age_hours: 24
+    source_label: org.opencontainers.image.source
+    source_value: https://github.com/OmniNode-ai/omnibase_infra
+    docker_timeout_seconds: 120
+    inspect_batch_size: 64
+    unit_names: [onex-deploy-agent-image-prune.service, onex-deploy-agent-image-prune.timer]
+    unit_source_directory: scripts/deploy-agent/deploy
+    user_home_path: "~"
+    unit_directory: .config/systemd/user
+    environment_file: .config/onex/deploy-agent-image-prune.env
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+capabilities:
+  - name: deploy_agent.images.plan
+    description: Read image identities and references without removing anything.
+  - name: deploy_agent.images.prune
+    description: Apply the declared source and age filters using dangling-only Docker prune.
+  - name: deploy_agent.images.install
+    description: Install and enable only the image cleanup companion timer.
+metadata:
+  ticket: OMN-19998
+  author: OmniNode Team
+  description: Host-local deployment maintenance through the regular local runtime.
+  tags: [effect, maintenance, deployment]

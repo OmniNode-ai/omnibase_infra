@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 # OMN-19998: the contract's install operation installs this companion and timer.
 # From the branch checkout: uv run onex node node_deploy_agent_image_prune_effect
+# --contract src/omnibase_infra/handlers/deploy_agent_image_prune_effect/contract.yaml
 # --input src/omnibase_infra/nodes/node_deploy_agent_image_prune_effect/install.json
 # --backend event_bus=inmemory
 [Unit]
@@ -11,7 +12,7 @@ Description=Deploy agent unreferenced runtime image cleanup
 Type=oneshot
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=%h/.config/onex/deploy-agent-image-prune.env
-ExecStart=/bin/bash -c 'cd "$${DEPLOY_AGENT_GC_REPO}" && exec "$${DEPLOY_AGENT_GC_REPO}/.venv/bin/onex" node node_deploy_agent_image_prune_effect --input src/omnibase_infra/nodes/node_deploy_agent_image_prune_effect/prune.json --state-root "%h/.local/state/onex/deploy-agent-image-prune" --backend event_bus=inmemory'
+ExecStart=/bin/bash -c 'cd "$${DEPLOY_AGENT_GC_REPO}" && exec "$${DEPLOY_AGENT_GC_REPO}/.venv/bin/onex" node node_deploy_agent_image_prune_effect --contract src/omnibase_infra/handlers/deploy_agent_image_prune_effect/contract.yaml --input src/omnibase_infra/nodes/node_deploy_agent_image_prune_effect/prune.json --state-root "%h/.local/state/onex/deploy-agent-image-prune" --backend event_bus=inmemory'
 TimeoutStartSec=15min
 Nice=10
 StandardOutput=journal
