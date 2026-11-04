@@ -10,7 +10,7 @@ ENABLE + FORCE row level security and the tenant_isolation policy), seeds it, ap
 forward runner does (``psql -v ON_ERROR_STOP=1 -f``) and reads the result back. Failure modes, one test each:
 
   R1 600 runs over 20 days serve 20 days whose runs sum to 600, more than the 500-row cap could hold, with each day's
-     passed, failed and unrecorded counts as the view's rules give them;
+     passed and failed counts as the view's rules give them, and no unrecorded run (the gate column is NOT NULL);
   R2 a day whose runs carry no token counts is served as null tokens, never 0;
   R3 every row, existing and inserted after 0065, has a distinct non-null cursor;
   R4 0065 applied a second time succeeds and leaves exactly one cursor sequence (the hostile review asked);
@@ -69,12 +69,16 @@ ROLES = (
 WRITER_GRANT = "GRANT SELECT, INSERT, UPDATE ON public.delegation_events TO tenant_projection_writer"
 
 
-def _outcome(r: int) -> tuple[bool | None, bool | None]:
-    """(terminal_ok, quality_gate_passed) for the r-th run of a day: a mix of every rule the view applies."""
+def _outcome(r: int) -> tuple[bool | None, bool]:
+    """(terminal_ok, quality_gate_passed) for the r-th run of a day: a mix of every rule the view applies.
+
+    quality_gate_passed is NOT NULL DEFAULT FALSE (0007), so the real table holds no run the view could count as
+    unrecorded; R1 asserts that bucket stays 0.
+    """
     if r % 10 == 0:
         return False, True  # terminal not ok: failed, whatever the gate said
     if r % 7 == 0:
-        return True, None  # gate never recorded: unrecorded
+        return None, False  # terminal never recorded counts as ok; the gate fails it
     if r % 11 == 0:
         return None, True  # terminal never recorded counts as ok: the gate passes it
     return True, r % 3 != 0  # the gate decides
@@ -174,6 +178,7 @@ def test_r1_600_runs_over_20_days_are_served_whole(cluster: EphemeralPostgres) -
         (START + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(20)
     ]
     passed, failed, unrecorded = _expected(30)
+    assert unrecorded == 0 and passed and failed, (passed, failed, unrecorded)
     for day in days:
         assert (day["passed"], day["failed"], day["unrecorded"]) == (
             passed,
