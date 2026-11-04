@@ -84,8 +84,7 @@ for __name in $DEPLOY_AGENT_ENV_PROTECTED; do
 		die "DEPLOY_AGENT_ENV_PROTECTED contains a non-identifier name"
 		;;
 	esac
-	eval "__is_set=\${${__name}+x}"
-	if [ -n "${__is_set:-}" ]; then
+	if [[ -v $__name ]]; then
 		eval "__saved_${__name}=\${${__name}}"
 		__restore_names="${__restore_names} ${__name}"
 	fi
@@ -96,12 +95,10 @@ done
 # the store is the operator's file, not ours, and a line referencing an unset
 # variable must not abort the agent. Errexit stays armed -- a store that fails to
 # parse is a refusal, not something to run past.
-set -a
-set +u
+set -a +u
 # shellcheck disable=SC1090
 . "$DEPLOY_AGENT_ENV_FILE"
-set -u
-set +a
+set -u +a
 
 # Restore systemd's ordering: the unit's own declarations win over the store.
 for __name in $__restore_names; do
@@ -125,6 +122,12 @@ if [[ "${DEPLOY_AGENT_ALLOWED_LANES:-}" == "dev" && "${ONEX_LEDGER_WRITE_VIA:-}"
     printf -v ONEX_LEDGER_BUS_APPEND_COMMAND '%q -m omnimarket.work_ledger_bus.cli append --bus-lane dev --omnibase-path %q' \
         "${UNIT_DRIFT_REGISTRY_ROOT}/.onex-dispatch-venv/bin/python" "$UNIT_DRIFT_REGISTRY_ROOT"
     export ONEX_LEDGER_BUS_APPEND_COMMAND
+fi
+
+# The trusted dev parent survives a broken branch child. Its own imports stay
+# on dev; neither a prod fence nor a mixed fence can start this route.
+if [[ "${DEPLOY_AGENT_ALLOWED_LANES:-}" == "dev" && "${DEPLOY_AGENT_TRACKING_REF:-}" == "dev" && -n "${DEPLOY_AGENT_TRIAL_CONTRACT:-}" && "${DEPLOY_AGENT_SUPERVISED:-}" != "1" ]]; then
+    exec "$DEPLOY_AGENT_PYTHON" -m deploy_agent.events "$@"
 fi
 
 exec "$DEPLOY_AGENT_PYTHON" -m deploy_agent "$@"

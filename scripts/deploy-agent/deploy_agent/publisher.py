@@ -289,16 +289,13 @@ def _produce(
 
 
 def publish_result(
-    payload: dict[str, Any], kafka_config: ModelDeployAgentKafkaConfig
+    payload: dict[str, Any],
+    kafka_config: ModelDeployAgentKafkaConfig,
+    topic: str = TOPIC_REBUILD_COMPLETED,
 ) -> bool:
-    """Publish completion event to the same control bus consumed by deploy-agent."""
-    correlation_id = payload.get("correlation_id", "")
-    return _produce(
-        TOPIC_REBUILD_COMPLETED,
-        f"deploy-result/{correlation_id}",
-        payload,
-        kafka_config,
-    )
+    """Publish a typed result on its declared control-bus event topic."""
+    key = f"deploy-result/{payload.get('correlation_id', '')}"
+    return _produce(topic, key, payload, kafka_config)
 
 
 def publish_dev_lane_drift(

@@ -20,5 +20,7 @@ class EnumDeployTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_REBUILD_REQUESTED_V1 = contract_topic_value('nodes/node_deploy_agent_branch_trial_effect/contract.yaml', 'deploy', 'CMD_REBUILD_REQUESTED_V1')  # onex.cmd.deploy.rebuild-requested.v1
+    EVT_AGENT_BRANCH_TRIAL_QUEUED_V1 = contract_topic_value('nodes/node_deploy_agent_branch_trial_effect/contract.yaml', 'deploy', 'EVT_AGENT_BRANCH_TRIAL_QUEUED_V1')  # onex.evt.deploy.agent-branch-trial-queued.v1
     EVT_DEV_LANE_DRIFT_V1 = contract_topic_value('services/topics.yaml', 'deploy', 'EVT_DEV_LANE_DRIFT_V1')  # onex.evt.deploy.dev-lane-drift.v1
     EVT_DEV_TAG_HEARTBEAT_V1 = contract_topic_value('services/topics.yaml', 'deploy', 'EVT_DEV_TAG_HEARTBEAT_V1')  # onex.evt.deploy.dev-tag-heartbeat.v1

@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Canonical request adapter for the dev agent's trusted host supervisor."""
+
+from pathlib import Path
+
+from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.handlers.deploy_agent_branch_trial_effect import effect
+from omnibase_infra.models.model_deploy_agent_branch_trial_request import (
+    ModelDeployAgentBranchTrialRequest,
+)
+from omnibase_infra.models.model_deploy_agent_branch_trial_result import (
+    ModelDeployAgentBranchTrialResult,
+)
+
+
+class HandlerDeployAgentBranchTrial:
+    def __init__(self, container: ModelONEXContainer) -> None:
+        self._state_root = container.get_service(Path)
+
+    def handle(
+        self, request: ModelDeployAgentBranchTrialRequest
+    ) -> ModelDeployAgentBranchTrialResult:
+        return effect.queue_request(request, self._state_root)

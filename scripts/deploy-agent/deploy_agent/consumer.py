@@ -86,6 +86,7 @@ from deploy_agent.events import (
     ModelRebuildRequested,
     ModelRejectionNotice,
     Scope,
+    load_agent_branch_trial,
 )
 from deploy_agent.host_slot import HostSlot
 from deploy_agent.job_state import JobStore
@@ -117,18 +118,9 @@ from omnibase_infra.topics.topic_namespace import (
 logger = logging.getLogger(__name__)
 
 
-def _broker_timestamp(msg: Any) -> datetime | None:
-    """The record's broker timestamp, the lineage fence's fallback publish time.
-
-    OMN-19270. On this topic it is set by the hop that FORWARDS the command,
-    just before this agent reads it, so it is never earlier than the running
-    build's start: a command that carries no ``requested_at`` is therefore never
-    superseded on time, which is the direction that builds.
-    """
-    raw = getattr(msg, "timestamp", None)
-    if not isinstance(raw, int) or raw < 0:
-        return None
-    return datetime.fromtimestamp(raw / 1000, tz=UTC)
+_broker_timestamp: Callable[[object], datetime | None] = (
+    load_agent_branch_trial().effect.broker_timestamp
+)
 
 
 # OMN-16442. Invoked at the PRE_ACCEPT job boundary with a callback that rewinds
@@ -866,6 +858,10 @@ class DeployConsumer:
         for the fence. The verdict is journalled on every path, so an accepted
         command still records which comparison let it through.
         """
+        # Agent code is not a runtime image. All signature, lane, instance,
+        # freeze, busy, host-slot and dedup checks above still apply.
+        if cmd.scope is Scope.AGENT_TRIAL:
+            return None
         if self.running_build is None or self.ancestry_resolver is None:
             return None
         reader = self.running_build
