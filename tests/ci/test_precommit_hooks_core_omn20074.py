@@ -22,7 +22,7 @@ pytestmark = pytest.mark.unit
 CONFIG = Path(__file__).resolve().parents[2] / ".pre-commit-config.yaml"
 CORE_REPO = "https://github.com/OmniNode-ai/omnibase_core"
 OCC_REPO = "https://github.com/OmniNode-ai/onex_change_control"
-FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+DEV_MERGE_TAG = re.compile(r"^dev-\d{14}-[0-9a-f]{12}$")
 
 
 def _owners(hook_id: str) -> list[tuple[str, str, dict[str, Any]]]:
@@ -40,7 +40,7 @@ def test_no_hardcoded_topics_comes_from_omnibase_core() -> None:
     owners = _owners("no-hardcoded-topics")
     assert [url for url, _, _ in owners] == [CORE_REPO]
     _, rev, hook = owners[0]
-    assert FULL_SHA.match(rev), f"omnibase_core rev must be a full sha, got {rev!r}"
+    assert DEV_MERGE_TAG.match(rev), f"omnibase_core rev must be a tag, got {rev!r}"
     assert hook.get("require_serial") is True
     assert hook.get("exclude")
 

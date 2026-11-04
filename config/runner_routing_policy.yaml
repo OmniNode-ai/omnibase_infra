@@ -1125,6 +1125,9 @@ route:
         - Demo Loop Gate
         - Dep Provenance Gate
         - Dep Provenance Lineage Gate (OMN-15604)
+        # OMN-22360: the core dependency-pin validator, registered STRICT in
+        # STRICT_GATE_JOBS and enforced by the CI Summary poller.
+        - dependency-pins / Dependency Pins
         - Deploy Agent Tests (OMN-15378) / deploy-agent-tests
         - deploy-gate / deploy-gate
         - dispatcher-route-coverage
