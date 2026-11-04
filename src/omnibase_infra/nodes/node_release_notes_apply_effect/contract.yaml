@@ -34,6 +34,9 @@ output_model:
   name: "ModelReleaseNotesApplyResult"
   module: "omnibase_infra.models.model_release_notes_apply_result"
   description: "success, the notes target, the staged paths in staging order, and the refusal reason when success is false."
+descriptor:
+  node_archetype: effect
+  purity: side_effect
 # Top-level handler block: RuntimeLocal's single-shot compute path (no terminal_event,
 # no event bus) resolves the handler and its input model from THIS block, so
 # `onex node node_release_notes_apply_effect --input request.json` runs it without a

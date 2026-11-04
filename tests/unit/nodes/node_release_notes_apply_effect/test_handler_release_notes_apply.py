@@ -340,6 +340,9 @@ class TestCutJobWiring:
         assert "jq -er '(.result.handler_result // .result)" in body
         assert "select(.success == true)" in body
         assert "read -r -d '' -a staged < <(jq" not in body
+        assert "release-notes-stderr.log" in body, (
+            "a node that never reaches a receipt must still surface its stderr"
+        )
 
     def test_the_node_runs_from_the_train_checkout_without_the_app_token(
         self,
