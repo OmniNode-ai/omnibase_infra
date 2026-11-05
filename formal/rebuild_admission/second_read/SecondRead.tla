@@ -543,10 +543,6 @@ SeeHandover ==     \* the old holder's own copy catches up
 Next ==
   \/ \E t \in Tasks : Reserve(t) \/ Release(t) \/ Consume(t) \/ DupConsume(t) \/ Finish(t)
                       \/ Bind(t) \/ ClaimRow(t) \/ CloseRow(t) \/ ZombieEnds(t) \/ FinishFail(t) \/ ContCheck(t) \/ ContDo(t)
-  \/ \E p \in Pieces : RowOnLedger(p) \/ GateSees(p)
-  \/ \E s \in SafetyIds : SafetyEscalates(s)
-  \/ \E x \in Procs : KeyWrite(x) \/ StepIntent(x)
-  \/ SyncView \/ SeeHandover
                       \/ Fix(t) \/ SafetyFix(t) \/ ContStep(t) \/ Suspend(t) \/ Resume(t)
   \/ \E s \in SafetyIds : SafetyOpens(s) \/ SafetyCloses(s)
   \/ PubDies \/ GoesStale \/ Publish
@@ -554,6 +550,10 @@ Next ==
                        \/ \E r \in {"see", "typed"} : EvidenceRow(p, r)
   \/ \E x \in Procs : StepWrite(x) \/ Checkpoint(x) \/ Crash(x) \/ Recover(x)
   \/ Handover
+  \/ \E p \in Pieces : RowOnLedger(p) \/ GateSees(p)
+  \/ \E s \in SafetyIds : SafetyEscalates(s)
+  \/ \E x \in Procs : KeyWrite(x) \/ StepIntent(x)
+  \/ SyncView \/ SeeHandover
 
 \* Fairness, stated, used only by liveness. Time passes (a reservation expires, a dead
 \* publisher's table goes stale, an aged stop writes its decision row, a suspension sweep
