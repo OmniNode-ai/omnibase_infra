@@ -125,7 +125,6 @@ from omnibase_infra.event_bus.topic_constants import (
     get_dlq_topic_for_original,
     is_dlq_topic,
 )
-from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import (
     ModelConsumerRetryConfig,
@@ -1492,6 +1491,8 @@ def load_published_events_map(
     try:
         # This runs for every subscribed contract during cold wiring. Share
         # discovery's safe parser instead of reintroducing Python YAML scans.
+        from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
+
         contract_data = read_contract_yaml(contract_path)
     except yaml.YAMLError as e:
         _logger.warning("Failed to parse YAML in %s: %s", contract_path, e)

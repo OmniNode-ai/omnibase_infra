@@ -47,8 +47,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
-
 __all__ = [
     "CONSUME_CONCURRENCY_KEY",
     "DEFAULT_MAX_IN_FLIGHT_RECORDS",
@@ -120,6 +118,8 @@ def load_consume_concurrency(contract_path: Path) -> ModelConsumeConcurrency:
     """
     if not contract_path.exists():
         return ModelConsumeConcurrency()
+
+    from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
 
     raw = read_contract_yaml(contract_path)
     if not isinstance(raw, dict):
