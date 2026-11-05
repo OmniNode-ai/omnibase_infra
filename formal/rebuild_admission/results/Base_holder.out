@@ -1,0 +1,32 @@
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 65 and seed -8500601199502769518 with 16 workers on 80 cores with 43691MB heap and 64MB offheap memory [pid: 1105449] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 21.0.13 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file RebuildAdmission.tla
+Parsing file /tmp/tlc-9568380692566737327/Integers.tla (jar:file:Integers.tla)
+Parsing file /tmp/tlc-9568380692566737327/FiniteSets.tla (jar:file:FiniteSets.tla)
+Parsing file /tmp/tlc-9568380692566737327/TLC.tla (jar:file:TLC.tla)
+Parsing file /tmp/tlc-9568380692566737327/_TLCTrace.tla (jar:file:_TLCTrace.tla)
+Parsing file /tmp/tlc-9568380692566737327/Naturals.tla (jar:file:Naturals.tla)
+Parsing file /tmp/tlc-9568380692566737327/Sequences.tla (jar:file:Sequences.tla)
+Parsing file /tmp/tlc-9568380692566737327/TLCExt.tla (jar:file:TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-05 16:21:00)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 16:21:01.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 8.1E-13
+10003 states generated, 1842 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 24.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 5 and the 95th percentile is 3).
+Finished in 02s at (2026-11-05 16:21:02)

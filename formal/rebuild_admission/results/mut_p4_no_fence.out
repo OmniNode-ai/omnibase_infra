@@ -1,0 +1,96 @@
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 46 and seed -8994643654759700135 with 16 workers on 80 cores with 43691MB heap and 64MB offheap memory [pid: 1182431] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 21.0.13 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file RebuildAdmission.tla
+Parsing file /tmp/tlc-5654048515514246889/Integers.tla (jar:file:Integers.tla)
+Parsing file /tmp/tlc-5654048515514246889/FiniteSets.tla (jar:file:FiniteSets.tla)
+Parsing file /tmp/tlc-5654048515514246889/TLC.tla (jar:file:TLC.tla)
+Parsing file /tmp/tlc-5654048515514246889/_TLCTrace.tla (jar:file:_TLCTrace.tla)
+Parsing file /tmp/tlc-5654048515514246889/Naturals.tla (jar:file:Naturals.tla)
+Parsing file /tmp/tlc-5654048515514246889/Sequences.tla (jar:file:Sequences.tla)
+Parsing file /tmp/tlc-5654048515514246889/TLCExt.tla (jar:file:TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-05 16:33:22)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 16:33:22.
+Error: Invariant ExactlyOneOwner is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = ( o1 :> "idle" @@
+  o2 :> "idle" @@
+  o3 :> "idle" @@
+  "j" :> "idle" @@
+  "j3" :> "idle" @@
+  "u" :> "idle" )
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = (o1 :> 0 @@ o2 :> 0 @@ o3 :> 0 @@ "j" :> 0 @@ "j3" :> 0 @@ "u" :> 0)
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 2: <Handover line 377, col 3 to line 382, col 84 of module RebuildAdmission>
+/\ fresh = TRUE
+/\ handed = TRUE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = ( o1 :> "idle" @@
+  o2 :> "idle" @@
+  o3 :> "idle" @@
+  "j" :> "idle" @@
+  "j3" :> "idle" @@
+  "u" :> "idle" )
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = (o1 :> 0 @@ o2 :> 0 @@ o3 :> 0 @@ "j" :> 0 @@ "j3" :> 0 @@ "u" :> 0)
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+188 states generated, 68 distinct states found, 31 states left on queue.
+The depth of the complete state graph search is 7.
+Finished in 01s at (2026-11-05 16:33:23)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793896401.tla

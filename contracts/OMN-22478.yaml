@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22478
+title: M0 model of the stop gate, WIP admission and the holder, checked exhaustively on the lab
+summary: >-
+  formal/rebuild_admission states the admission table, the holder and fallback and the single-use start reservation as one state machine, with the four properties of the rebuild plan's section 12 and a mutation per property. It implements and wires nothing.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22478-m0-model
+    statement: The model states the four properties and checks them over the bounds its writer inventory fixes.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every base config reports no error with 0 states left on queue, and the digest ties the results to the spec and cfgs -- falsifier: uv run pytest tests/unit/formal/test_rebuild_admission_model.py -q -k "base or match"'
+      - id: AC2
+        statement: 'AC2: every mutation, witness and finding reports its violation, and a mutation that stops failing fails the test -- falsifier: uv run pytest tests/unit/formal/test_rebuild_admission_model.py -q -k mutation'
+evidence_requirements:
+  - kind: tests
+    description: The committed TLC output matches the current spec and cfg digest, each base holds, each mutation fails.
+    command: uv run pytest tests/unit/formal/test_rebuild_admission_model.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22478-m0-ac1
+    description: Each base config reports no error with 0 states left, bound to the model by its digest.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_rebuild_admission_model.py -q -k "base or match"
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn22478-m0-ac2
+    description: Each mutation, witness and finding reports its violation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_rebuild_admission_model.py -q -k mutation
+        cwd: .
+    binds_ac:
+      - AC2

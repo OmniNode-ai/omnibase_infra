@@ -1,0 +1,206 @@
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 44 and seed 3866810702007695399 with 16 workers on 80 cores with 43691MB heap and 64MB offheap memory [pid: 1176098] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 21.0.13 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file RebuildAdmission.tla
+Parsing file /tmp/tlc-2502796535475918994/Integers.tla (jar:file:Integers.tla)
+Parsing file /tmp/tlc-2502796535475918994/FiniteSets.tla (jar:file:FiniteSets.tla)
+Parsing file /tmp/tlc-2502796535475918994/TLC.tla (jar:file:TLC.tla)
+Parsing file /tmp/tlc-2502796535475918994/_TLCTrace.tla (jar:file:_TLCTrace.tla)
+Parsing file /tmp/tlc-2502796535475918994/Naturals.tla (jar:file:Naturals.tla)
+Parsing file /tmp/tlc-2502796535475918994/Sequences.tla (jar:file:Sequences.tla)
+Parsing file /tmp/tlc-2502796535475918994/TLCExt.tla (jar:file:TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-05 16:32:24)
+Implied-temporal checking--satisfiability problem has 3 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 16:32:25.
+Progress(18) at 2026-11-05 16:32:26: 795 states generated, 180 distinct states found, 0 states left on queue.
+Checking 3 branches of temporal properties for the complete state space with 540 total distinct states at (2026-11-05 16:32:26)
+Error: Temporal property RunningContinuationSuspended was violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "idle"]
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 2: <Reserve("g") line 218, col 3 to line 222, col 53 of module RebuildAdmission>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = [g |-> "resv", s1 |-> "idle", r1 |-> "idle"]
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 3: <Consume("g") line 231, col 3 to line 242, col 62 of module RebuildAdmission>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = [g |-> "run", s1 |-> "idle", r1 |-> "idle"]
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = [g |-> 1, s1 |-> 0, r1 |-> 0]
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 4: <SafetyOpens("s1") line 286, col 3 to line 289, col 99 of module RebuildAdmission>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = [g |-> "run", s1 |-> "idle", r1 |-> "idle"]
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = [g |-> 1, s1 |-> 0, r1 |-> 0]
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {"s1"}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 5: <Reserve("s1") line 218, col 3 to line 222, col 53 of module RebuildAdmission>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = [g |-> "run", s1 |-> "resv", r1 |-> "idle"]
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = [g |-> 1, s1 |-> 0, r1 |-> 0]
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {"s1"}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 6: <Release("s1") line 225, col 3 to line 228, col 113 of module RebuildAdmission>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = [g |-> "run", s1 |-> "idle", r1 |-> "idle"]
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = [g |-> 1, s1 |-> 0, r1 |-> 0]
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {"s1"}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+Back to state 5: <Reserve("s1") line 218, col 3 to line 222, col 53 of module RebuildAdmission>
+
+Finished checking temporal properties in 00s at 2026-11-05 16:32:26
+795 states generated, 180 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 18.
+Finished in 02s at (2026-11-05 16:32:26)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793896343.tla

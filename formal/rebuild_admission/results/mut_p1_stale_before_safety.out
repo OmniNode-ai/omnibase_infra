@@ -1,0 +1,144 @@
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 48 and seed 7390287788408701845 with 16 workers on 80 cores with 43691MB heap and 64MB offheap memory [pid: 1176679] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 21.0.13 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file RebuildAdmission.tla
+Parsing file /tmp/tlc-15848650108813507499/Integers.tla (jar:file:Integers.tla)
+Parsing file /tmp/tlc-15848650108813507499/FiniteSets.tla (jar:file:FiniteSets.tla)
+Parsing file /tmp/tlc-15848650108813507499/TLC.tla (jar:file:TLC.tla)
+Parsing file /tmp/tlc-15848650108813507499/_TLCTrace.tla (jar:file:_TLCTrace.tla)
+Parsing file /tmp/tlc-15848650108813507499/Naturals.tla (jar:file:Naturals.tla)
+Parsing file /tmp/tlc-15848650108813507499/Sequences.tla (jar:file:Sequences.tla)
+Parsing file /tmp/tlc-15848650108813507499/TLCExt.tla (jar:file:TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-05 16:32:30)
+Warning: The set Ords has been defined to be a symmetry set but contains less than two elements.
+(Use the -nowarning option to disable this warning.)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 16:32:31.
+Error: Invariant SafetyCauseAdmitted is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = (o1 :> "idle" @@ "s1" :> "idle" @@ "s2" :> "idle")
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = (o1 :> 0 @@ "s1" :> 0 @@ "s2" :> 0)
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 2: <SafetyOpens("s2") line 286, col 3 to line 289, col 99 of module RebuildAdmission>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = TRUE
+/\ pc = (o1 :> "idle" @@ "s1" :> "idle" @@ "s2" :> "idle")
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = (o1 :> 0 @@ "s1" :> 0 @@ "s2" :> 0)
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {"s2"}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 3: <PubDies line 298, col 3 to line 299, col 112 of module RebuildAdmission>
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = FALSE
+/\ pc = (o1 :> "idle" @@ "s1" :> "idle" @@ "s2" :> "idle")
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = (o1 :> 0 @@ "s1" :> 0 @@ "s2" :> 0)
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {"s2"}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+State 4: <GoesStale line 301, col 3 to line 303, col 108 of module RebuildAdmission>
+/\ fresh = FALSE
+/\ handed = FALSE
+/\ badStart = FALSE
+/\ oldResv = {}
+/\ cur = 1
+/\ pubUp = FALSE
+/\ pc = (o1 :> "idle" @@ "s1" :> "idle" @@ "s2" :> "idle")
+/\ keys = [F |-> {}, H |-> {}]
+/\ cleared = FALSE
+/\ consumed = (o1 :> 0 @@ "s1" :> 0 @@ "s2" :> 0)
+/\ ckpt = [F |-> 0, H |-> 0]
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ clash = FALSE
+/\ contStep = FALSE
+/\ staleCons = FALSE
+/\ working = 1..3
+/\ joined = {}
+/\ safety = {"s2"}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ broken = {}
+/\ sFixed = {}
+/\ badClear = FALSE
+/\ busy = [F |-> 0, H |-> 0]
+/\ effects = <<0, 0>>
+
+245 states generated, 145 distinct states found, 105 states left on queue.
+The depth of the complete state graph search is 6.
+Finished in 01s at (2026-11-05 16:32:31)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793896349.tla

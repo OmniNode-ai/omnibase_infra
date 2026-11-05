@@ -1,0 +1,36 @@
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 117 and seed 4406071001567970485 with 16 workers on 80 cores with 43691MB heap and 64MB offheap memory [pid: 1106244] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 21.0.13 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file RebuildAdmission.tla
+Parsing file /tmp/tlc-13976650909678098768/Integers.tla (jar:file:Integers.tla)
+Parsing file /tmp/tlc-13976650909678098768/FiniteSets.tla (jar:file:FiniteSets.tla)
+Parsing file /tmp/tlc-13976650909678098768/TLC.tla (jar:file:TLC.tla)
+Parsing file /tmp/tlc-13976650909678098768/_TLCTrace.tla (jar:file:_TLCTrace.tla)
+Parsing file /tmp/tlc-13976650909678098768/Naturals.tla (jar:file:Naturals.tla)
+Parsing file /tmp/tlc-13976650909678098768/Sequences.tla (jar:file:Sequences.tla)
+Parsing file /tmp/tlc-13976650909678098768/TLCExt.tla (jar:file:TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-05 16:21:05)
+Implied-temporal checking--satisfiability problem has 4 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 16:21:05.
+Progress(19) at 2026-11-05 16:21:06: 1,167 states generated, 260 distinct states found, 0 states left on queue.
+Checking 4 branches of temporal properties for the complete state space with 1040 total distinct states at (2026-11-05 16:21:06)
+Finished checking temporal properties in 00s at 2026-11-05 16:21:06
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.3E-14
+1167 states generated, 260 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 19.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 2).
+Finished in 02s at (2026-11-05 16:21:06)

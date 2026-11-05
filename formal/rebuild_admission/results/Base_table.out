@@ -1,0 +1,36 @@
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 112 and seed -2942378514695088131 with 16 workers on 80 cores with 43691MB heap and 64MB offheap memory [pid: 1169164] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 21.0.13 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file RebuildAdmission.tla
+Parsing file /tmp/tlc-1725245033152273164/Integers.tla (jar:file:Integers.tla)
+Parsing file /tmp/tlc-1725245033152273164/FiniteSets.tla (jar:file:FiniteSets.tla)
+Parsing file /tmp/tlc-1725245033152273164/TLC.tla (jar:file:TLC.tla)
+Parsing file /tmp/tlc-1725245033152273164/_TLCTrace.tla (jar:file:_TLCTrace.tla)
+Parsing file /tmp/tlc-1725245033152273164/Naturals.tla (jar:file:Naturals.tla)
+Parsing file /tmp/tlc-1725245033152273164/Sequences.tla (jar:file:Sequences.tla)
+Parsing file /tmp/tlc-1725245033152273164/TLCExt.tla (jar:file:TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-05 16:31:06)
+Warning: The set Ords has been defined to be a symmetry set but contains less than two elements.
+(Use the -nowarning option to disable this warning.)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 16:31:06.
+Progress(13) at 2026-11-05 16:31:09: 334,414 states generated (334,414 s/min), 71,314 distinct states found (71,314 ds/min), 31,765 states left on queue.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.1E-7
+  based on the actual fingerprints:  val = 4.3E-8
+4291369 states generated, 515460 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 27.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 7 and the 95th percentile is 3).
+Finished in 15s at (2026-11-05 16:31:21)
