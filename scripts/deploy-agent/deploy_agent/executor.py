@@ -121,11 +121,12 @@ from deploy_agent.unit_drift import (
 )
 
 # Maps deploy scope to catalog bundle names used by compose_gen.
-# Scope.FULL regenerates both core and runtime bundles.
+# Runtime and full rebuilds both regenerate core and runtime bundles; host code
+# trials regenerate none.
 SCOPE_BUNDLES: dict[Scope, list[str]] = {
+    Scope.AGENT_TRIAL: [],
     Scope.CORE: ["core"],
-    Scope.RUNTIME: ["core", "runtime"],
-    Scope.FULL: ["core", "runtime"],
+    **{scope: ["core", "runtime"] for scope in (Scope.RUNTIME, Scope.FULL)},
 }
 
 if TYPE_CHECKING:

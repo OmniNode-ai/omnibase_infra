@@ -26,6 +26,7 @@ import time
 from collections.abc import Callable, Iterator, Sequence
 from contextvars import ContextVar
 from datetime import UTC, datetime
+from operator import or_
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -109,7 +110,7 @@ def _write(path: Path, payload: dict[str, object]) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         Path(name).replace(path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        directory = os.open(path.parent, or_(os.O_RDONLY, os.O_DIRECTORY))
         try:
             os.fsync(directory)
         finally:
@@ -132,7 +133,7 @@ def read_receipt(state_dir: Path) -> dict[str, object]:
 def _lock(path: Path) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(stream, or_(fcntl.LOCK_EX, fcntl.LOCK_NB))
         yield
 
 

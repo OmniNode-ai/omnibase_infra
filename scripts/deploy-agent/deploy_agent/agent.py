@@ -823,7 +823,7 @@ class DeployAgent:
             get_dev_lane_drift=self._latest_dev_lane_drift,
             get_dev_tag_heartbeat=self._latest_dev_tag_heartbeat,
             get_branch_installs=self._latest_branch_installs,
-            get_agent_branch_trial=lambda: load_agent_branch_trial().read_receipt(
+            get_agent_branch_trial=lambda: load_agent_branch_trial().effect.read_receipt(
                 STATE_DIR
             ),
         )

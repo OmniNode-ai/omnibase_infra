@@ -56,14 +56,15 @@ def test_non_dev_request_is_refused_before_any_host_effect(
     tmp_path, monkeypatch, target
 ):
     monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev")
-    with pytest.raises(ValueError, match="dev"):
-        request = ModelDeployAgentBranchTrialRequest(
-            correlation_id=uuid4(),
-            target=target,
-            branch="fix-agent",
-            head="a" * 40,
-            duration_seconds=30,
-        )
+    # Exercise the host guard even if an internal caller bypasses validation.
+    request = ModelDeployAgentBranchTrialRequest.model_construct(
+        correlation_id=uuid4(),
+        target=target,
+        branch="fix-agent",
+        head="a" * 40,
+        duration_seconds=30,
+    )
+    with pytest.raises(ValueError, match="admit only dev"):
         queue_from_host(tmp_path / "state", request)
     assert list(tmp_path.iterdir()) == []
 
@@ -581,3 +582,145 @@ def test_queue_acknowledgement_uses_the_contract_topic_with_cached_handler(
     assert publish.call_args.kwargs == {
         "topic": safe_load(contract.read_text())["terminal_event"]
     }
+
+
+def _queued_request():
+    return ModelDeployAgentBranchTrialRequest(
+        correlation_id=uuid4(),
+        target="dev",
+        branch="trial-head",
+        head="a" * 40,
+        duration_seconds=10,
+    )
+
+
+def _supervisor_heartbeat(state, *, valid_until):
+    root = state / "agent-branch-trial"
+    root.mkdir(parents=True)
+    (root / "supervisor.json").write_text(
+        json.dumps(
+            {
+                "target": "dev",
+                "return_ref": "origin/dev",
+                "pid": os.getpid(),
+                "valid_until": valid_until,
+            }
+        )
+    )
+    return root
+
+
+def test_stale_supervisor_refuses_before_writing_a_request(tmp_path):
+    root = _supervisor_heartbeat(tmp_path, valid_until=time.time() - 1)
+    with pytest.raises(ValueError, match="supervisor is stale"):
+        queue_from_host(tmp_path, _queued_request())
+    assert not (root / "request.json").exists()
+    assert not (root / "receipt.json").exists()
+
+
+def test_concurrent_queue_lock_refuses_without_overwriting_the_first_request(tmp_path):
+    root = _supervisor_heartbeat(tmp_path, valid_until=time.time() + 30)
+    with effect._lock(root / "request.lock"):
+        with pytest.raises(BlockingIOError):
+            queue_from_host(tmp_path, _queued_request())
+        assert not (root / "request.json").exists()
+    # Positive control: releasing the same lock admits exactly one request.
+    request = _queued_request()
+    assert queue_from_host(tmp_path, request).status == "queued"
+    with pytest.raises(ValueError, match="already active"):
+        queue_from_host(tmp_path, _queued_request())
+    assert (
+        json.loads((root / "request.json").read_text())["request"]["head"]
+        == request.head
+    )
+    assert json.loads((root / "request.json").read_text())["request"][
+        "correlation_id"
+    ] == str(request.correlation_id)
+
+
+def test_restoration_failure_is_recorded_without_claiming_a_restored_head(
+    trial_host, monkeypatch
+):
+    clone, state, _, failed, _ = trial_host
+    real_spawn = effect._spawn
+
+    def spawn(repo, *, trial, args=()):
+        if not trial:
+            raise OSError("recorded fallback spawn failure")
+        return real_spawn(repo, trial=trial, args=args)
+
+    monkeypatch.setattr(effect, "_spawn", spawn)
+    request = _queued_request().model_copy(update={"head": failed})
+    result = supervise_trial(request, repo_root=clone, state_dir=state)
+    assert result.status == "failed"
+    assert result.restored_loaded_code_sha is None
+    assert "dev restoration: recorded fallback spawn failure" in result.error
+    assert effect.read_receipt(state)["restored_loaded_code_sha"] is None
+
+
+def test_interrupted_supervisor_restores_dev_and_preserves_the_interrupt(
+    trial_host, monkeypatch
+):
+    clone, state, baseline, failed, _ = trial_host
+    real_wait = effect._wait_loaded
+    waits = []
+
+    def wait(child, head, deadline):
+        waits.append(head)
+        if len(waits) == 1:
+            raise KeyboardInterrupt
+        return real_wait(child, head, deadline)
+
+    monkeypatch.setattr(effect, "_wait_loaded", wait)
+    request = _queued_request().model_copy(update={"head": failed})
+    with pytest.raises(KeyboardInterrupt):
+        supervise_trial(request, repo_root=clone, state_dir=state)
+    record = effect.read_receipt(state)
+    assert record["status"] == "failed"
+    assert record["restored_loaded_code_sha"] == baseline
+    assert "supervisor interrupted" in record["error"]
+
+
+def test_unhealthy_candidate_in_parent_loop_returns_to_dev(trial_host, monkeypatch):
+    clone, state, baseline, _, _ = trial_host
+    # dev is also a pushed, healthy head; use it as the bounded candidate.
+    request = _queued_request().model_copy(update={"branch": "dev", "head": baseline})
+    real_wait = effect._wait_loaded
+    real_health = effect._health
+    candidate_loaded = []
+
+    def wait(child, head, deadline):
+        real_wait(child, head, deadline)
+        candidate_loaded.append(True)
+
+    def health():
+        if len(candidate_loaded) == 1:
+            candidate_loaded.append(False)
+            raise OSError("recorded unhealthy candidate socket")
+        return real_health()
+
+    monkeypatch.setattr(effect, "_wait_loaded", wait)
+    monkeypatch.setattr(effect, "_health", health)
+    result = supervise_trial(request, repo_root=clone, state_dir=state)
+    assert result.status == "failed"
+    assert result.loaded_code_sha == baseline
+    assert result.restored_loaded_code_sha == baseline
+    assert "recorded unhealthy candidate socket" in result.error
+
+
+def test_effect_import_failure_is_not_cached_as_a_working_handler(monkeypatch):
+    from deploy_agent import events
+
+    name = "omnibase_infra.handlers.handler_deploy_agent_branch_trial"
+    monkeypatch.delitem(sys.modules, name, raising=False)
+    real_spec = events.importlib.util.spec_from_file_location
+
+    def missing_spec(module_name, path):
+        if module_name.endswith("model_deploy_agent_branch_trial_policy"):
+            return None
+        return real_spec(module_name, path)
+
+    monkeypatch.setattr(events.importlib.util, "spec_from_file_location", missing_spec)
+    with pytest.raises(RuntimeError, match="Cannot load agent branch trial effect"):
+        events.load_agent_branch_trial()
+    assert name not in sys.modules
