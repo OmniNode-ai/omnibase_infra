@@ -10,6 +10,7 @@ the production wire -> freeze -> subscribe path exercised by the boot helper.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Literal
 
 import pytest
 
@@ -19,6 +20,7 @@ from omnibase_infra.event_bus.enum_contract_attach_status import (
 from omnibase_infra.runtime.service_kernel import resolve_topic_readiness_config
 from scripts import lab_alarm
 from scripts.render_runtime_policy_env import load_contract, render_env
+from tests.helpers.lane_overlay_fixtures import load_compose
 from tests.unit.runtime.auto_wiring.test_omn18087_boot_roster_and_priority import (
     DELEGATE_SKILL,
     DELEGATE_SKILL_GROUP,
@@ -38,16 +40,38 @@ pytestmark = pytest.mark.integration
 @pytest.mark.parametrize("process", ["main", "effects"])
 @pytest.mark.parametrize("control", ["ready", "unlisted", "not_ready"])
 async def test_shipped_priority_boots_empty_first_hop_(
-    process: str, control: str, monkeypatch: pytest.MonkeyPatch
+    process: Literal["main", "effects"], control: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     policy = load_contract(ROOT / "contracts/services/runtime_policy.contract.yaml")
     rendered = render_env(policy)
+    service, compose = (
+        ("omninode-runtime", "docker-compose.infra.yml")
+        if process == "main"
+        else ("runtime-effects", "docker-compose.dev-lane.yml")
+    )
+    carrier = load_compose(ROOT / "docker" / compose)["services"][service]
+    for variable, suffix in (
+        ("ONEX_BOOT_READY_BOUND_SECONDS", "READY_BOUND_SECONDS"),
+        ("ONEX_MAX_CONCURRENT_CONTRACT_ATTACH", "MAX_CONCURRENT_CONTRACT_ATTACH"),
+    ):
+        policy_key = f"DEV_RUNTIME_{process.upper()}_{suffix}"
+        assert carrier["environment"][variable] == (
+            f"${{{policy_key}:?runtime policy contract must set {policy_key}}}"
+        )
+        monkeypatch.setenv(variable, rendered[policy_key])
+    memory_key = f"DEV_RUNTIME_{process.upper()}_MEMORY"
+    assert carrier["deploy"]["resources"]["limits"]["memory"] == (
+        f"${{{memory_key}:?runtime policy contract must set {memory_key}}}"
+    )
     key = f"DEV_RUNTIME_{process.upper()}_BOOT_PRIORITY_CONTRACTS"
     monkeypatch.setenv(
         "ONEX_BOOT_PRIORITY_CONTRACTS",
         "" if control == "unlisted" else rendered[key],
     )
     knobs = resolve_topic_readiness_config()
+    boot = policy.profiles["dev"].processes[process].boot
+    assert boot is not None
+    assert knobs.max_concurrent_contract_attach == boot.max_concurrent_contract_attach
     assert (DELEGATE_SKILL in knobs.priority_contracts) == (control != "unlisted")
     provisioner = RecordingProvisioner(
         not_ready_topics=(

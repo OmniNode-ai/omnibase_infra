@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Literal
 from unittest.mock import patch
 
 import pytest
@@ -38,13 +39,17 @@ from omnibase_infra.event_bus.model_contract_attach_result import (
 from omnibase_infra.event_bus.model_topic_readiness_config import (
     ModelTopicReadinessConfig,
 )
-from omnibase_infra.handlers.boot_readiness_checks import verify_roster_partition
+from omnibase_infra.handlers.boot_readiness_checks import (
+    parse_ready_bound_seconds,
+    verify_roster_partition,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     subscribe_wired_contract_topics,
     wire_from_manifest,
 )
 from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.service_kernel import resolve_topic_readiness_config
 from scripts.render_runtime_policy_env import load_contract, render_env
 from tests.helpers.lane_overlay_fixtures import load_compose
 from tests.unit.runtime.auto_wiring.test_omn18087_boot_subscribes_only_topics_in_use import (
@@ -408,7 +413,7 @@ async def test_priority_does_not_bypass_topic_readiness() -> None:
     ],
 )
 def test_dev_delegation_priority_reaches_both_carriers(
-    process: str,
+    process: Literal["main", "effects"],
     service: str,
     compose: str,
 ) -> None:
@@ -425,3 +430,46 @@ def test_dev_delegation_priority_reaches_both_carriers(
         environment["ONEX_BOOT_PRIORITY_CONTRACTS"]
         == f"${{{key}:?runtime policy contract must set {key}}}"
     )
+
+
+def test_dev_effects_boot_policy_reaches_carrier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = load_contract(ROOT / "contracts/services/runtime_policy.contract.yaml")
+    effects = policy.profiles["dev"].processes["effects"]
+    assert effects.boot is not None
+    # Distinct values catch a carrier silently using the kernel or base defaults.
+    policy.profiles["dev"].processes["effects"] = effects.model_copy(
+        update={
+            "boot": effects.boot.model_copy(
+                update={
+                    "ready_bound_seconds": 321,
+                    "max_concurrent_contract_attach": 7,
+                    "memory_limit": "2048M",
+                }
+            )
+        }
+    )
+    rendered = render_env(policy)
+    carrier = load_compose(ROOT / "docker/docker-compose.dev-lane.yml")["services"][
+        "runtime-effects"
+    ]
+    boot_env: dict[str, str] = {}
+    for variable, suffix in (
+        ("ONEX_BOOT_READY_BOUND_SECONDS", "READY_BOUND_SECONDS"),
+        ("ONEX_MAX_CONCURRENT_CONTRACT_ATTACH", "MAX_CONCURRENT_CONTRACT_ATTACH"),
+        ("ONEX_BOOT_PRIORITY_CONTRACTS", "BOOT_PRIORITY_CONTRACTS"),
+    ):
+        key = f"DEV_RUNTIME_EFFECTS_{suffix}"
+        assert carrier["environment"][variable] == (
+            f"${{{key}:?runtime policy contract must set {key}}}"
+        )
+        boot_env[variable] = rendered[key]
+        monkeypatch.setenv(variable, rendered[key])
+    assert parse_ready_bound_seconds(boot_env) == 321
+    assert resolve_topic_readiness_config().max_concurrent_contract_attach == 7
+    key = "DEV_RUNTIME_EFFECTS_MEMORY"
+    assert carrier["deploy"]["resources"]["limits"]["memory"] == (
+        f"${{{key}:?runtime policy contract must set {key}}}"
+    )
+    assert rendered[key] == "2048M"
