@@ -76,6 +76,7 @@ CONSTANTS
   RepairCanFail,  \* the bounded repair lane can end without repairing the writer
   CloseOnSources, \* a safety failure closes on its own sources, not on the table
   SafetyEscOn,    \* an aged safety stop writes one decision row
+  ScauseFiltered, \* a filter ahead of step 1 refuses the safety cause lane: step 0b on a private repository, or no freed place
   TrackReading    \* keep the ghost that dates a reading against its stop; off, the state counts match the first reader's
 
 Tasks == Ords \cup Others
@@ -207,6 +208,7 @@ First(a, b, c, d) ==
   IF a # "next" THEN a ELSE IF b # "next" THEN b ELSE IF c # "next" THEN c ELSE d
 Decide(k) ==
   IF k.k = "ro" THEN "admit"
+  ELSE IF ScauseFiltered /\ k.k = "scause" THEN "refuse"
   ELSE CASE TableOrder \in {"design", "no_repair_bound"} -> First(Step1(k), Step2(k), Step3(k), StepOrder(k))
          [] TableOrder = "stale_first" -> First(Step2(k), Step1(k), Step3(k), StepOrder(k))
          [] TableOrder = "stop_first"  -> First(Step1(k), Step3(k), Step2(k), StepOrder(k))
@@ -586,6 +588,14 @@ FairnessMin ==
 Spec == Init /\ [][Next]_vars
 LiveSpec == Spec /\ Fairness
 LiveMinSpec == Spec /\ FairnessMin
+\* Weak in place of strong on Publish and on closing a safety failure.
+LiveWeakSpec == Spec
+  /\ \A t \in Tasks : WF_vars(Release(t)) /\ WF_vars(Suspend(t)) /\ WF_vars(Resume(t))
+  /\ \A p \in Pieces : WF_vars(Escalates(p))
+  /\ \A s \in SafetyIds : WF_vars(SafetyCloses(s))
+  /\ \A t \in Tasks : K(t).k = "repair" => (SF_vars(Reserve(t)) /\ SF_vars(Consume(t)) /\ WF_vars(Finish(t)))
+  /\ WF_vars(Publish) /\ WF_vars(GoesStale)
+  /\ \A x \in Procs : WF_vars(Recover(x))
 \* As the repair lane has it: a safety cause lane that keeps being admitted does start.
 LiveCauseSpec == LiveSpec /\ \A t \in Tasks : K(t).k = "scause" => (SF_vars(Reserve(t)) /\ SF_vars(Consume(t)))
 
