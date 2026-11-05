@@ -185,6 +185,16 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-agent-hotpatch-ledger-gate
+    statement: The deploy agent must run the existing hot-patch ledger preflight before compose replacement and recovery paths.
+    acceptance:
+      - id: AC1999802
+        statement: 'AC1999802: an unmerged recorded hot-patch refuses run_compose_recreate and _compose_up before any compose up, a merged row permits replacement, and a host with no ledger skips the gate -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest -c pyproject.toml tests/scripts/test_hotpatch_ledger_gate_omn19998.py -q'
+  - id: req-omn19998-agent-host-dispatch
+    statement: Deploy-agent replacement effects remain host-local and admission failures and recreate cleanup survive serialization over the in-memory bus.
+    acceptance:
+      - id: AC1999801
+        statement: 'AC1999801: the host contract attaches no shared Kafka consumer; the real ledger preflight returns a serialized terminal result; missing script, missing OMNI_HOME, unreadable git HEAD and gate timeout refuse replacement; removal races and one or two timeouts retain cleanup and retry behavior.'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -769,3 +779,30 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-agent-hotpatch-ledger-deploy-probe
+    description: Exercises the deploy agent replacement entry points with the real hot-patch preflight and disposable Git histories. Docker is a stand-in and compose calls are captured. An unmerged ledger row refuses both replacement paths before any up command; a merged row and an absent ledger permit replacement. This checks the deployment artifact without replacing live containers.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest -c pyproject.toml tests/scripts/test_hotpatch_ledger_gate_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC1999802
+  - id: dod-omn19998-agent-host-dispatch-deploy-readback
+    description: Deploy-agent host readback through the real in-memory bus and real ledger preflight on disposable Git histories, plus admission failure and retry checks. Runs on a hosted runner without replacing live containers.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env COMPOSE_PROJECT_NAME=landing-l26762-lab PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/deploy_agent/test_replacement_host_dispatch_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC1999801
+  - id: dod-omn19998-host-node-package-boundary
+    description: The host-owned replacement contract stays outside shared-runtime node exports. Exercise the host bus with the real ledger preflight and verify contract-backed runtime node exports remain synchronized. Runs with disposable Git histories and captured compose commands on a hosted runner.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/deploy_agent/test_replacement_host_dispatch_omn19998.py tests/scripts/test_generate_entry_points.py::test_current_repo_entry_points_match_contract_backed_nodes -q
+        cwd: .
+    binds_ac:
+      - AC1999801

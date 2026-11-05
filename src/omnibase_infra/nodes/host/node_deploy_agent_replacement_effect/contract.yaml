@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_deploy_agent_replacement_effect
+contract_name: node_deploy_agent_replacement_effect
+node_name: node_deploy_agent_replacement_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Host-local effect invoked by the deploy agent while handling a bus command, before compose replacement or recovery. Uses the existing hot-patch ledger preflight and supervises recreate cleanup and one retry. Like the dev boot guard, its execution boundary is supplied by the host agent; it does not depend on the runtime containers it protects being available.
+input_model:
+  name: ModelDeployAgentReplacementRequest
+  module: omnibase_infra.models.model_deploy_agent_replacement_request
+  description: Replacement operation, lane, compose project and invocation.
+output_model:
+  name: ModelDeployAgentReplacementResult
+  module: omnibase_infra.models.model_deploy_agent_replacement_result
+  description: Captured process result; admission and repeated timeouts raise.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: preflight
+      handler:
+        name: HandlerDeployAgentReplacement
+        module: omnibase_infra.handlers.handler_deploy_agent_replacement
+    - operation: recreate
+      handler:
+        name: HandlerDeployAgentReplacement
+        module: omnibase_infra.handlers.handler_deploy_agent_replacement
+capabilities:
+  - name: deploy_agent.replacement
+    description: Gate container replacement on recorded hot-patches and settle recreate failures.
+metadata:
+  ticket: OMN-19998
+  author: OmniNode Team
+  description: Host-local effect under the deploy agent bus command and lane lock.
+  tags: [effect, deployment, hotpatch]
+replacement_policy:
+  ledger_path: /data/omninode/hotpatch-ledger/ledger.yaml
+  gate_timeout: 300
+  ref_timeout: 30
+# The deploy agent owns both ends of this in-memory exchange. These are not
+# shared-runtime Kafka subscriptions: the handler requires host I/O supplied by
+# the agent and must remain usable while the runtime it replaces is down.
+host_dispatch:
+  command_topic: "onex.cmd.platform.deploy-agent-replacement.v1"
+  terminal_topic: "onex.evt.platform.deploy-agent-replacement-completed.v1"
