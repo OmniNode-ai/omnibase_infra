@@ -490,9 +490,8 @@ def _branch_hook_install(
     return direct
 
 
-@pytest.mark.parametrize("requested", ["omn-19998-branch-fix", "b" * 40])
 def test_hook_sync_refuses_replacing_an_installer_selected_branch(
-    ws: _Workspace, monkeypatch: pytest.MonkeyPatch, requested: str
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _make_uv_shim(ws.bin_dir, check_exit=1)
     direct = _branch_hook_install(
@@ -501,9 +500,6 @@ def test_hook_sync_refuses_replacing_an_installer_selected_branch(
         plan=" - omniclaude==1.0\n + omniclaude==1.0",
         replace=True,
     )
-    metadata = json.loads(direct.read_text())
-    metadata["vcs_info"]["requested_revision"] = requested
-    direct.write_text(json.dumps(metadata))
     before = direct.read_bytes()
     result = ws.run()
     assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr

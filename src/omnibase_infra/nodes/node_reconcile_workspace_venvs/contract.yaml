@@ -29,7 +29,7 @@ handler_routing:
     - operation: hook_venv.reconcile
       handler:
         name: HandlerReconcileWorkspaceVenvs
-        module: omnibase_infra.nodes.node_reconcile_workspace_venvs.handler_reconcile_workspace_venvs
+        module: omnibase_infra.handlers.hook_venv_reconcile.handler_reconcile_workspace_venvs
       event_model:
         name: ModelHookVenvReconcileRequest
         module: omnibase_infra.models.model_hook_venv_reconcile_request

@@ -18,15 +18,15 @@ from pathlib import Path
 import yaml
 
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+from omnibase_infra.handlers.hook_venv_reconcile.handler_reconcile_workspace_venvs import (
+    HandlerHookVenvReconcileHost,
+    HandlerReconcileWorkspaceVenvs,
+)
 from omnibase_infra.models.model_hook_venv_reconcile_policy import (
     ModelHookVenvReconcilePolicy,
 )
 from omnibase_infra.models.model_hook_venv_reconcile_request import (
     ModelHookVenvReconcileRequest,
-)
-from omnibase_infra.nodes.node_reconcile_workspace_venvs.handler_reconcile_workspace_venvs import (
-    HandlerHookVenvReconcileHost,
-    HandlerReconcileWorkspaceVenvs,
 )
 from omnibase_infra.protocols.protocol_hook_venv_reconcile_host import (
     HOOK_VENV_HOST_SERVICE,
