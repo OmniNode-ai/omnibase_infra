@@ -73,7 +73,8 @@ from omnibase_infra.protocols.protocol_clock import ProtocolClock
 # DispatchResultApplier can publish each output event to the correct topic
 # instead of the single fallback output_topic. (OMN-4881/OMN-4883)
 _CONTRACT_PATH = Path(__file__).parent / "contract.yaml"
-_TOPIC_ROUTER = HandlerRegistrationBootstrap.resources().topic_router(_CONTRACT_PATH)
+_RESOURCES = HandlerRegistrationBootstrap.resources()
+_TOPIC_ROUTER = _RESOURCES.topic_router(_CONTRACT_PATH)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -631,7 +632,7 @@ class ServiceRegistration:
             return
 
         try:
-            schema_sql = HandlerRegistrationBootstrap.read_schema(schema_file)
+            schema_sql = _RESOURCES.read_schema(schema_file)
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
                     # Serialize concurrent schema initialization across multiple
@@ -648,7 +649,7 @@ class ServiceRegistration:
                 correlation_id,
             )
         except Exception as schema_error:  # noqa: BLE001 — boundary: catch-all for resilience
-            if HandlerRegistrationBootstrap.is_duplicate_schema_error(schema_error):
+            if _RESOURCES.is_duplicate_schema_error(schema_error):
                 # Expected for idempotent schema initialization - log at DEBUG
                 logger.debug(
                     "Schema already initialized (idempotent, correlation_id=%s)",

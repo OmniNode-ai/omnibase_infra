@@ -125,15 +125,5 @@ class HandlerRegistrationBootstrap:
         pool = await HandlerRegistrationBootstrap.resources().create_pool(postgres_dsn)
         return ModelRegistrationBootstrapResult(pool=pool)
 
-    @staticmethod
-    def read_schema(path: Path) -> str:
-        """Read the schema file; the caller retains its existing failure policy."""
-        return HandlerRegistrationBootstrap.resources().read_schema(path)
-
-    @staticmethod
-    def is_duplicate_schema_error(error: Exception) -> bool:
-        """Classify the two database-driver errors bootstrap treats as idempotent."""
-        return HandlerRegistrationBootstrap.resources().is_duplicate_schema_error(error)
-
 
 __all__ = ["HandlerRegistrationBootstrap", "Pool"]
