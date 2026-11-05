@@ -1268,6 +1268,13 @@ runner_tmp_headroom() {
 runner_tmp_reap || true
 runner_tmp_headroom || true
 
+# OMN-16363 -- disk-admission gate runs FIRST, before every other step in this
+# hook (including wire_pypi_cache and the workspace reset below). This is the
+# one call site in this file that is allowed to fail the job: every other
+# mechanism here is `|| true` fail-open by design, but the whole point of this
+# gate is to fail fast, before any write-heavy step, when disk is critically
+# low. See the OMN-16363 comment block above disk_admission_gate() for why this
+# ordering is load-bearing.
 # >>> fork refusal (OMN-19998)
 # A pull request from a fork runs the fork's own workflow file, so nothing in the
 # base repository's routing can keep it off a lab runner: one approval click is
@@ -1277,21 +1284,13 @@ runner_tmp_headroom || true
 # refused. A payload naming no head repository (push, schedule, merge group) passes,
 # and one that cannot be read refuses only on a pull-request ref, so a defect here
 # cannot fail any other job.
-fork_payload="${GITHUB_EVENT_PATH:-${RUNNER_TEMP:-${GITHUB_WORKSPACE%/*/*}/_temp}/_github_workflow/event.json}"
+fork_payload="${GITHUB_EVENT_PATH:-${RUNNER_TEMP:-${RUNNER_HOME:-${HOME:-}/actions-runner}/${RUNNER_WORK_DIR:-_work}/_temp}/_github_workflow/event.json}"
 fork_verdict="$(jq -r 'if .pull_request then [.pull_request.head.repo.full_name, .pull_request.base.repo.full_name] elif .workflow_run then [.workflow_run.head_repository.full_name, .repository.full_name] else [0, 0] end | if .[0] == .[1] then empty else "\(.[0] // "a deleted fork")" end' "${fork_payload}" 2>/dev/null)" || fork_verdict="unproven"
 if [[ -n "${fork_verdict}" && ("${fork_verdict}" != "unproven" || "${GITHUB_REF:-}" == refs/pull/*) ]]; then
     echo "::error::OMN-19998: refused on this runner: the head repository (${fork_verdict}) is not the base repository. A fork's code does not run on a lab runner."
     exit 1
 fi
 # <<< fork refusal (OMN-19998)
-
-# OMN-16363 -- disk-admission gate runs FIRST, before every other step in this
-# hook (including wire_pypi_cache and the workspace reset below). This is the
-# one call site in this file that is allowed to fail the job: every other
-# mechanism here is `|| true` fail-open by design, but the whole point of this
-# gate is to fail fast, before any write-heavy step, when disk is critically
-# low. See the OMN-16363 comment block above disk_admission_gate() for why this
-# ordering is load-bearing.
 disk_admission_gate || exit 1
 
 # Deliberately called before the workspace-reset logic below, and guarded with
