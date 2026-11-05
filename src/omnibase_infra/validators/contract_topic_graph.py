@@ -66,24 +66,16 @@ installed or checkout-tier -- cannot be resolved, rather than silently
 reporting a smaller graph as clean. A silent partial is exactly how this
 census went blind the first time.
 
-Ratchet, not a big bang
------------------------
-The corpus already carries a large pre-existing defect population. A gate that
-hard-fails all of it on day one blocks every merge and gets disabled within the
-hour -- the classic way a correct check dies. So the existing defects are frozen
-into a baseline that may only ever SHRINK. Any defect NOT in the baseline is a
-hard failure. That stops the bleeding immediately and turns the backlog into a
-burn-down list instead of an outage.
+Full closure
+------------
+The graph checks every finding owned by the requested scope. There is no
+baseline or exclusion file. A nonzero verdict must propagate to the caller.
 
 Usage::
 
-    python -m omnimarket.validators.contract_topic_graph            # gate (ratcheted)
-    python -m omnimarket.validators.contract_topic_graph --report   # full census
-    python -m omnimarket.validators.contract_topic_graph --write-baseline
+    python -m omnibase_infra.validators.contract_topic_graph \
+        --scope omnibase_infra --checkout-root /path/to/checkouts --report
 
-    # Full coverage requires the checkout-tier packages (see CHECKOUT_PACKAGES):
-    CONTRACT_GRAPH_CHECKOUT_ROOT=/path/to/checkouts \\
-        python -m omnimarket.validators.contract_topic_graph --report
 """
 
 from __future__ import annotations
@@ -119,7 +111,6 @@ INSTALLED_PACKAGES: tuple[str, ...] = (
     "omnibase_infra",
     "omnibase_core",
     "omnibase_spi",
-    "omnibase_compat",
 )
 
 # Resolved via a filesystem checkout, NOT an import (see
@@ -332,14 +323,15 @@ def parse_contract(
         externally_consumed=tuple(
             sorted(set(_collect_topics(data.get("externally_consumed_topics"))))
         ),
-        # A subscription is wired to a dispatcher by handler_routing (topic/operation
-        # match) or by a single top-level handler. Without either, the runtime still
-        # creates the Kafka subscription -- it just has nowhere to dispatch the event
-        # it receives, and drops it ("No dispatcher found"). Truthiness of the
-        # handler_routing MAPPING is not enough -- {"handlers": []} is truthy and
-        # still undispatchable, so this checks for an actual resolvable entry.
-        has_dispatch_wiring=_has_dispatch_entry(data.get("handler_routing"))
-        or _has_top_level_handler(data.get("handler")),
+        # _prepare_contract_wiring returns SKIPPED before subscribing when routing
+        # is absent. Keep these topics as real graph edges: the kernel or a
+        # dedicated consumer can own them independently of auto-wiring.
+        has_dispatch_wiring=(
+            _has_dispatch_entry(data.get("handler_routing"))
+            or _has_top_level_handler(data.get("handler"))
+            if data.get("handler_routing") is not None
+            else None
+        ),
         runtime_loaded=runtime_loaded,
         declared_ingress_root=declared_ingress_root,
     )
@@ -590,7 +582,7 @@ def find_defects(graph: ModelTopicGraph) -> list[ModelGraphFinding]:
                     detail=(
                         "subscribes to a topic that NO contract publishes, that is not "
                         "declared as an external producer, and that is no node's "
-                        "runtime_dispatch.command_topic — nothing can ever send it a message"
+                        "runtime_dispatch.command_topic in the scanned corpus"
                     ),
                 )
             )
@@ -617,18 +609,19 @@ def find_defects(graph: ModelTopicGraph) -> list[ModelGraphFinding]:
                     package=producer_node.package,
                     detail=(
                         "publishes a topic that NO contract subscribes to and that is not "
-                        "declared in externally_consumed_topics — its output goes nowhere"
+                        "declared in externally_consumed_topics in the scanned corpus"
                     ),
                 )
             )
 
-    # --- DECLARED BUT UNWIRED: the runtime creates the subscription, then has no
-    # dispatcher for what arrives. Events are consumed and silently dropped.
+    # --- DECLARED BUT UNWIRED: routing is declared but names no dispatcher.
+    # Absent routing never reaches the runtime's auto-subscription decision.
+    # Present-but-empty/malformed routing remains a failure, not an exemption.
     for node in graph.nodes:
         if (
             node.runtime_loaded
             and node.subscribe_topics
-            and not node.has_dispatch_wiring
+            and node.has_dispatch_wiring is False
         ):
             findings.append(
                 ModelGraphFinding(
@@ -637,8 +630,8 @@ def find_defects(graph: ModelTopicGraph) -> list[ModelGraphFinding]:
                     package=node.package,
                     detail=(
                         f"declares {len(node.subscribe_topics)} subscribe topic(s) with NO "
-                        "handler_routing and NO handler — the runtime subscribes, receives, "
-                        "and drops every event because there is nothing to dispatch to"
+                        "dispatchable handler in its declared handler_routing — "
+                        "auto-wiring cannot register a dispatcher for these subscriptions"
                     ),
                 )
             )
@@ -883,7 +876,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"CONTRACT GRAPH GATE FAILED — {len(scoped)} static defect(s) owned by "
             f"{args.scope}.",
             "",
-            "The contract graph proves these are broken WITHOUT running anything:",
+            "The scanned contract corpus has these declared closure defects:",
             "",
         ]
         for finding in scoped:

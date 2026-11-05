@@ -89,6 +89,7 @@ def test_ci_process_change_selects_ci_tests() -> None:
         "scripts/tests/",
         "tests/ci/",
         "tests/integration/chains/test_event_chain_gate.py",
+        "tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py",
         "tests/scripts/",
         "tests/unit/db/test_application_internal_schema_provisioning_omn18926.py",
         "tests/unit/scripts/",

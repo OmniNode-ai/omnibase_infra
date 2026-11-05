@@ -27,12 +27,14 @@ The five gates, and the parent-commit fact each one contradicts:
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from omnibase_core.models.errors import ModelOnexError
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
@@ -483,9 +485,15 @@ def test_every_gate_ships_as_both_a_precommit_hook_and_a_ci_step() -> None:
 def test_the_retired_validator_and_its_module_are_gone() -> None:
     """``mixed_category_routing`` is superseded, not left lying around."""
     assert not (SRC / "validators" / "mixed_category_routing.py").exists()
+    # Remote worktrees can expose their metadata only through the engine's
+    # location. Pin that intended repository explicitly before scrubbing hooks.
+    location = ["--work-tree", str(REPO_ROOT)]
+    if git_dir := os.environ.get("GIT_DIR"):
+        location.extend(["--git-dir", git_dir])
     result = subprocess.run(
         [
             "git",
+            *location,
             "grep",
             "-l",
             "-E",
@@ -495,10 +503,42 @@ def test_the_retired_validator_and_its_module_are_gone() -> None:
             "tests",
         ],
         cwd=REPO_ROOT,
+        env=scrub_git_location_env(os.environ),
         capture_output=True,
         text=True,
         check=False,
     )
+    assert result.returncode == 1, result.stderr or result.stdout
     assert result.stdout.strip() == "", (
         "live imports of the retired validator remain: " + result.stdout
     )
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/topic_graph_no_routing_omn19998.json")
+def test_recorded_no_routing_adapter_response_is_not_a_graph_drop(
+    recorded_response: dict[str, object],
+) -> None:
+    """The recorded production adapter refused to subscribe both alleged droppers."""
+    from omnibase_infra.validators import contract_topic_graph as graph
+    from omnibase_infra.validators.models import ModelTopicGraph
+
+    responses = recorded_response["responses"]
+    assert len(responses) == 2
+    for response in responses:
+        assert response["bus_subscribe_calls"] == 0
+        assert response["runtime_results"] == [
+            {
+                "outcome": "EnumWiringOutcome.SKIPPED",
+                "reason": "No handler_routing declared in contract",
+                "topics_subscribed": [],
+            }
+        ]
+        old_findings = response["graph_declared_but_unwired"]
+        assert len(old_findings) == 1
+        assert old_findings[0]["defect"] == "DECLARED_BUT_UNWIRED"
+        path = SRC / "nodes" / response["contract"] / "contract.yaml"
+        node = graph.parse_contract(path, "omnibase_infra")
+        assert node is not None
+        assert node.subscribe_topics
+        findings = graph.find_defects(ModelTopicGraph(nodes=(node,)))
+        assert not any(f.defect == "DECLARED_BUT_UNWIRED" for f in findings)

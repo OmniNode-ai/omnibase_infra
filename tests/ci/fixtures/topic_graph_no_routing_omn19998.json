@@ -1,0 +1,49 @@
+{
+  "_provenance": {
+    "source": "Production discovery and wire_from_manifest replay of both shipped no-routing contracts; the bus spy received no subscription calls. This records the adapter response, not a broker-liveness observation.",
+    "source_sha256": "c767ec07630eb1a4b81dab56da79dd831efed7a86e3d151f5147e153ce2c9809",
+    "source_revision": "c1674e81da144cf18320a22cd47885592b3653f8"
+  },
+  "responses": [
+    {
+      "contract": "node_contract_registry_reducer",
+      "graph_declared_but_unwired": [
+        {
+          "defect": "DECLARED_BUT_UNWIRED",
+          "topic": null,
+          "node": "node_contract_registry_reducer",
+          "package": "omnibase_infra",
+          "detail": "declares 4 subscribe topic(s) with NO handler_routing and NO handler \u2014 the runtime subscribes, receives, and drops every event because there is nothing to dispatch to"
+        }
+      ],
+      "runtime_results": [
+        {
+          "outcome": "EnumWiringOutcome.SKIPPED",
+          "reason": "No handler_routing declared in contract",
+          "topics_subscribed": []
+        }
+      ],
+      "bus_subscribe_calls": 0
+    },
+    {
+      "contract": "node_context_audit_dlq_effect",
+      "graph_declared_but_unwired": [
+        {
+          "defect": "DECLARED_BUT_UNWIRED",
+          "topic": null,
+          "node": "node_context_audit_dlq_effect",
+          "package": "omnibase_infra",
+          "detail": "declares 1 subscribe topic(s) with NO handler_routing and NO handler \u2014 the runtime subscribes, receives, and drops every event because there is nothing to dispatch to"
+        }
+      ],
+      "runtime_results": [
+        {
+          "outcome": "EnumWiringOutcome.SKIPPED",
+          "reason": "No handler_routing declared in contract",
+          "topics_subscribed": []
+        }
+      ],
+      "bus_subscribe_calls": 0
+    }
+  ]
+}

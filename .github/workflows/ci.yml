@@ -4635,6 +4635,13 @@ jobs:
     permissions:
       contents: read
 
+  # OMN-19998: closure must finish successfully before CI Summary can pass.
+  contract-topic-graph:
+    uses: ./.github/workflows/contract-topic-graph.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
   ci-summary:
     name: CI Summary
     # OMN-14127: REQUIRED branch-protection context — the single umbrella gate for

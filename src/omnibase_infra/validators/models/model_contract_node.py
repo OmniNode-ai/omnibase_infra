@@ -21,7 +21,8 @@ class ModelContractNode(BaseModel):
     command_topic: str | None = None
     terminal_topics: tuple[str, ...] = ()
     externally_consumed: tuple[str, ...] = ()
-    has_dispatch_wiring: bool = False
+    # None: no auto-routing declared; False: declared routing has no dispatcher.
+    has_dispatch_wiring: bool | None = None
     runtime_loaded: bool = False
     # OMN-14591: a REAL, positive, machine-checkable signal that this node is
     # deliberately invoked from outside the Kafka contract graph (cron/on-demand

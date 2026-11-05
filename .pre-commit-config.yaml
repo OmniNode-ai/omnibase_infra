@@ -1836,6 +1836,14 @@ repos:
       # its topic's own name, and a topic whose name derives no category at all.
       # The OMN-14605 baseline was burned to zero and DELETED; there is no --baseline.
       # SYNC with the ci.yml step 'Check contract topic category gate (OMN-18013)'.
+      # OMN-19998: fixture corpus and real wiring adapter; needs no sibling checkout.
+      - id: contract-topic-graph-regressions
+        name: Contract graph resolver, wiring and failure propagation (OMN-19998)
+        entry: env -u PYTHONPATH uv run --frozen pytest tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py -q -n 0 --no-cov
+        language: system
+        files: ^(src/omnibase_infra/validators/(contract_topic_graph\.py|models/.*\.py)|tests/integration/ci/test_contract_topic_graph_corpus_omn20074\.py|\.github/workflows/(contract-topic-graph|ci)\.yml|scripts/ci/ci_summary_gate\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: contract-topic-category
         name: Every route category comes from its own topic's name (OMN-18013)
         entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.contract_topic_category --scope omnibase_infra

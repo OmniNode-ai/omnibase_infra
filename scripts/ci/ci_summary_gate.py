@@ -121,6 +121,7 @@ SELF_JOB_NAME = "CI Summary"
 # the ``name:`` display strings the Actions jobs API returns (verified against
 # ci.yml on 2026-07-07).
 STRICT_GATE_JOBS: tuple[str, ...] = (
+    "contract-topic-graph / contract-topic-graph",  # OMN-19998: full closure, fail closed
     "runner-routing-audit / Runner Routing Audit",  # OMN-18780: live + local routing assertions
     "CI Tests Gate",  # tests-gate — aggregator over the split matrix
     "Lint",  # lint
@@ -2565,10 +2566,7 @@ def _is_allowlisted(name: str, allowlist: frozenset[str]) -> bool:
     lets a single allowlist entry cover all of its inner jobs.
     """
 
-    if name in allowlist:
-        return True
-    caller = name.split(" / ", 1)[0]
-    return caller in allowlist
+    return name in allowlist or name.split(" / ", 1)[0] in allowlist
 
 
 def evaluate(

@@ -185,6 +185,11 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-topic-graph-correctness
+    statement: The existing contract graph resolves only supported packages, models the runtime no-routing skip accurately, and enforces full declared closure through the unconditional CI Summary member without a baseline or suppression.
+    acceptance:
+      - id: AC199981045
+        statement: The frozen resolver builds without the retired compatibility package; the two recorded no-routing contracts preserve their subscription edges without a false auto-wiring drop finding; malformed routing and missing producers still fail; CI Summary waits for the graph and rejects failure, cancellation and skipped states; the checked-in workflow propagates both zero and nonzero validator exits.
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -769,3 +774,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-topic-graph-correctness
+    description: Replays the recorded resolver and real-contract wiring defects through production discovery and auto-wiring, retains malformed-routing and orphan controls, and exercises the workflow shell and required summary evaluator for success and refusal states.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC199981045
