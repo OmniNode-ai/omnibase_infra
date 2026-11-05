@@ -21,6 +21,7 @@ import json
 import subprocess
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -123,6 +124,12 @@ class _Host:
         module = ModuleType("fake_deploy_execution")
         module.__dict__.update(
             EnumRuntimeLane=_Lane,
+            subprocess=subprocess,
+            _dev_boot_clock=lambda: 0.0,
+            _dev_boot_timestamp=lambda: datetime(2026, 11, 4, tzinfo=UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            _read_private_text=lambda path: path.read_text(encoding="utf-8"),
             lane_config_for=lambda lane: SimpleNamespace(
                 compose_project=PROJECT, disabled_services=()
             ),
@@ -186,6 +193,7 @@ def test_companion_lane_failure_keeps_the_healthy_new_runtime(tmp_path: Path) ->
     assert guard.point.current.revision == NEW_REVISION
     incident = _incident(host, tmp_path)
     assert incident["status"] == "failed"
+    assert incident["at"] == "2026-11-04T00:00:00Z"
     assert incident["recovery_verified"] is True
     assert incident["runtime_kept_revision"] == NEW_REVISION
 

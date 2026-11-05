@@ -180,12 +180,20 @@ requirements:
     acceptance:
       - id: AC38
         statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
+  - id: req-omn19998-gapless-roll-failure
+    statement: A rolling dev runtime update must wait for each service's declared health before updating its peer, and must fail at a non-running, unhealthy or timed-out step without reporting a partial roll successful.
+    acceptance:
+      - id: AC39
+        statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
   - id: req-omn19998-infisical-stability-mail
     statement: Record the standalone stability Infisical compose project with its SMTP settings and required secret references without deploying it or managing its existing dependencies.
     acceptance:
       - id: AC39
         statement: 'AC39: the standalone compose renders the existing 8880 project and external stability network with mail enabled by required inputs, and rendering refuses each missing secret input -- falsifier: uv run pytest tests/unit/infra/test_infisical_stability_compose_omn19998.py -q -n 0 --no-cov'
 evidence_requirements:
+  - kind: tests
+    description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
@@ -272,6 +280,33 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac39-runtime-roll
+    description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_compose_budget_omn18057.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_executor_runtime_timeout_recovery_omn18057.py scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC39
+  - id: dod-omn19998-ac39-runtime-roll-deploy-source
+    description: Hosted behavioral probe for AC39 from this checkout. The real executor loads its boot-guard effect and replays failed running checks, health waits and deadlines through the Docker adapter, requiring a failed roll after recovery without advancing peer images or emitting success. The convergence replay also exercises successful and unchanged rolls and forced rollback. No network source read, live installation or uninterrupted readiness is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+    binds_ac:
+      - AC39
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual
