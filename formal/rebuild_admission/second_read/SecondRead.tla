@@ -75,7 +75,8 @@ CONSTANTS
   RecordSeparate, \* the holder record is readable with both engines down
   RepairCanFail,  \* the bounded repair lane can end without repairing the writer
   CloseOnSources, \* a safety failure closes on its own sources, not on the table
-  SafetyEscOn     \* an aged safety stop writes one decision row
+  SafetyEscOn,    \* an aged safety stop writes one decision row
+  TrackReading    \* keep the ghost that dates a reading against its stop; off, the state counts match the first reader's
 
 Tasks == Ords \cup Others
 Procs == {"H", "F"}             \* H: the engine holding the order; F: the fallback
@@ -290,7 +291,7 @@ Consume(t) ==
   /\ \/ pc[t] \in (IF EpochGuard THEN {"resv"} ELSE {"resv", "rold"})
      \/ (pc[t] = "idle" /\ t \in tok)
   /\ HolderOK
-  /\ RecheckFresh => (K(t).k = "repair" \/ Step2(K(t)) # "refuse")
+  /\ RecheckFresh => (K(t).k = "repair" \/ (Step2(K(t)) # "refuse" /\ ~OrderForbids(K(t))))
   /\ pc' = [pc EXCEPT ![t] = IF ConsGap = "none" THEN "run" ELSE "cons"]
   /\ tok' = tok \ {t}
   /\ badStrong' = (badStrong \/ OrderForbids(K(t)))
@@ -388,7 +389,7 @@ Publish ==
   /\ working' = Pieces \ broken /\ fresh' = TRUE
   /\ (fresh' # fresh \/ working' # working)
   /\ pc' = GateKill
-  /\ readAfter' = [q \in Pieces |-> readAfter[q] \/ q \in working']
+  /\ readAfter' = IF TrackReading THEN [q \in Pieces |-> readAfter[q] \/ q \in working'] ELSE readAfter
   /\ UNCHANGED <<consumed, safety, sFixed, pubUp, broken, stop, rows, cur, joined, engVars, ghost,
                  inflight, pend, tok, fView, pendKey, intent, handedH, sEsc, badStrong, badOldReading, downStart>>
 
@@ -400,7 +401,7 @@ Breaks(p) ==   \* two failing probes, a stale read, an andon trigger, a return
   /\ seeAfter' = [seeAfter EXCEPT ![p] = FALSE]
   /\ pc' = GateKill
   /\ working' = IF BreakDropsReading THEN working \ {p} ELSE working
-  /\ readAfter' = [readAfter EXCEPT ![p] = FALSE]
+  /\ readAfter' = IF TrackReading THEN [readAfter EXCEPT ![p] = FALSE] ELSE readAfter
   /\ UNCHANGED <<consumed, safety, sFixed, fresh, pubUp, cur, joined, engVars,
                  cleared, oldResv, badStart, staleCons, contStep, badClear, clash,
                  inflight, pend, tok, fView, pendKey, intent, handedH, sEsc, badStrong, badOldReading, downStart>>
@@ -415,7 +416,7 @@ GateSees(p) ==
   /\ rows' = [rows EXCEPT ![p] = {}]
   /\ seeAfter' = [seeAfter EXCEPT ![p] = FALSE]
   /\ pc' = GateKill
-  /\ readAfter' = [readAfter EXCEPT ![p] = FALSE]
+  /\ readAfter' = IF TrackReading THEN [readAfter EXCEPT ![p] = FALSE] ELSE readAfter
   /\ UNCHANGED <<consumed, safety, sFixed, fresh, pubUp, broken, working, cur, joined, engVars,
                  cleared, oldResv, badStart, staleCons, contStep, badClear, clash,
                  inflight, tok, fView, pendKey, intent, handedH, sEsc, badStrong, badOldReading, downStart>>
@@ -436,7 +437,7 @@ Clears(p) ==
        [] ClearGuard = "rows"    -> Evidence(p)
   /\ stop' = [stop EXCEPT ![p] = "none"]
   /\ rows' = IF RowsSurvive THEN rows ELSE [rows EXCEPT ![p] = {}]
-  /\ badOldReading' = (badOldReading \/ ~readAfter[p])
+  /\ badOldReading' = (badOldReading \/ (TrackReading /\ ~readAfter[p]))
   /\ UNCHANGED <<inflight, pend, tok, fView, pendKey, intent, handedH, sEsc, badStrong, downStart, readAfter>>
   /\ cleared' = TrackCleared
   /\ badClear' = (badClear \/ ~(Evidence(p) /\ Working(p) /\ seeAfter[p]))
@@ -585,6 +586,8 @@ FairnessMin ==
 Spec == Init /\ [][Next]_vars
 LiveSpec == Spec /\ Fairness
 LiveMinSpec == Spec /\ FairnessMin
+\* As the repair lane has it: a safety cause lane that keeps being admitted does start.
+LiveCauseSpec == LiveSpec /\ \A t \in Tasks : K(t).k = "scause" => (SF_vars(Reserve(t)) /\ SF_vars(Consume(t)))
 
 (***************************************************************************)
 (* Property 1: admission follows the order of 7.1.                         *)
