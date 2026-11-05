@@ -3,21 +3,10 @@
 
 """Derive ``object_type: TABLE`` grants from node contract ``db_io.db_tables``.
 
-OMN-15656. The OMN-15418 privilege validator
-(:func:`omnibase_infra.runtime.auto_wiring.handler_wiring._require_projection_binding_privileges`)
-requires an explicit per-table grant before a projection handler may wire. The
-checked-in topology instances declared none, so every contract-declared table
-failed on every profile.
-
-This module is the *authoring* side of that contract: the grants are a
-projection of the node contracts that consume them, never a hand-maintained
-list. Contracts own ``schema``/``name``/``access``; the deployment topology owns
-which principal serves which schema domain. Nothing here invents a relation, and
-nothing here widens a privilege beyond what the validator demands.
-
-The derivation is deliberately total and fail-closed: a declaration this module
-cannot map to a topology principal is returned as a typed residual with a
-reason, never silently dropped.
+Node contracts own schema, name and access; topology owns the principal for
+that schema domain. Runtime admission requires an explicit grant for each table.
+Derivation returns unmappable declarations as typed residuals rather than
+silently dropping them.
 """
 
 from __future__ import annotations
@@ -489,6 +478,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             "brief_quality_vs_outcome",
             "subagent_waste",
         )
+    ),
+    # OMN-21994: infra-first bridge until the pinned node contract owns both tables.
+    *(
+        _vendored_read_write(
+            t, "node_projection_compaction_ab", "0000_create_compaction_ab.sql"
+        )
+        for t in ("compaction_ab_rows", "compaction_ab_build_series")
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings

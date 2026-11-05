@@ -84,6 +84,8 @@ databases:
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
+              - compaction_ab_build_series
+              - compaction_ab_rows
               - compaction_activations
               - compaction_current_context
               - compaction_receipts
@@ -461,5 +463,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: ddee2f3aa91b21c3bb8f135a44b9bf339c9841fc109d174fbf47c7f03b24631b
+  sha256: 0a47fd4b7ca1dcd7b5eb3f50e922f691d8830c6781ede21d8211626d60d481e1
 topology_instance: onex-dev

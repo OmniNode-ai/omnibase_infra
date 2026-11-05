@@ -94,6 +94,8 @@ databases:
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
+              - compaction_ab_build_series
+              - compaction_ab_rows
               - compaction_activations
               - compaction_current_context
               - compaction_receipts
