@@ -775,7 +775,7 @@ dod_evidence:
     binds_ac:
       - AC38
   - id: dod-omn19998-ac39-agent-branch-trial
-    description: Focused refusal, signed adapter, real child-process failure and expiry recovery, pinned-head mismatch and declared installer restoration regressions.
+    description: AC40 covers focused refusal, signed adapter, real child-process failure and expiry recovery, pinned-head mismatch and declared installer restoration regressions.
     source: manual
     binds_ac: [AC40]
     checks:
@@ -783,7 +783,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_branch_trial.py -q -n 0 --no-cov
         cwd: .
   - id: dod-omn19998-ac39-agent-branch-trial-deploy-probe
-    description: Hosted-runner artifact probe uses disposable local Git origins and real HTTP-serving agent child processes to read a loaded candidate SHA and the restored origin/dev SHA after crash and expiry. It requires no broker, Docker, production host or credential and is not evidence of installation on the live dev agent.
+    description: Hosted-runner artifact probe for AC40 uses disposable local Git origins and real HTTP-serving agent child processes to read a loaded candidate SHA and the restored origin/dev SHA after crash and expiry. It requires no broker, Docker, production host or credential and is not evidence of installation on the live dev agent.
     source: manual
     binds_ac: [AC40]
     checks:
