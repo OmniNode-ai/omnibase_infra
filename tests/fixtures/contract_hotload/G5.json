@@ -1,0 +1,106 @@
+{
+  "chain": "G5",
+  "kind": "golden",
+  "title": "rollback",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "deploy",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "replace",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "3a465705-5933-5f8b-979e-3644be89fc2e",
+        "expected_version": 2,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 3,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "replace",
+        "owner": "lab-deploy",
+        "registration_request_id": "3a465705-5933-5f8b-979e-3644be89fc2e",
+        "contract_yaml": "name: node_x\nnode_version: 1.0.0\n"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 3,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:3a465705-5933-5f8b-979e-3644be89fc2e",
+        "outcome": "accepted",
+        "reason": null,
+        "registry_version": 3
+      },
+      "key": "lab-deploy:3a465705-5933-5f8b-979e-3644be89fc2e"
+    },
+    {
+      "step": 4,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 3,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "replace",
+        "status": "replaced",
+        "reason": null,
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 5,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "state",
+      "model": "ModelRuntimeHotloadState",
+      "record": {
+        "entity_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f",
+        "bootstrap_ready": true,
+        "serving_ready": true,
+        "names": {
+          "node_x": {
+            "observed": {
+              "registry_version": 3,
+              "status": "replaced",
+              "reason": null
+            },
+            "served": {
+              "registry_version": 3,
+              "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87"
+            }
+          }
+        }
+      },
+      "key": "8c242722-5f7b-5b52-86f1-0961206fa958"
+    }
+  ],
+  "ends_in": "G3 with the older contract: v3 carries the hash of v1"
+}
