@@ -58,7 +58,7 @@ def sample(
     script_directory: str,
     arguments: tuple[str, ...],
     plan_path: Path,
-    timeout: int,
+    timeout: float,
 ) -> subprocess.CompletedProcess[str]:
     """Invoke one collector sample with its own plan and unchanged environment."""
     plan_path.unlink(missing_ok=True)

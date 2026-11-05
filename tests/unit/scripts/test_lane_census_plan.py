@@ -1919,7 +1919,7 @@ def test_oneshot_sampling_budget_does_not_reset_for_new_executions(
         ModelCensusOneshotRequest,
     )
 
-    ticks = iter((0.0, 1.0, 301.0))
+    ticks = iter((0.0, 0.0, 1.0, 3.0, 301.0))
     samples = []
     sleeps = []
 

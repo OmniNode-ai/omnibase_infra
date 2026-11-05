@@ -21,6 +21,7 @@ import tomllib
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
+from importlib.resources import files
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
@@ -384,11 +385,12 @@ def _hold_build_context(purpose: str) -> Iterator[None]:
             _restore_build_byproducts(REPO_DIR)
 
 
-with open(
-    f"{Path(__file__).resolve().parents[3]}/src/omnibase_infra/nodes/node_census_oneshot_effect/contract.yaml",
-    encoding="utf-8",
-) as _phase_policy:
-    PHASE_TIMEOUTS: dict[str, int] = yaml.safe_load(_phase_policy)["phase_timeouts"]
+_phase_root = AGENT_CLONE_ROOT / "src/omnibase_infra"
+PHASE_TIMEOUTS: dict[str, int] = yaml.safe_load(
+    (_phase_root if _phase_root.is_dir() else files("omnibase_infra"))
+    .joinpath("nodes/node_census_oneshot_effect/contract.yaml")
+    .read_text(encoding="utf-8")
+)["phase_timeouts"]
 
 # OMN-18057: the two windows _compose_up gives the lane to settle after the
 # compose command returns -- named rather than inline so the recovery path reads

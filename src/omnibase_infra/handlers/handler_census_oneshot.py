@@ -18,6 +18,10 @@ from omnibase_infra.models.model_oneshot_grade import ModelOneshotGrade
 from omnibase_infra.models.model_oneshot_observation import ModelOneshotObservation
 from omnibase_infra.models.model_pending_oneshot import ModelPendingOneshot
 
+# Delivery and observation failures take precedence over delivered alarms.
+# A fixed order retains failures independently of the order of the samples.
+_SAMPLE_STATUS_PRIORITY = {0: 0, 30: 1, 31: 2, 7: 3, 6: 4, 8: 5}
+
 
 def load_policy(path: Path) -> ModelCensusOneshotPolicy:
     """Load explicitly supplied policy at a composition boundary."""
@@ -130,44 +134,49 @@ class HandlerCensusOneshot:
     def handle(self, request: ModelCensusOneshotRequest) -> ModelCensusOneshotResult:
         """Execute the existing collector through a finite follow-up window."""
         status = 0
+        stdout = ""
         diagnostics: list[str] = []
         deadline = self._clock() + request.policy.phase_timeouts["runtime"]
         arguments = request.arguments
         with collector.workspace() as plan_path:
             while True:
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    diagnostics.append(
+                        "ABORT: oneshot follow-up sampling budget exhausted with a new execution pending; completion could not be observed.\n"
+                    )
+                    return ModelCensusOneshotResult(
+                        exit_code=status or 4,
+                        stdout=stdout,
+                        stderr="".join(diagnostics),
+                    )
                 try:
                     sample = collector.sample(
                         request.script_directory,
                         arguments,
                         plan_path,
-                        request.policy.phase_timeouts["runtime"],
+                        remaining,
                     )
                 except collector.TimeoutExpired as exc:
                     diagnostics.append(f"census sample timed out: {exc}\n")
                     return ModelCensusOneshotResult(
-                        exit_code=4, stderr="".join(diagnostics)
+                        exit_code=status or 4,
+                        stdout=stdout,
+                        stderr="".join(diagnostics),
                     )
+                stdout = sample.stdout
                 diagnostics.append(sample.stderr)
-                if sample.returncode:
-                    if sample.returncode == 8 or status in (0, 30):
-                        status = sample.returncode
-                if sample.returncode not in (
-                    0,
-                    6,
-                    7,
-                    8,
-                    30,
-                    31,
-                ) or not collector.has_plan(plan_path):
+                if sample.returncode not in _SAMPLE_STATUS_PRIORITY:
                     return ModelCensusOneshotResult(
                         exit_code=sample.returncode,
                         stdout=sample.stdout,
                         stderr="".join(diagnostics),
                     )
+                status = max(
+                    (status, sample.returncode), key=_SAMPLE_STATUS_PRIORITY.__getitem__
+                )
                 if not collector.has_plan(plan_path):
-                    code = sample.returncode or (
-                        0 if set(arguments) & {"--help", "-h"} else 4
-                    )
+                    code = status or (0 if set(arguments) & {"--help", "-h"} else 4)
                     return ModelCensusOneshotResult(
                         exit_code=code,
                         stdout=sample.stdout,
@@ -181,16 +190,20 @@ class HandlerCensusOneshot:
                         stdout=sample.stdout,
                         stderr="".join(diagnostics),
                     )
-                if self._clock() >= deadline:
+                remaining = deadline - self._clock()
+                if remaining <= 0:
                     diagnostics.append(
                         "ABORT: oneshot follow-up sampling budget exhausted with a new execution pending; completion could not be observed.\n"
                     )
                     return ModelCensusOneshotResult(
-                        exit_code=4, stderr="".join(diagnostics)
+                        exit_code=status or 4,
+                        stdout=stdout,
+                        stderr="".join(diagnostics),
                     )
                 delay = min(
                     request.policy.sample_interval_seconds,
                     *pending,
+                    remaining,
                 )
                 diagnostics.append(
                     f"Oneshot completion pending; automatically sampling again in {delay}s.\n"
