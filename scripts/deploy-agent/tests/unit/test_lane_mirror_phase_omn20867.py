@@ -68,6 +68,8 @@ from deploy_agent.routing import (
     parse_routing_table,
 )
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -111,14 +113,7 @@ def _isolate_overlay_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
         if argv[:2] == ["git", "-C"]:
             repo = Path(argv[2])
             if repo.is_relative_to(tmp_path):
-                argv = [
-                    "git",
-                    "--git-dir",
-                    str(repo / ".git"),
-                    "--work-tree",
-                    str(repo),
-                    *argv[1:],
-                ]
+                kwargs["env"] = scrub_git_location_env(kwargs.get("env"))
         return real_run(argv, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", run)
