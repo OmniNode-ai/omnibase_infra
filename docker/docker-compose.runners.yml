@@ -806,6 +806,7 @@ services:
         runner_gid="$$(id -g runner)"
         mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        rm -f ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       # `host-201` is load-bearing, not decoration: `omnibase-verify` names a
@@ -947,6 +948,7 @@ services:
         runner_gid="$$(id -g runner)"
         mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        rm -f ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
@@ -995,6 +997,7 @@ services:
         runner_gid="$$(id -g runner)"
         mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        rm -f ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
