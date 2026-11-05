@@ -17,11 +17,10 @@ output_model:
   name: ModelDeployAgentBranchTrialResult
   module: omnibase_infra.models.model_deploy_agent_branch_trial_result
   description: Queue acknowledgement; the agent readback endpoint reports actual loading and restoration separately.
-event_bus:
-  # The host's signed DeployConsumer owns rebuild admission and invokes this
-  # handler. Container runtimes must not register a second, unsigned consumer.
-  publish_topics: ["onex.evt.deploy.agent-branch-trial-queued.v1"]
-terminal_event: "onex.evt.deploy.agent-branch-trial-queued.v1"
+# The signed host DeployConsumer already owns rebuild-requested admission.
+# Queue acknowledgement is durable in /job and /agent-branch-trial; it is not
+# a runtime rebuild completion and needs no separate boot-provisioned topic.
+event_bus: {}
 handler_routing:
   routing_strategy: operation_match
   handlers:

@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import argparse
 
+    from deploy_agent.agent import DeployAgent
     from deploy_agent.events import ModelRebuildCompleted, ModelRebuildRequested
     from deploy_agent.job_state import JobStore
 
@@ -47,9 +48,6 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.models.model_deploy_agent_branch_trial_result import (
         ModelDeployAgentBranchTrialResult,
-    )
-    from omnibase_infra.protocols.protocol_deploy_agent_branch_queue import (
-        ProtocolDeployAgentBranchQueue,
     )
 
 
@@ -774,7 +772,7 @@ def validate_rebuild_command(command: ModelRebuildRequested) -> ModelRebuildRequ
 
 
 def queue_agent_trial(
-    host: ProtocolDeployAgentBranchQueue,
+    host: DeployAgent,
     cmd: ModelRebuildRequested,
     state_dir: Path,
     queue: Callable[
@@ -809,9 +807,8 @@ def queue_agent_trial(
             installer=cmd.agent_installer,
         )
 
-        result = queue(state_dir, request)
+        queue(state_dir, request)
         host.job_store.complete(cmd.correlation_id, status="success")
-        host._publish_trial_result(result.model_dump(mode="json"))
     except Exception as exc:
         logger.exception("Agent branch trial request refused")
         host.job_store.complete(cmd.correlation_id, status="failed", errors=[str(exc)])

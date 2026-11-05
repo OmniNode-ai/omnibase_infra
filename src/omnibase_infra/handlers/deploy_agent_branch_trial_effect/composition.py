@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Read contract-owned host-effect policy and the result topic."""
+"""Read contract-owned host-effect policy."""
 
 from pathlib import Path
 
@@ -15,9 +15,3 @@ def load_policy(contract_path: Path) -> ModelDeployAgentBranchTrialPolicy:
     return ModelDeployAgentBranchTrialPolicy.model_validate(
         safe_load(contract_path.read_text())["config"]["branch_trial"]
     )
-
-
-def trial_result_topic(contract_path: Path) -> str:
-    from yaml import safe_load
-
-    return str(safe_load(contract_path.read_text())["terminal_event"])

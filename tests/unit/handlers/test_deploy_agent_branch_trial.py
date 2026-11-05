@@ -270,6 +270,9 @@ def test_signed_command_adapter_queues_the_effect_without_a_runtime_rebuild(
         {k: v for k, v in envelope.items() if k != "_signature"}
     )
     agent = agent_mod.DeployAgent.__new__(agent_mod.DeployAgent)
+    agent._kafka_config = Mock()
+    publish = Mock(side_effect=AssertionError("queue acknowledgement is host readback"))
+    monkeypatch.setattr(agent_mod, "publish_result", publish)
     agent.job_store = JobStore(tmp_path)
     agent.job_store.accept(
         correlation_id=command.correlation_id, command=command.model_dump(mode="json")
@@ -281,14 +284,11 @@ def test_signed_command_adapter_queues_the_effect_without_a_runtime_rebuild(
     agent._self_update_post_terminal = Mock(
         side_effect=AssertionError("queued trial must keep dev supervisor")
     )
-    agent._publish_trial_result = Mock()
     monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path)
     monkeypatch.setattr(agent_mod, "single_flight_lock", nullcontext)
     agent._execute_command(command)
     agent._run_deploy.assert_not_called()
-    agent._publish_trial_result.assert_called_once()
-    assert agent._publish_trial_result.call_args.args[0]["status"] == "queued"
-    assert agent._publish_trial_result.call_args.args[0]["loaded_code_sha"] is None
+    publish.assert_not_called()
     assert agent.job_store.load(command.correlation_id).status == "success"
     assert (
         json.loads((root / "request.json").read_text())["request"]["head"]
@@ -560,28 +560,26 @@ def test_recovery_reads_the_dev_head_after_a_concurrent_refresh(
     assert _git(clone, "rev-parse", "HEAD") == refreshed[0]
 
 
-def test_queue_acknowledgement_uses_the_contract_topic_with_cached_handler(
-    monkeypatch,
-):
-    from unittest.mock import Mock
+@pytest.mark.asyncio
+async def test_queue_acknowledgement_is_read_from_the_host_api(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+    from deploy_agent.health import create_health_app
+    from deploy_agent.job_state import JobStore
 
-    from deploy_agent import agent as agent_mod
-
-    agent = agent_mod.DeployAgent.__new__(agent_mod.DeployAgent)
-    agent._kafka_config = Mock()
-    publish = Mock(return_value=True)
-    monkeypatch.setattr(agent_mod, "publish_result", publish)
-    payload = {"correlation_id": str(uuid4()), "status": "queued"}
-
-    agent._publish_trial_result(payload)
-
-    contract = Path(os.environ["DEPLOY_AGENT_TRIAL_CONTRACT"])
-    from yaml import safe_load
-
-    assert publish.call_args.args == (payload, agent._kafka_config)
-    assert publish.call_args.kwargs == {
-        "topic": safe_load(contract.read_text())["terminal_event"]
-    }
+    _supervisor_heartbeat(tmp_path, valid_until=time.time() + 5)
+    request = _queued_request()
+    result = queue_from_host(tmp_path, request)
+    app = create_health_app(
+        JobStore(tmp_path),
+        get_agent_state=lambda: "idle",
+        get_agent_branch_trial=lambda: effect.read_receipt(tmp_path),
+    )
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get("/agent-branch-trial")
+        assert response.status == 200
+        assert await response.json() == result.model_dump(mode="json")
+    assert result.status == "queued"
+    assert result.loaded_code_sha is None
 
 
 def _queued_request():

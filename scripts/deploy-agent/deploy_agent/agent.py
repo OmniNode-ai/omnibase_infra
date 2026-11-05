@@ -1830,18 +1830,6 @@ class DeployAgent:
         # process holds the deploy lock.
         self._self_update_post_terminal()
 
-    def _publish_trial_result(self, payload: dict[str, object]) -> None:
-        load_agent_branch_trial()
-        from omnibase_infra.handlers.deploy_agent_branch_trial_effect.composition import (
-            trial_result_topic,
-        )
-
-        topic = trial_result_topic(Path(os.environ["DEPLOY_AGENT_TRIAL_CONTRACT"]))
-        if not publish_result(payload, self._kafka_config, topic=topic):
-            logger.error(
-                "Agent trial acknowledgement was not published; read /agent-branch-trial"
-            )
-
     def _run_deploy(self, cmd: ModelRebuildRequested) -> None:
         """Execute every phase of one deploy. BLOCKING — see ``_execute_command``."""
         self._state = "deploying"
