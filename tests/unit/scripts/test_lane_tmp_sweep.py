@@ -53,7 +53,7 @@ def _seconds(age: str) -> int:
 
 
 def _ages() -> dict[str, int]:
-    return {path: _seconds(age) for _, path, _, _, _, age in _rules()}
+    return {path: _seconds(age) for kind, path, _, _, _, age in _rules() if kind == "e"}
 
 
 def test_the_parser_skips_indented_comments_and_names_a_malformed_line() -> None:
@@ -69,10 +69,13 @@ def test_every_rule_is_an_age_bound_under_tmp() -> None:
     rules = _rules()
     assert rules
     for kind, path, mode, uid, gid, age in rules:
-        assert kind == "e"
+        assert kind in ("e", "x")
         assert path.startswith(_ROOT + "/")
         assert (mode, uid, gid) == ("-", "-", "-")
-        assert _seconds(age) > 0
+        if kind == "e":
+            assert _seconds(age) > 0
+        else:
+            assert age == "-"
 
 
 def test_a_malformed_age_is_refused() -> None:
@@ -82,8 +85,9 @@ def test_a_malformed_age_is_refused() -> None:
 
 
 def test_only_retired_pytest_trees_have_an_age_bound() -> None:
-    # pytest's numbered directories and generic lane/service roots may be live.
-    assert _ages() == {_ROOT + "/pytest-of-*/garbage-*": 12 * 3600}
+    # Numbered runs are excluded; generic lane/service roots are not matched.
+    assert _ages() == {_ROOT + "/pytest-of-*": 12 * 3600}
+    assert [r[1] for r in _rules() if r[0] == "x"] == [_ROOT + "/pytest-of-*/pytest-*"]
 
 
 def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
@@ -93,7 +97,8 @@ def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
     fixtures = {
         "pytest-of-lane/pytest-0/input.db": "live fixture",
         "pytest-of-lane/pytest-0/.lock": str(os.getpid()),
-        "pytest-of-lane/garbage-retired/input.db": "retired fixture",
+        "pytest-of-lane/garbage-retired/nested/input.db": "retired fixture",
+        "pytest-of-lane/garbage-empty/.keep": "retired marker",
         "claude-lane/input.db": "live lane",
         "service-worker/input.db": "service state",
     }
@@ -104,7 +109,10 @@ def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
     config = tmp_path / "cleanup.conf"
     # Scale only the age; retain the shipped rule types and path globs.
     config.write_text(
-        "\n".join(" ".join([*rule[:5], "1s"]) for rule in _rules()) + "\n"
+        "\n".join(
+            " ".join([*rule[:5], "1s" if rule[0] == "e" else "-"]) for rule in _rules()
+        )
+        + "\n"
     )
     # ctime cannot be set with utime: let every fixture age beyond the test bound.
     time.sleep(2)
@@ -117,7 +125,11 @@ def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
     )
     assert cleaned.returncode == 0, cleaned.stdout + cleaned.stderr
     for relative, contents in fixtures.items():
-        if "garbage-retired" in relative:
+        if "garbage-" in relative:
             assert not (scratch / relative).exists(), "retired scratch must be cleaned"
         else:
             assert (scratch / relative).read_text() == contents
+    for retired in ("garbage-retired", "garbage-empty"):
+        assert not (scratch / "pytest-of-lane" / retired).exists(), (
+            "retired directory must be removed, not left empty"
+        )
