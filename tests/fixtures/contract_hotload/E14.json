@@ -1,0 +1,70 @@
+{
+  "chain": "E14",
+  "kind": "error",
+  "title": "owner",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "sender",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "b6d38505-ff8b-55cf-8ffd-aa0b3fe283a1",
+        "expected_version": 0,
+        "owner": "other-owner"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:b6d38505-ff8b-55cf-8ffd-aa0b3fe283a1",
+        "outcome": "rejected",
+        "reason": "OWNER_FORBIDDEN",
+        "registry_version": 0
+      },
+      "key": "lab-deploy:b6d38505-ff8b-55cf-8ffd-aa0b3fe283a1",
+      "note": "the sender is not mapped to the owner it acts for"
+    },
+    {
+      "step": 3,
+      "actor": "sender",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "remove",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "5d2ce80a-ce85-5451-8f0a-210c0f46b0fb",
+        "expected_version": 1,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 4,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:5d2ce80a-ce85-5451-8f0a-210c0f46b0fb",
+        "outcome": "rejected",
+        "reason": "OWNER_MISMATCH",
+        "registry_version": 1
+      },
+      "key": "lab-deploy:5d2ce80a-ce85-5451-8f0a-210c0f46b0fb",
+      "note": "the row belongs to another owner"
+    }
+  ],
+  "ends_in": "OWNER_FORBIDDEN or OWNER_MISMATCH; no row change"
+}

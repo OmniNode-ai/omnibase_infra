@@ -1,0 +1,50 @@
+{
+  "chain": "E11",
+  "kind": "error",
+  "title": "relay down",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "registry",
+      "action": "commit",
+      "note": "commits change sequences 4 and 5 while the relay is stopped past the compaction lag"
+    },
+    {
+      "step": 2,
+      "actor": "registry",
+      "action": "publish",
+      "topic_role": "watermark",
+      "model": "ModelRegistryWatermark",
+      "record": {
+        "entity_id": "registry-watermark",
+        "committed_sequence": 5,
+        "published_sequence": 3,
+        "observed_at": "2026-11-03T06:00:00Z"
+      },
+      "key": "registry-watermark",
+      "note": "committed ahead of published"
+    },
+    {
+      "step": 3,
+      "actor": "relay",
+      "action": "observe",
+      "note": "reports unhealthy; entries wait in the outbox in order"
+    },
+    {
+      "step": 4,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "watermark",
+      "model": "ModelRegistryWatermark",
+      "record": {
+        "entity_id": "registry-watermark",
+        "committed_sequence": 5,
+        "published_sequence": 5,
+        "observed_at": "2026-11-03T06:00:00Z"
+      },
+      "key": "registry-watermark",
+      "note": "after restart it publishes them in order"
+    }
+  ],
+  "ends_in": "outbox entries wait in order, then publish in order after the restart"
+}

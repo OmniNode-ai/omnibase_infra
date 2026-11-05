@@ -46,6 +46,9 @@ node_type: "COMPUTE_GENERIC"
 description: >
   Compute node with two pure handlers. lab_proof.plan renders one proof run from a registry profile row, the subject PR commit, the host's lane directory and the bundle facts below into ordered argv steps with working directories, timeouts, polling and mechanical expectations; it refuses a row that does not run by nodes, a proof kind with no plan, and a subject from another repository. lab_proof.verdict evaluates the row's mandatory checks from the run's observations and decides the outcome, with an optional base-control result that turns a FAIL reproduced at the merge base into DEV_INHERITED. lab_proof.verdict fails a mandatory check closed when a planned step has no observation.
 
+descriptor:
+  node_archetype: "compute"
+  purity: "pure"
 input_model:
   name: "ModelLabProofPlanRequest"
   module: "omnibase_infra.lab_proof.model_lab_proof_plan_request"
@@ -79,7 +82,7 @@ handler_routing:
       handler:
         name: "HandlerLabProofPlan"
         module: "omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan"
-      description: "Target-ref manifest, lock, Compose hashes and broker/fleet declarations to canonical desired state"
+      description: "Target-ref manifest, lane census host registry, lock, Compose hashes and broker/fleet declarations to canonical desired state (OMN-22152)"
       supported_operations: ["lab_desired_state.render"]
       input_model:
         name: "ModelLabDesiredStateRenderRequest"
