@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Release Notes Apply Effect
+#
+# OMN-17427: the release train wrote CHANGELOG.md for every repository, so every
+# omnibase_core release PR was born red once core deleted that file under the
+# README-only documentation policy (kb-doc-gate, the Root README only documentation
+# gate hook, CI Summary). The cut job of release-train-nightly.yml now runs this
+# node over the checkout it is cutting. The target repository's own
+# .readme-only-docs.yaml decides where the block goes: a CHANGELOG.md prepend for a
+# repository that allows one; root README.md (plus the release-cut contract item and
+# the pinned identity test, where the repository carries them) for a README-only one.
+#
+# Related Tickets:
+#   - OMN-17427: this change
+#   - OMN-18595: the release train and the release-cut contract it extends
+#   - OMN-20304: the canonical-file-shape ratchet that moved this behaviour out of
+#     scripts/ci/release_train.py (baselined, shrink-only) into contract + node + handler
+name: "node_release_notes_apply_effect"
+node_type: "EFFECT_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Writes a rendered release block into a checkout where the repository's documentation policy accepts it, and returns the repo-relative paths to stage. The policy is the checkout's own .readme-only-docs.yaml: absent, or listing CHANGELOG.md under exceptions, keeps the CHANGELOG.md prepend; otherwise the block goes into root README.md above the newest release section, a root CHANGELOG.md is removed, and a checkout carrying contracts/OMN-18595.yaml and tests/ci/test_release_cut_identity_omn18595.py also gets the dod_evidence item and the pinned identity test. Refuses on an unparseable policy file, a missing README, a block in another shape, or a contract that does not end in dod_evidence.
+
+input_model:
+  name: "ModelReleaseNotesApplyRequest"
+  module: "omnibase_infra.models.model_release_notes_apply_request"
+  description: "The checkout being cut, the file holding the rendered release block, and the repository name used in the contract item's cwd."
+output_model:
+  name: "ModelReleaseNotesApplyResult"
+  module: "omnibase_infra.models.model_release_notes_apply_result"
+  description: "success, the notes target, the staged paths in staging order, and the refusal reason when success is false."
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+# Top-level handler block: RuntimeLocal's single-shot compute path (no terminal_event,
+# no event bus) resolves the handler and its input model from THIS block, so
+# `onex node node_release_notes_apply_effect --input request.json` runs it without a
+# broker and exits 1 on a refusal. Same shape as node_sync_revert_watchdog_effect.
+handler:
+  module: "omnibase_infra.handlers.handler_release_notes_apply"
+  class: "HandlerReleaseNotesApply"
+  input_model: "omnibase_infra.models.model_release_notes_apply_request.ModelReleaseNotesApplyRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "apply_release_notes"
+      handler:
+        name: "HandlerReleaseNotesApply"
+        module: "omnibase_infra.handlers.handler_release_notes_apply"
+      description: "read the checkout's docs policy -> write the release block where it is accepted -> return the paths to stage"
+      output_fields:
+        - success
+        - target
+        - staged
+        - error_message
+io_operations:
+  - operation: "apply_release_notes"
+    description: "Place a rendered release block under the checkout's documentation policy."
+    input_fields:
+      - clone_path
+      - entry_file
+      - repo_name
+    output_fields:
+      - success
+      - target
+      - staged
+      - error_message
+metadata:
+  description: "Release-notes apply: write the release block where the target repository's documentation policy accepts it (OMN-17427)"
+  author: "OmniNode Team"
+  created: "2026-11-04"
+  tags:
+    - "effect"
+    - "release-train"
+    - "documentation-policy"

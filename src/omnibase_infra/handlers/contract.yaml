@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Archetype Declaration -- src/omnibase_infra/handlers/
+#
+# This directory is not a node. It is the infra-owned handler package that node
+# contracts bind into: the "Infra Node Handler Ownership" gate
+# (scripts/ci/reject-node-implementations.sh) refuses a handler under
+# src/omnibase_infra/nodes/*/handlers/ and requires every infra-owned handler to
+# live here and be bound from the node contract (OMN-20821; #4565, #5405).
+#
+# Those handlers are the effect side of their nodes: they hold the database,
+# HTTP, subprocess, filesystem and bus surfaces that the compute halves are
+# forbidden. The check-no-io-outside-effects hook (OMN-21532, K4) judges a module
+# against the NEAREST contract.yaml above it, and with no contract above this
+# directory its package_scope.nodeless_module_patterns row
+# ('^(?!(?:.*/)?tests/)(?:.*/)?handlers/') judged every module here as
+# non-EFFECT -- "a handler that no node binds is not in an EFFECT node". These
+# handlers ARE bound, by the node contracts that the ownership gate points at,
+# so the premise of that fallback does not hold here and the package was failing
+# a rule it is exempt from. This file supplies the missing declaration.
+#
+# Only the archetype: K4 reads node_type, then descriptor.node_archetype, and
+# exempts 'effect' alone. Same shape as
+# src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml.
+#
+# Related tickets:
+#   - OMN-21532: K4, the no_io_outside_effects rule
+#   - OMN-20821: infra handlers live here and are bound from the node contract
+#   - OMN-17427: epic
+node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
