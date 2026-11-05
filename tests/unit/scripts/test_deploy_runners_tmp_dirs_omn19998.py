@@ -23,10 +23,8 @@ import yaml
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
-from omnibase_infra.models.model_deploy_runners import (
-    ModelDeployRunnersRequest,
-    ModelDeployRunnersResult,
-)
+from omnibase_infra.models.model_deploy_runners_request import ModelDeployRunnersRequest
+from omnibase_infra.models.model_deploy_runners_result import ModelDeployRunnersResult
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine

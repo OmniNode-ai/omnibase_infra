@@ -12,10 +12,10 @@ node_version: {major: 1, minor: 0, patch: 0}
 description: "OMN-19998: prepare and verify declared runner TMPDIR binds before registration or recreation."
 input_model:
   name: ModelDeployRunnersRequest
-  module: omnibase_infra.models.model_deploy_runners
+  module: omnibase_infra.models.model_deploy_runners_request
 output_model:
   name: ModelDeployRunnersResult
-  module: omnibase_infra.models.model_deploy_runners
+  module: omnibase_infra.models.model_deploy_runners_result
 event_bus:
   subscribe_topics: ["onex.cmd.platform.runner-tmp-prepare.v1"]
   publish_topics: ["onex.evt.platform.runner-tmp-prepared.v1"]
@@ -29,11 +29,10 @@ handler_routing:
         module: omnibase_infra.handlers.handler_deploy_runners
       event_model:
         name: ModelDeployRunnersRequest
-        module: omnibase_infra.models.model_deploy_runners
+        module: omnibase_infra.models.model_deploy_runners_request
       output_events: [ModelDeployRunnersResult]
 capabilities:
   - name: runner.tmp.prepare
     description: Prepare normalized Compose TMPDIR bind sources and refuse failed readback.
 metadata:
   ticket: OMN-19998
-  policy_overlay: overlays/ci.yaml

@@ -10,18 +10,14 @@ import re
 import shlex
 from pathlib import Path
 
-import yaml
-
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.models.model_deploy_runners import (
-    ModelDeployRunnersRequest,
-    ModelDeployRunnersResult,
-    ModelRunnerTmpCompose,
-    ModelRunnerTmpPolicy,
-)
+from omnibase_infra.enums.enum_compose_mount_type import EnumComposeMountType
+from omnibase_infra.models.model_deploy_runners_request import ModelDeployRunnersRequest
+from omnibase_infra.models.model_deploy_runners_result import ModelDeployRunnersResult
+from omnibase_infra.models.model_runner_tmp_compose import ModelRunnerTmpCompose
+from omnibase_infra.models.model_runner_tmp_policy import ModelRunnerTmpPolicy
 
 _LOG = logging.getLogger(__name__)
-_POLICY = Path(__file__).parents[1] / "nodes/node_deploy_runners/overlays/ci.yaml"
 
 
 class HandlerDeployRunners:
@@ -60,9 +56,7 @@ class HandlerDeployRunners:
         if not request.secondary or request.dry_run:
             return ModelDeployRunnersResult(success=True)
         try:
-            policy = ModelRunnerTmpPolicy.model_validate(
-                yaml.safe_load(_POLICY.read_text())
-            )
+            policy = ModelRunnerTmpPolicy()
             # Read only the registration variable names; no credential value
             # leaves the remote Compose stdout -> typed model boundary.
             token_vars = sorted(
@@ -107,14 +101,17 @@ class HandlerDeployRunners:
                 service = services[f"{request.prefix}-{number}"]
                 tmpdir = service.environment.get("TMPDIR")
                 for volume in service.volumes:
-                    if volume.type == "bind" and volume.target == tmpdir:
+                    if (
+                        volume.type is EnumComposeMountType.BIND
+                        and volume.target == tmpdir
+                    ):
                         if (
                             not Path(volume.source).is_absolute()
                             or "\n" in volume.source
                         ):
                             raise ValueError("invalid TMPDIR source")
                         directories.add(volume.source)
-        except (OSError, ValueError, KeyError, TimeoutError, yaml.YAMLError):
+        except (OSError, ValueError, KeyError, TimeoutError):
             return ModelDeployRunnersResult(
                 success=False,
                 error_message=f"RUNNER-TMP-DISCOVERY host={request.host}: cannot resolve TMPDIR binds.",
