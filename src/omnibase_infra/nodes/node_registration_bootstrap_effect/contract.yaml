@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_registration_bootstrap_effect
+contract_name: node_registration_bootstrap_effect
+node_name: node_registration_bootstrap_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Acquires registration's PostgreSQL pool before dispatch starts. The handler also owns the bootstrap environment and contract/schema file boundaries. The domain plugin retains resource lifecycle ownership. Invoked during kernel bootstrap; it has no bus subscription because the dispatch infrastructure is not wired yet.
+input_model:
+  name: ModelDomainPluginConfig
+  module: omnibase_infra.runtime.protocol_domain_plugin
+output_model:
+  name: ModelRegistrationBootstrapResult
+  module: omnibase_infra.models.registration.model_registration_bootstrap_result
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: registration.bootstrap
+      handler:
+        name: HandlerRegistrationBootstrap
+        module: omnibase_infra.handlers.handler_registration_bootstrap
+      supported_operations: [registration.bootstrap]
+      input_model:
+        name: ModelDomainPluginConfig
+        module: omnibase_infra.runtime.protocol_domain_plugin
+capabilities:
+  - name: registration.bootstrap
+    description: Acquire registration resources and resolve bootstrap configuration.
+metadata:
+  description: Acquires the registration PostgreSQL pool and resolves bootstrap environment and contract/schema files before dispatch starts.
+  ticket: OMN-22446
+  tags: [effect, registration, bootstrap]

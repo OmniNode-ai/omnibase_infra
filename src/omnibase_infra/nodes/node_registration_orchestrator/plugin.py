@@ -56,44 +56,30 @@ Related:
 from __future__ import annotations
 
 import logging
-import os
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
-
-from omnibase_infra.runtime.contract_topic_router import (
-    build_topic_router_from_contract,
+from omnibase_infra.handlers.handler_registration_bootstrap import (
+    HandlerRegistrationBootstrap,
 )
-from omnibase_infra.runtime.models.model_postgres_pool_config import (
-    ModelPostgresPoolConfig,
+from omnibase_infra.handlers.handler_registration_snapshot_publisher import (
+    HandlerRegistrationSnapshotPublisher,
 )
+from omnibase_infra.models.dispatch.model_system_clock import SYSTEM_CLOCK
+from omnibase_infra.protocols.protocol_clock import ProtocolClock
 
 # Build topic router from contract published_events at module import time.
 # This maps Python event class names to their declared Kafka topics so that
 # DispatchResultApplier can publish each output event to the correct topic
 # instead of the single fallback output_topic. (OMN-4881/OMN-4883)
 _CONTRACT_PATH = Path(__file__).parent / "contract.yaml"
-try:
-    _contract_raw = yaml.safe_load(_CONTRACT_PATH.read_text(encoding="utf-8"))
-except (OSError, yaml.YAMLError) as _contract_exc:
-    logging.getLogger(__name__).warning(
-        "Failed to load registration contract at %s: %s. Using empty topic router.",
-        _CONTRACT_PATH,
-        _contract_exc,
-    )
-    _contract_raw = {}
-_CONTRACT_DATA: dict[str, object] = (
-    _contract_raw if isinstance(_contract_raw, dict) else {}
-)
-_TOPIC_ROUTER: dict[str, str] = build_topic_router_from_contract(_CONTRACT_DATA)
+_RESOURCES = HandlerRegistrationBootstrap.resources()
+_TOPIC_ROUTER = _RESOURCES.topic_router(_CONTRACT_PATH)
 
 if TYPE_CHECKING:
     from uuid import UUID
 
-    import asyncpg
-
+    from omnibase_infra.handlers.handler_registration_bootstrap import Pool
     from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
         HandlerRegistrationStoragePostgres,
     )
@@ -224,9 +210,10 @@ class ServiceRegistration:
         _wiring: EventBusSubcontractWiring for dispatch engine consumers
     """
 
-    def __init__(self) -> None:
-        """Initialize the plugin with empty state."""
-        self._pool: asyncpg.Pool | None = None
+    def __init__(self, *, clock: ProtocolClock | None = None) -> None:
+        """Initialize the plugin with empty state and an injected duration clock."""
+        self._clock = clock if clock is not None else SYSTEM_CLOCK
+        self._pool: Pool | None = None
         self._projector: ProjectorShell | None = None
         self._registration_storage: HandlerRegistrationStoragePostgres | None = None
         self._snapshot_publisher: SnapshotPublisherRegistration | None = None
@@ -246,7 +233,7 @@ class ServiceRegistration:
         return "Registration"
 
     @property
-    def postgres_pool(self) -> asyncpg.Pool | None:
+    def postgres_pool(self) -> Pool | None:
         """Return the PostgreSQL pool (for external access)."""
         return self._pool
 
@@ -277,7 +264,7 @@ class ServiceRegistration:
         Returns:
             True if OMNIBASE_INFRA_DB_URL environment variable is set.
         """
-        db_url = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
+        db_url = HandlerRegistrationBootstrap.database_url()
         if not db_url:
             logger.debug(
                 "Registration plugin inactive: OMNIBASE_INFRA_DB_URL not set "
@@ -304,43 +291,17 @@ class ServiceRegistration:
         Returns:
             Result with resources_created list on success.
         """
-        import asyncpg
-
-        start_time = time.time()
+        start_time = self._clock.monotonic()
         resources_created: list[str] = []
         correlation_id = config.correlation_id
 
         try:
             # 1. Create PostgreSQL pool from OMNIBASE_INFRA_DB_URL
-            postgres_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
-
-            # Shared error context for all DSN validation failures
-            pool_error_context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="create_postgres_pool",
+            bootstrap_handler = await HandlerRegistrationBootstrap.from_container(
+                config.container
             )
-
-            if not postgres_dsn:
-                raise ContainerWiringError(
-                    "OMNIBASE_INFRA_DB_URL is required but not set",
-                    context=pool_error_context,
-                )
-
-            # Validate DSN scheme and database name before pool creation
-            try:
-                ModelPostgresPoolConfig.validate_dsn(postgres_dsn)
-            except ValueError as exc:
-                raise ContainerWiringError(
-                    str(exc),
-                    context=pool_error_context,
-                ) from exc
-
-            self._pool = await asyncpg.create_pool(
-                postgres_dsn,
-                min_size=2,
-                max_size=10,
-            )
+            bootstrap = await bootstrap_handler.handle(config)
+            self._pool = bootstrap.pool
             # Validate pool creation succeeded - asyncpg.create_pool() can return None
             # in edge cases (e.g., connection issues during pool warmup)
             if self._pool is None:
@@ -385,7 +346,7 @@ class ServiceRegistration:
             if self._snapshot_publisher is not None:
                 resources_created.append("snapshot_publisher")
 
-            duration = time.time() - start_time
+            duration = self._clock.monotonic() - start_time
             # Use constructor directly for results with resources_created
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,
@@ -396,7 +357,7 @@ class ServiceRegistration:
             )
 
         except Exception as e:
-            duration = time.time() - start_time
+            duration = self._clock.monotonic() - start_time
             logger.exception(
                 "Failed to initialize Registration plugin (correlation_id=%s)",
                 correlation_id,
@@ -560,11 +521,8 @@ class ServiceRegistration:
         # Environment variable allows overriding the default path when package structure differs
         # Uses PROJECTOR_CONTRACTS_DEFAULT_DIR constant which is calculated from package root
         # for robustness against internal directory restructuring
-        projector_contracts_dir = Path(
-            os.getenv(
-                "ONEX_PROJECTOR_CONTRACTS_DIR",
-                str(PROJECTOR_CONTRACTS_DEFAULT_DIR),
-            )
+        projector_contracts_dir = HandlerRegistrationBootstrap.projector_contracts_dir(
+            PROJECTOR_CONTRACTS_DEFAULT_DIR
         )
 
         if not projector_contracts_dir.exists():
@@ -674,7 +632,7 @@ class ServiceRegistration:
             return
 
         try:
-            schema_sql = schema_file.read_text()
+            schema_sql = _RESOURCES.read_schema(schema_file)
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
                     # Serialize concurrent schema initialization across multiple
@@ -691,22 +649,7 @@ class ServiceRegistration:
                 correlation_id,
             )
         except Exception as schema_error:  # noqa: BLE001 — boundary: catch-all for resilience
-            # Import asyncpg exceptions at runtime to check for duplicate object errors
-            # PostgreSQL error codes: 42P07 = duplicate_table, 42710 = duplicate_object
-            import asyncpg.exceptions
-
-            # Catch both DuplicateTableError (42P07) and DuplicateObjectError (42710)
-            # These are sibling classes covering tables and other schema objects (indexes, etc.)
-            #
-            # Note: isinstance is used here for exception type checking, which is standard
-            # Python practice and an accepted exception to the "duck typing, never isinstance"
-            # rule from CLAUDE.md. Exception handling inherently requires type discrimination
-            # since exceptions don't implement protocols for error categorization.
-            duplicate_errors = (
-                asyncpg.exceptions.DuplicateTableError,
-                asyncpg.exceptions.DuplicateObjectError,
-            )
-            if isinstance(schema_error, duplicate_errors):
+            if _RESOURCES.is_duplicate_schema_error(schema_error):
                 # Expected for idempotent schema initialization - log at DEBUG
                 logger.debug(
                     "Schema already initialized (idempotent, correlation_id=%s)",
@@ -755,7 +698,7 @@ class ServiceRegistration:
 
             handler = HandlerRegistrationStoragePostgres(
                 container=config.container,
-                dsn=(os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip() or None,
+                dsn=HandlerRegistrationBootstrap.database_url() or None,
                 auto_create_schema=True,
             )
 
@@ -826,21 +769,18 @@ class ServiceRegistration:
             return
 
         try:
-            from aiokafka import AIOKafkaProducer
-
-            from omnibase_infra.event_bus.kafka_auth import (
-                build_aiokafka_auth_kwargs_from_env,
-            )
             from omnibase_infra.models.projection import ModelSnapshotTopicConfig
             from omnibase_infra.projectors.snapshot_publisher_registration import (
                 SnapshotPublisherRegistration,
             )
 
             snapshot_config = ModelSnapshotTopicConfig.default()
-            snapshot_producer = AIOKafkaProducer(
-                bootstrap_servers=kafka_bootstrap_servers,
-                **build_aiokafka_auth_kwargs_from_env(),
+            snapshot_handler = (
+                await HandlerRegistrationSnapshotPublisher.from_container(
+                    config.container
+                )
             )
+            snapshot_producer = (await snapshot_handler.handle(config)).producer
             self._snapshot_publisher = SnapshotPublisherRegistration(
                 snapshot_producer,
                 snapshot_config,
@@ -947,7 +887,7 @@ class ServiceRegistration:
             wire_registration_handlers,
         )
 
-        start_time = time.time()
+        start_time = self._clock.monotonic()
         correlation_id = config.correlation_id
 
         if self._pool is None:
@@ -965,7 +905,7 @@ class ServiceRegistration:
                 event_bus=config.event_bus,
                 correlation_id=correlation_id,
             )
-            duration = time.time() - start_time
+            duration = self._clock.monotonic() - start_time
 
             logger.info(
                 "Registration handlers wired (correlation_id=%s)",
@@ -987,7 +927,7 @@ class ServiceRegistration:
             )
 
         except Exception as e:
-            duration = time.time() - start_time
+            duration = self._clock.monotonic() - start_time
             logger.exception(
                 "Failed to wire Registration handlers (correlation_id=%s)",
                 correlation_id,
@@ -1017,7 +957,7 @@ class ServiceRegistration:
             ``ModelDomainPluginResult`` indicating dispatcher wiring was
             intentionally skipped because auto-wiring owns it.
         """
-        start_time = time.time()
+        start_time = self._clock.monotonic()
         message = (
             "Registration dispatcher wiring skipped: generic contract "
             "auto-wiring owns registration event-bus wiring"
@@ -1032,7 +972,7 @@ class ServiceRegistration:
             success=True,
             message=message,
             services_registered=[],
-            duration_seconds=time.time() - start_time,
+            duration_seconds=self._clock.monotonic() - start_time,
         )
 
     async def prepare_result_applier(
@@ -1052,7 +992,7 @@ class ServiceRegistration:
         Returns:
             Result indicating whether result application services are ready.
         """
-        start_time = time.time()
+        start_time = self._clock.monotonic()
         correlation_id = config.correlation_id
 
         if self._result_applier is not None:
@@ -1185,7 +1125,7 @@ class ServiceRegistration:
                 correlation_id,
             )
 
-            duration = time.time() - start_time
+            duration = self._clock.monotonic() - start_time
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,
                 success=True,
@@ -1194,7 +1134,7 @@ class ServiceRegistration:
             )
 
         except Exception as e:
-            duration = time.time() - start_time
+            duration = self._clock.monotonic() - start_time
             logger.exception(
                 "Failed to prepare registration result applier (correlation_id=%s)",
                 correlation_id,
@@ -1477,7 +1417,7 @@ class ServiceRegistration:
         Returns:
             Result indicating cleanup success/failure.
         """
-        start_time = time.time()
+        start_time = self._clock.monotonic()
         correlation_id = config.correlation_id
         errors: list[str] = []
 
@@ -1538,7 +1478,7 @@ class ServiceRegistration:
         self._wiring = None
         self._result_applier = None
 
-        duration = time.time() - start_time
+        duration = self._clock.monotonic() - start_time
 
         if errors:
             return ModelDomainPluginResult.failed(

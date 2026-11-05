@@ -1,0 +1,64 @@
+schema_version: 1.0.0
+ticket_id: OMN-22446
+title: Registration plugin bootstrap I/O moves into effect handlers
+summary: Extract the recorded five I/O categories from the registration orchestrator plugin without changing baselines or allowlists. The required regression test and this evidence contract accompany the production-only extraction.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22446-pure-plugin
+    statement: The registration plugin coordinates effect-owned bootstrap resources and uses an injected clock.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: check-no-io-outside-effects reports zero findings on src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py at the PR head -- falsifier: uv run pre-commit run check-no-io-outside-effects --files src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py'
+      - id: AC2
+        statement: 'AC2: a regression test built from the recorded 23 findings fails on origin/dev and passes on the fix, and the registration orchestrator tests still pass -- falsifier: uv run pytest tests/ -q -k registration_orchestrator'
+      - id: AC3
+        statement: 'AC3: the PR diff touches only [plugin.py](<http://plugin.py>) and the effect node or handler files the I/O moves into, with no baseline or allowlist edit -- falsifier: git diff --stat origin/dev...HEAD in the PR review'
+evidence_requirements:
+  - kind: tests
+    description: The canonical no-I/O validator checks all 23 positive controls and the real plugin source; the effect contracts expose executable handlers.
+    command: uv run pytest tests/unit/nodes/node_registration_orchestrator/test_plugin_no_io_omn22446.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22446-ac1-hook
+    description: The unchanged pinned no-I/O hook checks the registration plugin.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: uv run pre-commit run check-no-io-outside-effects --files src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py
+        cwd: .
+  - id: dod-omn22446-ac2-regression
+    description: The regression uses the canonical ValidatorNoIoOutsideEffects for all 23 recorded positive controls and the real plugin source. The unchanged pinned hook reports 23 findings on the dev plugin and zero on the extracted plugin. The discovered effect routes must expose handle and EFFECT metadata.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_registration_orchestrator/test_plugin_no_io_omn22446.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_registration_orchestrator/test_plugin_no_io_omn22446.py tests/ -q -k registration_orchestrator
+        cwd: .
+  - id: dod-omn22446-ac3-scope
+    description: Only the plugin, the effect handlers and their node files, plus the explicitly required regression and evidence contract may change; every baseline and allowlist remains outside this set.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: uv run python -c "import subprocess; allowed=set(['src/omnibase_infra/protocols/protocol_registration_bootstrap_resources.py', 'src/omnibase_infra/protocols/protocol_registration_snapshot_producer.py', 'contracts/OMN-22446.yaml', 'pyproject.toml', 'src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py', 'src/omnibase_infra/handlers/handler_registration_bootstrap.py', 'src/omnibase_infra/handlers/handler_registration_snapshot_publisher.py', 'src/omnibase_infra/nodes/node_event_bus_wiring_effect/contract.yaml', 'src/omnibase_infra/models/registration/model_registration_snapshot_producer.py', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/__init__.py', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/contract.yaml', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/node.py', 'src/omnibase_infra/nodes/node_registration_bootstrap_effect/registration_bootstrap_resources.py', 'src/omnibase_infra/nodes/node_event_bus_wiring_effect/registration_snapshot_producer.py', 'src/omnibase_infra/models/registration/model_registration_bootstrap_result.py', 'tests/unit/nodes/node_registration_orchestrator/test_plugin_no_io_omn22446.py', 'tests/integration/handlers/test_handler_registration_bootstrap_omn22446.py', 'tests/unit/test_db_ownership.py', 'tests/unit/test_schema_fingerprint.py', 'tests/fixtures/dispatch_parity/selection-oracle-no-occ-v2.header.json', 'tests/ci/fixtures/dispatch_parity_readback_omn20074.json', 'tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py']); changed=set(subprocess.check_output(['git','diff','--name-only','origin/dev...HEAD'],text=True).splitlines()); assert not changed-allowed, sorted(changed-allowed); required={'src/omnibase_infra/nodes/node_registration_orchestrator/plugin.py', 'src/omnibase_infra/handlers/handler_registration_bootstrap.py', 'src/omnibase_infra/handlers/handler_registration_snapshot_publisher.py'}; assert required <= changed, sorted(required-changed)"
+        cwd: .
+  - id: dod-omn22446-deploy-image
+    description: 'Hosted-runner deploy probe: build the shipped runtime image from this checkout and execute the installed plugin with an injected clock, asserting its measured duration and importing both real effect handlers. It needs Docker but no lab-network access or running database/broker. This is an image execution probe, not a full runtime health claim.'
+    source: manual
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker build -f docker/Dockerfile.runtime -t omn22446-registration-probe . && docker run --rm --entrypoint /app/.venv/bin/python omn22446-registration-probe -c "import asyncio, inspect; from types import SimpleNamespace; from uuid import uuid4; from omnibase_infra.nodes.node_registration_orchestrator.plugin import ServiceRegistration; from omnibase_infra.handlers.handler_registration_bootstrap import HandlerRegistrationBootstrap; from omnibase_infra.handlers.handler_registration_snapshot_publisher import HandlerRegistrationSnapshotPublisher; assert 'clock' in inspect.signature(ServiceRegistration).parameters; clock=SimpleNamespace(monotonic=iter((10.0, 11.0)).__next__); result=asyncio.run(ServiceRegistration(clock=clock).wire_dispatchers(SimpleNamespace(correlation_id=uuid4()))); assert result.success and result.duration_seconds == 1.0; assert callable(HandlerRegistrationBootstrap.handle) and callable(HandlerRegistrationSnapshotPublisher.handle)"
+        cwd: .
