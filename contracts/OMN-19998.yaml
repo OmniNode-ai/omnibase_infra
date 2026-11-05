@@ -190,6 +190,11 @@ requirements:
     acceptance:
       - id: AC40
         statement: 'AC40: docker/runners/Dockerfile pins runner 2.338.2 and both architecture checksums, docker/runners/runner-image.lock.json records 2.338.2 with a valid identity, and the existing fleet-floor and multiarch tests pass; the 2.336.0 merge-base Dockerfile fails the head fleet-floor test and the exact-pin deployment probe.'
+  - id: req-omn19998-verify-runner-no-operator-env
+    statement: The verify runner class is given no key from the operator env file, because no job that runs on it reads one; the deploy runner keeps the file.
+    acceptance:
+      - id: AC42
+        statement: 'AC42: omninode-verify-runner-1, -2 and -3 carry no bind mount of the operator env file, no root-phase copy of it and no OMNIBASE_OPERATOR_ENV_FILE, while omninode-deploy-runner keeps all three -- falsifier: uv run pytest tests/ci/test_verify_runner_credential_read_only_omn18408.py -q -n 0 fails on the merge-base docker/docker-compose.runners.yml, which mounts the file into all three verify services'
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -802,3 +807,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-verify-runner-no-operator-env
+    description: The compose file read as YAML, the verify services against the deploy runner as positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_verify_runner_credential_read_only_omn18408.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC42
