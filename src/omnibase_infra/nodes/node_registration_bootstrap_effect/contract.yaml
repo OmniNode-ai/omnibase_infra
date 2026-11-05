@@ -27,14 +27,6 @@ handler_routing:
       input_model:
         name: ModelDomainPluginConfig
         module: omnibase_infra.runtime.protocol_domain_plugin
-    - operation: registration.bootstrap_resources
-      handler:
-        name: HandlerRegistrationBootstrapResources
-        module: omnibase_infra.nodes.node_registration_bootstrap_effect.handler_registration_bootstrap_resources
-      supported_operations: [registration.bootstrap_resources]
-      input_model:
-        name: ModelDomainPluginConfig
-        module: omnibase_infra.runtime.protocol_domain_plugin
 capabilities:
   - name: registration.bootstrap
     description: Acquire registration resources and resolve bootstrap configuration.

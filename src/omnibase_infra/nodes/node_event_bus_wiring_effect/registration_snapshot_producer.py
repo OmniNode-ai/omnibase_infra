@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from aiokafka import AIOKafkaProducer
 
 
-class HandlerRegistrationSnapshotProducer:
+class RegistrationSnapshotProducer:
     """Acquire the authenticated producer used by registration snapshots."""
 
     @staticmethod

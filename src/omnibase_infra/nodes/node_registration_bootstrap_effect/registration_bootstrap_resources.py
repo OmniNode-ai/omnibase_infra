@@ -18,7 +18,7 @@ from omnibase_infra.runtime.contract_topic_router import (
 logger = logging.getLogger(__name__)
 
 
-class HandlerRegistrationBootstrapResources:
+class RegistrationBootstrapResources:
     """Perform the resource operations coordinated by the bootstrap handler."""
 
     @staticmethod
@@ -48,7 +48,7 @@ class HandlerRegistrationBootstrapResources:
     def topic_router(path: Path) -> dict[str, str]:
         """Read the registration routing declarations at the effect boundary."""
         return build_topic_router_from_contract(
-            HandlerRegistrationBootstrapResources.read_declarations(path)
+            RegistrationBootstrapResources.read_declarations(path)
         )
 
     @staticmethod

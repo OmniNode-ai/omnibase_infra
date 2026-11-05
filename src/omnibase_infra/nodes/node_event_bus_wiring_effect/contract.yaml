@@ -323,11 +323,3 @@ handler_routing:
       output_model:
         name: ModelRegistrationSnapshotProducer
         module: omnibase_infra.models.registration.model_registration_snapshot_producer
-    - operation: registration.snapshot_producer
-      handler:
-        name: HandlerRegistrationSnapshotProducer
-        module: omnibase_infra.nodes.node_event_bus_wiring_effect.handler_registration_snapshot_producer
-      supported_operations: [registration.snapshot_producer]
-      input_model:
-        name: ModelDomainPluginConfig
-        module: omnibase_infra.runtime.protocol_domain_plugin

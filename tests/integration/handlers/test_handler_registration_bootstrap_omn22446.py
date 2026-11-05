@@ -19,8 +19,8 @@ from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.handlers.handler_registration_bootstrap import (
     HandlerRegistrationBootstrap,
 )
-from omnibase_infra.nodes.node_registration_bootstrap_effect.handler_registration_bootstrap_resources import (
-    HandlerRegistrationBootstrapResources,
+from omnibase_infra.nodes.node_registration_bootstrap_effect.registration_bootstrap_resources import (
+    RegistrationBootstrapResources,
 )
 from omnibase_infra.runtime.protocol_domain_plugin import ModelDomainPluginConfig
 
@@ -74,13 +74,9 @@ def test_projector_dir_override_and_contract_fallback(
     monkeypatch.setenv("ONEX_PROJECTOR_CONTRACTS_DIR", str(tmp_path))
     assert HandlerRegistrationBootstrap.projector_contracts_dir(Path("/x")) == tmp_path
     assert (
-        HandlerRegistrationBootstrapResources.read_declarations(
-            tmp_path / "missing.yaml"
-        )
+        RegistrationBootstrapResources.read_declarations(tmp_path / "missing.yaml")
         == {}
     )
     good = tmp_path / "c.yaml"
     good.write_text("name: demo\n", encoding="utf-8")
-    assert HandlerRegistrationBootstrapResources.read_declarations(good) == {
-        "name": "demo"
-    }
+    assert RegistrationBootstrapResources.read_declarations(good) == {"name": "demo"}

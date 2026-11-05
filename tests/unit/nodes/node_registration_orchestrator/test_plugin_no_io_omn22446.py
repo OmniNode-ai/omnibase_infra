@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Hold the five I/O categories recorded on plugin.py before extraction."""
 
-import ast
 from pathlib import Path
 
 import pytest
@@ -40,32 +39,19 @@ RECORDED_FINDINGS = (
 )
 
 
-def _findings(source: str) -> list[tuple[int, str]]:
-    # The runtime dependency and the hook pin can carry different checker
-    # versions. Keep this regression tied to the recorded hook categories,
-    # including clock/env/file reads absent from older runtime checkers.
-    findings: list[tuple[int, str]] = []
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            modules = (
-                [alias.name for alias in node.names]
-                if isinstance(node, ast.Import)
-                else [node.module or ""]
-            )
-            if any(module.split(".")[0] == "asyncpg" for module in modules):
-                findings.append((node.lineno, "import_database"))
-        elif isinstance(node, ast.Call):
-            func = node.func
-            name = ast.unparse(func)
-            if name in {"time.time", "time.monotonic", "time.perf_counter"}:
-                findings.append((node.lineno, "clock"))
-            elif name in {"os.getenv", "os.environ.get"}:
-                findings.append((node.lineno, "env_read"))
-            elif isinstance(func, ast.Attribute) and func.attr == "read_text":
-                findings.append((node.lineno, "file_read"))
-            elif name == "AIOKafkaProducer":
-                findings.append((node.lineno, "direct_bus"))
-    return sorted(findings)
+def _findings(source: str, root: Path) -> list[tuple[int, str]]:
+    from omnibase_core.validation.validator_no_io_outside_effects import (
+        ValidatorNoIoOutsideEffects,
+    )
+
+    # Preserve the real module path and orchestrator contract: both select the
+    # canonical validator's package scope, including clock, env and file reads.
+    plugin = root / PLUGIN
+    plugin.parent.mkdir(parents=True, exist_ok=True)
+    (root / CONTRACT).write_text((ROOT / CONTRACT).read_text())
+    plugin.write_text(source)
+    result = ValidatorNoIoOutsideEffects(root=root).validate([plugin])
+    return sorted((issue.line_number, issue.rule_name) for issue in result.issues)
 
 
 @pytest.mark.unit
@@ -74,15 +60,16 @@ def test_recorded_registration_plugin_offender_is_detected(
     line: int,
     category: str,
     source: str,
+    tmp_path: Path,
 ) -> None:
-    findings = _findings(source)
+    findings = _findings(source, tmp_path)
     assert len(findings) == 1, (line, category, findings)
     assert findings[0][1] == category
 
 
 @pytest.mark.unit
-def test_registration_orchestrator_plugin_has_no_io() -> None:
-    findings = _findings((ROOT / PLUGIN).read_text())
+def test_registration_orchestrator_plugin_has_no_io(tmp_path: Path) -> None:
+    findings = _findings((ROOT / PLUGIN).read_text(), tmp_path)
     assert not findings, findings
 
 
@@ -225,16 +212,16 @@ def test_registration_contract_read_remains_best_effort(
     tmp_path: Path,
     content: str,
 ) -> None:
-    from omnibase_infra.nodes.node_registration_bootstrap_effect.handler_registration_bootstrap_resources import (
-        HandlerRegistrationBootstrapResources,
+    from omnibase_infra.nodes.node_registration_bootstrap_effect.registration_bootstrap_resources import (
+        RegistrationBootstrapResources,
     )
 
     path = tmp_path / "contract.yaml"
-    assert HandlerRegistrationBootstrapResources.read_declarations(path) == {}
+    assert RegistrationBootstrapResources.read_declarations(path) == {}
     path.write_text(content)
-    assert HandlerRegistrationBootstrapResources.read_declarations(path) == {}
+    assert RegistrationBootstrapResources.read_declarations(path) == {}
     path.write_text("published_events: []")
-    assert HandlerRegistrationBootstrapResources.read_declarations(path) == {
+    assert RegistrationBootstrapResources.read_declarations(path) == {
         "published_events": []
     }
 
@@ -322,8 +309,6 @@ async def test_registration_effect_contracts_resolve_real_handlers_and_boot_mani
     )
     expected = {
         "HandlerRegistrationBootstrap",
-        "HandlerRegistrationBootstrapResources",
-        "HandlerRegistrationSnapshotProducer",
         "HandlerRegistrationSnapshotPublisher",
     }
     resolved = set()
@@ -343,6 +328,8 @@ async def test_registration_effect_contracts_resolve_real_handlers_and_boot_mani
                 )
             )
             assert isinstance(resolution.handler_instance, handler_cls)
+            assert callable(resolution.handler_instance.handle)
+            assert resolution.handler_instance.handler_category.value == "effect"
             resolved.add(entry.handler.name)
     assert resolved == expected
     # These effects run before dispatch is wired and declare no subscriptions.
