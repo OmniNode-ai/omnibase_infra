@@ -1,0 +1,22 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 53 and seed -3207444285375025874 with 4 workers on 80 cores with 5461MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module SecondRead
+Starting... (2026-11-05 18:33:22)
+Implied-temporal checking--satisfiability problem has 3 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 18:33:22.
+Checking 3 branches of temporal properties for the complete state space with 227712 total distinct states at (2026-11-05 18:34:14)
+Finished checking temporal properties in 35s at 2026-11-05 18:34:49
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 2.1E-9
+  based on the actual fingerprints:  val = 1.3E-10
+574833 states generated, 75904 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 29.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 9 and the 95th percentile is 4).
+Finished in 01min 28s at (2026-11-05 18:34:49)
+
+exit=0 commit=d65f9a748

@@ -1,0 +1,21 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 3 and seed 6072287755931716154 with 4 workers on 80 cores with 5461MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module SecondRead
+Starting... (2026-11-05 18:23:55)
+Warning: The set Ords has been defined to be a symmetry set but contains less than two elements.
+(Use the -nowarning option to disable this warning.)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 18:23:56.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 5.5E-6
+  based on the actual fingerprints:  val = 1.2E-5
+32251841 states generated, 3537408 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 34.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 13 and the 95th percentile is 4).
+Finished in 03min 38s at (2026-11-05 18:27:33)
+
+exit=0 commit=d65f9a748

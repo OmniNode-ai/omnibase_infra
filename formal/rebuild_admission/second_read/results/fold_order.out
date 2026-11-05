@@ -1,0 +1,12 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 43 and seed -6457319235883289259 with 4 workers on 80 cores with 5461MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module SecondRead
+Starting... (2026-11-05 17:46:42)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 17:46:42.
+Checkpointing of run /tmp/sr-vbGB1K/26-11-05-17-46-41.653
+Checkpointing completed at (2026-11-05 18:16:45)
+
+exit=124 commit=d3b605a24

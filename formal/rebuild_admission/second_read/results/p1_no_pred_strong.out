@@ -1,0 +1,138 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 43 and seed -1969964944856606964 with 4 workers on 80 cores with 5461MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module SecondRead
+Starting... (2026-11-05 18:40:23)
+Warning: The set Ords has been defined to be a symmetry set but contains less than two elements.
+(Use the -nowarning option to disable this warning.)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 18:40:23.
+Error: Invariant StrongOrderTable is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = TRUE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = (o1 :> 0 @@ "s1" :> 0 @@ "s2" :> 0)
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = TRUE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = (o1 :> "idle" @@ "s1" :> "idle" @@ "s2" :> "idle")
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 2: <PubDies line 390, col 3 to line 392, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = TRUE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = (o1 :> 0 @@ "s1" :> 0 @@ "s2" :> 0)
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = (o1 :> "idle" @@ "s1" :> "idle" @@ "s2" :> "idle")
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 3: <GoesStale line 394, col 3 to line 397, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = (o1 :> 0 @@ "s1" :> 0 @@ "s2" :> 0)
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = (o1 :> "idle" @@ "s1" :> "idle" @@ "s2" :> "idle")
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+120 states generated, 76 distinct states found, 58 states left on queue.
+The depth of the complete state graph search is 4.
+Finished in 00s at (2026-11-05 18:40:23)
+Trace exploration spec path: ./SecondRead_TTrace_1793904022.tla
+
+exit=12 commit=d65f9a748

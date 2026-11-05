@@ -1,0 +1,72 @@
+fold_holder                          exit=0    commit=d65f9a748  states=    17340  holds
+fold_live_owner                      exit=0    commit=d65f9a748  states=      690  holds
+fold_live_safety                     exit=0    commit=d65f9a748  states=     2744  holds
+fold_live_stop                       exit=0    commit=d65f9a748  states=    26460  holds
+fold_order                           exit=124  commit=d3b605a24  states=        -  TIMEOUT no result
+fold_order_small                     exit=124  commit=d65f9a748  states=        -  TIMEOUT no result
+fold_stop                            exit=0    commit=d65f9a748  states=   804870  holds
+fold_table                           exit=0    commit=d65f9a748  states=   596475  holds
+fold_union                           exit=124  commit=d3b605a24  states=        -  TIMEOUT no result
+fold_union_small                     exit=124  commit=2a354dbb5  states=        -  TIMEOUT no result
+fold_union_tiny                      exit=0    commit=70ac488a3  states=   122400  holds
+fold_wip2                            exit=0    commit=d65f9a748  states=   380988  holds
+live_cause_starts_base               exit=0    commit=d65f9a748  states=      260  holds
+live_cause_starts_wf_only            exit=13   commit=d65f9a748  states=      260  Temporal property SafetyCauseStarts was violated
+live_close_on_sources                exit=0    commit=d65f9a748  states=      224  holds
+live_min_owner                       exit=0    commit=d65f9a748  states=      166  holds
+live_min_safety                      exit=0    commit=d65f9a748  states=      260  holds
+live_min_stop                        exit=0    commit=d65f9a748  states=    75904  holds
+live_repair_fails                    exit=13   commit=d65f9a748  states=      260  Temporal property FixedSafetyCloses was violated
+live_safety_crash                    exit=0    commit=d65f9a748  states=     2080  holds
+live_union                           exit=124  commit=c9e253d57  states=        -  TIMEOUT no result
+live_union_small                     exit=0    commit=9f164dd55  states=    93440  holds
+live_weak_publish                    exit=13   commit=d65f9a748  states=      260  Temporal property FixedSafetyCloses was violated
+p1_cause_above_active                exit=12   commit=d65f9a748  states=       39  Invariant CauseOnlyIfBlocking is violated
+p1_cont_step_split                   exit=12   commit=d65f9a748  states=       56  Invariant NoContinuationStepInSafety is violated
+p1_epoch_first                       exit=0    commit=d65f9a748  states=    37568  holds
+p1_gate_lag                          exit=12   commit=d65f9a748  states=      231  Invariant NoStartAgainstOrder is violated
+p1_kept_below_stop_refused_base      exit=12   commit=d65f9a748  states=       29  Invariant KeptAdmittedBelowStop is violated
+p1_late_bind                         exit=12   commit=d65f9a748  states=      654  Invariant NoStartAgainstOrder is violated
+p1_no_join_target_strong             exit=12   commit=d65f9a748  states=        -  Invariant StrongOrderTable is violated
+p1_no_join_target_survives           exit=0    commit=d65f9a748  states=   515460  holds
+p1_no_pred_strong                    exit=12   commit=d65f9a748  states=       76  Invariant StrongOrderTable is violated
+p1_no_pred_survives                  exit=0    commit=d65f9a748  states=   515460  holds
+p1_no_slot_strong                    exit=12   commit=d65f9a748  states=       24  Invariant OneCauseLane is violated
+p1_no_slot_survives                  exit=0    commit=d65f9a748  states=      304  holds
+p1_slot_base                         exit=0    commit=d65f9a748  states=      172  holds
+p1_stale_time_only                   exit=12   commit=d65f9a748  states=      616  Invariant NoStartAgainstOrder is violated
+p1_stale_time_only_recheck           exit=124  commit=d65f9a748  states=        -  TIMEOUT no result
+p1_step0b_refuses_cause              exit=12   commit=d65f9a748  states=        6  Invariant SafetyCauseAdmitted is violated
+p1_strict_next_stop_wedge            exit=12   commit=d65f9a748  states=       11  Invariant NextStopHasAWayIn is violated
+p1_strong_base_order                 exit=0    commit=c9e253d57  states=  8446464  holds
+p1_strong_base_table                 exit=0    commit=d65f9a748  states=   515460  holds
+p2_expired_token                     exit=12   commit=d65f9a748  states=       31  Invariant ClaimsWithinLimit is violated
+p2_row_gap                           exit=12   commit=d65f9a748  states=       18  Invariant AliveWithinLimit is violated
+p2_row_gap_counted                   exit=0    commit=d65f9a748  states=       10  holds
+p2_third_close                       exit=12   commit=d65f9a748  states=       15  Invariant AliveWithinLimit is violated
+p2_third_close_rows_hold             exit=0    commit=d65f9a748  states=       16  holds
+p3_break_drops_reading               exit=0    commit=d65f9a748  states=  1180545  holds
+p3_escalate_on_reader                exit=13   commit=d65f9a748  states=    22976  Temporal property StopClearsOrEscalates was violated
+p3_old_reading                       exit=12   commit=d65f9a748  states=      511  Invariant StopClearsOnFreshReading is violated
+p3_rows_survive                      exit=12   commit=d65f9a748  states=     3712  Invariant StopClearsOnlyWithEvidence is violated
+p3_safety_assumed                    exit=13   commit=d65f9a748  states=      260  Temporal property SafetyStopClearsOrEscalates was violated
+p3_safety_escalation                 exit=0    commit=d65f9a748  states=      440  holds
+p3_safety_no_escalation              exit=13   commit=d65f9a748  states=      260  Temporal property SafetyStopClearsOrEscalates was violated
+p4_both_down_base                    exit=0    commit=d65f9a748  states=     1680  holds
+p4_both_down_record                  exit=12   commit=d65f9a748  states=      120  Invariant WitStartWithBothEnginesDown is violated
+p4_effect_then_key                   exit=12   commit=d65f9a748  states=      294  Invariant RestartRepeatsNoStep is violated
+p4_fence_split                       exit=12   commit=d65f9a748  states=      355  Invariant NoWriteByLostOwner is violated
+p4_holder_down_cause                 exit=13   commit=d65f9a748  states=     2080  Temporal property SafetyCauseStarts was violated
+p4_holder_down_cause_record          exit=0    commit=d65f9a748  states=     2600  holds
+p4_key_lag                           exit=12   commit=d65f9a748  states=      322  Invariant RestartRepeatsNoStep is violated
+p4_record_per_engine                 exit=12   commit=d65f9a748  states=       36  Invariant ExactlyOneOwner is violated
+p4_record_separate_holds             exit=0    commit=d65f9a748  states=     1944  holds
+reg_holder                           exit=0    commit=d65f9a748  states=     1842  holds
+reg_live_owner                       exit=0    commit=d65f9a748  states=      166  holds
+reg_live_safety                      exit=0    commit=d65f9a748  states=      260  holds
+reg_live_stop                        exit=0    commit=d65f9a748  states=    75904  holds
+reg_order                            exit=0    commit=c9e253d57  states=  8446464  holds
+reg_stop                             exit=0    commit=d65f9a748  states=  3537408  holds
+reg_table                            exit=0    commit=d65f9a748  states=   515460  holds
+reg_wip2                             exit=0    commit=d65f9a748  states=  1180672  holds
+reg_wip8                             exit=0    commit=d65f9a748  states=   287020  holds

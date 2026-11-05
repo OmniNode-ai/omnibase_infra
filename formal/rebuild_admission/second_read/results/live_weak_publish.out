@@ -1,0 +1,463 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 3 and seed 55445784402102631 with 4 workers on 80 cores with 5461MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module SecondRead
+Starting... (2026-11-05 18:40:01)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-05 18:40:02.
+Checking temporal properties for the complete state space with 260 total distinct states at (2026-11-05 18:40:03)
+Error: Temporal property FixedSafetyCloses was violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = TRUE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = TRUE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 2: <PubDies line 390, col 3 to line 392, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = TRUE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 3: <GoesStale line 394, col 3 to line 397, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 4: <SafetyOpens("s1") line 370, col 3 to line 374, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 5: <Reserve("s1") line 280, col 3 to line 285, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "resv", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 6: <Consume("s1") line 302, col 3 to line 319, col 62 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 1, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "run", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 7: <SafetyFix("s1") line 345, col 3 to line 349, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 1, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "run", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {"s1"}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 8: <Finish("s1") line 328, col 3 to line 335, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {"s1"}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 9: <Reserve("r1") line 280, col 3 to line 285, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "resv"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {"s1"}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 10: <Consume("r1") line 302, col 3 to line 319, col 62 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 1]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "run"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {"s1"}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+State 11: <Finish("r1") line 328, col 3 to line 335, col 21 of module SecondRead>
+/\ staleCons = FALSE
+/\ handedH = FALSE
+/\ inflight = {}
+/\ seeAfter = <<FALSE, FALSE, FALSE>>
+/\ broken = {}
+/\ fView = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ effects = <<0, 0>>
+/\ pend = {}
+/\ oldResv = {}
+/\ cleared = FALSE
+/\ badOldReading = FALSE
+/\ consumed = [g |-> 0, s1 |-> 0, r1 |-> 0]
+/\ badClear = FALSE
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = TRUE
+/\ downStart = FALSE
+/\ keys = [F |-> {}, H |-> {}]
+/\ pc = [g |-> "idle", s1 |-> "idle", r1 |-> "idle"]
+/\ badStrong = FALSE
+/\ readAfter = <<FALSE, FALSE, FALSE>>
+/\ contStep = FALSE
+/\ stop = <<"none", "none", "none">>
+/\ sFixed = {"s1"}
+/\ joined = {}
+/\ busy = [F |-> 0, H |-> 0]
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ working = 1..3
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ intent = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ badStart = FALSE
+/\ tok = {}
+/\ clash = FALSE
+/\ ckpt = [F |-> 0, H |-> 0]
+
+Back to state 8: <PubDies line 390, col 3 to line 392, col 21 of module SecondRead>
+
+Finished checking temporal properties in 00s at 2026-11-05 18:40:03
+1167 states generated, 260 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 19.
+Finished in 01s at (2026-11-05 18:40:03)
+Trace exploration spec path: ./SecondRead_TTrace_1793904001.tla
+
+exit=13 commit=d65f9a748
