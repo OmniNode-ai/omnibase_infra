@@ -58,7 +58,9 @@ wip2, wip8  P2 under the race            9 ordinary requests + 2 joins + next-pi
 holder      P4                           3 ordinary, 2 joins, next-piece ordinary; crash, restart,
                                          fenced handover, 2 steps
 stop        P3 evidence                  3 cause lanes, 1 ordinary; stops on 3 pieces; typed rows
-live_stop, live_safety, live_owner       liveness, each on its own smaller scope; see Limits
+live_stop   P3 liveness                  2 cause lanes and a repair lane; stops on 2 pieces; typed rows
+live_safety P1 suspend, FixedSafetyCloses continuation, safety cause and repair lanes; writer can die
+live_owner  P4 owner comes back          1 ordinary, 1 join; crash, restart, handover
 
 Why classes can be split: a request's decision reads the gate's facts and the occupancy of its own
 class (WIP room, cause slot, repair slot). Every gate fact can change in every state whatever the
