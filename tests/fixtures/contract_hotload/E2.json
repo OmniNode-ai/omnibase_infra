@@ -1,0 +1,70 @@
+{
+  "chain": "E2",
+  "kind": "error",
+  "title": "conflict",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "deploy",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "replace",
+        "contract_name": "node_x",
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "registration_request_id": "89bbb920-f17c-5f73-b5ca-d9fd882906ac",
+        "expected_version": 1,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:89bbb920-f17c-5f73-b5ca-d9fd882906ac",
+        "outcome": "rejected",
+        "reason": "VERSION_CONFLICT",
+        "registry_version": 2
+      },
+      "key": "lab-deploy:89bbb920-f17c-5f73-b5ca-d9fd882906ac",
+      "note": "the registry holds v2; the request expected v1"
+    },
+    {
+      "step": 3,
+      "actor": "deploy",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "05c268c1-05f5-5156-88ec-86132bf3db54",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x",
+      "note": "a delayed register after a removal at v3"
+    },
+    {
+      "step": 4,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:05c268c1-05f5-5156-88ec-86132bf3db54",
+        "outcome": "rejected",
+        "reason": "VERSION_CONFLICT",
+        "registry_version": 3
+      },
+      "key": "lab-deploy:05c268c1-05f5-5156-88ec-86132bf3db54"
+    }
+  ],
+  "ends_in": "VERSION_CONFLICT; no row change; exit 1"
+}

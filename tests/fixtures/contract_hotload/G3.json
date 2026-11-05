@@ -1,0 +1,134 @@
+{
+  "chain": "G3",
+  "kind": "golden",
+  "title": "replace",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "deploy",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "replace",
+        "contract_name": "node_x",
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "registration_request_id": "8f6db65b-f24b-59e8-a720-a0d177f132f9",
+        "expected_version": 1,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 2,
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "operation": "replace",
+        "owner": "lab-deploy",
+        "registration_request_id": "8f6db65b-f24b-59e8-a720-a0d177f132f9",
+        "contract_yaml": "name: node_x\nnode_version: 2.0.0\n"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 3,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:8f6db65b-f24b-59e8-a720-a0d177f132f9",
+        "outcome": "accepted",
+        "reason": null,
+        "registry_version": 2
+      },
+      "key": "lab-deploy:8f6db65b-f24b-59e8-a720-a0d177f132f9"
+    },
+    {
+      "step": 4,
+      "actor": "runtime-new-image",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 2,
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "operation": "replace",
+        "status": "replaced",
+        "reason": null,
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:5a0717cb6596468ea1dffa86011f9b0f497348d80421835b51799f9aeb455642"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 5,
+      "actor": "runtime-old-image",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 2,
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "operation": "replace",
+        "status": "refused",
+        "reason": "PACKAGE_HASH_MISMATCH",
+        "runtime_instance_id": "26db428e-d3cc-5fb2-92ac-f8d8c2dce2db",
+        "incarnation_id": "655cd2fd-1b1e-5e3e-b7bb-8fb1a7d5da27",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 6,
+      "actor": "runtime-old-image",
+      "action": "publish",
+      "topic_role": "state",
+      "model": "ModelRuntimeHotloadState",
+      "record": {
+        "entity_id": "26db428e-d3cc-5fb2-92ac-f8d8c2dce2db",
+        "incarnation_id": "655cd2fd-1b1e-5e3e-b7bb-8fb1a7d5da27",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f",
+        "bootstrap_ready": true,
+        "serving_ready": true,
+        "names": {
+          "node_x": {
+            "observed": {
+              "registry_version": 2,
+              "status": "refused",
+              "reason": "PACKAGE_HASH_MISMATCH"
+            },
+            "served": {
+              "registry_version": 1,
+              "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87"
+            }
+          }
+        }
+      },
+      "key": "26db428e-d3cc-5fb2-92ac-f8d8c2dce2db",
+      "note": "observed v2 refused, served v1"
+    },
+    {
+      "step": 7,
+      "actor": "client",
+      "action": "observe",
+      "note": "no command across the switch is skipped; a command redelivered by the rebalance may be handled again"
+    }
+  ],
+  "ends_in": "the new image serves v2; the old image reports the mismatch and keeps v1 until replaced"
+}
