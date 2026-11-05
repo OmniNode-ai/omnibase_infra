@@ -113,6 +113,7 @@ from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
 )
+from omnibase_core.utils.util_run_coro_sync import run_coro_sync
 from omnibase_infra.enums import (
     EnumCircuitState,
     EnumConsumerGroupPurpose,
@@ -1429,11 +1430,32 @@ class WorkspaceRuntimeConfigMissingError(ProtocolConfigurationError):
     """
 
 
+async def _create_embedded_config_container() -> ModelONEXContainer:
+    """Compose the filesystem handlers used before the embedded runtime boots."""
+    from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
+        HandlerWorkspaceRuntimeConfigMaterializer,
+    )
+
+    bootstrap = ModelONEXContainer()
+    registry = bootstrap.service_registry
+    if registry is None:
+        raise RuntimeError("Embedded configuration requires a service registry")
+    await registry.register_instance(
+        HandlerWorkspaceConfigRootResolve, HandlerWorkspaceConfigRootResolve()
+    )
+    await registry.register_instance(
+        HandlerWorkspaceRuntimeConfigMaterializer,
+        HandlerWorkspaceRuntimeConfigMaterializer(),
+    )
+    return bootstrap
+
+
 def resolve_embedded_runtime_config(
     correlation_id: UUID | None = None,
     *,
     workspace_root: Path | None = None,
     developer_lane_binding: str | None = None,
+    container: ModelONEXContainer | None = None,
 ) -> tuple[ModelRuntimeConfig, str]:
     """Resolve the per-runtime config for an EMBEDDED (CLI-hosted) runtime.
 
@@ -1441,7 +1463,8 @@ def resolve_embedded_runtime_config(
     runtime resolves its transport from its OWN configuration through the one
     shared authority — never from an env var and never from a broker probe.
     This function answers "which configuration is that?" for the embedded
-    case:
+    case. Workspace handlers resolve from the supplied container; standalone
+    callers compose a bootstrap container before resolving them.
 
     1. ``ONEX_CONTRACTS_DIR`` (a BOOTSTRAP pointer — it names where config
        lives, never what the transport is) selects the contracts directory,
@@ -1526,12 +1549,19 @@ def resolve_embedded_runtime_config(
             HandlerWorkspaceRuntimeConfigMaterializer,
         )
 
-        config_root = (
-            HandlerWorkspaceConfigRootResolve()
-            .handle(ModelWorkspaceConfigRootRequest(workspace_root=workspace_root))
-            .config_root
+        config_container = (
+            run_coro_sync(_create_embedded_config_container())
+            if container is None
+            else container
         )
-        copy = HandlerWorkspaceRuntimeConfigMaterializer().read(workspace_root)
+        root_resolver = config_container.get_service(HandlerWorkspaceConfigRootResolve)
+        materializer = config_container.get_service(
+            HandlerWorkspaceRuntimeConfigMaterializer
+        )
+        config_root = root_resolver.handle(
+            ModelWorkspaceConfigRootRequest(workspace_root=workspace_root)
+        ).config_root
+        copy = materializer.read(workspace_root)
         if copy is not None:
             config = load_runtime_config(
                 copy.contracts_dir, correlation_id=correlation_id
