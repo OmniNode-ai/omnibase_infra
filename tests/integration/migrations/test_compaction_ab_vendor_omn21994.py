@@ -145,6 +145,8 @@ def test_repair_refuses_a_different_legacy_primary_key(
         )
         assert result.returncode != 0
         assert "42P16" in result.stderr, result.stderr
+        assert f"incompatible primary key on {table}" in result.stderr, result.stderr
+        assert "expected columns" in result.stderr, result.stderr
         assert _snapshot(conn) == before
         with conn.cursor() as cur:
             cur.execute(

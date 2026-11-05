@@ -50,7 +50,7 @@ _VENDORED = [
 ]
 _MIGRATIONS = [
     *_VENDORED,
-    (_REPAIR, "57c9fa619625637a0bea28862cc53dfa27176a00b11a8abdfe677bc89babff38"),
+    (_REPAIR, "094eef928d8e366b72f9d8bc517136bca737639c9a0df2ef63d25cd1d28a8ec8"),
 ]
 _CLASSES = {_CREATE: "forward-only", _GRANT: "expand-only", _REPAIR: "forward-only"}
 _TABLES = ("compaction_ab_rows", "compaction_ab_build_series")

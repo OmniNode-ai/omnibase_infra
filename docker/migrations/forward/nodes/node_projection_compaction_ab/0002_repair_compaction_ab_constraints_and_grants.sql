@@ -32,6 +32,16 @@ BEGIN
               WHERE a.attrelid = conrelid AND a.attnum = ANY (conkey)
           ) = ARRAY['boundary_uuid', 'experiment_id', 'session_id']
     ) THEN
+        IF EXISTS (
+            SELECT 1 FROM pg_catalog.pg_constraint
+            WHERE conrelid = 'omninode_internal.compaction_ab_rows'::regclass
+              AND contype = 'p'
+        ) THEN
+            RAISE EXCEPTION 'incompatible primary key on %: expected columns %',
+                'omninode_internal.compaction_ab_rows',
+                '(experiment_id, session_id, boundary_uuid)'
+                USING ERRCODE = '42P16';
+        END IF;
         ALTER TABLE omninode_internal.compaction_ab_rows
             ADD PRIMARY KEY (experiment_id, session_id, boundary_uuid);
     END IF;
@@ -46,6 +56,16 @@ BEGIN
               WHERE a.attrelid = conrelid AND a.attnum = ANY (conkey)
           ) = ARRAY['candidate_id', 'node_commit']
     ) THEN
+        IF EXISTS (
+            SELECT 1 FROM pg_catalog.pg_constraint
+            WHERE conrelid = 'omninode_internal.compaction_ab_build_series'::regclass
+              AND contype = 'p'
+        ) THEN
+            RAISE EXCEPTION 'incompatible primary key on %: expected columns %',
+                'omninode_internal.compaction_ab_build_series',
+                '(candidate_id, node_commit)'
+                USING ERRCODE = '42P16';
+        END IF;
         ALTER TABLE omninode_internal.compaction_ab_build_series
             ADD PRIMARY KEY (candidate_id, node_commit);
     END IF;
