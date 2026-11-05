@@ -3,7 +3,7 @@ ticket_id: OMN-19497
 title: >-
   Every resolved catalog bundle maps each host port to at most one service, enforced by a CI test
 summary: >
-  The duplicate host-port validator (src/omnibase_infra/docker/catalog/validator_host_ports.py), the generate/up refusal in the catalog CLI and the moved host ports for decision-store-consumer, dlq-replay-consumer and infra-routing-decisions-consumer are already on dev. This change exposes the existing suite at tests/unit/docker/catalog, the path the acceptance criteria name, while retaining its original module for contracts that already cite it. The diff contains only test coverage and this ticket contract; the validator behaviour is already on dev.
+  The duplicate host-port validator (src/omnibase_infra/docker/catalog/validator_host_ports.py), the generate/up refusal in the catalog CLI and the moved host ports for decision-store-consumer, dlq-replay-consumer and infra-routing-decisions-consumer are already on dev. This change adds independent compose-output and writer-refusal checks at tests/unit/docker/catalog, the path the acceptance criteria name, while retaining the existing validator and CLI suite for contracts that already cite it. The diff contains only test coverage and this ticket contract; the validator behaviour is already on dev.
 
 is_seam_ticket: false
 interface_change: false
@@ -24,7 +24,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The duplicate host-port tests resolve every bundle and refuse a planted clash.
-    command: "uv run pytest tests/unit/docker/catalog -k duplicate_host_port -q --no-cov"
+    command: "uv run pytest tests/unit/docker/catalog/test_duplicate_host_ports.py -k duplicate_host_port -q --no-cov"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -32,28 +32,28 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn19497-ac1-every-bundle
     description: >-
-      The parametrised sweep resolves every bundle in bundles.yaml and asserts no host port has two claimants. This is coverage-only evidence: the hosted control overlays the head tests onto the merge base, where the existing validator already passes them (TEST_ONLY_DIFF).
+      An independent sweep resolves and renders every bundle in bundles.yaml and asserts that each generated host port has one claimant, including bundle port overrides. This is coverage-only evidence: the hosted control overlays the head tests onto the merge base, where the existing catalog already passes them (TEST_ONLY_DIFF).
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: "uv run pytest tests/unit/docker/catalog -k no_duplicate_host_port_in_resolved_bundle -q --no-cov"
+        check_value: "uv run pytest tests/unit/docker/catalog/test_duplicate_host_ports.py -k duplicate_host_port_absent_from_every_rendered_bundle -q --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn19497-ac2-planted-clash
     description: >-
-      A planted catalog with two services on one host port is reported by the validator and refused by onex generate before any compose file is written.
+      A copy of the real catalog with a planted runtime host-port clash is refused by the compose writer without overwriting existing output.
     source: manual
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: "uv run pytest tests/unit/docker/catalog -k 'duplicate_host_port_planted_clash_is_reported or duplicate_host_port_cli_generate_refuses_before_writing' -q --no-cov"
+        check_value: "uv run pytest tests/unit/docker/catalog/test_duplicate_host_ports.py -k duplicate_host_port_writer_refuses_planted_clash -q --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn19497-ac3-unit-ci
     description: >-
-      The tests sit under tests/unit, which the hosted unit test job collects on every pull request, and carry the unit marker.
+      The independent tests sit under tests/unit, which the hosted unit test job collects on every pull request, and declare their own unit marker.
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: "uv run pytest tests/unit/docker/catalog -m unit -k duplicate_host_port -q --no-cov"
+        check_value: "uv run pytest tests/unit/docker/catalog/test_duplicate_host_ports.py -m unit -k duplicate_host_port -q --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
