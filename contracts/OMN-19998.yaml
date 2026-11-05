@@ -183,9 +183,17 @@ requirements:
   - id: req-omn19998-nuc-trusted-routing-policy
     statement: The permanently unparked repository's trusted-CI policy must require arch-amd64 so its jobs cannot select NUC runners, with fresh activation evidence and the audit retaining its single-value comparison.
     acceptance:
+      - id: AC40
+        statement: 'AC40: the declared NUC exclusion requires self-hosted,omnibase-ci,arch-amd64 and fresh ninety-minute activation evidence; the production audit accepts that shadow and rejects broad, arm64, nested dual-value and missing shadows -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy fails on the merge-base policy'
+  - id: req-omn19998-gapless-roll-failure
+    statement: A rolling dev runtime update must wait for each service's declared health before updating its peer, and must fail at a non-running, unhealthy or timed-out step without reporting a partial roll successful.
+    acceptance:
       - id: AC39
-        statement: 'AC39: the declared NUC exclusion requires self-hosted,omnibase-ci,arch-amd64 and fresh ninety-minute activation evidence; the production audit accepts that shadow and rejects broad, arm64, nested dual-value and missing shadows -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy fails on the merge-base policy'
+        statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
 evidence_requirements:
+  - kind: tests
+    description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
@@ -272,6 +280,33 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac39-runtime-roll
+    description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_compose_budget_omn18057.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_executor_runtime_timeout_recovery_omn18057.py scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC39
+  - id: dod-omn19998-ac39-runtime-roll-deploy-source
+    description: Hosted behavioral probe for AC39 from this checkout. The real executor loads its boot-guard effect and replays failed running checks, health waits and deadlines through the Docker adapter, requiring a failed roll after recovery without advancing peer images or emitting success. The convergence replay also exercises successful and unchanged rolls and forced rollback. No network source read, live installation or uninterrupted readiness is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+    binds_ac:
+      - AC39
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual
@@ -739,21 +774,21 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
-  - id: dod-omn19998-ac39-nuc-trusted-routing-policy
-    description: AC39 exercises the shipped policy through the production variable comparator with an eligible shadow and broad, arm64, nested dual-value and missing-shadow controls. Activation assertions require fresh evidence for the eligible pool.
+  - id: dod-omn19998-ac40-nuc-trusted-routing-policy
+    description: AC40 exercises the shipped policy through the production variable comparator with an eligible shadow and broad, arm64, nested dual-value and missing-shadow controls. Activation assertions require fresh evidence for the eligible pool.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy
         cwd: .
     binds_ac:
-      - AC39
-  - id: dod-omn19998-ac39-routing-policy-artifact
-    description: Hosted-runner artifact check for AC39. Loads this checkout's routing YAML and drives the production audit comparator without a live API, broker or variable mutation. Live runner controls and ninety-minute samples remain pending after the separate repository-variable write.
+      - AC40
+  - id: dod-omn19998-ac40-routing-policy-artifact
+    description: Hosted-runner artifact check for AC40. Loads this checkout's routing YAML and drives the production audit comparator without a live API, broker or variable mutation. Live runner controls and ninety-minute samples remain pending after the separate repository-variable write.
     source: manual
     checks:
       - check_type: command
         check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy
         cwd: .
     binds_ac:
-      - AC39
+      - AC40
