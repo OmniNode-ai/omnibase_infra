@@ -72,9 +72,12 @@ class HandlerCostEstimatorBuild:
 
     def __init__(self, container: ModelONEXContainer) -> None:
         self._recipe = container.get_service(ModelCostEstimatorBuildConfig)
-        self._io = container.get_service(
-            cast("type[ProtocolCostEstimatorBuildIO]", ProtocolCostEstimatorBuildIO)
-        )
+        # The registry uses the interface as a key, never as a constructor.
+        io_key: type[object] = ProtocolCostEstimatorBuildIO
+        io = container.get_service(io_key)
+        if not isinstance(io, ProtocolCostEstimatorBuildIO):
+            raise TypeError("estimator build I/O must implement its declared protocol")
+        self._io = io
 
     @property
     def handler_type(self) -> EnumHandlerType:

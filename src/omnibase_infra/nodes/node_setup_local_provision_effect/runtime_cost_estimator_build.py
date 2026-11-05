@@ -10,7 +10,6 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
 from types import ModuleType
-from typing import cast
 
 import yaml
 
@@ -124,11 +123,10 @@ def build_dev_lane_services(
     recipe, environment = settings
     container = ModelONEXContainer()
     try:
+        io_key: type[object] = ProtocolCostEstimatorBuildIO
         run_coro_sync(
             container.service_registry.register_instance(
-                cast(
-                    "type[ProtocolCostEstimatorBuildIO]", ProtocolCostEstimatorBuildIO
-                ),
+                io_key,
                 CostEstimatorBuildIO(),
             )
         )
