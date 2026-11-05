@@ -213,8 +213,8 @@ requirements:
   - id: req-omn19998-fork-refusal
     statement: A fork's code never runs on a lab runner, whatever a workflow file says and whoever approved the run.
     acceptance:
-      - id: AC41
-        statement: "AC41: The job-started hook exits non-zero before any job step on a pull request whose head repository is not the base repository, including a deleted fork and a workflow_run from a fork, and passes a same-repository pull request, a push, a schedule and a merge group. -- falsifier: uv run pytest tests/unit/scripts/test_runner_job_started_fork_refusal_omn19998.py -q --no-cov"
+      - id: AC46
+        statement: "AC46: The job-started hook exits non-zero before any job step on a pull request whose head repository is not the base repository, including a deleted fork and a workflow_run from a fork, and passes a same-repository pull request, a push, a schedule and a merge group. -- falsifier: uv run pytest tests/unit/scripts/test_runner_job_started_fork_refusal_omn19998.py -q --no-cov"
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -886,7 +886,7 @@ dod_evidence:
   - id: dod-omn19998-fork-refusal
     description: The hook's fork refusal, run in bash from the hook file against real payload shapes.
     source: manual
-    binds_ac: [AC41]
+    binds_ac: [AC46]
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/test_runner_job_started_fork_refusal_omn19998.py -q --no-cov
