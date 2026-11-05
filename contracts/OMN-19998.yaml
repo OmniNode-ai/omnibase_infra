@@ -185,6 +185,11 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-prepr-standalone-expiry-notice
+    statement: The slot completion message must explain when the reaper may remove a standalone slot and name the existing command that keeps its lease alive during a longer proof.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: after READY and before the descriptor, the completion message names standalone lease expiry, the default 300s window after the last heartbeat, the run wrapper invoked through uv run --frozen python and explicit teardown; the reaper keeps an unexpired dead-owner slot and selects it after expiry -- falsifier: uv run pytest tests/unit/scripts/test_prepr_standalone_exit_notice_omn19998.py -q -n 0'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -275,6 +280,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-prepr-standalone-expiry-notice
+    description: Executes the shipped completion block with standalone and inherited leases, requiring the default expiry window, wrapper command through uv run --frozen python and teardown command after READY and before the descriptor. Checks the reaper at the recorded expiry. The merge-base completion message lacks the warning and fails these assertions.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_standalone_exit_notice_omn19998.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-prepr-standalone-command-deploy-probe
+    description: Hosted-runner artifact probe executes the shipped Bash completion block against a temporary descriptor with standalone and inherited leases. Requires the displayed run command to use uv run --frozen python. Fails against the previous bare-interpreter command without starting a slot or contacting Docker.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_standalone_exit_notice_omn19998.py -q -k test_completion_output_names_standalone_expiry_and_safe_path
+        cwd: .
+    binds_ac:
+      - AC40
   - id: dod-omn19998-ac39-runtime-roll
     description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
     source: manual
