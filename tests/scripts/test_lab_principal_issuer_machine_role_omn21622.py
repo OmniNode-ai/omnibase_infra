@@ -229,25 +229,71 @@ def test_dispatch_grants_require_a_trusted_machine_row(
     }
 
 
-@pytest.mark.parametrize("environment", [None, "local", "dev"])
+@pytest.mark.parametrize(
+    ("environment", "expected_environment", "authorized"),
+    [
+        (None, "local", True),
+        ("", "local", True),
+        ("   ", "local", True),
+        ("local", "local", True),
+        ("dev", "dev", True),
+        (" DEV ", "dev", True),
+        ("qa", "qa", False),
+        ("staging", "staging", False),
+        ("prod", "prod", False),
+    ],
+)
 def test_dispatch_groups_match_runtime_local(
     monkeypatch: pytest.MonkeyPatch,
     declaration: lpi.Declaration,
     environment: str | None,
+    expected_environment: str,
+    authorized: bool,
 ) -> None:
     from omnibase_core.runtime.runtime_local import derive_runtime_local_group_id
+    from omnibase_infra.handlers.handler_broker_grant_derive import (
+        HandlerBrokerGrantDerive,
+    )
+    from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+        ModelBrokerGrantBindings,
+    )
 
     if environment is None:
         monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
     else:
         monkeypatch.setenv("ONEX_ENVIRONMENT", environment)
-    groups = {
+    # The dev broker's policy is static: changing the caller's environment must
+    # neither change the artifact nor grant access to another environment.
+    result = HandlerBrokerGrantDerive().handle(
+        ModelBrokerGrantBindings.model_validate(
+            yaml.safe_load((LAB / "machine-principal-bindings.yaml").read_text())
+        )
+    )
+    assert MACHINE_DERIVED.read_text() == result.model_dump_json(indent=2) + "\n"
+    derived_groups = {
+        grant.resource: grant.operation
+        for grant in result.grants
+        if grant.resource_type == "GROUP"
+    }
+    issued_groups = {
         grant.name: grant.operations
         for grant in declaration.machine_grants
         if grant.resource == "group"
     }
+    assert issued_groups == {
+        group: (op.lower(),) for group, op in derived_groups.items()
+    }
     for node in ("HandlerLaneDispatch", "runtime_local_terminal"):
-        assert groups[derive_runtime_local_group_id(node)] == ("read",)
+        group = derive_runtime_local_group_id(node)
+        assert (
+            group == f"{expected_environment}.omnibase_core.{node.lower()}.consume.v1"
+        )
+        if authorized:
+            assert issued_groups[group] == ("read",)
+        else:
+            # This declaration is for local/dev on the dev broker. Arbitrary
+            # RuntimeLocal environments are deliberately outside its grant set.
+            assert group not in issued_groups
 
 
 # --- the overlay names which principals are machines ----------------------------
