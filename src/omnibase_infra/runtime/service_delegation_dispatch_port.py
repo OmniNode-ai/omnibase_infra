@@ -19,6 +19,7 @@ from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.handlers.handler_delegation_dispatch_terminal import (
     HandlerDelegationDispatchTerminal,
@@ -62,6 +63,8 @@ _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
 _PREFERRED_DELEGATION_PACKAGE = "omnimarket"
 _REQUESTER = "delegate_skill"
+_RUN_STEP_EVENT_TYPE = "delegation.run_step"
+_RUN_STEP_SOURCE_TOOL = "omnibase_infra.runtime_delegation_dispatch_port"
 
 
 @dataclass(
@@ -468,13 +471,28 @@ class RuntimeDelegationDispatchPort:
             routes=routes,
         )
         key = str(correlation_id).encode("utf-8")
-        for message in finished.run_step_messages:
+        for step in finished.run_steps:
             try:
+                envelope = ModelEventEnvelope[dict[str, object]](
+                    payload=step.model_dump(mode="json"),
+                    correlation_id=correlation_id,
+                    envelope_timestamp=datetime.now(UTC),
+                    event_type=_RUN_STEP_EVENT_TYPE,
+                    source_tool=_RUN_STEP_SOURCE_TOOL,
+                    tenant_id=step.tenant_id,
+                )
                 await self._event_bus.publish(
-                    finished.run_step_topic or "", key, message, None
+                    finished.run_step_topic or "",
+                    key,
+                    envelope.model_dump_json(exclude_none=True).encode("utf-8"),
+                    None,
                 )
             except Exception:  # a trace gap, never a failed delegation
-                logger.exception("a run step of %s was not published", key)
+                logger.exception(
+                    "run step %d of %s was not published",
+                    step.step_sequence,
+                    correlation_id,
+                )
         return dict(finished.result)
 
 

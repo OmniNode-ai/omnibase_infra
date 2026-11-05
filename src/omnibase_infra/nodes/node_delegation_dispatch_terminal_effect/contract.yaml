@@ -7,11 +7,10 @@
 #
 # What the runtime delegation dispatch port does once the broker has answered a
 # run: flatten the terminal into the delegate-skill result shape, and, for a run
-# the caller waited on, number the run's steps and build one event envelope per
-# step for the topic the delegation engine's package declares as
-# runtime_dispatch.run_step_event. The port sends the envelopes; the handler
-# holds no event bus. Effect: it reads the installed node contracts for that
-# topic.
+# the caller waited on, number the run's steps for the topic the delegation
+# engine's package declares as runtime_dispatch.run_step_event. The port wraps each step in an event envelope
+# and sends it; the handler holds no event bus and no envelope. Effect: it reads
+# the installed node contracts for that topic.
 #
 # Related Tickets:
 #   - OMN-19972: the run-trace writer's steps come from the deployed dispatch path
@@ -28,7 +27,7 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Turn a dispatched delegation run's terminal into the delegate-skill result and, for a waited run, into one run-step event envelope per step on the contract-declared run-step topic.
+  Turn a dispatched delegation run's terminal into the delegate-skill result and, for a waited run, into its numbered run steps for the contract-declared run-step topic.
 
 runtime_profiles:
   - local-dev
@@ -39,7 +38,7 @@ input_model:
 output_model:
   name: "ModelDelegationDispatchTerminalResult"
   module: "omnibase_infra.models.delegation.model_delegation_dispatch_terminal_result"
-  description: "The flattened delegate-skill result, the declared run-step topic and the run's step envelopes in step order."
+  description: "The flattened delegate-skill result, the declared run-step topic and the run's numbered steps in step order."
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -59,10 +58,10 @@ handler_routing:
       output_fields:
         - result
         - run_step_topic
-        - run_step_messages
+        - run_steps
 io_operations:
   - operation: "delegation.dispatch_terminal"
-    description: "Turn one dispatched run's terminal into its result and its step envelopes."
+    description: "Turn one dispatched run's terminal into its result and its numbered steps."
     input_fields:
       - terminal
       - correlation_id
@@ -75,7 +74,7 @@ io_operations:
     output_fields:
       - result
       - run_step_topic
-      - run_step_messages
+      - run_steps
 capabilities:
   - name: "delegation.dispatch_terminal"
     description: "Flatten a delegation terminal and derive the run's numbered step events."

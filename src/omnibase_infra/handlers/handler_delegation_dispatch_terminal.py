@@ -4,10 +4,10 @@
 
 OMN-19972. Bound by ``node_delegation_dispatch_terminal_effect``. The handler
 turns the broker's terminal into the delegate-skill result shape the port
-returns, and, for a run the caller waited on, numbers the run's steps and
-builds one event envelope per step for the topic the delegation engine's
-package declares as ``runtime_dispatch.run_step_event``. The port sends those
-envelopes: a handler holds no event bus.
+returns, and, for a run the caller waited on, numbers the run's steps for
+the topic the delegation engine's package declares as
+``runtime_dispatch.run_step_event``. The port wraps each step in an event
+envelope and sends it: a handler holds no event bus and no envelope.
 
 The step derivation is omnibase_infra#5041's, moved here because
 the dispatch port's file may only shrink (canonical-file-shape, OMN-20304).
@@ -32,7 +32,6 @@ from uuid import UUID
 import yaml
 
 from omnibase_core.models.delegation.wire import EnumDelegationTerminalFailureCause
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.delegation.model_delegation_dispatch_terminal_request import (
     ModelDelegationDispatchTerminalRequest,
@@ -52,8 +51,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_RUN_STEP_EVENT_TYPE = "delegation.run_step"
-_RUN_STEP_SOURCE_TOOL = "omnibase_infra.runtime_delegation_dispatch_port"
 # A step's free text is a short explanation, not a transcript.
 _RUN_STEP_REASON_LIMIT = 500
 
@@ -482,33 +479,8 @@ def _run_step_topic(
     return None
 
 
-def _run_step_message(
-    step: ModelDelegationRunStepEvent, correlation_id: UUID
-) -> bytes | None:
-    """One step as a serialized event envelope; None when it cannot be built."""
-    try:
-        envelope = ModelEventEnvelope[dict[str, object]](
-            payload=step.model_dump(mode="json"),
-            correlation_id=correlation_id,
-            envelope_timestamp=datetime.now(UTC),
-            event_type=_RUN_STEP_EVENT_TYPE,
-            source_tool=_RUN_STEP_SOURCE_TOOL,
-            tenant_id=step.tenant_id,
-        )
-        return envelope.model_dump_json(exclude_none=True).encode("utf-8")
-    except ValueError:
-        # A trace gap, never a failed delegation.
-        logger.warning(
-            "run step %d of correlation_id=%s could not be serialized",
-            step.step_sequence,
-            correlation_id,
-            exc_info=True,
-        )
-        return None
-
-
 class HandlerDelegationDispatchTerminal:
-    """Turn a dispatched run's terminal into its result and its step messages."""
+    """Turn a dispatched run's terminal into its result and its numbered steps."""
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -524,7 +496,7 @@ class HandlerDelegationDispatchTerminal:
         *,
         routes: Mapping[str, ModelRuntimeLocalIngressRoute],
     ) -> ModelDelegationDispatchTerminalResult:
-        """Normalize the terminal; for a waited run, also build its step messages.
+        """Normalize the terminal; for a waited run, also number its steps.
 
         Best-effort for the steps: no declared topic, no tenant or a step that
         cannot be built is a gap in the trace, never a failed delegation.
@@ -575,13 +547,8 @@ class HandlerDelegationDispatchTerminal:
                 request.correlation_id,
                 exc_info=True,
             )
-        messages = tuple(
-            message
-            for step in sequence.steps
-            if (message := _run_step_message(step, request.correlation_id)) is not None
-        )
         return ModelDelegationDispatchTerminalResult(
-            result=normalized, run_step_topic=topic, run_step_messages=messages
+            result=normalized, run_step_topic=topic, run_steps=tuple(sequence.steps)
         )
 
 
