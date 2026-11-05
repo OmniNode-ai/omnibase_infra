@@ -590,7 +590,8 @@ FairnessMin ==
   /\ \A t \in Tasks : WF_vars(Release(t)) /\ WF_vars(Suspend(t)) /\ WF_vars(Resume(t))
   /\ \A p \in Pieces : WF_vars(Escalates(p))
   /\ \A s \in SafetyIds : SF_vars(SafetyCloses(s)) /\ WF_vars(SafetyEscalates(s))
-  /\ \A t \in Tasks : K(t).k = "repair" => (SF_vars(Reserve(t)) /\ SF_vars(Consume(t)) /\ WF_vars(Finish(t)))
+  /\ \A t \in Tasks : K(t).k = "repair" => (SF_vars(Reserve(t)) /\ SF_vars(Bind(t)) /\ SF_vars(Consume(t))
+                                            /\ WF_vars(ClaimRow(t)) /\ WF_vars(Finish(t)))
   /\ SF_vars(Publish) /\ WF_vars(GoesStale)
   /\ \A x \in Procs : WF_vars(Recover(x))
 
