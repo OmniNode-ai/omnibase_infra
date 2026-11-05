@@ -88,17 +88,19 @@ ALTER TABLE omninode_internal.transcript_mirror_runs
 ALTER TABLE omninode_internal.transcript_mirror_runs
     ADD COLUMN IF NOT EXISTS bytes_put BIGINT NOT NULL DEFAULT 0;
 
--- Existing columns must already have the declared types. Refuse incompatible
--- storage without casting, truncating or otherwise rewriting existing values.
+-- Existing columns must have exactly the declared types and their default
+-- collations. Domains and extra columns are incompatible too: an extra required
+-- column can prevent the reducer's insert even when all declared columns match.
+-- Refuse drift without rewriting existing values or removing columns.
 DO $column_types$
 DECLARE
     incompatible RECORD;
 BEGIN
     SELECT a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod) AS actual,
-           pg_catalog.format_type(expected.type_oid, -1) AS expected
+           coalesce(pg_catalog.format_type(expected.type_oid, -1), 'no extra column') AS expected
     INTO incompatible
     FROM pg_catalog.pg_attribute a
-    JOIN (VALUES
+    LEFT JOIN (VALUES
         ('run_id', 'text'::regtype),
         ('attempt_id', 'text'::regtype),
         ('state', 'text'::regtype),
@@ -114,9 +116,12 @@ BEGIN
         ('source_unreadable', 'bigint'::regtype),
         ('bytes_put', 'bigint'::regtype)
     ) AS expected(name, type_oid) ON a.attname = expected.name
+    LEFT JOIN pg_catalog.pg_type t ON t.oid = expected.type_oid
     WHERE a.attrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+      AND a.attnum > 0
       AND NOT a.attisdropped
-      AND (a.atttypid <> expected.type_oid OR a.atttypmod <> -1)
+      AND (expected.name IS NULL OR a.atttypid <> expected.type_oid
+           OR a.atttypmod <> -1 OR a.attcollation <> t.typcollation)
     ORDER BY a.attnum
     LIMIT 1;
     IF FOUND THEN
@@ -266,19 +271,44 @@ $reconcile$;
 -- rather than drop or rebuild it.
 DO $index_shape$
 DECLARE
-    actual_definition TEXT;
+    actual_index RECORD;
 BEGIN
-    SELECT pg_catalog.pg_get_indexdef(c.oid)
-    INTO actual_definition
+    -- Compare catalog attributes, not version-dependent SQL rendering. A
+    -- non-index relation has no pg_index row and must also be refused.
+    SELECT c.relkind, i.*, am.amname, op.opcdefault, op.opcintype
+    INTO actual_index
     FROM pg_catalog.pg_class c
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+    LEFT JOIN pg_catalog.pg_am am ON am.oid = c.relam
+    LEFT JOIN pg_catalog.pg_opclass op ON op.oid = i.indclass[0]
     WHERE n.nspname = 'omninode_internal'
       AND c.relname = 'idx_transcript_mirror_runs_started_at';
-    IF FOUND AND actual_definition IS DISTINCT FROM
-        'CREATE INDEX idx_transcript_mirror_runs_started_at ON omninode_internal.transcript_mirror_runs USING btree (started_at DESC)'
+    IF FOUND AND (
+        actual_index.relkind IS DISTINCT FROM 'i'::"char"
+        OR actual_index.indrelid IS DISTINCT FROM 'omninode_internal.transcript_mirror_runs'::regclass
+        OR actual_index.amname IS DISTINCT FROM 'btree'
+        OR actual_index.indisvalid IS DISTINCT FROM TRUE
+        OR actual_index.indisready IS DISTINCT FROM TRUE
+        OR actual_index.indislive IS DISTINCT FROM TRUE
+        OR actual_index.indisunique IS DISTINCT FROM FALSE
+        OR actual_index.indisexclusion IS DISTINCT FROM FALSE
+        OR actual_index.indnatts IS DISTINCT FROM 1
+        OR actual_index.indnkeyatts IS DISTINCT FROM 1
+        OR actual_index.indexprs IS NOT NULL
+        OR actual_index.indpred IS NOT NULL
+        OR actual_index.indkey[0] IS DISTINCT FROM (
+            SELECT attnum FROM pg_catalog.pg_attribute
+            WHERE attrelid = 'omninode_internal.transcript_mirror_runs'::regclass
+              AND attname = 'started_at' AND NOT attisdropped
+        )
+        OR actual_index.indoption[0] IS DISTINCT FROM 3::smallint
+        OR actual_index.indcollation[0] IS DISTINCT FROM 0::oid
+        OR actual_index.opcdefault IS DISTINCT FROM TRUE
+        OR actual_index.opcintype IS DISTINCT FROM 'timestamptz'::regtype
+    )
     THEN
-        RAISE EXCEPTION 'transcript_mirror_runs: incompatible index idx_transcript_mirror_runs_started_at; found %',
-            actual_definition;
+        RAISE EXCEPTION 'transcript_mirror_runs: incompatible index idx_transcript_mirror_runs_started_at';
     END IF;
 END;
 $index_shape$;

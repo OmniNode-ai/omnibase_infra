@@ -311,7 +311,8 @@ def test_schema_diff_is_one_table_and_dropping_it_leaves_nothing_behind(
             "type:_transcript_mirror_runs",
             *(k for k in after["other"] if k.startswith("schema:omninode_internal")),
         }
-        # The rollback of an expand-only table: dropping it restores the catalog.
+        # Fresh-table cleanup restores the catalog. This is not a rollback of
+        # reconciliation: the create migration remains a forward-only barrier.
         with conn.cursor() as cur:
             cur.execute(f"DROP TABLE {TABLE}")
         conn.commit()
@@ -873,5 +874,99 @@ def test_divergent_started_at_index_refuses_reconciliation_atomically(
             "incompatible index idx_transcript_mirror_runs_started_at" in result.stderr
         )
         assert _snapshot(conn) == before
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        f'ALTER TABLE {TABLE} ALTER COLUMN run_id TYPE TEXT COLLATE "C"',
+        f"ALTER TABLE {TABLE} ADD COLUMN unexpected TEXT",
+        f"ALTER TABLE {TABLE} ADD COLUMN required_extra TEXT NOT NULL DEFAULT ''",
+        "CREATE DOMAIN mirror_run_id AS TEXT; "
+        f"ALTER TABLE {TABLE} ALTER COLUMN run_id TYPE mirror_run_id",
+    ],
+)
+def test_incompatible_column_shape_refuses_atomically(
+    database: EphemeralPostgres, drift: str
+) -> None:
+    _apply(database, CREATE)
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_INSERT_STARTED, _start_row("preserved", "attempt"))
+            cur.execute(drift)
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE
+        )
+        assert result.returncode != 0, "incompatible column shape was accepted"
+        assert "transcript_mirror_runs: incompatible column" in result.stderr
+        assert _snapshot(conn) == before
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT run_id, attempt_id FROM omninode_internal.transcript_mirror_runs"
+            )
+            assert cur.fetchall() == [("preserved", "attempt")]
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "collision",
+    [
+        "CREATE TABLE omninode_internal.idx_transcript_mirror_runs_started_at (id INT)",
+        "CREATE SEQUENCE omninode_internal.idx_transcript_mirror_runs_started_at",
+        "CREATE TABLE omninode_internal.other_runs (started_at TIMESTAMPTZ); "
+        "CREATE INDEX idx_transcript_mirror_runs_started_at "
+        "ON omninode_internal.other_runs (started_at DESC)",
+        f"CREATE UNIQUE INDEX idx_transcript_mirror_runs_started_at ON {TABLE} (started_at DESC)",
+        f"CREATE INDEX idx_transcript_mirror_runs_started_at ON {TABLE} (started_at DESC NULLS LAST)",
+        f"CREATE INDEX idx_transcript_mirror_runs_started_at ON {TABLE} (started_at DESC) INCLUDE (state)",
+    ],
+)
+def test_started_at_index_name_collision_refuses_atomically(
+    database: EphemeralPostgres, collision: str
+) -> None:
+    _apply(database, CREATE)
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DROP INDEX omninode_internal.idx_transcript_mirror_runs_started_at"
+            )
+            cur.execute(collision)
+        conn.commit()
+        before = _snapshot(conn)
+        result = database.psql(
+            "-v", "ON_ERROR_STOP=1", "-f", str(CREATE), dbname=DATABASE
+        )
+        assert result.returncode != 0
+        assert (
+            "incompatible index idx_transcript_mirror_runs_started_at" in result.stderr
+        )
+        assert _snapshot(conn) == before
+    finally:
+        conn.close()
+
+
+def test_started_at_index_in_another_schema_does_not_interfere(
+    database: EphemeralPostgres,
+) -> None:
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE public.other_runs (started_at TIMESTAMPTZ)")
+            cur.execute(
+                "CREATE INDEX idx_transcript_mirror_runs_started_at "
+                "ON public.other_runs (started_at)"
+            )
+        conn.commit()
+        _apply(database, CREATE, GRANT)
+        applied = _snapshot(conn)
+        _apply(database, CREATE, GRANT)
+        assert _snapshot(conn) == applied
     finally:
         conn.close()

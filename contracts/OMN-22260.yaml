@@ -16,7 +16,7 @@ requirements:
           AC1: a forward migration creates omninode_internal.transcript_mirror_runs with one column per field of the reducer's row model and the key (run_id, attempt_id), bound to a ledger row and the required rollback class -- falsifier: the vendor test pins the migration bytes, the ledger row, the class, the columns and the key, and fails at the merge base where the migration does not exist
       - id: AC2
         statement: >-
-          AC2: the migration applies cleanly on an empty database and on a database at the head of other projection chains, a second pass changes nothing, and the schema diff of one pass is exactly the table, its key index and its start-time index -- falsifier: the live-apply test applies the migration twice with psql on a real Postgres, compares schema, ACL and rows between passes, and drops the table to show the catalog returns to what it was
+          AC2: the migration applies cleanly on an empty database and on a database at the head of other projection chains, a second pass changes nothing, and the schema diff of one pass is exactly the table, its key index and its start-time index -- falsifier: the live-apply test applies the migration twice with psql on a real Postgres, compares schema, ACL and rows between passes, and drops only a freshly created table to show the catalog returns to what it was; reconciliation of a pre-existing table remains a forward-only rollback barrier
       - id: AC3
         statement: >-
           AC3: the table's writer principal is the runtime role the reducer writes through and no other principal holds any privilege on it -- falsifier: the topology test finds omninode_runtime as the only principal granted the table, with exactly SELECT, INSERT and UPDATE, in every shipped profile; the live-apply test finds the table ACL naming only its owner and the runtime role, and every other role refused SELECT, INSERT, UPDATE and DELETE
@@ -97,4 +97,15 @@ dod_evidence:
       - check_type: command
         check_value: |-
           env PGHOST="${INTEGRATION_POSTGRES_HOST:?}" PGPORT="${INTEGRATION_POSTGRES_PORT:?}" PGUSER="${INTEGRATION_POSTGRES_USER:?}" PGPASSWORD="${INTEGRATION_POSTGRES_PASSWORD:?}" PGDATABASE="${INTEGRATION_POSTGRES_DB:?}" psql -X -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS omninode_internal' -c 'CREATE TABLE IF NOT EXISTS omninode_internal.transcript_mirror_runs (run_id TEXT, attempt_id TEXT)' -f docker/migrations/forward/nodes/node_projection_transcript_mirror_run/0000_create_transcript_mirror_runs.sql -c "DO \$proof\$ BEGIN IF (SELECT count(*) FROM pg_attribute WHERE attrelid = 'omninode_internal.transcript_mirror_runs'::regclass AND attnum > 0 AND NOT attisdropped AND attnotnull) <> 13 OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass AND contype = 'p' AND pg_get_constraintdef(oid) = 'PRIMARY KEY (run_id, attempt_id)') OR (SELECT count(*) FROM pg_constraint WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass AND contype = 'c' AND convalidated) <> 4 THEN RAISE EXCEPTION 'transcript_mirror_runs constraints did not reconcile'; END IF; END \$proof\$;"
+        cwd: .
+  - id: dod-omn22260-column-and-index-shape
+    description: PostgreSQL refuses unexpected columns, nondefault collations and domain types atomically, refuses a same-name table, sequence or divergent index including an index on another table, and accepts an unrelated same-name index in another schema. Fresh-table cleanup is distinct from rollback of forward-only reconciliation.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'incompatible_column_shape or index_name_collision or another_schema or schema_diff'
         cwd: .
