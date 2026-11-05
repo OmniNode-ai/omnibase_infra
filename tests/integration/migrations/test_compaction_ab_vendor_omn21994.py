@@ -76,6 +76,84 @@ def _snapshot(conn: psycopg2.extensions.connection) -> list[tuple[object, ...]]:
         return cur.fetchall()
 
 
+def test_repair_preserves_reordered_legacy_primary_keys(
+    ephemeral_postgres: EphemeralPostgres,
+) -> None:
+    pg = ephemeral_postgres
+    _provision(pg, legacy=True)
+    result = pg.psql(
+        "-X",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "ALTER TABLE omninode_internal.compaction_ab_rows "
+        "ADD CONSTRAINT legacy_rows_identity "
+        "PRIMARY KEY (boundary_uuid, session_id, experiment_id); "
+        "ALTER TABLE omninode_internal.compaction_ab_build_series "
+        "ADD CONSTRAINT legacy_build_identity PRIMARY KEY (node_commit, candidate_id);",
+    )
+    assert result.returncode == 0, result.stderr
+    _apply(pg, _REPAIR)
+    with closing(pg.connect()) as conn:
+        conn.autocommit = True
+        before = _snapshot(conn)
+        with conn.cursor() as cur:
+            cur.execute("SET ROLE omninode_runtime")
+            cur.execute(_ROW)
+            cur.execute(_BUILD)
+            cur.execute(
+                _BUILD + " ON CONFLICT (candidate_id, node_commit) "
+                "DO UPDATE SET h1_recall = 0.9 RETURNING h1_recall"
+            )
+            assert cur.fetchone() == (0.9,)
+        _apply(pg, _REPAIR)
+        assert _snapshot(conn) == before
+        assert {row[3] for row in before if row[1] == "p"} == {
+            "PRIMARY KEY (boundary_uuid, session_id, experiment_id)",
+            "PRIMARY KEY (node_commit, candidate_id)",
+        }
+
+
+@pytest.mark.parametrize(
+    ("table", "columns"),
+    [(_ROWS, "experiment_id, session_id"), (_SERIES, "candidate_id")],
+)
+def test_repair_refuses_a_different_legacy_primary_key(
+    ephemeral_postgres: EphemeralPostgres, table: str, columns: str
+) -> None:
+    pg = ephemeral_postgres
+    _provision(pg, legacy=True)
+    result = pg.psql(
+        "-X",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        f"ALTER TABLE {table} ADD PRIMARY KEY ({columns})",
+    )
+    assert result.returncode == 0, result.stderr
+    with closing(pg.connect()) as conn:
+        conn.autocommit = True
+        before = _snapshot(conn)
+        result = pg.psql(
+            "-X",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-v",
+            "VERBOSITY=verbose",
+            "-f",
+            str(_REPAIR),
+        )
+        assert result.returncode != 0
+        assert "42P16" in result.stderr, result.stderr
+        assert _snapshot(conn) == before
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT has_table_privilege('omninode_runtime', %s, 'UPDATE')",
+                (_SERIES,),
+            )
+            assert cur.fetchone() == (False,)
+
+
 @pytest.mark.parametrize(
     ("legacy", "named_keys"),
     [(False, False), (True, False), (True, True)],

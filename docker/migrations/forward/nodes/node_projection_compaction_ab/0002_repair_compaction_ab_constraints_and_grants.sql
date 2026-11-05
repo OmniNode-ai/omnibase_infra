@@ -24,8 +24,13 @@ BEGIN
         SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'omninode_internal.compaction_ab_rows'::regclass
           AND contype = 'p'
-          AND pg_catalog.pg_get_constraintdef(oid) =
-              'PRIMARY KEY (experiment_id, session_id, boundary_uuid)'
+          -- Uniqueness and ON CONFLICT inference depend on the column set,
+          -- not the index order or the legacy constraint's name.
+          AND (
+              SELECT array_agg(a.attname::text ORDER BY a.attname)
+              FROM pg_catalog.pg_attribute AS a
+              WHERE a.attrelid = conrelid AND a.attnum = ANY (conkey)
+          ) = ARRAY['boundary_uuid', 'experiment_id', 'session_id']
     ) THEN
         ALTER TABLE omninode_internal.compaction_ab_rows
             ADD PRIMARY KEY (experiment_id, session_id, boundary_uuid);
@@ -35,8 +40,11 @@ BEGIN
         SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'omninode_internal.compaction_ab_build_series'::regclass
           AND contype = 'p'
-          AND pg_catalog.pg_get_constraintdef(oid) =
-              'PRIMARY KEY (candidate_id, node_commit)'
+          AND (
+              SELECT array_agg(a.attname::text ORDER BY a.attname)
+              FROM pg_catalog.pg_attribute AS a
+              WHERE a.attrelid = conrelid AND a.attnum = ANY (conkey)
+          ) = ARRAY['candidate_id', 'node_commit']
     ) THEN
         ALTER TABLE omninode_internal.compaction_ab_build_series
             ADD PRIMARY KEY (candidate_id, node_commit);
