@@ -6375,6 +6375,7 @@ class DeployExecutor:
         # rename it back, and the census reports the declared container absent.
         finish_recreate_renames(lane)
         self._record_compose_invocation(phase, cmd)
+        roll_error: RuntimeError | None = None
         if deps_phase:
             # OMN-18640: say what convergence is about to do BEFORE it does it.
             # After the fact the only trace of a replaced dependency is a
@@ -6394,27 +6395,14 @@ class DeployExecutor:
                 # or image id moved, so no two runtimes are ever stopped together.
                 prefix = cmd[: -len(requested_services)]
                 steps = [prefix + [x] for x in requested_services] if rolling else [cmd]
-                env = _compose_env(extra_env)
-                for step in steps:
-                    if rolling and lane is EnumRuntimeLane.DEV:
-                        result = load_dev_boot_guard().run_runtime_roll_step(
-                            step,
-                            timeout,
-                            execution=sys.modules[__name__],
-                            extra_env=extra_env,
-                        )
-                    else:
-                        result = _run(step, timeout=timeout, env=env)
-                    if result.returncode != 0 or (
-                        rolling
-                        and lane is not EnumRuntimeLane.DEV
-                        and not verify_containers_up(
-                            step[-1:],
-                            timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS,
-                            lane=lane,
-                        )[0]
-                    ):
-                        break
+                result, roll_error = load_dev_boot_guard().run_compose_up_steps(
+                    steps,
+                    timeout,
+                    rolling=rolling,
+                    lane=lane,
+                    execution=sys.modules[__name__],
+                    extra_env=extra_env,
+                )
             except subprocess.TimeoutExpired:
                 compose_up_error = (
                     f"docker compose up exceeded its {timeout}s ceiling for phase "
@@ -6461,7 +6449,11 @@ class DeployExecutor:
                     "-d",
                     "--no-deps",
                 ]
-                if not build:
+                if roll_error is not None:
+                    # Starting a stopped peer must not adopt the candidate image
+                    # or config after the roll has already stopped.
+                    recovery_cmd.append("--no-recreate")
+                if not build or roll_error is not None:
                     recovery_cmd.extend(["--no-build", "--pull", "never"])
                 recovery_cmd.append(name)
                 start_result = subprocess.run(
@@ -6489,6 +6481,10 @@ class DeployExecutor:
                     detail = f"Docker compose up failed: {compose_up_error}; {detail}"
                 raise RuntimeError(detail)
             logger.info("Recovery succeeded — all containers now running")
+        if roll_error is not None:
+            # Recovery restores availability; it cannot finish the partial roll
+            # or turn a failed health wait into a successful runtime phase.
+            raise roll_error
         if compose_up_error:
             # OMN-17427: "running" is not "converged". A container compose was
             # about to recreate is still running at its old config, and a

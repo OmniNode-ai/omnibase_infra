@@ -141,6 +141,54 @@ def run_runtime_roll_step(
     )
 
 
+def run_compose_up_steps(
+    steps: list[list[str]],
+    timeout: int,
+    *,
+    rolling: bool,
+    lane: str,
+    execution: ModuleType,
+    extra_env: Mapping[str, str] | None = None,
+) -> tuple[ModelSubprocessOutcome, DevBootFailedError | None]:
+    """Stop a failed dev roll, retaining its verdict for container recovery.
+
+    Other lanes keep their running-state check and subprocess timeout path.
+    The executor may restore stopped containers after a dev failure, but must
+    raise the retained error even when that recovery succeeds.
+    """
+    env = execution._compose_env(extra_env)
+    result = ModelSubprocessOutcome(returncode=0, stdout="", stderr="", timed_out=False)
+    for step in steps:
+        if rolling and lane is execution.EnumRuntimeLane.DEV:
+            try:
+                result = run_runtime_roll_step(
+                    step, timeout, execution=execution, extra_env=extra_env
+                )
+            except DevBootFailedError as exc:
+                return ModelSubprocessOutcome(
+                    returncode=1, stdout="", stderr=str(exc), timed_out=False
+                ), exc
+        else:
+            process = execution._run(step, timeout=timeout, env=env)
+            result = ModelSubprocessOutcome(
+                returncode=int(process.returncode),
+                stdout=str(process.stdout),
+                stderr=str(process.stderr),
+                timed_out=False,
+            )
+        if result.returncode != 0 or (
+            rolling
+            and lane is not execution.EnumRuntimeLane.DEV
+            and not execution.verify_containers_up(
+                step[-1:],
+                timeout_s=execution.CONTAINER_VERIFY_TIMEOUT_SECONDS,
+                lane=lane,
+            )[0]
+        ):
+            break
+    return result, None
+
+
 def preflight_dev_images(
     lane: str, services: list[str], *, execution: ModuleType
 ) -> None:

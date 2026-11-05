@@ -285,6 +285,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest scripts/deploy-agent/tests/unit/test_compose_budget_omn18057.py -q
         cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_executor_runtime_timeout_recovery_omn18057.py scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
     binds_ac:
       - AC39
   - id: dod-omn19998-ac39-runtime-roll-deploy-source
@@ -293,6 +296,9 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c "Runtime roll stopped at" >/dev/null'
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
         cwd: .
     binds_ac:
       - AC39
