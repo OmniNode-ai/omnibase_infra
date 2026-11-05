@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_deploy_agent_branch_trial_effect
+contract_name: node_deploy_agent_branch_trial_effect
+node_name: node_deploy_agent_branch_trial_effect
+node_type: EFFECT_GENERIC
+runtime_profiles: [local-dev]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Queue a full pushed repository head for a dev-only agent trial of at most one hour. The deploy agent adapts its signed agent-trial command to this request after ordinary admission. A trusted launcher parent reads the loaded code SHA, supervises the deadline and returns to origin/dev on expiry or failure.
+input_model:
+  name: ModelDeployAgentBranchTrialRequest
+  module: omnibase_infra.models.model_deploy_agent_branch_trial_request
+  description: Exact dev target, pushed branch and full head, bounded lifetime and optional image-prune installer.
+output_model:
+  name: ModelDeployAgentBranchTrialResult
+  module: omnibase_infra.models.model_deploy_agent_branch_trial_result
+  description: Queue acknowledgement; the agent readback endpoint reports actual loading and restoration separately.
+# The signed host DeployConsumer already owns rebuild-requested admission.
+# Queue acknowledgement is durable in /job and /agent-branch-trial; it is not
+# a runtime rebuild completion and needs no separate boot-provisioned topic.
+event_bus: {}
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: deploy_agent.branch_trial
+      handler:
+        name: HandlerDeployAgentBranchTrial
+        module: omnibase_infra.handlers.handler_deploy_agent_branch_trial
+      event_model:
+        name: ModelDeployAgentBranchTrialRequest
+        module: omnibase_infra.models.model_deploy_agent_branch_trial_request
+      output_events: [ModelDeployAgentBranchTrialResult]
+config:
+  branch_trial:
+    health_host: 127.0.0.1
+    health_timeout_seconds: 0.5
+    git_timeout_seconds: 30
+    stop_timeout_seconds: 3
+    heartbeat_timeout_seconds: 5
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+capabilities:
+  - name: deploy_agent.branch_trial
+    description: Queue a bounded dev-agent code trial without entering runtime build phases.
+metadata:
+  ticket: OMN-19998
+  author: OmniNode Team
+  description: Existing signed deploy bus admission; host supervisor owns execution and recovery.
+  tags: [effect, deployment, dev]

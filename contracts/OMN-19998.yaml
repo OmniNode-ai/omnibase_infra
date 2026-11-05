@@ -185,6 +185,11 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-deploy-agent-branch-trial
+    statement: The signed deploy-agent interface admits only bounded dev trials of a pushed full repository head, reads the loaded code SHA and returns to origin/dev on expiry or failure. A declared image-prune node installer runs on the same host with its units restored afterward.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: non-dev requests are refused before host effects; a failed head returns to origin/dev with loaded-code readback; a healthy head expires; a mismatched pushed head is refused; the signed adapter queues without runtime or broker phases; the image-prune install.json is dispatched to its node and its unit state is restored -- falsifier: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_branch_trial.py -q -n 0 --no-cov'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -769,3 +774,19 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-ac39-agent-branch-trial
+    description: AC40 covers focused refusal, signed adapter, real child-process failure and expiry recovery, pinned-head mismatch and declared installer restoration regressions.
+    source: manual
+    binds_ac: [AC40]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_branch_trial.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn19998-ac39-agent-branch-trial-deploy-probe
+    description: Hosted-runner artifact probe for AC40 uses disposable local Git origins and real HTTP-serving agent child processes to read a loaded candidate SHA and the restored origin/dev SHA after crash and expiry. It requires no broker, Docker, production host or credential and is not evidence of installation on the live dev agent.
+    source: manual
+    binds_ac: [AC40]
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_branch_trial.py -q -n 0 --no-cov -k 'failed_head or healthy_head'
+        cwd: .

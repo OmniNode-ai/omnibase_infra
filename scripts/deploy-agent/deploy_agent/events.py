@@ -4,9 +4,14 @@
 
 from __future__ import annotations
 
+import importlib.util
+import os
+import sys
 from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
+from types import ModuleType
 from typing import Final, Literal
 from uuid import UUID
 
@@ -39,6 +44,7 @@ class Scope(StrEnum):
     FULL = "full"
     RUNTIME = "runtime"
     CORE = "core"
+    AGENT_TRIAL = "agent-trial"
 
 
 class EnumRuntimeLane(StrEnum):
@@ -142,6 +148,7 @@ DEPLOY_PHASE_ORDER: tuple[Phase, ...] = (
 
 
 SCOPE_SERVICES: dict[Scope, list[str]] = {
+    Scope.AGENT_TRIAL: [],
     Scope.CORE: ["postgres", "redpanda", "valkey"],
     Scope.RUNTIME: [
         "omninode-runtime",
@@ -918,6 +925,33 @@ class ModelDevTagHeartbeat(BaseModel):
     alarm: bool
 
 
+def load_agent_branch_trial() -> ModuleType:
+    """Use the host effect from the same checkout as the agent, before release."""
+    name = "omnibase_infra.handlers.handler_deploy_agent_branch_trial"
+    if name in sys.modules:
+        return sys.modules[name]
+    root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
+    for relative in (
+        "models/model_deploy_agent_branch_trial_policy.py",
+        "models/model_deploy_agent_branch_trial_host.py",
+        "models/model_deploy_agent_branch_trial_request.py",
+        "models/model_deploy_agent_branch_trial_result.py",
+        "handlers/deploy_agent_branch_trial_effect/__init__.py",
+        "handlers/deploy_agent_branch_trial_effect/effect.py",
+        "handlers/handler_deploy_agent_branch_trial.py",
+        "handlers/deploy_agent_branch_trial_effect/composition.py",
+    ):
+        module_name = "omnibase_infra." + relative.removesuffix(".py").removesuffix(
+            "/__init__"
+        ).replace("/", ".")
+        spec = importlib.util.spec_from_file_location(module_name, root / relative)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Cannot load agent branch trial effect: {relative}")
+        module = sys.modules[module_name] = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
 class ModelRebuildRequested(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
@@ -960,47 +994,17 @@ class ModelRebuildRequested(BaseModel):
     # producer-stamped time therefore builds, as it did before.
     requested_at: datetime | None = None
 
-    @model_validator(mode="after")
-    def validate_requested_at_is_aware(self) -> ModelRebuildRequested:
-        if self.requested_at is not None and self.requested_at.utcoffset() is None:
-            msg = (
-                f"requested_at={self.requested_at.isoformat()} carries no UTC "
-                "offset; a publish time compared across hosts must be aware"
-            )
-            raise ValueError(msg)
-        return self
+    # Host code trials share the signed bus and acceptance protocol, but never
+    # enter the runtime build phases. These fields are refused on other scopes.
+    agent_branch: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$"
+    )
+    agent_trial_seconds: int | None = Field(default=None, ge=1, le=3600)
+    agent_installer: Literal["image-prune"] | None = None
 
     @model_validator(mode="after")
-    def validate_open_pr(self) -> ModelRebuildRequested:
-        if self.open_pr and (
-            self.runtime_lane != EnumRuntimeLane.DEV
-            or self.rollback is None
-            or not self.open_pr.endswith(f"@{self.git_ref}")
-        ):
-            msg = "open_pr needs runtime_lane dev, a rollback declaration, git_ref = its head"
-            raise ValueError(msg)
-        return self
-
-    @model_validator(mode="after")
-    def validate_services_subset(self) -> ModelRebuildRequested:
-        if self.services:
-            # OMN-18108: lane-aware, so a dev command may name one of the
-            # dev-lane-only services and a prod/stability command may not.
-            allowed = services_for_scope(self.scope, lane=self.runtime_lane)
-            invalid = [s for s in self.services if s not in allowed]
-            if invalid:
-                msg = f"Services {invalid} not in scope '{self.scope}'. Allowed: {allowed}"
-                raise ValueError(msg)
-        return self
-
-    @model_validator(mode="after")
-    def validate_prod_requires_digest(self) -> ModelRebuildRequested:
-        if self.runtime_lane == EnumRuntimeLane.PROD and not self.image_digest:
-            msg = (
-                "prod runtime_lane requires image_digest: production deploys the "
-                "exact stability-proven digest and never rebuilds from a ref"
-            )
-            raise ValueError(msg)
+    def validate_command(self) -> ModelRebuildRequested:
+        load_agent_branch_trial().effect.validate_rebuild_command(self)
         return self
 
 
@@ -1470,22 +1474,7 @@ class ModelRebuildCompleted(BaseModel):
           ``in_progress`` made ``status`` derive "failed" for every deploy the
           agent ever completed, successful ones included.
         """
-        if Phase.PUBLISH in self.phase_results:
-            raise ValueError(
-                "phase_results must not carry Phase.PUBLISH: the completion "
-                "event is the publish and cannot report its own outcome"
-            )
-        unsettled = sorted(
-            phase.value
-            for phase, status in self.phase_results.items()
-            if status in (PhaseStatus.IN_PROGRESS, PhaseStatus.PENDING)
-        )
-        if unsettled:
-            raise ValueError(
-                f"phase_results carries unsettled verdicts for {unsettled}: a "
-                "terminal event must report failed/skipped for a phase that "
-                "raised or was never reached"
-            )
+        load_agent_branch_trial().effect.validate_completed(self)
         return self
 
     # OMN-18640: NO ``@property`` under ``@computed_field``. Pydantic wraps a
@@ -1555,3 +1544,11 @@ class ModelRebuildCompleted(BaseModel):
         if all(v == PhaseStatus.SUCCESS for v in non_skipped.values()):
             return "success"
         return "failed"
+
+
+if __name__ == "__main__":
+    raise SystemExit(
+        load_agent_branch_trial().effect.supervise_from_environment(
+            dict(os.environ), sys.argv[1:]
+        )
+    )

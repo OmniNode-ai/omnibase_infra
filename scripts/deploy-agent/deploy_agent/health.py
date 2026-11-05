@@ -16,7 +16,8 @@ from deploy_agent.accept_backlog import (
     EnumAcceptBacklogStatus,
     ModelAcceptBacklogVerdict,
 )
-from deploy_agent.job_state import JobState, JobStore
+from deploy_agent.events import load_agent_branch_trial
+from deploy_agent.job_state import JobStore
 from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
 from deploy_agent.queue_depth import ModelControlTopicLag, compute_queue_snapshot
@@ -34,6 +35,7 @@ def create_health_app(
     get_dev_lane_drift: Callable[[], dict[str, object]] | None = None,
     get_dev_tag_heartbeat: Callable[[], dict[str, object]] | None = None,
     get_branch_installs: Callable[[], dict[str, object]] | None = None,
+    get_agent_branch_trial: Callable[[], dict[str, object]] | None = None,
 ) -> web.Application:
     """Build the agent's HTTP surface.
 
@@ -54,6 +56,7 @@ def create_health_app(
     app["get_dev_lane_drift"] = get_dev_lane_drift
     app["get_dev_tag_heartbeat"] = get_dev_tag_heartbeat
     app["get_branch_installs"] = get_branch_installs
+    app["get_agent_branch_trial"] = get_agent_branch_trial
 
     app.router.add_get("/health", _health_handler)
     app.router.add_get("/unit-drift", _unit_drift_handler)
@@ -68,6 +71,7 @@ def create_health_app(
     # the host drift observer for the running-vs-merged alarm; carries no file
     # content and no credential.
     app.router.add_get("/branch-installs", _branch_installs_handler)
+    app.router.add_get("/agent-branch-trial", _agent_branch_trial_handler)
     app.router.add_get("/job/{correlation_id}", _job_handler)
     # OMN-18144. What is ahead of a command, and how fast this agent has been
     # draining it. The post-merge lab-pass guard reads this to bound its wait
@@ -102,6 +106,12 @@ def create_health_app(
     # API, never locally: this endpoint carries no ancestry logic itself.
     app.router.add_get("/lab-overlay-latest", _lab_overlay_latest_handler)
     return app
+
+
+async def _agent_branch_trial_handler(request: web.Request) -> web.Response:
+    """Read the trusted parent's receipt, including after a failed candidate."""
+    getter = request.app["get_agent_branch_trial"]
+    return web.json_response(getter() if getter else {"status": "unavailable"})
 
 
 async def _unit_drift_handler(request: web.Request) -> web.Response:
@@ -159,34 +169,7 @@ async def _health_handler(request: web.Request) -> web.Response:
     # non-None here; a lambda reaching back into the model cannot express that,
     # so the sort was typed as ordering by a possibly-``None`` key -- a real
     # ``TypeError`` waiting for the day the guard is loosened, not a nuisance.
-    last_result = None
-    completed_jobs: list[tuple[datetime, JobState]] = []
-    for path in store.state_dir.glob("*.json"):
-        try:
-            job = JobState.model_validate_json(path.read_text())
-            completed_at = job.completed_at
-            if job.status in ("success", "failed") and completed_at is not None:
-                completed_jobs.append((completed_at, job))
-        except Exception:  # noqa: BLE001
-            continue
-    if completed_jobs:
-        completed_jobs.sort(key=lambda pair: pair[0], reverse=True)
-        latest = completed_jobs[0][1]
-        last_result = {
-            "correlation_id": str(latest.correlation_id),
-            "status": latest.status,
-            "completed_at": latest.completed_at.isoformat()
-            if latest.completed_at
-            else None,
-            "phase_results": {str(k): str(v) for k, v in latest.phase_results.items()},
-            # OMN-18636 AC5. A reader that only looks at /health must be able to
-            # tell a finished job from one whose post-terminal work is still
-            # running on this agent's job thread.
-            "settling": latest.settling_stage is not None,
-            "settling_stage": (
-                latest.settling_stage.value if latest.settling_stage else None
-            ),
-        }
+    last_result = load_agent_branch_trial().effect.last_completed_readback(store)
 
     pending_publish = len(store.get_pending_publish())
 

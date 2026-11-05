@@ -76,7 +76,7 @@ import sys
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from deploy_agent.auth import sign_envelope
 from deploy_agent.events import (
@@ -86,6 +86,7 @@ from deploy_agent.events import (
     ModelRebuildRequested,
     ModelRollbackDeclaration,
     Scope,
+    load_agent_branch_trial,
 )
 from deploy_agent.kafka_config import (
     ModelDeployAgentKafkaConfig,
@@ -123,6 +124,9 @@ def build_rebuild_command(
     rollback: ModelRollbackDeclaration | None = None,
     open_pr: str = "",
     requested_at: datetime | None = None,
+    agent_branch: str | None = None,
+    agent_trial_seconds: int | None = None,
+    agent_installer: Literal["image-prune"] | None = None,
 ) -> ModelRebuildRequested:
     """Build the command as the contract model, resolving declared defaults.
 
@@ -145,6 +149,9 @@ def build_rebuild_command(
         rollback=rollback,
         open_pr=open_pr,
         requested_at=requested_at,
+        agent_branch=agent_branch,
+        agent_trial_seconds=agent_trial_seconds,
+        agent_installer=agent_installer,
     )
 
 
@@ -166,7 +173,7 @@ def command_to_signed_envelope(
             "would look like success and do nothing. Source the operator env "
             "file that carries it."
         )
-    return sign_envelope(command.model_dump(mode="json"), secret)
+    return sign_envelope(load_agent_branch_trial().effect.command_body(command), secret)
 
 
 def masked_envelope_json(envelope: dict[str, Any]) -> str:
@@ -295,6 +302,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help="Build an open PR's head (OMN-21928): <repo>#<number>@<head sha>.",
     )
+    load_agent_branch_trial().effect.extend_trigger_parser(parser)
     parser.add_argument("--requested-by", default="operator-manual")
     parser.add_argument("--correlation-id", default=None)
     parser.add_argument(
@@ -418,20 +426,6 @@ def _resolve_rollback(
     return ModelRollbackDeclaration(actor=actor, reason=reason)
 
 
-def _resolve_git_ref(raw: str | None) -> str:
-    if raw:
-        return raw
-    try:
-        return load_tracking_remote_ref_from_env()
-    except RuntimeError as exc:
-        raise TriggerRefusedError(
-            f"no --git-ref given and {ENV_TRACKING_REF} is not set.\n"
-            f"       Pass --git-ref origin/<branch>, or export\n"
-            f"       {ENV_TRACKING_REF}=<branch> (e.g. dev) to supply the "
-            f"default.\n       {exc}"
-        ) from exc
-
-
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _build_parser().parse_args(argv)
@@ -452,13 +446,16 @@ def main(argv: list[str] | None = None) -> int:
                 "       Production deploys the exact stability-proven digest."
             )
         command = build_rebuild_command(
-            git_ref=_resolve_git_ref(args.git_ref),
+            git_ref=load_agent_branch_trial().effect.resolve_git_ref(args.git_ref),
             runtime_lane=runtime_lane,
             scope=_resolve_enum(args.scope, Scope, "--scope"),
             build_source=_resolve_build_source(args.build_source, runtime_lane),
             requested_by=args.requested_by,
             correlation_id=correlation_id,
             services=list(args.services),
+            agent_branch=args.agent_branch,
+            agent_trial_seconds=args.agent_trial_seconds,
+            agent_installer=args.agent_installer,
             image_ref=args.image_ref,
             image_digest=args.image_digest,
             rollback=_resolve_rollback(args.rollback_actor, args.rollback_reason),

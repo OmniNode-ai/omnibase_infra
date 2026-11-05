@@ -92,7 +92,8 @@ def test_envelope_carries_every_contract_field_and_no_others() -> None:
     """Field set is the model's, so adding or removing one moves both sides at once."""
     envelope = command_to_signed_envelope(_command(), _SECRET)
     published = set(envelope) - {"_signature"}
-    assert published == set(ModelRebuildRequested.model_fields)
+    trial_fields = {"agent_branch", "agent_trial_seconds", "agent_installer"}
+    assert published == set(ModelRebuildRequested.model_fields) - trial_fields
 
 
 @pytest.mark.unit
@@ -274,3 +275,16 @@ def test_publish_declares_no_compression() -> None:
     assert factory.call_args.kwargs["compression_type"] is None
     producer.send.assert_called_once()
     producer.close.assert_called_once()
+
+
+def test_trial_envelope_carries_every_trial_contract_field() -> None:
+    command = _command(
+        scope=Scope.AGENT_TRIAL,
+        git_ref="a" * 40,
+        agent_branch="fix-agent",
+        agent_trial_seconds=30,
+    )
+    envelope = command_to_signed_envelope(command, _SECRET)
+    body = {k: v for k, v in envelope.items() if k != "_signature"}
+    assert set(body) == set(ModelRebuildRequested.model_fields)
+    assert ModelRebuildRequested.model_validate(body) == command

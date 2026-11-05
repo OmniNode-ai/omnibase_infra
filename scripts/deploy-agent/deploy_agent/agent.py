@@ -21,7 +21,7 @@ from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from aiohttp import web
@@ -53,6 +53,7 @@ from deploy_agent.events import (
     Phase,
     PhaseStatus,
     Scope,
+    load_agent_branch_trial,
 )
 from deploy_agent.executor import (
     DEPLOY_AGENT_DIR,
@@ -822,6 +823,9 @@ class DeployAgent:
             get_dev_lane_drift=self._latest_dev_lane_drift,
             get_dev_tag_heartbeat=self._latest_dev_tag_heartbeat,
             get_branch_installs=self._latest_branch_installs,
+            get_agent_branch_trial=lambda: load_agent_branch_trial().effect.read_receipt(
+                STATE_DIR
+            ),
         )
         runner = web.AppRunner(health_app)
         await runner.setup()
@@ -1303,31 +1307,10 @@ class DeployAgent:
             logger.info("branch install apply waits for the dev lane lock: %s", exc)
 
     def _latest_branch_installs(self) -> dict[str, object]:
-        """The declared installs and the last readback, for ``/branch-installs``."""
-        root = STATE_DIR / "branch-installs"
-        try:
-            declared = json.loads((root / "records.json").read_text(encoding="utf-8"))[
-                "installs"
-            ]
-        except FileNotFoundError:
-            declared = []
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            return {"installs": None, "reason": f"{type(exc).__name__}: {exc}"}
-        try:
-            status = json.loads((root / "status.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            status = None
-        readbacks = status.get("readbacks") if isinstance(status, dict) else None
-        return {
-            "read_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "declared": declared,
-            "last_check": status,
-            "missing": [
-                str(r.get("install_key"))
-                for r in (readbacks if isinstance(readbacks, list) else [])
-                if isinstance(r, dict) and r.get("state") in ("missing", "failed")
-            ],
-        }
+        return cast(
+            "dict[str, object]",
+            load_agent_branch_trial().effect.branch_installs_readback(STATE_DIR),
+        )
 
     def _maybe_idle_converge(self) -> None:
         """Converge on a followed repository's dev head when idle (OMN-19509).
@@ -1824,6 +1807,12 @@ class DeployAgent:
         """
         try:
             with single_flight_lock():
+                if cmd.scope is Scope.AGENT_TRIAL:
+                    trial = load_agent_branch_trial()
+                    trial.effect.queue_agent_trial(
+                        self, cmd, STATE_DIR, trial.queue_from_host
+                    )
+                    return
                 self._run_deploy(cmd)
         except DeployInProgressError:
             logger.warning(
