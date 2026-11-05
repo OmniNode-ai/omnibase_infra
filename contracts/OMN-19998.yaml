@@ -291,14 +291,14 @@ dod_evidence:
     binds_ac:
       - AC39
   - id: dod-omn19998-ac39-runtime-roll-deploy-source
-    description: Hosted source-identity probe for AC39. Reads this revision's published boot-guard handler and refuses a revision without the named rolling-stop failure. This checks the published source, not a running installation or uninterrupted readiness.
+    description: Hosted behavioral probe for AC39 from this checkout. The real executor loads its boot-guard effect and replays failed running checks, health waits and deadlines through the Docker adapter, requiring a failed roll after recovery without advancing peer images or emitting success. The convergence replay also exercises successful and unchanged rolls and forced rollback. No network source read, live installation or uninterrupted readiness is claimed.
     source: manual
     checks:
       - check_type: command
-        check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c "Runtime roll stopped at" >/dev/null'
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
         cwd: .
       - check_type: command
-        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
         cwd: .
     binds_ac:
       - AC39
