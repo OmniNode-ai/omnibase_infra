@@ -271,6 +271,7 @@ databases:
               - agent_status_events
               - agent_transformation_events
               - capability_scores
+              - context_audit_events
               - context_roi_scores
               - delegation_budget_applied_events
               - delegation_budget_state
@@ -461,5 +462,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 583fb6aa4749341ce73410f770efa603faccd89f3a91e7c1c8798c9fdaa54fa6
+  sha256: a7bd32f86d28e9c65056fdb3b3269c44b264dd5698dab9fb1878f3069c36dbae
 topology_instance: local
