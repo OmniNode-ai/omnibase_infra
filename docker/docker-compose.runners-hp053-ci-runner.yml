@@ -69,6 +69,16 @@ x-runner-lab-credentials: &runner-lab-credentials
   read_only: true
   bind:
     create_host_path: true
+# OMN-19998: install the retention node and its dependencies at the container
+# prefix below, outside _work. Supply its deployment overlay as overlay.yaml.
+# Refuse an absent installation instead of creating an empty runtime directory.
+x-runner-retention-runtime: &runner-retention-runtime
+  type: bind
+  source: ${RUNNER_RETENTION_RUNTIME_HOST_DIR:?RUNNER_RETENTION_RUNTIME_HOST_DIR must name the installed runner retention runtime}
+  target: /opt/onex-runner-retention
+  read_only: true
+  bind:
+    create_host_path: false
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
@@ -92,6 +102,8 @@ x-runner-base: &runner-base
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
+    RUNNER_RETENTION_PYTHON: /opt/onex-runner-retention/bin/python
+    RUNNER_RETENTION_POLICY_FILE: /opt/onex-runner-retention/overlay.yaml
     UV_CONCURRENT_DOWNLOADS: "1"
     UV_CONCURRENT_BUILDS: "1"
     UV_CONCURRENT_INSTALLS: "1"
@@ -106,6 +118,7 @@ x-runner-base: &runner-base
     - *runner-disk-admission-pause
     - *runner-lab-credentials
     - *lab-host-table
+    - *runner-retention-runtime
   group_add:
     - "988" # h053 docker group GID (getent group docker on the host, read 2026-11-02)
   healthcheck:
@@ -133,6 +146,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-retention-runtime
       - /data/scratch/cache/runners/1/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/1/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/1/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -155,6 +169,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-retention-runtime
       - /data/scratch/cache/runners/2/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/2/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/2/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -177,6 +192,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-retention-runtime
       - /data/scratch/cache/runners/3/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/3/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/3/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -199,6 +215,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-retention-runtime
       - /data/scratch/cache/runners/4/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/4/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/4/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -221,6 +238,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-retention-runtime
       - /data/scratch/cache/runners/5/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/5/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/5/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -243,6 +261,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-retention-runtime
       - /data/scratch/cache/runners/6/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/6/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/6/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -265,6 +284,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-retention-runtime
       - /data/scratch/cache/runners/7/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/7/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/7/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -287,6 +307,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - *runner-retention-runtime
       - /data/scratch/cache/runners/8/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/8/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/8/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm

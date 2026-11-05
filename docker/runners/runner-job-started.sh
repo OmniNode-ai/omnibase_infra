@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reset the current repository workspace before each self-hosted runner job.
+# Reclaim completed runner data and reset the incoming repository before a job.
 #
 # Stateful self-hosted runners can inherit sparse-checkout and partial worktree
 # state from earlier jobs on the same runner. GitHub-hosted runners avoid this
@@ -24,6 +24,10 @@
 # leaves a job to run against an unreset workspace.
 
 set -euo pipefail
+
+RUNNER_HOME="${RUNNER_HOME:-${RUNNER_USER_HOME:-${HOME}}/actions-runner}"
+RUNNER_WORK_DIR="${RUNNER_WORK_DIR:-_work}"
+WORK_ROOT="${RUNNER_HOME}/${RUNNER_WORK_DIR}"
 
 # ---------------------------------------------------------------------------
 # OMN-14027 C2 -- local git-mirror pre-seed (fail-open by construction)
@@ -853,7 +857,7 @@ _C3_DISK_ADMISSION_MIN_FREE_GB="${RUNNER_DISK_ADMISSION_MIN_FREE_GB:-5}"
 # recreate, which is correct: a freshly recreated runner has observed no disk
 # pressure yet.
 _C3_DISK_ADMISSION_BACKOFF_N="${RUNNER_DISK_ADMISSION_BACKOFF_N:-3}"
-_C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME:-/home/runner/actions-runner}/.onex-disk-admission}"
+_C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME}/.onex-disk-admission}"
 # Durable pause-marker directory. Bind-mounted host-side
 # (docker-compose.runners.yml) so a host-side companion
 # (scripts/runner-disk-admission-restore.sh) can see which runners this gate
@@ -861,7 +865,7 @@ _C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME:-
 # skipped, the per-job gate above still blocks each individual job) when the
 # mount is absent -- e.g. before the fleet is recreated to pick up the new
 # compose volume; see the rollout note in knowledge-base:runbooks/runner-disk-admission-gate.md.
-_C3_DISK_ADMISSION_PAUSE_DIR="${RUNNER_DISK_ADMISSION_PAUSE_DIR:-/home/runner/.onex-disk-admission-pause}"
+_C3_DISK_ADMISSION_PAUSE_DIR="${RUNNER_DISK_ADMISSION_PAUSE_DIR:-${RUNNER_USER_HOME:-${HOME}}/.onex-disk-admission-pause}"
 # An explicit mount is an additional write target, never a replacement for
 # runner home and workspace storage (which can be separate bind mounts).
 _C3_DISK_ADMISSION_MOUNT="${RUNNER_DISK_ADMISSION_MOUNT:-}"
@@ -894,15 +898,14 @@ _c3_disk_usage() {
 # never hide a known short filesystem. No workspace/cache writes precede this.
 disk_admission_gate() {
     local avail_kb avail_gb_frac min_free_kb runner="${RUNNER_NAME:-unknown}"
-    local runner_home="${RUNNER_HOME:-/home/runner/actions-runner}"
-    local work_root="${runner_home}/_work"
+    local work_root="${RUNNER_HOME}/_work"
     local mount filesystem usage shortest_mount="" minimum_kb=""
-    local -a mounts=("${runner_home}" "${work_root}") unreadable=()
+    local -a mounts=("${RUNNER_HOME}" "${work_root}") unreadable=()
     local -A free_by_fs=() mount_by_fs=()
     [[ ! -d "${work_root}/_temp" ]] || mounts+=("${work_root}/_temp")
     # RUNNER_WORK_DIR is configurable in the workspace-reset path below.
     if [[ "${RUNNER_WORK_DIR:-_work}" != "_work" ]]; then
-        local configured_work="${runner_home}/${RUNNER_WORK_DIR}"
+        local configured_work="${RUNNER_HOME}/${RUNNER_WORK_DIR}"
         mounts+=("${configured_work}")
         [[ ! -d "${configured_work}/_temp" ]] || mounts+=("${configured_work}/_temp")
     fi
@@ -1193,7 +1196,7 @@ wire_pypi_cache() {
 # more than RUNNER_TMP_REAP_SECONDS. A TMPDIR that is not a dedicated one (/tmp,
 # where the image bakes omni-ci-bin, /, a home directory) is never reaped.
 #
-# THE WARNING. Byte and inode use of the TMPDIR mount at or past
+# THE WARNING. Byte and inode use of a dedicated TMPDIR mount at or past
 # RUNNER_TMP_WARN_PCT (85, the same advisory line as
 # scripts/disk-watermark-check.sh, which alarms on the bus hourly for the
 # runner scratch disk)
@@ -1223,6 +1226,7 @@ runner_tmp_reap() {
     case "${real}" in
         / | /tmp | /var/tmp | /scratch | /home | /home/runner | "${home_real}")
             echo "[runner-tmp] ${real} is not a dedicated runner TMPDIR; not reaping."
+            _C4_TMP_DIR=""
             return 0
             ;;
     esac
@@ -1268,13 +1272,10 @@ runner_tmp_headroom() {
 runner_tmp_reap || true
 runner_tmp_headroom || true
 
-# OMN-16363 -- disk-admission gate runs FIRST, before every other step in this
-# hook (including wire_pypi_cache and the workspace reset below). This is the
-# one call site in this file that is allowed to fail the job: every other
-# mechanism here is `|| true` fail-open by design, but the whole point of this
-# gate is to fail fast, before any write-heavy step, when disk is critically
-# low. See the OMN-16363 comment block above disk_admission_gate() for why this
-# ordering is load-bearing.
+# OMN-16363: admission precedes write-heavy work, including retention and
+# mirror seeding. Refuse critically low disk before checkout or dependencies.
+# Pools opting into retention also require that lifecycle boundary to complete
+# before any job steps; cache/mirror optimizations remain fail-open.
 disk_admission_gate || exit 1
 
 # Deliberately called before the workspace-reset logic below, and guarded with
@@ -1282,9 +1283,6 @@ disk_admission_gate || exit 1
 # can change whether the cache is wired, and a defect here can never fail a job.
 wire_pypi_cache || true
 
-RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
-RUNNER_WORK_DIR="${RUNNER_WORK_DIR:-_work}"
-WORK_ROOT="${RUNNER_HOME}/${RUNNER_WORK_DIR}"
 
 workspace="${GITHUB_WORKSPACE:-}"
 if [[ -z "${workspace}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
@@ -1308,9 +1306,20 @@ case "${canonical_workspace}" in
         ;;
 esac
 
-if [[ "${canonical_workspace}" == "/" || "${canonical_workspace}" == "${canonical_work_root}" ]]; then
-    echo "[runner-job-started] Refusing unsafe workspace path: ${canonical_workspace}" >&2
-    exit 1
+# OMN-19998: the runner owns this synchronous boundary, before any job steps
+# or mirror seed. Cleanup policy and filesystem effects live in the retention
+# node; this adapter only serializes the lifecycle request and checks its receipt.
+# Pools opt in by supplying an installed runtime outside disposable work data.
+if [[ -n "${RUNNER_RETENTION_PYTHON:-}" ]]; then
+    retention_payload="$(python3 -c 'import json,sys; print(json.dumps(dict(runner_home=sys.argv[1], workspace=sys.argv[2], phase="job_started", lifecycle_boundary=True, active_workspaces=[], dry_run=False)))' "${RUNNER_HOME}" "${canonical_workspace}")"
+    ONEX_LOCAL_RUNTIME_STATE_ROOT="${RUNNER_HOME}/.workspace-retention-state" \
+        timeout "${RUNNER_RETENTION_TIMEOUT_SECONDS:-120}" "${RUNNER_RETENTION_PYTHON}" \
+        -m omnimarket.adapters.codex.runtime_client --runtime-selection local \
+        --command-name node_runner_workspace_retention_effect.retain_runner_workspace \
+        --payload "${retention_payload}" --timeout-ms 120000 | jq -er '
+        .dispatch_result as $d | if (.ok == true and .runtime_mode == "local" and $d.status == "completed" and $d.payload.status == "completed" and $d.payload.dry_run == false and $d.payload.bytes_after != null) then
+        $d.payload | "[runner-retention] completed bytes_before=\(.bytes_before) bytes_after=\(.bytes_after) bytes_removed=\(.bytes_removed)"
+        else error("[runner-retention] cleanup not completed: \($d.payload.reason // .error.message // "unreadable receipt")") end'
 fi
 
 echo "[runner-job-started] Resetting workspace: ${canonical_workspace}"
@@ -1318,47 +1327,29 @@ echo "[runner-job-started] Resetting workspace: ${canonical_workspace}"
 err_file="$(mktemp)"
 trap 'rm -f "${err_file}"' EXIT
 
-if rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
-    mkdir -p -- "${canonical_workspace}"
-    seed_workspace_from_mirror "${canonical_workspace}"
-    wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
-    wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
-    wire_git_transfer_stall_bound || true
-    _c2_rewrite_flush || true
-    exit 0
-fi
-
-# Plain rm -rf failed. Fail loud FIRST: name the offending paths and the
-# owning uid so this is diagnosable from the job log, not just "exit 1".
-echo "[runner-job-started] ERROR: rm -rf failed on ${canonical_workspace}:" >&2
-cat "${err_file}" >&2
-echo "[runner-job-started] Non-runner-owned paths under ${canonical_workspace}:" >&2
-find "${canonical_workspace}" \! -user "$(id -u)" -printf '%u:%g %m %p\n' 2>/dev/null >&2 || true
-
-# Self-heal fallback (OMN-15134): a narrowly scoped NOPASSWD sudo rule
-# (Dockerfile, /etc/sudoers.d/runner-workspace-reset) allows exactly this one
-# rm -rf under this runner's own _work tree as root. Try it; if sudo itself
-# is unavailable or the rule doesn't match (defense in depth -- this must
-# never silently grant a broader escalation), fail the hook loudly rather
-# than let the job proceed against an unreset workspace.
-echo "[runner-job-started] Attempting scoped root cleanup fallback..." >&2
-: >"${err_file}"
-if ! command -v sudo >/dev/null 2>&1; then
-    echo "[runner-job-started] ERROR: sudo is not installed in this image; cannot self-heal." >&2
-elif sudo -n /bin/rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
-    echo "[runner-job-started] Root-owned debris removed via scoped sudo fallback." >&2
-    mkdir -p -- "${canonical_workspace}"
-    seed_workspace_from_mirror "${canonical_workspace}"
-    wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
-    wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
-    wire_git_transfer_stall_bound || true
-    _c2_rewrite_flush || true
-    exit 0
-else
-    echo "[runner-job-started] ERROR: scoped sudo fallback also failed:" >&2
+if ! rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
+    # Diagnose the unprivileged failure before the same narrowly scoped fallback.
+    echo "[runner-job-started] ERROR: rm -rf failed on ${canonical_workspace}:" >&2
     cat "${err_file}" >&2
+    echo "[runner-job-started] Non-runner-owned paths under ${canonical_workspace}:" >&2
+    find "${canonical_workspace}" \! -user "$(id -u)" -printf '%u:%g %m %p\n' 2>/dev/null >&2 || true
+    echo "[runner-job-started] Attempting scoped root cleanup fallback..." >&2
+    : >"${err_file}"
+    if command -v sudo >/dev/null 2>&1 && sudo -n /bin/rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
+        echo "[runner-job-started] Root-owned debris removed via scoped sudo fallback." >&2
+    else
+        echo "[runner-job-started] ERROR: scoped sudo fallback unavailable or failed:" >&2
+        cat "${err_file}" >&2
+        echo "[runner-job-started] Refusing to run the job against an unreset workspace." >&2
+        echo "[runner-job-started] Manual remediation: docker exec -u root omninode-deploy-runner rm -rf -- '${canonical_workspace}'" >&2
+        exit 1
+    fi
 fi
 
-echo "[runner-job-started] Refusing to run the job against an unreset workspace." >&2
-echo "[runner-job-started] Manual remediation: docker exec -u root omninode-deploy-runner rm -rf -- '${canonical_workspace}'" >&2
-exit 1
+mkdir -p -- "${canonical_workspace}"
+seed_workspace_from_mirror "${canonical_workspace}"
+wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
+wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
+wire_git_transfer_stall_bound || true
+_c2_rewrite_flush || true
+exit 0

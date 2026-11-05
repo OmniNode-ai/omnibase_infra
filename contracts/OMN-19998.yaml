@@ -185,6 +185,11 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-runner-start-retention-wiring
+    statement: The h053 runner start hook dispatches the runner-local retention node before workspace reset and mirror seeding, with an installed runtime outside disposable data.
+    acceptance:
+      - id: AC19998001
+        statement: 'A configured job start dispatches the recorded retained-workspace request synchronously, refuses failed cleanup before reset, and every h053 service mounts the required external runtime -- falsifier: uv run pytest tests/scripts/test_runner_job_started_retention_omn19998.py -q -n 0 --no-cov'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -769,3 +774,19 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-runner-start-retention-wiring
+    description: The actual Bash hook receives the recorded sparse workspace case and dispatches the typed lifecycle request before reset. Failure results retain the incoming sentinel; the unconfigured positive control still resets it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_runner_job_started_retention_omn19998.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac: [AC19998001]
+  - id: dod-omn19998-runner-start-retention-deploy-probe
+    description: Hosted-runner artifact probe executes the shipped hook with an isolated runtime transport and parses every h053 service mount. No live credentials, sibling checkout, runner or broker is required; live cleanup is separate lab evidence.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_runner_job_started_retention_omn19998.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac: [AC19998001]
