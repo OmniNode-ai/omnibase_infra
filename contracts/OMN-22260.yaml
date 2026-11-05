@@ -44,8 +44,18 @@ dod_evidence:
     binds_ac:
       - AC2
     checks:
+      # Disjoint selections preserve every case within the hosted 180s per-check budget.
       - check_type: test_passes
-        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'unsafe_existing_grants'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'incompatible_column_type'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'not unsafe_existing_grants and not incompatible_column_type and (index or column_shape or primary_key or named_constraint)'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'not unsafe_existing_grants and not incompatible_column_type and not (index or column_shape or primary_key or named_constraint)'
         cwd: .
   - id: dod-omn22260-infra-writer-topology
     description: Every shipped topology profile grants the runtime principal exactly SELECT, INSERT and UPDATE on the table and grants no other principal anything on it. It fails at the merge base, where the table has no declaration.
@@ -73,8 +83,18 @@ dod_evidence:
       - AC1
       - AC2
     checks:
+      # Disjoint selections preserve every case within the hosted 180s per-check budget.
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'unsafe_existing_grants'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'incompatible_column_type'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'not unsafe_existing_grants and not incompatible_column_type and (index or column_shape or primary_key or named_constraint)'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'not unsafe_existing_grants and not incompatible_column_type and not (index or column_shape or primary_key or named_constraint)'
         cwd: .
   - id: dod-omn22260-atomic-grant-boundary
     description: The grant migration refuses extra runtime, PUBLIC, other-role and column privileges, grant options and runtime ownership or inherited owner access; a failure preserves existing ACLs and rows and leaves no partial schema or table grants.
