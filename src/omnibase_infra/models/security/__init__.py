@@ -29,6 +29,9 @@ from omnibase_infra.models.security.model_environment_policy import (
 from omnibase_infra.models.security.model_handler_security_policy import (
     ModelHandlerSecurityPolicy,
 )
+from omnibase_infra.models.security.model_infisical_handler_config import (
+    ModelInfisicalHandlerConfig,
+)
 from omnibase_infra.models.security.model_security_error import (
     ModelSecurityError,
 )
@@ -43,6 +46,7 @@ __all__ = [
     "CLASSIFICATION_SECURITY_LEVELS",
     "ModelEnvironmentPolicy",
     "ModelHandlerSecurityPolicy",
+    "ModelInfisicalHandlerConfig",
     "ModelSecurityError",
     "ModelSecurityValidationResult",
     "ModelSecurityWarning",

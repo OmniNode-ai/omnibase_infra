@@ -25,6 +25,38 @@
 # exempts 'effect' alone. Same shape as
 # src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml.
 #
+# Scope, measured rather than assumed. ValidatorNoIoOutsideEffects._validate_file
+# walks path.resolve().parents and takes the first contract.yaml it finds, with no
+# stop condition, so this declaration reaches every subdirectory below it. Run
+# module by module with no contract above the package, 48 of 173 modules here were
+# flagged, and nothing in scripts/ci/reject-node-implementations.sh (which only
+# rejects paths under src/omnibase_infra/nodes/*/handlers/) enforces that a module
+# placed here is a handler at all. Three of the 48 were pure Pydantic models that
+# no node contract binds; a model is not an effect, so they moved to the packages
+# that own them rather than being exempted from here:
+#
+#   handlers/models/model_operation_context.py
+#     -> models/resilience/model_operation_context.py
+#   handlers/models/model_retry_state.py
+#     -> models/resilience/model_retry_state.py
+#   handlers/models/infisical/model_infisical_handler_config.py
+#     -> models/security/model_infisical_handler_config.py
+#
+# What this file declares EFFECT is now 45 flagged modules of 169, and every one of
+# them is effect-side: it holds a database, HTTP, subprocess, filesystem, clock,
+# environment or bus surface that the compute halves are forbidden. That includes
+# the three modules here that are not named handler_*.py but build the shared host
+# listener's aiohttp application -- shared_listener.py,
+# shared_listener_broker_client.py and mixin_shared_listener.py. They belong to the
+# effect side by what they do, and src/omnibase_infra/handlers/ is the only
+# canonical home open to them: canonical-file-shape (OMN-20304) admits a new code
+# file under src/<pkg>/{nodes,handlers,models,protocols,contracts,enums}/ alone, and
+# src/omnibase_infra/mixins/ is a closed, grandfathered location whose ten files are
+# all in .onex_ratchets/canonical_file_shape_baseline.txt.
+#
+# Keep it that way: a module placed here that holds no effect surface belongs in its
+# own package, not under this declaration.
+#
 # Related tickets:
 #   - OMN-21532: K4, the no_io_outside_effects rule
 #   - OMN-20821: infra handlers live here and are bound from the node contract

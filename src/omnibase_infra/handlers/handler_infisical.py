@@ -54,9 +54,9 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 from omnibase_infra.models.handlers.model_secret_cache import ModelSecretCache
+from omnibase_infra.models.security import ModelInfisicalHandlerConfig
 
 logger = logging.getLogger(__name__)
 

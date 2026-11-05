@@ -46,8 +46,8 @@ from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers.handler_infisical import HandlerInfisical
 from omnibase_infra.handlers.kafka_permanent_failure import kafka_failure_types
-from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.idempotency import StoreIdempotencySqlite
+from omnibase_infra.models.security import ModelInfisicalHandlerConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
