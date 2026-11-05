@@ -368,15 +368,38 @@ jobs:
             --clone . \
             --version "${VERSION}" >"${RUNNER_TEMP}/changelog-entry.md"
 
-          python3 - <<'PY'
-          import os, pathlib
-          entry = pathlib.Path(os.environ["RUNNER_TEMP"], "changelog-entry.md").read_text()
-          target = pathlib.Path("CHANGELOG.md")
-          existing = target.read_text() if target.exists() else ""
-          target.write_text(entry.rstrip("\n") + "\n\n" + existing)
-          PY
-
-          staged=(CHANGELOG.md)
+          # Where the block goes is the target repo's own docs policy, read from
+          # its .readme-only-docs.yaml (the file the readme-only-docs gate reads):
+          # a CHANGELOG.md prepend for a repo that allows one, root README.md plus
+          # the release-cut contract item and identity test for a README-only repo.
+          # Writing CHANGELOG.md unconditionally made every omnibase_core release
+          # PR red from the day dev deleted that file (OMN-17427). The behaviour is
+          # the node_release_notes_apply_effect node, run from the checked-out
+          # train by its locked environment; the app token is not in its env.
+          jq -n --arg clone "${PWD}" --arg entry "${RUNNER_TEMP}/changelog-entry.md" \
+            --arg repo "${TARGET_REPO}" \
+            '{clone_path: $clone, entry_file: $entry, repo_name: $repo}' \
+            >"${RUNNER_TEMP}/release-notes-request.json"
+          if ! env -u GH_TOKEN -u GITHUB_TOKEN uv run --frozen --no-dev \
+            --project "${GITHUB_WORKSPACE}/_train" \
+            onex node node_release_notes_apply_effect \
+            --input "${RUNNER_TEMP}/release-notes-request.json" \
+            --state-root "${RUNNER_TEMP}/release-notes-state" \
+            --output receipt >"${RUNNER_TEMP}/release-notes-receipt.json" \
+            2>"${RUNNER_TEMP}/release-notes-stderr.log"; then
+            # The node's own refusal is in the receipt; when it never got as far as
+            # a receipt, the cause is in its stderr.
+            reason=$(jq -er '(.result.handler_result // .result).error_message' "${RUNNER_TEMP}/release-notes-receipt.json" 2>/dev/null || tail -c 2000 "${RUNNER_TEMP}/release-notes-stderr.log")
+            echo "::error::release notes were not applied: ${reason}"
+            exit 1
+          fi
+          # One path per line. The receipt must say success and carry at least one
+          # path; jq -e fails on anything else, so a malformed receipt fails here.
+          if ! staged_lines=$(jq -er '(.result.handler_result // .result) | select(.success == true) | .staged[]' "${RUNNER_TEMP}/release-notes-receipt.json"); then
+            echo "::error::the release-notes receipt does not report success with staged paths"
+            exit 1
+          fi
+          mapfile -t staged <<<"${staged_lines}"
           if [ "${NEEDS_BUMP}" = "true" ]; then
             # The manifest and the lockfile move together: uv.lock records the
             # root package's own version, so a bump of pyproject.toml alone
