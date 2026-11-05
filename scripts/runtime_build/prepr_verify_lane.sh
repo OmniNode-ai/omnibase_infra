@@ -1030,5 +1030,5 @@ mkdir -p "$(dirname "${DESCRIPTOR_OUT}")"
 } > "${DESCRIPTOR_OUT}"
 
 log "slot ${SLOT} is READY. Descriptor: ${DESCRIPTOR_OUT}"
-log "WARNING: a standalone bring-up stops heartbeating when it exits; the reaper may remove slot ${SLOT} after its lease expires (300s after its last heartbeat by default). For longer proofs, run bring-up, exercise and teardown together: python3 scripts/runtime_build/prepr_teardown_slot.py run --slot ${SLOT} --holder <lane> -- bash <proof.sh>. When the proof is done, destroy it: scripts/runtime_build/prepr_teardown_slot.sh --slot ${SLOT} --reason <text>"
+log "WARNING: a standalone bring-up stops heartbeating when it exits; the reaper may remove slot ${SLOT} after its lease expires (300s after its last heartbeat by default). For longer proofs, run bring-up, exercise and teardown together: uv run --frozen python scripts/runtime_build/prepr_teardown_slot.py run --slot ${SLOT} --holder <lane> -- bash <proof.sh>. When the proof is done, destroy it: scripts/runtime_build/prepr_teardown_slot.sh --slot ${SLOT} --reason <text>"
 cat "${DESCRIPTOR_OUT}"

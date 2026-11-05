@@ -94,8 +94,8 @@ def test_completion_output_names_standalone_expiry_and_safe_path(
     assert "last heartbeat" in output
     assert "300s" in output
     assert (
-        "prepr_teardown_slot.py run --slot 1 --holder <lane> -- bash <proof.sh>"
-        in output
+        "uv run --frozen python scripts/runtime_build/prepr_teardown_slot.py "
+        "run --slot 1 --holder <lane> -- bash <proof.sh>" in output
     )
     assert "prepr_teardown_slot.sh --slot 1 --reason <text>" in output
     assert (
