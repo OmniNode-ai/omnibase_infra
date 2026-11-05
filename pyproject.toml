@@ -668,6 +668,7 @@ node_gateway_link_health_projection_compute = "omnibase_infra.nodes.node_gateway
 node_gateway_link_health_write_effect = "omnibase_infra.nodes.node_gateway_link_health_write_effect"
 node_gmail_archive_cleanup_effect = "omnibase_infra.nodes.node_gmail_archive_cleanup_effect"
 node_gmail_intent_poller_effect = "omnibase_infra.nodes.node_gmail_intent_poller_effect"
+node_hostile_review_fix_verifier_effect = "omnibase_infra.nodes.node_hostile_review_fix_verifier_effect"
 node_hotpatch_ledger_reconcile_effect = "omnibase_infra.nodes.node_hotpatch_ledger_reconcile_effect"
 node_impact_analyzer_compute = "omnibase_infra.nodes.node_impact_analyzer_compute"
 node_in_progress_probe_hygiene_effect = "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect"

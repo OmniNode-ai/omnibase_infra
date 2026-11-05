@@ -24,7 +24,7 @@
     "snapshot_sha256": "5509645535394bcd5e81e23c4c5dbc9712cf7b71c26d4f6b3c8b759638ef627f"
   },
   "retired": {
-    "captured_utc": "2026-11-05T00:57:42.545533+00:00",
+    "captured_utc": "2026-11-05T03:19:23.855100+00:00",
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
