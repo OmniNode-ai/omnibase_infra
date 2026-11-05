@@ -87,5 +87,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_delegation_dispatch_run_steps_omn19972.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_delegation_dispatch_terminal.py?ref=a38b41fb701e897524a32f26d88dcd3697848d38 --jq .content | base64 -d | grep -c 'class HandlerDelegationDispatchTerminal'
     binds_ac:
       - AC13
