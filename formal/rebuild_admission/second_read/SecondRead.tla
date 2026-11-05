@@ -77,6 +77,8 @@ CONSTANTS
   CloseOnSources, \* a safety failure closes on its own sources, not on the table
   SafetyEscOn,    \* an aged safety stop writes one decision row
   ScauseFiltered, \* a filter ahead of step 1 refuses the safety cause lane: step 0b on a private repository, or no freed place
+  KeptBelowStop,  \* plan head 15ddc745, step 3: a kept fix below the lowest stop is admitted
+  CauseBlocking,  \* plan head 15ddc745, step 3: "off" as the first reader; "strict": cause lane only at or below the active piece; "join_aware": also the next piece while its join is pending
   TrackReading    \* keep the ghost that dates a reading against its stop; off, the state counts match the first reader's
 
 Tasks == Ords \cup Others
@@ -94,6 +96,7 @@ KindOf(t) ==
     [] t = "c2" -> [k |-> "cause", p |-> 2, s |-> "-"]
     [] t = "c3" -> [k |-> "cause", p |-> MaxPiece, s |-> "-"]
     [] t = "kf" -> [k |-> "kept", p |-> MaxPiece, s |-> "-"]
+    [] t = "kl" -> [k |-> "kept", p |-> 1, s |-> "-"]
     [] t = "g"  -> [k |-> "cont", p |-> 0, s |-> "-"]
     [] t \in {"r1", "r2"} -> [k |-> "repair", p |-> 0, s |-> "-"]
     [] t = "s1" -> [k |-> "scause", p |-> MaxPiece, s |-> "s1"]
@@ -192,9 +195,14 @@ Step2(k) ==
   ELSE "next"
 OrdOK(k) == k.p = cur /\ (DropPred \/ (Pred(k.p) /\ Joined(k.p))) /\ Room(k.p)
 JoinOK(k) == (DropJoinTarget \/ k.p = cur + 1) /\ k.p \notin joined /\ (DropPred \/ Pred(k.p)) /\ Room(k.p)
+CauseMayRun(k) ==
+  CASE CauseBlocking = "off" -> TRUE
+    [] CauseBlocking = "strict" -> k.p <= cur
+    [] CauseBlocking = "join_aware" -> k.p <= cur \/ (k.p = cur + 1 /\ k.p \notin joined)
 Step3(k) ==
   IF Stops = {} THEN "next"
-  ELSE CASE k.k = "cause" -> IF k.p = Low /\ (DropSlot \/ Slot(k)) THEN "admit" ELSE "refuse"
+  ELSE CASE k.k = "cause" -> IF k.p = Low /\ (DropSlot \/ Slot(k)) /\ CauseMayRun(k) THEN "admit" ELSE "refuse"
+         [] k.k = "kept"  -> IF KeptBelowStop /\ k.p < Low THEN "admit" ELSE "refuse"
          [] k.k = "ord"   -> IF k.p < Low /\ OrdOK(k) THEN "admit" ELSE "refuse"
          [] k.k = "join"  -> IF k.p < Low /\ JoinOK(k) THEN "admit" ELSE "refuse"
          [] k.k \in {"b0", "cont"} -> "admit"
@@ -224,7 +232,8 @@ Against(k) ==
   ELSE IF ~fresh /\ (k.k = "kept" \/ (Rebuild(k) /\ k.p > Seven)) THEN TRUE
   ELSE IF ~fresh /\ k.k = "repair" THEN FALSE
   ELSE IF Stops # {} THEN
-       \/ k.k \in {"kept", "other", "repair", "scause"}
+       \/ k.k \in {"other", "repair", "scause"}
+       \/ (k.k = "kept" /\ ~(KeptBelowStop /\ k.p < Low))
        \/ (k.k = "cause" /\ k.p # Low)
        \/ (k.k \in {"ord", "join"} /\ k.p >= Low)
        \/ (k.k = "ord" /\ k.p # cur)
@@ -676,6 +685,17 @@ OneCauseLane == \A p \in Pieces :
 AliveWithinLimit == \A p \in Pieces : Alive(p) <= Limit
 StopClearsOnFreshReading == ~badOldReading
 WitStartWithBothEnginesDown == ~downStart
+\* Plan head 15ddc745, step 3: a kept fix below the lowest stop is admitted, if nothing earlier refuses.
+KeptAdmittedBelowStop == \A q \in Pieces :
+  (Stops # {} /\ q < Low /\ safety = {} /\ fresh) => Decide([k |-> "kept", p |-> q, s |-> "-"]) = "admit"
+\* Plan head 15ddc745, step 3: a break on a higher piece is queued.
+CauseOnlyIfBlocking == \A k \in AllKinds : (k.k = "cause" /\ Decide(k) = "admit") => k.p <= cur + 1
+\* A stop on the next piece with its join pending, nothing lower open: one of its two ways in is open.
+NextStopHasAWayIn ==
+  (/\ MaxPiece >= 2 /\ stop[1] = "none" /\ stop[2] # "none" /\ cur = 1 /\ 2 \notin joined /\ safety = {} /\ fresh
+   /\ \A t \in Tasks : pc[t] = "idle")
+  => (\/ Decide([k |-> "cause", p |-> 2, s |-> "-"]) = "admit"
+      \/ Decide([k |-> "join", p |-> 2, s |-> "-"]) = "admit")
 SafetyCauseStarts == \A s \in SafetyIds :
   (s \in safety) ~> (s \notin safety \/ \E t \in Tasks : K(t).s = s /\ pc[t] = "run")
 SafetyStopClearsOrEscalates == \A s \in SafetyIds : (s \in safety) ~> (s \notin safety \/ s \in sEsc)
