@@ -7,7 +7,7 @@ from pydantic import Field
 from omnibase_core.models.event_bus.model_resolved_bus_bindings import (
     ModelResolvedBusBindings,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_group_prefix import (
+from omnibase_infra.models.security.model_broker_group_prefix import (
     ModelBrokerGroupPrefix,
 )
 
