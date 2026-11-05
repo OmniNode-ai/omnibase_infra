@@ -1219,6 +1219,10 @@ PYEOF
 # runtime will then be in sync. A candidate that does not exist is SKIPPED and
 # never created -- creating a plugin venv is repair-plugin-venv.sh's job, and
 # doing it from a background tick would be a surprise, not a repair.
+# The locked hook environments require the intelligence extra. A base-only
+# sync can report IN_SYNC while omninode-intelligence is absent, because the
+# project declares it only under intelligence/full. Both check and repair must
+# select intelligence explicitly; sync remains frozen and exact.
 hook_venv_projects() {
   local seen=""
   local candidate
@@ -1686,8 +1690,8 @@ run_check() {
   local project
   while IFS= read -r project; do
     [[ -n "$project" ]] || continue
-    trace "uv sync --frozen --check --project $project"
-    if ! lock_layer_ok "$project"; then
+    trace "uv sync --frozen --check --project $project --extra intelligence"
+    if ! lock_layer_ok "$project" --extra intelligence; then
       say "DRIFT: hook venv $project/.venv is outdated against $project/uv.lock"
       drift=1
     fi
@@ -2203,18 +2207,18 @@ run_repair() {
       say "  Reconcile it as $hook_owner, or make the two surfaces share an owner."
       exit "$EXIT_INDETERMINATE"
     fi
-    trace "uv sync --frozen --check --project $project"
-    if lock_layer_ok "$project"; then
+    trace "uv sync --frozen --check --project $project --extra intelligence"
+    if lock_layer_ok "$project" --extra intelligence; then
       say "hook venv: already in sync ($project/.venv)"
       continue
     fi
     say "hook venv: reconciling $project/.venv to $project/uv.lock"
-    trace "uv sync --frozen --project $project"
+    trace "uv sync --frozen --project $project --extra intelligence"
     if ! (cd "$project" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT \
-        "$UV_BIN" sync --frozen --project "$project"); then
+        "$UV_BIN" sync --frozen --project "$project" --extra intelligence); then
       fail "hook venv lock sync did not complete for $project." \
         "Run by hand and read the error:" \
-        "  cd $project && env -u PYTHONPATH uv sync --frozen"
+        "  cd $project && env -u PYTHONPATH uv sync --frozen --extra intelligence"
     fi
     say "hook venv: reconciled ($project/.venv)"
   done < <(hook_venv_projects)

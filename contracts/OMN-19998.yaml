@@ -180,6 +180,11 @@ requirements:
     acceptance:
       - id: AC38
         statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
+  - id: req-omn19998-hook-intelligence-extra
+    statement: The existing host reconcile venv delegate must select the intelligence extra for locked hook environments in both check and repair while retaining frozen, exact synchronization.
+    acceptance:
+      - id: AC39
+        statement: 'AC39: a base-only hook environment missing locked omninode-intelligence 0.25.3 reads as drift without mutation, repair installs the locked version and the next check exits zero, and undeclared distributions remain drift and are removed by repair -- falsifier: uv run pytest tests/scripts/test_reconcile_hook_intelligence_extra_omn19998.py -q -n 0 fails against the merge-base reconciler'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -262,11 +267,32 @@ evidence_requirements:
   - kind: tests
     description: The warm-up tests run the step body against a stand-in installer and read the test-parallel job's steps for the warm step and its place before both pytest steps.
     command: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0
+  - kind: tests
+    description: The recorded missing-intelligence case executes the workspace venv delegate with real uv, a local wheel and a frozen hook lock; other workspace surfaces use the offline harness.
+    command: uv run pytest tests/scripts/test_reconcile_hook_intelligence_extra_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac39-hook-intelligence-extra
+    description: AC39 replays the base-only green check with intelligence 0.25.3 absent, then checks drift, installation, a clean next check and exact removal of an undeclared distribution through the shipped delegate.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_reconcile_hook_intelligence_extra_omn19998.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC39
+  - id: dod-omn19998-ac39-hook-deploy-probe
+    description: Hosted-runner artifact probe for AC39. Executes the shipped reconcile-workspace-venvs.sh delegate against a disposable hook environment with real uv and a locally generated wheel, requiring frozen exact extra selection and installed metadata readback. This does not claim installation on a live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_reconcile_hook_intelligence_extra_omn19998.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC39
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual
