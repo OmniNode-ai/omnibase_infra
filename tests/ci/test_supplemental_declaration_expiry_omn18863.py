@@ -119,6 +119,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     ),
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "local_environment": "omnimarket OMN-19988 (node_projection_local_environment)",
+    "context_audit_events": "omnimarket OMN-21934 (node_projection_context_audit)",
     "agent_actions": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_transformation_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "router_performance_metrics": "omnimarket OMN-21920 (node_projection_agent_actions)",

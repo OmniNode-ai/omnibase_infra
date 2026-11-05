@@ -25,9 +25,10 @@ def inputs() -> dict:
             "commit": "a" * 40,
             "composition": [],
         },
-        "host": "lab-201",
+        "host": "host-a",
         "lane": "dev",
-        "manifest_yaml": "hosts: {lab-201: {aliases: [omninode-pc]}}\nlanes:\n  dev:\n    hosts: [lab-201]\n    compose_project: omnibase-infra\n    services:\n      - {name: runtime, kind: service}\n      - {name: broker, kind: service}\n",
+        "registry_yaml": "registry:\n  - {name: host-a, aliases: [box-a], lanes: [dev]}\n",
+        "manifest_yaml": "lanes:\n  dev:\n    compose_project: omnibase-infra\n    services:\n      - {name: runtime, kind: service}\n      - {name: broker, kind: service}\n",
         "lock_toml": '[[package]]\nname = "omnibase-infra"\nversion = "1.2.3"\n[[package]]\nname = "omnibase-core"\nversion = "4.5.6"\n',
         "compose_json": json.dumps(
             {
@@ -95,6 +96,7 @@ def test_byte_identical_after_source_order_changes() -> None:
         "empty_lane",
         "wrong_project",
         "wrong_host",
+        "lane_not_listed_for_host",
         "bad_ref",
         "conflicting_broker",
         "ambiguous_lock",
@@ -115,7 +117,11 @@ def test_refuses_incomplete_or_ambiguous_sources(case: str) -> None:
             data["manifest_yaml"].split("    services:")[0] + "    services: []\n"
         )
     elif case == "wrong_host":
-        data["host"] = "lab-999"
+        data["host"] = "host-z"
+    elif case == "lane_not_listed_for_host":
+        data["registry_yaml"] = (
+            "registry:\n  - {name: host-a, aliases: [box-a], lanes: []}\n"
+        )
     elif case == "bad_ref":
         data["target_ref"]["commit"] = "abcdef"
     elif case == "ambiguous_lock":
@@ -208,7 +214,7 @@ def test_host_surface_uses_the_manifest_allowance_list() -> None:
         "allowed_undeclared:\n  - name: cache\n    match: {compose_project: cache}\n    owner: infrastructure\n    reason: pull-through-cache\n"
     )
     doc = parse_desired_state(render_desired_state(data).decode()).document
-    assert doc["surface"]["id"] == "lab-201/host"
+    assert doc["surface"]["id"] == "host-a/host"
     assert doc["allowed_undeclared"][0]["name"] == "cache"
     assert doc["containers"] == []
 

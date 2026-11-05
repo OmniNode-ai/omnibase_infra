@@ -251,6 +251,7 @@ databases:
               - agent_status_events
               - agent_transformation_events
               - capability_scores
+              - context_audit_events
               - context_roi_scores
               - delegation_budget_applied_events
               - delegation_budget_state

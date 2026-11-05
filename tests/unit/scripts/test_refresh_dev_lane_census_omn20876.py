@@ -43,6 +43,7 @@ from tests.helpers.lane_census_fixtures import (
     NEUTRAL_CONFIG_ROOT,
     NEUTRAL_HOSTNAME,
     NEUTRAL_MANIFEST,
+    NEUTRAL_REGISTRY,
 )
 
 pytestmark = pytest.mark.unit
@@ -149,6 +150,7 @@ def _run(
     env["HOME"] = str(tmp_path)
     env["OMNI_HOME"] = str(tmp_path)
     env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+    env["LANE_CENSUS_REGISTRY"] = str(NEUTRAL_REGISTRY)
     env.pop("LANE_MANIFEST", None)
     if manifest is not None:
         env["LANE_MANIFEST"] = str(manifest)
