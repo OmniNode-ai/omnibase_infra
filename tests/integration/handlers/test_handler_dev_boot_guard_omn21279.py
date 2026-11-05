@@ -16,6 +16,7 @@ import json
 import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -122,6 +123,12 @@ class _Host:
         module = ModuleType("fake_deploy_execution")
         module.__dict__.update(
             EnumRuntimeLane=_Lane,
+            subprocess=subprocess,
+            _dev_boot_clock=lambda: 0.0,
+            _dev_boot_timestamp=lambda: datetime(2026, 11, 4, tzinfo=UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            _read_private_text=lambda path: path.read_text(encoding="utf-8"),
             lane_config_for=lambda lane: SimpleNamespace(
                 compose_project=PROJECT, disabled_services=()
             ),
@@ -259,3 +266,17 @@ def test_recovery_phase_updates_reach_the_injected_verifier(tmp_path: Path) -> N
     guard._restore()
     assert len(seen) == 1
     assert any("--force-recreate" in argv for argv in host.calls)
+
+
+def test_wait_uses_the_execution_clock_for_the_declared_deadline(
+    tmp_path: Path,
+) -> None:
+    host = _Host(
+        containers=[_container(s, healthy=False) for s in guard_mod.DEV_BOOT_SERVICES]
+    )
+    guard = _guard(host, tmp_path)
+    ticks = iter((0.0, 21.0))
+    guard.execution._dev_boot_clock = lambda: next(ticks)
+    with pytest.raises(guard_mod.DevBootFailedError, match="dev boot window exhausted"):
+        guard.handle(ModelDevBootRequest(operation="wait"))
+    assert list(ticks) == []
