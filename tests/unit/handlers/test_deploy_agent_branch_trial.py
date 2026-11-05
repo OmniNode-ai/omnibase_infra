@@ -301,7 +301,7 @@ def test_signed_command_adapter_queues_the_effect_without_a_runtime_rebuild(
 def test_command_schema_refuses_non_dev_even_with_prod_digest(target):
     from deploy_agent.events import ModelRebuildRequested
 
-    with pytest.raises(ValueError, match="dev"):
+    with pytest.raises(ValueError, match="agent-trial requires runtime_lane dev"):
         ModelRebuildRequested(
             correlation_id=uuid4(),
             requested_by="test/branch-trial",
