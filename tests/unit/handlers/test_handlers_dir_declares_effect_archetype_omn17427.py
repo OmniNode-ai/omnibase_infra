@@ -9,20 +9,77 @@ I/O import in a bound handler failed a rule the package is exempt from.
 """
 
 import ast
+import importlib
 import shutil
 from pathlib import Path
 
 import pytest
 import yaml
 
+from omnibase_core.models.validation.model_canonical_file_shape_text import (
+    ModelCanonicalFileShapeText,
+)
+from omnibase_core.models.validation.model_canonical_file_shape_tree import (
+    ModelCanonicalFileShapeTree,
+)
+from omnibase_core.validation.checker_canonical_file_shape import (
+    file_rule_refusals,
+    load_rule_set,
+)
+from omnibase_core.validation.validator_canonical_file_shape import (
+    ValidatorCanonicalFileShape,
+)
 from omnibase_core.validation.validator_no_io_outside_effects import (
     ValidatorNoIoOutsideEffects,
+)
+from omnibase_infra.handlers.placement.model_placement_command import (
+    ModelPlacementCommand,
 )
 
 _HANDLERS = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra" / "handlers"
 _COMPUTE_CONTRACT = (
     "node_type: COMPUTE_GENERIC\ndescriptor:\n  node_archetype: compute\n"
 )
+
+
+@pytest.mark.unit
+def test_epoch_guard_contract_binds_an_executable_compute_handler() -> None:
+    package = _HANDLERS / "placement" / "handler_placement_epoch_guard"
+    contract_path = package / "contract.yaml"
+    contract = yaml.safe_load(contract_path.read_text())
+    binding = contract["handler"]
+    handler_class = getattr(importlib.import_module(binding["module"]), binding["name"])
+    guard = handler_class()
+    new = ModelPlacementCommand(node_key="node_a", placement_epoch=2, runtime_key="new")
+    old = new.model_copy(update={"placement_epoch": 1, "runtime_key": "old"})
+
+    assert guard.accept(new)
+    assert not guard.accept(old)
+    assert guard.highest("node_a") == 2
+    assert guard.accept(new)
+    assert guard.accept(old.model_copy(update={"node_key": "node_b"}))
+    assert contract["descriptor"]["node_archetype"] == "compute"
+
+    root = _HANDLERS.parents[2]
+    module_path = (package / "handler.py").relative_to(root).as_posix()
+    contract_name = contract_path.relative_to(root).as_posix()
+    rules = load_rule_set(ValidatorCanonicalFileShape().contract)
+
+    def refusals(document: dict[str, object]) -> dict[str, tuple[str, str]]:
+        tree = ModelCanonicalFileShapeTree(
+            files=(module_path, contract_name),
+            handler_class_paths=(module_path,),
+            contract_texts=(
+                ModelCanonicalFileShapeText(
+                    path=contract_name, text=yaml.safe_dump(document)
+                ),
+            ),
+        )
+        return file_rule_refusals(tree, rules)
+
+    assert module_path not in refusals(contract)
+    del contract["handler"]
+    assert refusals(contract)[module_path][0] == "handler_outside_node"
 
 
 @pytest.mark.unit
