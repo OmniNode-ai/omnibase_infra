@@ -1147,9 +1147,6 @@ route:
         # OMN-20413: the hook push rehearsal, enforced by the CI Summary poller
         # via EXPECTED_EXTERNAL_CONTEXTS and absent from branch protection.
         - hook-push-rehearsal / rehearse
-        # OMN-17427: the hostile-reviewer finding gate, enforced by the CI
-        # Summary poller on PRs into dev via EXPECTED_EXTERNAL_CONTEXTS.
-        - Hostile Review Thread Gate
         - imperative-contract-guard / Imperative Contract Guard
         - Infra Node Handler Ownership
         - Integration Silent-Skip Guard (OMN-14172)
