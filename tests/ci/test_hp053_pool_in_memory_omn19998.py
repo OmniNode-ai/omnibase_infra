@@ -32,6 +32,18 @@ IN_MEMORY_DIRS = (
     f"{RUNNER_HOME}/.npm",
 )
 GIB = 1024**3
+SLICE = (
+    REPO_ROOT
+    / "docker"
+    / "runners"
+    / "systemd"
+    / "pools"
+    / "hp053-ci-runner"
+    / "omnirunners.slice"
+)
+# The lane probe the repository's tests run refuses a volume with under this much free space.
+LANE_PROBE_MIN_FREE = 10 * GIB
+DECLARED_SIZES = {IN_MEMORY_DIRS[0]: 16 * GIB, IN_MEMORY_DIRS[1]: 12 * GIB}
 
 
 def _services() -> dict[str, dict[str, Any]]:
@@ -64,8 +76,18 @@ def test_every_job_directory_is_an_exec_tmpfs_and_no_disk_path_is_bound() -> Non
 def test_the_job_directories_leave_the_free_space_the_lane_probe_requires() -> None:
     for name, service in _services().items():
         sizes = {e.rsplit(":", 1)[0]: _size_bytes(e) for e in service["tmpfs"]}
-        assert sizes[IN_MEMORY_DIRS[0]] >= 12 * GIB, name
-        assert sizes[IN_MEMORY_DIRS[1]] >= 12 * GIB, name
+        for directory, declared in DECLARED_SIZES.items():
+            assert sizes[directory] == declared, (name, directory)
+            assert sizes[directory] >= LANE_PROBE_MIN_FREE, (name, directory)
+
+
+def _slice_limit(key: str) -> int:
+    for line in SLICE.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{key}="):
+            value = line.split("=", 1)[1].strip()
+            assert value.endswith("G"), line
+            return int(value[:-1]) * GIB
+    raise AssertionError(f"{key} not set in {SLICE}")
 
 
 def test_the_limits_are_the_ones_the_host_memory_reads_allow() -> None:
@@ -74,10 +96,12 @@ def test_the_limits_are_the_ones_the_host_memory_reads_allow() -> None:
     for name, service in services.items():
         assert service["mem_limit"] == service["memswap_limit"] == "9g", name
         assert float(service["cpus"]) == 5.0, name
-    # Five runners at 9 GiB are 45 GiB: under the 49 GiB the host showed as its lowest available memory on 2026-11-04.
-    assert (
-        sum(_size_bytes_of_limit(s["mem_limit"]) for s in services.values()) <= 49 * GIB
-    )
+    total = sum(_size_bytes_of_limit(s["mem_limit"]) for s in services.values())
+    # The slice read from disk must admit every runner at its limit, and cap it with headroom for job containers.
+    assert total <= _slice_limit("MemoryHigh") <= _slice_limit("MemoryMax")
+    assert _slice_limit("MemoryMax") - total >= 1 * GIB
+    # The slice cap stays under the 49 GiB the host showed as its lowest available memory on 2026-11-04.
+    assert _slice_limit("MemoryMax") <= 49 * GIB
 
 
 def _size_bytes_of_limit(value: str) -> int:
