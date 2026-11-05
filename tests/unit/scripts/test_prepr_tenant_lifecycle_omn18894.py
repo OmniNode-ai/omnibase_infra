@@ -13,6 +13,7 @@ import re
 import runpy
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -187,6 +188,8 @@ def test_teardown_adapter_preserves_resources_when_offboard_fails(
     def runner(
         argv: list[str], env: dict[str, str] | None
     ) -> subprocess.CompletedProcess[str]:
+        if argv[:3] == ["docker", "ps", "-a"]:
+            return subprocess.CompletedProcess(argv, 0, "slot-api\n", "")
         if argv[:2] == ["docker", "ps"]:
             # The dev-lane server lookup by compose label (OMN-17427).
             service = argv[argv.index("--filter") + 3].rsplit("=", 1)[1]
@@ -363,3 +366,339 @@ def test_lifecycle_falsifiers_are_wired_to_ci_and_precommit() -> None:
     )
     assert path in hook["entry"]
     assert hook["pass_filenames"] is False
+
+
+@pytest.fixture
+def recorded_reaper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.syspath_prepend(str(TEARDOWN.parent))
+    monkeypatch.setenv("ONEX_LANE_LOCK_DIR", str(tmp_path / "locks"))
+    spec = importlib.util.spec_from_file_location("recorded_slot_reaper", TEARDOWN)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "STAGING_PARENT", tmp_path / "staging")
+    return module
+
+
+def saved_offboard(staging: Path) -> Path:
+    credential = staging / "tenant-state" / "credential.env"
+    credential.parent.mkdir(parents=True)
+    credential.write_text(
+        "TENANT_ID=00000000-0000-4000-8000-000000000001\n"
+        "TENANT_SLUG=onex-prepr1\nONEX_API_KEY=test-key\n"
+    )
+    proof = credential.with_suffix(".env.revoked.json")
+    proof.write_text(
+        json.dumps(
+            {
+                "tenant_id": "00000000-0000-4000-8000-000000000001",
+                "key_sha256": hashlib.sha256(b"test-key").hexdigest(),
+                "auth_before": 200,
+                "auth_after": 401,
+            }
+        )
+    )
+    return proof
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_recorded_standalone_reaper_finishes_after_gateway_removal(
+    recorded_reaper: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    installed: bool,
+) -> None:
+    # Recorded case: expired standalone-1695065, containers already removed,
+    # nine databases, ten roles and staging left after the first teardown.
+    from tests.unit.scripts import test_prepr_teardown_slot_omn18896 as teardown_tests
+
+    reaper = recorded_reaper
+    if installed:
+        info = reaper.install_reaper(
+            tmp_path / "installed", tmp_path / "units", enable=False
+        )
+        helper = Path(info["helper"])
+        assert helper.read_bytes() == TEARDOWN.read_bytes()
+        spec = importlib.util.spec_from_file_location(
+            "installed_recorded_reaper", helper
+        )
+        assert spec and spec.loader
+        reaper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reaper)
+        monkeypatch.setattr(reaper, "STAGING_PARENT", tmp_path / "staging")
+        monkeypatch.setattr(
+            teardown_tests.teardown, "PROVISION_DB", reaper.PROVISION_DB
+        )
+    staging = reaper.STAGING_PARENT / "slot-1"
+    saved_offboard(staging)
+    host = teardown_tests.FakeHost()
+    host.containers[slot_one_project()] = set()
+    host.databases = {"control"} | {f"db{i}_prepr1" for i in range(9)}
+    host.roles = {"postgres"} | {f"role{i}_prepr1" for i in range(10)}
+    host.topics = {name for name in host.topics if not name.startswith("prepr1.")}
+    host.groups = {name for name in host.groups if not name.startswith("prepr1.")}
+    host.valkey[1] = 0
+    host.volumes[slot_one_project()] = set()
+    host.images[slot_one_project()] = set()
+    original_host = host
+
+    def runner(argv: list[str], env: Any = None) -> Any:
+        if argv[:1] == ["bash"] and "revoke" in argv:
+            return subprocess.CompletedProcess(
+                argv,
+                1,
+                "",
+                "FATAL: no running onex-api container in compose project "
+                + slot_one_project(),
+            )
+        return original_host(argv, env)
+
+    record = reaper.claim(
+        tmp_path, 1, "recorded-run", "standalone-1695065", str(staging)
+    )
+    record.update(expires=time.time() - 1, owner_pid=99999999, owner_start="gone")
+    reaper.write_record(tmp_path, 1, record)
+
+    def shell_adapter(argv: list[str], **kwargs: Any) -> Any:
+        assert Path(argv[1]).name == "prepr_teardown_slot.sh"
+        report = Path(argv[argv.index("--report-out") + 1])
+        code = reaper.run_teardown(
+            reaper.policy.SLOTS[1],
+            runner=runner,
+            staging_root=staging,
+            base_env={"POSTGRES_USER": "postgres"},
+            report_path=report,
+        )
+        return subprocess.CompletedProcess(argv, code)
+
+    monkeypatch.setattr(reaper.subprocess, "run", shell_adapter)
+    result = reaper.reap_slot(tmp_path, 1)
+    assert result["verdict"] == "REAPED", result
+    report = json.loads((tmp_path / "slot-1.teardown.json").read_text())
+    assert report["verdict"] == "CLEAN"
+    assert report["tenant_authentication"]["auth_before"] == 200
+    assert report["tenant_authentication"]["auth_after"] == 401
+    assert all(value == 0 for value in report["residue"].values())
+    assert all(value > 0 for value in report["controls"].values())
+    assert host.databases == {"control"} and host.roles == {"postgres"}
+    assert host.containers["omnibase-infra"] == {"d1", "d2"}
+    assert host.valkey[0] == 5 and host.valkey[2] == 1
+    assert not staging.exists() and not reaper.record_path(tmp_path, 1).exists()
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing", "key", "tenant", "before", "after", "malformed"]
+)
+def test_removed_gateway_without_bound_offboard_evidence_retains_resources(
+    recorded_reaper: Any, tmp_path: Path, fault: str
+) -> None:
+    from tests.unit.scripts.test_prepr_teardown_slot_omn18896 import FakeHost
+
+    reaper = recorded_reaper
+    staging = reaper.STAGING_PARENT / "slot-1"
+    proof = saved_offboard(staging)
+    if fault == "missing":
+        proof.unlink()
+    elif fault == "malformed":
+        proof.write_text("[]")
+    else:
+        data = json.loads(proof.read_text())
+        field, value = {
+            "key": ("key_sha256", "other-key"),
+            "tenant": ("tenant_id", "another-tenant"),
+            "before": ("auth_before", 401),
+            "after": ("auth_after", 200),
+        }[fault]
+        data[field] = value
+        proof.write_text(json.dumps(data))
+    host = FakeHost()
+    host.containers[slot_one_project()] = set()
+    td = reaper._Teardown(reaper.selectors_for(reaper.policy.SLOTS[1]), host, {})
+    assert td.revoke_tenant(staging) is False
+    assert td.errors
+    assert staging.exists()
+    assert not any("--drop" in call or "FLUSHDB" in call for call in host.calls)
+
+
+@pytest.mark.parametrize("listing", ["stopped-api", None])
+def test_saved_offboard_proof_never_replaces_live_check_with_containers_or_unreadable_listing(
+    recorded_reaper: Any, listing: str | None, tmp_path: Path
+) -> None:
+    reaper = recorded_reaper
+    staging = reaper.STAGING_PARENT / "slot-1"
+    saved_offboard(staging)
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str], env: Any = None) -> Any:
+        calls.append(argv)
+        if argv[:3] == ["docker", "ps", "-a"]:
+            return subprocess.CompletedProcess(
+                argv, int(listing is None), listing or "", "unreadable"
+            )
+        assert "revoke" in argv
+        return subprocess.CompletedProcess(argv, 1, "", "no running gateway")
+
+    td = reaper._Teardown(reaper.selectors_for(reaper.policy.SLOTS[1]), runner, {})
+    assert td.revoke_tenant(staging) is False
+    assert td.tenant_authentication is None
+    assert len(calls) == (1 if listing is None else 2)
+
+
+@pytest.mark.parametrize(
+    "report_kind", ["recorded", "nonzero-clean", "malformed", "missing", "list"]
+)
+def test_reaper_reports_safe_teardown_cause_and_never_releases_incomplete_lease(
+    recorded_reaper: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    report_kind: str,
+) -> None:
+    reaper = recorded_reaper
+    staging = reaper.STAGING_PARENT / "slot-1"
+    record = reaper.claim(
+        tmp_path, 1, "recorded-run", "standalone-1695065", str(staging)
+    )
+    record.update(expires=time.time() - 1, owner_pid=99999999, owner_start="gone")
+    reaper.write_record(tmp_path, 1, record)
+    report_path = tmp_path / "slot-1.teardown.json"
+    report_path.write_text('{"verdict": "CLEAN"}')
+    raw_secret = "DO-NOT-PUBLISH-THIS-STDERR"
+
+    def shell_adapter(argv: list[str], **kwargs: Any) -> Any:
+        assert not report_path.exists(), "stale CLEAN report survived into retry"
+        if report_kind == "recorded":
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "verdict": "INCOMPLETE",
+                        "errors": [
+                            "revoke slot tenant and prove authentication refusal: exit 1: "
+                            "FATAL: no running onex-api container in compose project "
+                            + slot_one_project(),
+                            raw_secret,
+                        ],
+                        "residue": {"databases": 9, "roles": 10, "staging_root": 1},
+                        "controls": {"dev_containers": 2},
+                    }
+                )
+            )
+        elif report_kind == "nonzero-clean":
+            report_path.write_text('{"verdict": "CLEAN"}')
+        elif report_kind == "malformed":
+            report_path.write_text("{")
+        elif report_kind == "list":
+            report_path.write_text("[]")
+        return subprocess.CompletedProcess(argv, 13)
+
+    monkeypatch.setattr(reaper.subprocess, "run", shell_adapter)
+    result = reaper.reap_slot(tmp_path, 1)
+    assert result["verdict"] == "INCOMPLETE"
+    assert reaper.read_record(tmp_path, 1) == record
+    diagnostic = result["teardown"]
+    assert diagnostic["report_path"] == str(report_path)
+    assert diagnostic["returncode"] == 13
+    assert raw_secret not in json.dumps(result)
+    if report_kind == "recorded":
+        assert diagnostic["reason"] == "slot gateway is not running"
+        assert diagnostic["residue"] == {"databases": 9, "roles": 10, "staging_root": 1}
+        assert diagnostic["controls"] == {"dev_containers": 2}
+
+
+def test_dependency_install_failure_preserves_the_previous_reaper_unit(
+    recorded_reaper: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    units = tmp_path / "units"
+    units.mkdir()
+    service = units / "onex-prepr-slot-reaper.service"
+    service.write_text("previous installed interpreter\n")
+    calls: list[list[str]] = []
+
+    def failed_sync(argv: list[str], **kwargs: Any) -> Any:
+        calls.append(argv)
+        assert argv[:3] == ["uv", "sync", "--frozen"]
+        assert kwargs["env"]["UV_PROJECT_ENVIRONMENT"] == str(Path(argv[-1]) / ".venv")
+        raise subprocess.CalledProcessError(17, argv)
+
+    monkeypatch.setattr(recorded_reaper.subprocess, "run", failed_sync)
+    with pytest.raises(subprocess.CalledProcessError):
+        recorded_reaper.install_reaper(tmp_path / "installed", units, enable=True)
+    assert len(calls) == 1
+    assert service.read_text() == "previous installed interpreter\n"
+    assert not (units / "onex-prepr-slot-reaper.timer").exists()
+
+
+def test_contract_handler_never_writes_clean_for_missing_readback_axes(
+    tmp_path: Path,
+    recorded_reaper: Any,
+) -> None:
+    from omnibase_infra.handlers.handler_prepr_teardown_slot import (
+        HandlerPreprTeardownSlot,
+    )
+    from omnibase_infra.models.model_prepr_teardown_request import (
+        ModelPreprTeardownRequest,
+    )
+
+    report = tmp_path / "report.json"
+    from omnibase_infra.handlers.handler_prepr_teardown_slot import (
+        create_container,
+    )
+
+    container = create_container(
+        lambda *_: pytest.fail("report rendering ran a command"),
+        {},
+        recorded_reaper._files(),
+    )
+    result = container.get_service(HandlerPreprTeardownSlot).handle(
+        ModelPreprTeardownRequest(
+            operation="write_report",
+            compose_project=slot_one_project(),
+            slot_token="prepr1",
+            staging_root=tmp_path,
+            repo_root=ROOT,
+            report_path=report,
+        )
+    )
+    assert result.success is False and result.exit_code == 13
+    assert json.loads(report.read_text())["verdict"] == "INCOMPLETE"
+
+
+def _boundary_report(source: str) -> Any:
+    from omnibase_core.models.nodes.node_boundary_import_check.model_boundary_import_check_input import (
+        ModelBoundaryImportCheckInput,
+    )
+    from omnibase_core.models.nodes.node_boundary_import_check.model_boundary_import_source_file import (
+        ModelBoundaryImportSourceFile,
+    )
+    from omnibase_core.nodes.node_boundary_import_check_compute.handler import (
+        NodeBoundaryImportCheckCompute,
+    )
+
+    return NodeBoundaryImportCheckCompute().handle(
+        ModelBoundaryImportCheckInput(
+            repo_packages=("omnibase_infra",),
+            node_packages=("omnibase_infra.nodes.node_prepr_teardown_slot",),
+            files=(
+                ModelBoundaryImportSourceFile(
+                    path="scripts/runtime_build/prepr_teardown_slot.py", source=source
+                ),
+            ),
+        )
+    )
+
+
+def test_cli_teardown_composition_has_no_node_boundary_imports() -> None:
+    report = _boundary_report(TEARDOWN.read_text())
+    assert report.overall_status == "PASS", report
+
+
+def test_recorded_private_registry_node_boundary_import_still_refuses() -> None:
+    # The recorded push refusal was a true alarm, including a dynamic import.
+    report = _boundary_report(
+        "def _node():\n"
+        "    return importlib.import_module(\n"
+        '        "omnibase_infra.nodes.node_prepr_teardown_slot.registry.registry_prepr_teardown_slot"\n'
+        "    )\n"
+    )
+    assert report.overall_status == "FAIL", report
+    assert len(report.findings) == 1
+    assert "outside->node" in report.findings[0].message

@@ -224,6 +224,33 @@ def default_runner(
     )
 
 
+def _runtime() -> Any:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from omnibase_infra.handlers import handler_prepr_teardown_slot
+
+    return handler_prepr_teardown_slot
+
+
+def _files() -> Any:
+    return _runtime().ModelPreprTeardownFiles(output=sys.stdout.write)
+
+
+def _evidence(operation: str, sel: Selectors, staging: Path, **kwargs: Any) -> Any:
+    return _runtime().execute_teardown_evidence(
+        kwargs.pop("runner", default_runner),
+        kwargs.pop("base_env", os.environ),
+        {
+            "operation": operation,
+            "compose_project": sel.compose_project,
+            "slot_token": sel.db_slot,
+            "staging_root": staging,
+            "repo_root": REPO_ROOT,
+            **kwargs,
+        },
+        _files(),
+    )
+
+
 class _Teardown:
     def __init__(
         self, sel: Selectors, runner: Runner, base_env: Mapping[str, str]
@@ -546,49 +573,12 @@ class _Teardown:
             time.sleep(min(GROUP_DRAIN_POLL_S, remaining))
 
     def revoke_tenant(self, staging_root: Path) -> bool:
-        credential = staging_root / "tenant-state" / "credential.env"
-        if not credential.exists():
-            # A slot without a gateway, or a bring-up that failed before mint.
-            return True
-        env = dict(self.env)
-        env["COMPOSE_PROJECT"] = self.sel.compose_project
-        env["LAB_TENANT_SLUG"] = f"onex-{self.sel.db_slot}"
-        before = len(self.errors)
-        output = self._checked(
-            [
-                "bash",
-                str(REPO_ROOT / "scripts" / "smoke" / "smoke_delegation.sh"),
-                "--target",
-                "compose",
-                "--tenant-lifecycle",
-                "revoke",
-            ],
-            "revoke slot tenant and prove authentication refusal",
-            env=env,
+        result = _evidence(
+            "revoke_tenant", self.sel, staging_root, runner=self.run, base_env=self.env
         )
-        if len(self.errors) != before:
-            return False
-        try:
-            proofs = [
-                json.loads(line) for line in output.splitlines() if line.startswith("{")
-            ]
-        except json.JSONDecodeError:
-            self.errors.append(
-                "slot tenant offboard returned malformed authentication proof"
-            )
-            return False
-        if not proofs or not (
-            proofs[-1].get("revoked") is True
-            and proofs[-1].get("auth_before") == 200
-            and proofs[-1].get("auth_after") in (401, 403)
-        ):
-            self.errors.append("slot tenant offboard returned no authentication proof")
-            return False
-        self.tenant_authentication = {
-            key: proofs[-1][key]
-            for key in ("tenant_id", "revoked", "auth_before", "auth_after")
-        }
-        return True
+        self.errors.extend(result.errors)
+        self.tenant_authentication = result.authentication
+        return bool(result.success)
 
     def readback(self, staging_root: Path) -> tuple[dict[str, int], dict[str, int]]:
         topics = self.topics()
@@ -630,40 +620,24 @@ def run_teardown(
     sel = selectors_for(slot_policy)
     td = _Teardown(sel, runner, base_env)
     planned = td.plan(staging_root)
-    report: dict[str, Any] = {
-        "schema": "onex.prepr.slot-teardown.v1",
-        "slot": slot_policy.slot,
-        "compose_project": sel.compose_project,
-        "planned": planned,
-    }
-    if plan_only:
-        report["verdict"] = "PLAN"
-        code = policy.EXIT_OK if not td.errors else policy.EXIT_TEARDOWN_INCOMPLETE
-    else:
+    residue, controls = {}, {}
+    if not plan_only:
         if not td.errors:
             td.destroy(planned, staging_root)
         residue, controls = td.readback(staging_root)
-        report["residue"] = residue
-        report["controls"] = controls
-        if td.errors or any(v != 0 for v in residue.values()):
-            report["verdict"] = "INCOMPLETE"
-        elif any(v <= 0 for v in controls.values()):
-            report["verdict"] = "UNPROVEN"
-        else:
-            report["verdict"] = "CLEAN"
-        code = (
-            policy.EXIT_OK
-            if report["verdict"] == "CLEAN"
-            else policy.EXIT_TEARDOWN_INCOMPLETE
-        )
-    report["errors"] = td.errors
-    if td.tenant_authentication is not None:
-        report["tenant_authentication"] = td.tenant_authentication
-    text = json.dumps(report, indent=2, sort_keys=True)
-    if report_path is not None:
-        report_path.write_text(text + "\n", encoding="utf-8")
-    sys.stdout.write(text + "\n")
-    return int(code)
+    result = _evidence(
+        "write_report",
+        sel,
+        staging_root,
+        plan_only=plan_only,
+        planned=planned,
+        residue=residue,
+        controls=controls,
+        errors=td.errors,
+        authentication=td.tenant_authentication,
+        report_path=report_path,
+    )
+    return int(result.exit_code)
 
 
 # Resource lease and reaper (OMN-18896)
@@ -693,25 +667,33 @@ the installer uses the same default state and locks as the slot entrypoints.
 """
 
 RUNTIME = "scripts/runtime_build/"
-FILES = tuple(
-    RUNTIME + name
-    for name in (
-        "prepr_slot_policy.py",
-        "prepr_teardown_slot.py",
-        "prepr_teardown_slot.sh",
-        "lane_lock.py",
-        "lane_lock.sh",
+FILES = (
+    tuple(
+        RUNTIME + name
+        for name in (
+            "prepr_slot_policy.py",
+            "prepr_teardown_slot.py",
+            "prepr_teardown_slot.sh",
+            "lane_lock.py",
+            "lane_lock.sh",
+        )
     )
-) + ("scripts/provision_db_slot.sh", "scripts/smoke/smoke_delegation.sh")
+    + (
+        "scripts/provision_db_slot.sh",
+        "scripts/smoke/smoke_delegation.sh",
+        "pyproject.toml",
+        "uv.lock",
+        "README.md",
+        "LICENSE",
+        ".python-version",
+    )
+    + tuple(
+        str(path.relative_to(REPO_ROOT))
+        for path in sorted((REPO_ROOT / "src/omnibase_infra").rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts
+    )
+)
 UNIT = "onex-prepr-slot-reaper"
-
-
-def _unit_quote(value: str) -> str:
-    if any(c in value for c in "\n\r\0"):
-        raise ValueError("unit path contains a control character")
-    return (
-        '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
-    )
 
 
 def install_reaper(prefix: Path, unit_dir: Path, *, enable: bool) -> dict[str, object]:
@@ -719,10 +701,12 @@ def install_reaper(prefix: Path, unit_dir: Path, *, enable: bool) -> dict[str, o
 
     Run on a Linux host offering the numbered shared-service slots. No sudo and
     no credentials are installed. --no-enable prepares the same artifacts without
-    contacting systemd, for review and hosted-runner smoke tests.
+    contacting systemd or installing dependencies, for hosted-runner probes.
+    An enabled install prepares and imports the locked package interpreter before
+    replacing any unit, so a failed dependency install preserves the old timer.
 
     On the slot host, with the operator's existing ~/.omnibase/.env and Docker:
-        python3 scripts/runtime_build/prepr_teardown_slot.py install-reaper
+        uv run --frozen python scripts/runtime_build/prepr_teardown_slot.py install-reaper
         systemctl --user start onex-prepr-slot-reaper.service
         systemctl --user list-timers onex-prepr-slot-reaper.timer
         journalctl --user -u onex-prepr-slot-reaper.service -n 30
@@ -749,30 +733,29 @@ def install_reaper(prefix: Path, unit_dir: Path, *, enable: bool) -> dict[str, o
             if staging.exists():
                 shutil.rmtree(staging)
     helper = release / RUNTIME / "prepr_teardown_slot.py"
-    service = f"""[Unit]
-Description=Reap abandoned numbered pre-PR slots (OMN-18896)
-
-[Service]
-Type=oneshot
-ExecStart={_unit_quote("/usr/bin/python3")} {_unit_quote(str(helper))} reap
-TimeoutStartSec=1300
-KillMode=control-group
-UMask=0077
-NoNewPrivileges=true
-Environment=PYTHONDONTWRITEBYTECODE=1
-"""
-    timer = f"""[Unit]
-Description=Inspect numbered pre-PR slot leases every minute
-
-[Timer]
-OnBootSec=60s
-OnUnitActiveSec=60s
-AccuracySec=5s
-Unit={UNIT}.service
-
-[Install]
-WantedBy=timers.target
-"""
+    interpreter = release / ".venv/bin/python"
+    settings = _runtime().load_settings(REPO_ROOT, _files())
+    if enable:
+        subprocess.run(
+            ["uv", "sync", "--frozen", "--no-dev", "--project", str(release)],
+            env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(release / ".venv")},
+            check=True,
+            timeout=settings.install_timeout_seconds,
+        )
+        subprocess.run(
+            [
+                str(interpreter),
+                "-c",
+                "import sys; sys.path.insert(0, sys.argv[1]); "
+                "from omnibase_infra.handlers.handler_prepr_teardown_slot import HandlerPreprTeardownSlot",
+                str(release / "src"),
+            ],
+            check=True,
+            timeout=settings.import_timeout_seconds,
+        )
+    service, timer = _runtime().render_units(
+        release, helper, interpreter, UNIT, _files()
+    )
     unit_dir.mkdir(parents=True, exist_ok=True)
     for suffix, contents in (("service", service), ("timer", timer)):
         path = unit_dir / f"{UNIT}.{suffix}"
@@ -1010,7 +993,12 @@ def authorize_teardown(root: Path, slot: int, token: str) -> None:
 
 
 def teardown_slot(
-    slot: int, staging: str, root: Path, *, lock_fd: int | None = None
+    slot: int,
+    staging: str,
+    root: Path,
+    *,
+    lock_fd: int | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> bool:
     report = root / f"slot-{slot}.teardown.json"
     report.unlink(missing_ok=True)
@@ -1037,13 +1025,16 @@ def teardown_slot(
         timeout=600,
         pass_fds=() if lock_fd is None else (lock_fd,),
     )
-    try:
-        return (
-            done.returncode == 0
-            and json.loads(report.read_text()).get("verdict") == "CLEAN"
-        )
-    except (OSError, ValueError):
-        return False
+    result = _evidence(
+        "inspect_report",
+        selectors_for(lease_slot_policy(slot)),
+        Path(staging),
+        report_path=report,
+        returncode=done.returncode,
+    )
+    if diagnostics is not None:
+        diagnostics.update(result.diagnostics)
+    return bool(result.success)
 
 
 def reap_slot(
@@ -1069,10 +1060,17 @@ def reap_slot(
             if plan_only:
                 return {**result, "verdict": "WOULD_REAP"}
             with locked(lane_lock_path(slot)) as lane_fd:
-                clean = (
-                    teardown
-                    or (lambda s, p: teardown_slot(s, p, root, lock_fd=lane_fd))
-                )(slot, record["staging_root"])
+                if teardown is None:
+                    result["teardown"] = {}
+                    clean = teardown_slot(
+                        slot,
+                        record["staging_root"],
+                        root,
+                        lock_fd=lane_fd,
+                        diagnostics=result["teardown"],
+                    )
+                else:
+                    clean = teardown(slot, record["staging_root"])
                 if clean:
                     record_path(root, slot).unlink()
                 return {**result, "verdict": "REAPED" if clean else "INCOMPLETE"}

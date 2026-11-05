@@ -6,6 +6,11 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn19998-prepr-offboard-retry
+    statement: An interrupted slot teardown must finish after removing its gateway only when the saved offboard proof matches the slot credential and all slot containers are authoritatively absent; every other case retains the live authentication check or refuses cleanup, and only CLEAN teardown releases the resource lease.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: the expired standalone-1695065 case with no containers, nine databases, ten roles and staging remaining reaps through the teardown adapter using a matching saved 200-to-401/403 proof; missing or mismatched proof, unreadable container listings and remaining containers refuse the saved-proof path; incomplete teardown preserves the lease and reports its safe cause -- falsifier: uv run pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q'
   - id: req-omn19998-run-conclusion-filter
     statement: The broker-dispatch-wedge scanner must avoid job-list reads for completed runs that cannot contain a wedge job while retaining reads and detection for candidate runs.
     acceptance:
@@ -187,6 +192,9 @@ requirements:
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
 evidence_requirements:
   - kind: tests
+    description: The recorded expired standalone lease is exercised through the reaper and teardown adapter, including an immutable installer snapshot, with shared services faked and incomplete evidence retaining the lease.
+    command: uv run pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q
+  - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
     command: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
   - kind: tests
@@ -275,6 +283,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac40-prepr-offboard-retry
+    description: AC40 replays the recorded post-gateway-removal state, checks the credential binding and positive authentication control, and retains leases on incomplete cleanup while exposing safe diagnostics.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac40-prepr-installer-probe
+    description: Hosted-runner artifact probe installs this checkout through install_reaper with enable=False, verifies the copied helper bytes, and replays the recorded teardown through that installed helper against fake shared services. It requires neither systemd nor live Docker and does not claim a live slot cleanup.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q -k recorded_standalone
+        cwd: .
+    binds_ac:
+      - AC40
   - id: dod-omn19998-ac39-runtime-roll
     description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
     source: manual

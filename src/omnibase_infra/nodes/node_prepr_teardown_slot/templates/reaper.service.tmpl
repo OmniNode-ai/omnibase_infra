@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+[Unit]
+Description=Reap abandoned numbered pre-PR slots (OMN-19998)
+
+[Service]
+Type=oneshot
+ExecStart={python} {helper} reap
+TimeoutStartSec=1300
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+Environment=PYTHONDONTWRITEBYTECODE=1
