@@ -201,3 +201,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-18595-core-0-47-67-pin-tests
+    description: The core dev-20261105194015-1adbf46062bd bump (lock 0.47.67) keeps the core pin tests, the recorded dep-provenance response and the runner image lock identity consistent with pyproject.toml and uv.lock.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_dep_provenance_core_lineage_live_contact_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
