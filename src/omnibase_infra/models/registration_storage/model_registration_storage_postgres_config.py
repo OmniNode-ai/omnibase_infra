@@ -12,7 +12,8 @@ rather than falling back to a literal.
 
 from __future__ import annotations
 
-from pathlib import Path
+from importlib.resources import files
+from importlib.resources.abc import Traversable
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
@@ -21,8 +22,8 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 
-DECLARED_SETTINGS_PATH = (
-    Path(__file__).resolve().parent / "registration_storage_postgres.yaml"
+DECLARED_SETTINGS_PATH = files("omnibase_infra.models.registration_storage").joinpath(
+    "registration_storage_postgres.yaml"
 )
 _BLOCK_NAME = "registration_storage_postgres"
 
@@ -68,7 +69,7 @@ class ModelRegistrationStoragePostgresConfig(BaseModel):
     @classmethod
     def from_file(
         cls,
-        settings_path: Path,
+        settings_path: Traversable,
         *,
         dsn: str,
         host: str,
@@ -77,6 +78,9 @@ class ModelRegistrationStoragePostgresConfig(BaseModel):
         auto_create_schema: bool,
     ) -> ModelRegistrationStoragePostgresConfig:
         """Load the declared block and add the deployment values.
+
+        Package resources support both extracted wheels and zip imports without
+        deriving a filesystem location from this module's source file.
 
         Raises:
             ProtocolConfigurationError: If the file has no settings mapping.

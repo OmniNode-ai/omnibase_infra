@@ -48,3 +48,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import inspect; from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import HandlerRegistrationStoragePostgres as H; assert list(inspect.signature(H.__init__).parameters) == [\"self\", \"container\"]; print(\"DI-CTOR-OK\")' | grep -E '^DI-CTOR-OK$'"
+  - id: dod-omn22131-deploy-packaged-settings
+    description: Hosted-runner deploy check imports the registration storage package from a zip archive and loads its declared database, pool size and timeout. It fails if deployment requires an extracted source-file path.
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/handlers/test_handler_registration_storage_postgres_di_omn22131.py -q -k zipped_package"
+        cwd: ${OMNI_HOME}/omnibase_infra

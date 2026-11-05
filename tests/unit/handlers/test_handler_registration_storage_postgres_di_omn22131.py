@@ -13,6 +13,10 @@ the handler opens and the waits it applies follow the bound config in each.
 from __future__ import annotations
 
 import inspect
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -184,6 +188,54 @@ def test_declared_file_holds_the_previous_defaults() -> None:
     assert config.circuit_breaker.threshold == 5
     assert config.circuit_breaker.reset_timeout_seconds == 60.0
     assert config.circuit_breaker.service_name == "postgres.storage"
+
+
+@pytest.mark.unit
+def test_declared_settings_load_from_zipped_package(tmp_path: Path) -> None:
+    """A packaged configuration loads without an extracted filesystem path."""
+    import omnibase_infra.models.registration_storage as package
+
+    package_dir = Path(package.__file__).parent
+    archive = tmp_path / "registration-storage.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        for name in (
+            "__init__.py",
+            "model_registration_storage_postgres_config.py",
+            "registration_storage_postgres.yaml",
+        ):
+            bundle.write(
+                package_dir / name,
+                f"omnibase_infra/models/registration_storage/{name}",
+            )
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+import omnibase_infra.models
+omnibase_infra.models.__path__.insert(0, sys.argv[1] + '/omnibase_infra/models')
+from omnibase_infra.models.registration_storage import (
+    DECLARED_SETTINGS_PATH, ModelRegistrationStoragePostgresConfig,
+)
+config = ModelRegistrationStoragePostgresConfig.from_file(
+    DECLARED_SETTINGS_PATH, dsn='', host='postgres.package.test', port=5436,
+    password='', auto_create_schema=False,
+)
+assert config.database == 'omnibase_infra'
+assert config.pool_size == 10
+assert config.timeout_seconds == 30.0
+print('PACKAGED-SETTINGS-OK')
+""",
+            str(archive),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout.strip() == "PACKAGED-SETTINGS-OK"
 
 
 @pytest.mark.unit
