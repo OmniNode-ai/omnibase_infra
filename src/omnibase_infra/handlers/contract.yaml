@@ -40,7 +40,7 @@
 #   handlers/models/model_retry_state.py
 #     -> models/resilience/model_retry_state.py
 #   handlers/models/infisical/model_infisical_handler_config.py
-#     -> models/security/model_infisical_handler_config.py
+#     -> models/security/model_infisical_config.py
 #
 # What this file declares EFFECT is now 45 flagged modules of 169, and every one of
 # them is effect-side: it holds a database, HTTP, subprocess, filesystem, clock,
@@ -56,6 +56,12 @@
 #
 # Keep it that way: a module placed here that holds no effect surface belongs in its
 # own package, not under this declaration.
+# The eight existing handlers that declare COMPUTE or NONDETERMINISTIC_COMPUTE
+# are packages with nearer COMPUTE contracts; K4 stays active for those modules.
+# Node contracts bind their explicit handler modules. Any further COMPUTE or REDUCER
+# package declares its own contract; K4 uses that nearer boundary. Sibling packages never inherit this declaration. Runtime
+# node discovery reads the installed onex.nodes entry points, not every file
+# named contract.yaml; this package is not announced as a node.
 #
 # Related tickets:
 #   - OMN-21532: K4, the no_io_outside_effects rule

@@ -10,7 +10,7 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
 )
-from omnibase_infra.handlers.handler_consumer_coordinator_rejoin import (
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
     HandlerConsumerCoordinatorRejoin,
 )
 from omnibase_infra.models.health.model_consumer_coordinator_rejoin_decision import (

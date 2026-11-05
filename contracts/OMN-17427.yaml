@@ -3433,11 +3433,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC191]
   - id: dod-omn17427-handlers-dir-effect-archetype
-    description: Runs the no-io-outside-effects validator on a real handler under src/omnibase_infra/handlers/ that imports an HTTP client, beside the directory contract, and on a copy of the same module with no contract above it. The test file is new, so it does not exist at the merge base.
+    description: Runs the K4 boundary regression with a paired synthetic network-import control, an outer EFFECT contract, nested and sibling COMPUTE contracts, and the real declared compute handlers. The integration test validates the real HTTP handler against K4 and executes it against a local server, and checks explicit Infisical configuration and model naming.
     source: manual
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handlers_dir_declares_effect_archetype_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_handlers_effect_configuration.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427670001]
   - id: dod-omn17427-c29-throttle-test-isolation
