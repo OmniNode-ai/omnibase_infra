@@ -57,8 +57,10 @@ def test_the_notice_matches_what_the_reaper_does_at_that_expiry(
     record.update(owner_pid=99999999, owner_start="gone")
     reaper.write_record(tmp_path, 1, record)
     before = reaper.reap_slot(tmp_path, 1, plan_only=True, now=record["expires"] - 1)
+    at = reaper.reap_slot(tmp_path, 1, plan_only=True, now=record["expires"])
     after = reaper.reap_slot(tmp_path, 1, plan_only=True, now=record["expires"] + 1)
     assert before["verdict"] == "HELD"
+    assert at["verdict"] == "WOULD_REAP"
     assert after["verdict"] == "WOULD_REAP"
 
 
