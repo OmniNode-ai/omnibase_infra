@@ -162,14 +162,12 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 
 
 def load_dev_boot_guard() -> ModuleType:
-    """Load the repo's canonical host effect beside this standalone agent.
+    """Load the checkout host effects beside this standalone agent.
 
     The agent has its own published-infra venv; its host effect must come from
     the same checkout as the agent, without waiting for a package release.
     """
     name = "omnibase_infra.handlers.handler_dev_boot_guard"
-    if name in sys.modules:
-        return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
     for relative in (
         "models/coding_agent/model_subprocess_outcome.py",
@@ -184,8 +182,14 @@ def load_dev_boot_guard() -> ModuleType:
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
+        "models/model_deploy_agent_replacement_config.py",
+        "models/model_deploy_agent_replacement_request.py",
+        "models/model_deploy_agent_replacement_result.py",
+        "handlers/handler_deploy_agent_replacement.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
+        if module_name in sys.modules:
+            continue
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Cannot load dev boot effect: {relative}")
@@ -2612,10 +2616,46 @@ def settle_service_containers(
         _removal_wait_sleep(CONTAINER_REMOVAL_POLL_SECONDS)
 
 
-def _hit_removal_race(result: subprocess.CompletedProcess[str]) -> bool:
-    return result.returncode != 0 and REMOVAL_IN_PROGRESS in (
-        f"{result.stderr or ''}{result.stdout or ''}"
+def _run_replacement(
+    lane: EnumRuntimeLane,
+    *,
+    argv: list[str] | None = None,
+    timeout: int | None = None,
+    services: Sequence[str] = (),
+    env: dict[str, str] | None = None,
+    removed: list[str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    load_dev_boot_guard()
+    import yaml
+
+    from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
+    from omnibase_infra.handlers.handler_deploy_agent_replacement import run_replacement
+
+    contract_path = (
+        Path(__file__).resolve().parents[3]
+        / "src/omnibase_infra/nodes/host/node_deploy_agent_replacement_effect/contract.yaml"
     )
+    bus = EventBusInmemory()
+    result = run_replacement(
+        sys.modules[__name__],
+        lane=lane,
+        environment=dict(os.environ),
+        contract=yaml.safe_load(contract_path.read_text()),
+        bus=bus,
+        lifecycle=bus,
+        argv=argv,
+        timeout=timeout,
+        services=services,
+        env=env,
+        removed=removed,
+    )
+    return subprocess.CompletedProcess(
+        argv or [], result.returncode, result.stdout, result.stderr
+    )
+
+
+def guard_hotpatch_ledger(lane: EnumRuntimeLane) -> None:
+    _run_replacement(lane)
 
 
 def run_compose_recreate(
@@ -2627,70 +2667,9 @@ def run_compose_recreate(
     env: dict[str, str] | None = None,
     removed: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one compose recreate; on a timeout or a removal race, settle and retry ONCE.
-
-    OMN-20864. A recreate killed at its ceiling leaves the new container
-    ``Created`` under its temporary name (``RECREATE_TMP_NAME``), and nothing
-    in this agent ever looked for it: the 2026-10-11 dev lane sat that way for
-    5h50m. On a timeout the leftover is removed and the command retried once;
-    a second timeout is cleaned up the same way and then raised, so the caller
-    reports the timeout exactly as before but never leaves the shape behind.
-
-    OMN-18475. The retry waits until dockerd has finished every removal it has
-    started for these services, and removes their Dead containers, before it
-    runs: a retry issued while a removal is still in flight fails with
-    ``REMOVAL_IN_PROGRESS``. An attempt that fails with that error is settled and
-    retried the same way, and the last failing attempt is settled on the way
-    out, so a failure leaves no Dead or Created container for the next job.
-
-    The name of every container removed is appended to ``removed``, which the
-    caller passes when it records them; it is filled before a raise as well.
-    """
-    if removed is None:
-        removed = []
-
-    def settle() -> None:
-        removed.extend(settle_service_containers(lane, services).removed)
-
-    try:
-        first = _run(argv, timeout=timeout, env=env)
-    except subprocess.TimeoutExpired:
-        removed.extend(remove_recreate_leftovers(lane, services))
-        settle()
-        logger.warning(
-            "compose recreate of %s timed out at %ss; leftovers removed: %s; "
-            "retrying once (OMN-20864)",
-            ", ".join(services),
-            timeout,
-            removed or "none",
-        )
-    else:
-        if first.returncode == 0:
-            return first
-        settle()
-        if not _hit_removal_race(first):
-            return first
-        logger.warning(
-            "compose recreate of %s met a removal still in progress; settled "
-            "(removed: %s) and retrying once (OMN-18475)",
-            ", ".join(services),
-            removed or "none",
-        )
-    try:
-        second = _run(argv, timeout=timeout, env=env)
-    except subprocess.TimeoutExpired:
-        removed.extend(remove_recreate_leftovers(lane, services))
-        settle()
-        logger.exception(
-            "compose recreate of %s timed out twice at %ss; leftovers removed: %s",
-            ", ".join(services),
-            timeout,
-            removed or "none",
-        )
-        raise
-    if second.returncode != 0:
-        settle()
-    return second
+    return _run_replacement(
+        lane, argv=argv, timeout=timeout, services=services, env=env, removed=removed
+    )
 
 
 def _compose_service_states(
@@ -6284,6 +6263,10 @@ class DeployExecutor:
         # ceiling derivation, so an unrelated long healthcheck elsewhere in the
         # compose file cannot inflate it.
         expected = requested_services or services_for_scope(scope, lane=lane)
+
+        # OMN-19998: the replacement below and its per-container recovery both
+        # recreate containers; refuse before either over a live hot-patch.
+        guard_hotpatch_ledger(lane)
 
         # OMN-21279: run the candidate's setting/package check before any
         # runtime replacement (and never on a prod or stability runner).
