@@ -198,8 +198,8 @@ requirements:
   - id: req-omn19998-effects-carrier-boot-policy
     statement: The dev effects carrier consumes every declared boot bound and resource limit from the rendered runtime policy.
     acceptance:
-      - id: AC40
-        statement: 'AC40: the dev effects overlay binds the readiness bound, attach concurrency, priority list and memory limit to its rendered policy; distinct policy values reach the kernel configuration readers and the carrier memory binding -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier'
+      - id: AC42
+        statement: 'AC42: the dev effects overlay binds the readiness bound, attach concurrency, priority list and memory limit to its rendered policy; distinct policy values reach the kernel configuration readers and the carrier memory binding -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier'
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -844,4 +844,4 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier
         cwd: .
     binds_ac:
-      - AC40
+      - AC42
