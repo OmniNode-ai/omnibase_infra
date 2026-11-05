@@ -4665,7 +4665,7 @@ jobs:
   # needs/if. A CI Summary member through STRICT_GATE_JOBS in
   # scripts/ci/ci_summary_gate.py ("<caller job id> / <inner job name>").
   dependency-pins:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261103173624-74e0b0f12767
+    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261105190003-87a6f5ddcbcc
     permissions:
       contents: read
 
