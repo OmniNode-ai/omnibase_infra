@@ -119,7 +119,7 @@ def load_consume_concurrency(contract_path: Path) -> ModelConsumeConcurrency:
     if not contract_path.exists():
         return ModelConsumeConcurrency()
 
-    from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
+    from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 
     raw = read_contract_yaml(contract_path)
     if not isinstance(raw, dict):

@@ -200,6 +200,11 @@ requirements:
     acceptance:
       - id: AC41
         statement: 'AC41: terminal-event and projection-topic readers use CSafeLoader when available and SafeLoader otherwise, preserve declared values, and retain empty results for missing or malformed contracts -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
+  - id: req-omn19998-contract-reader-layering
+    statement: Low-level contract readers must share a safe YAML utility without importing the package-announcer handler when reading declarations.
+    acceptance:
+      - id: AC43
+        statement: 'AC43: concurrency, published-event, terminal-event and projection-topic readers retain declared values when imports of handler_package_announcer are refused during reads, while terminal-event and projection-topic modules import without loading that handler -- falsifier: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -290,6 +295,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac43-reader-layering
+    description: AC43 executes four low-level readers against a temporary contract in a fresh interpreter, refusing imports of the announcer during reads and checking the declared values. Unsafe Python object tags remain refused by the shared utility.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC43
+  - id: dod-omn19998-ac43-reader-layering-deploy-probe
+    description: Hosted-runner runtime artifact probe for AC43. Executes this checkout's concurrency and routing readers in a fresh interpreter with package-announcer imports refused during reads, requiring the declared values from a temporary contract. Requires no live lane, broker, credentials or Docker and makes no live deployment claim.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC43
   - id: dod-omn19998-ac39-runtime-roll
     description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
     source: manual

@@ -193,7 +193,7 @@ def load_terminal_event_topics(contract_path: Path | None) -> frozenset[str]:
 
     if contract_path is None:
         return frozenset()
-    from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
+    from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 
     try:
         raw = read_contract_yaml(contract_path)

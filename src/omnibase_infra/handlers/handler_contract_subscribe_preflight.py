@@ -77,6 +77,7 @@ from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
 
 from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.kafka_transport import create_offset_consumer
@@ -98,7 +99,6 @@ from omnibase_infra.protocols.protocol_consume_concurrency_declarer import (
 from omnibase_infra.protocols.protocol_consumer_group_offset_handover import (
     ProtocolConsumerGroupOffsetHandover,
 )
-from omnibase_infra.runtime.auto_wiring.discovery import read_contract_yaml
 from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
     ModelConsumeConcurrency,
 )

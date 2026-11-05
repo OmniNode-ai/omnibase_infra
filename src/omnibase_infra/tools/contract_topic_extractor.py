@@ -707,7 +707,7 @@ def read_projection_api_topics(contract_path: Path) -> tuple[str, ...]:
     mapping, or has no served exposures — mirrors the degrade-not-abort
     contract of ``_read_dlq_topics``.
     """
-    from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
+    from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 
     try:
         raw_yaml = read_contract_yaml(contract_path)

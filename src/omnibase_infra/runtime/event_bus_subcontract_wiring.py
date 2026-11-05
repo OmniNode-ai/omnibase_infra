@@ -1491,7 +1491,7 @@ def load_published_events_map(
     try:
         # This runs for every subscribed contract during cold wiring. Share
         # discovery's safe parser instead of reintroducing Python YAML scans.
-        from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
+        from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 
         contract_data = read_contract_yaml(contract_path)
     except yaml.YAMLError as e:
