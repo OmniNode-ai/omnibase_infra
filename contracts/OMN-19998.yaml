@@ -185,6 +185,11 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-handler-wiring-migration-guard
+    statement: Auto-wiring must materialize topic-migration dependencies only for a nonempty set of required migration parameters, while preserving optional publisher and consumer injection.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: optional publisher, consumer and combined constructors with or without a bus never build migration dependencies, while the real migration contract wires its required handler -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_migration_dependency_guard.py -q -n 0'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -769,3 +774,19 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-ac40-handler-wiring-migration-guard
+    description: AC40 replays the optional callback constructor shapes from the recorded auto-wiring timeout and loads the real topic-migration manifest through wire_from_manifest. The regression fails against the previous materializer because the migration dependency builder is called for an empty required-parameter set.
+    source: manual
+    binds_ac: [AC40]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_migration_dependency_guard.py -q -n 0
+        cwd: .
+  - id: dod-omn19998-ac40-handler-wiring-deploy-probe
+    description: Hosted-runner artifact probe for AC40. Loads the shipped migration contract and real handler through the runtime wiring entrypoint without a broker or database; this checks wiring and does not claim a live runtime installation.
+    source: manual
+    binds_ac: [AC40]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_migration_dependency_guard.py -q -n 0
+        cwd: .

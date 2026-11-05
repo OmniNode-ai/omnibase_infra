@@ -9027,7 +9027,7 @@ def _materialize_known_handler_dependencies(
             event_bus=event_bus,
             handler_name=handler_name,
         )
-    if required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS):
+    if required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS:
         available.update(_build_topic_migration_executor_dependencies())
     if not (
         requires_event_publisher
@@ -9036,7 +9036,7 @@ def _materialize_known_handler_dependencies(
             {"container", "ownership_query", "dispatch_port"}
         )
         or ("dispatch_port" in constructor_params and requires_delegation_port)
-        or required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS)
+        or (required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS)
     ):
         return materialized_explicit_dependencies
     if "dispatch_port" in constructor_params and requires_delegation_port:
