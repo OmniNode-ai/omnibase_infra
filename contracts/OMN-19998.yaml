@@ -292,7 +292,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q "Runtime roll stopped at"'
+        check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c "Runtime roll stopped at" >/dev/null'
         cwd: .
     binds_ac:
       - AC39
