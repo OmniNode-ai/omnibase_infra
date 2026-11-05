@@ -154,3 +154,19 @@ def test_precommit_hook_names_this_public_repository() -> None:
         "--visibility",
         "public",
     ]
+
+
+def test_the_lab_selection_refusal_is_in_the_required_job() -> None:
+    """The refusal runs in the job CI Summary sweeps, with its failing control first."""
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["public-runner-placement"]["steps"]
+    runs = [str(step.get("run", "")) for step in steps]
+    control = next(i for i, run in enumerate(runs) if "FAILING CONTROL FAILED" in run)
+    refusal = next(
+        i
+        for i, run in enumerate(runs)
+        if "validator_public_lab_selection" in run and "--variables-json" in run
+    )
+    assert control < refusal
