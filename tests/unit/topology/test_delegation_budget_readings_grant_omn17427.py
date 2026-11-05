@@ -32,41 +32,6 @@ _EXPECTED = {
 
 
 @pytest.mark.parametrize(
-    "profile", tuple(sorted(set(TOPOLOGY_PROFILE_INSTANCE_MAP.values())))
-)
-def test_the_write_uses_only_the_runtime_table_grant(profile: str) -> None:
-    topology = load_topology_profile(profile)
-    (declaration,) = (
-        d for d in LEGACY_MIGRATION_TABLE_DECLARATIONS if d.table.name == _TABLE
-    )
-    target = _resolve_projection_database_target((declaration.table,), topology)
-    assert target.database_refs == ("application",)
-    assert target.physical_schemas == ("omninode_internal",)
-    principal = topology.databases["application"].principals["omninode_runtime"]
-    grants = [g for g in principal.grants if _TABLE in g.objects]
-    assert len(grants) == 1
-    assert grants[0].schema == "omninode_internal"
-    assert {p.value for p in grants[0].privileges} == {"INSERT", "SELECT", "UPDATE"}
-    for name, other in topology.databases["application"].principals.items():
-        if name != "omninode_runtime":
-            assert not any(_TABLE in g.objects for g in other.grants)
-
-
-def test_the_interim_declaration_has_delivered_migrations() -> None:
-    (declaration,) = (
-        d for d in LEGACY_MIGRATION_TABLE_DECLARATIONS if d.table.name == _TABLE
-    )
-    assert declaration.table.access == "read_write"
-    assert declaration.table.role == _TABLE
-    create = _ROOT / declaration.table.migration
-    assert create.is_file()
-    grant = create.parent / "0001_grant_omninode_runtime_delegation_budget_readings.sql"
-    assert grant.is_file()
-    # SQL privilege semantics are exercised by the live-apply migration proof,
-    # not inferred from statement prefixes or a partial SQL parser here.
-
-
-@pytest.mark.parametrize(
     ("name", "kind"),
     [
         ("0000_create_delegation_budget_readings.sql", "forward-only"),

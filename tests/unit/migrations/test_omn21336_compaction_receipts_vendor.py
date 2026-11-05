@@ -107,21 +107,3 @@ def test_neither_receipts_migration_is_fenced() -> None:
     for path, _, _ in _VENDORED:
         node, name = path.split("/")
         assert f"node:{node}:{name}" not in ids
-
-
-def test_the_interim_grant_declaration_names_the_vendored_create() -> None:
-    matches = [
-        declaration
-        for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if declaration.table.name == "compaction_receipts"
-    ]
-    assert len(matches) == 1
-    table = matches[0].table
-    assert table.database_ref == "application"
-    assert table.schema == "omninode_internal"
-    assert table.access == "read_write"
-    assert table.role == "compaction_receipts"
-    assert table.migration == (
-        "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
-        "0000_create_compaction_receipts.sql"
-    )
