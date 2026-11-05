@@ -1,0 +1,56 @@
+# OMN-19998: standalone stability secret store, recorded without deployment.
+# This is a separate project, NOT an overlay for the shared runtime compose.
+# It reuses the existing stability Postgres, Valkey and external network; it must
+# never create, recreate or remove those dependencies.
+# Dependency hosts, network name, lane label and invite URL are private
+# deployment bindings supplied by the operator config store, not defaults here.
+#
+# Adopted from the live additive project's base and SMTP overlay. SMTP belongs
+# in this file so a future authorized recreate cannot omit the mail overlay.
+# Supply secret inputs through the Infisical-backed operator environment, never
+# inline here. POSTGRES_PASSWORD_URLENC is the URL-encoded POSTGRES_PASSWORD;
+# VALKEY_PASSWORD must also be URI-safe. Both belong to stability dependencies.
+# Keep a protected host-local bootstrap copy: this store cannot fetch its own
+# encryption/auth/database credentials while it is down. This PR neither seeds
+# the store nor changes the existing host environment or deployment entrypoint.
+#
+# Read-only syntax check (no daemon access or secret resolution):
+#   docker compose -f docker/docker-compose.infisical-stability.yml \
+#     config --no-interpolate --quiet
+name: omnibase-infra-infisical-stability
+services:
+  infisical:
+    image: infisical/infisical:v0.146.0-postgres
+    container_name: omnibase-infra-infisical-stability
+    environment:
+      DB_CONNECTION_URI: "postgresql://postgres:${POSTGRES_PASSWORD_URLENC:?stability POSTGRES_PASSWORD_URLENC required}@${INFISICAL_POSTGRES_HOST:?existing Postgres host required}:5432/infisical_db"
+      REDIS_URL: "redis://:${VALKEY_PASSWORD:?stability VALKEY_PASSWORD required}@${INFISICAL_VALKEY_HOST:?existing Valkey host required}:6379"
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?stability INFISICAL_ENCRYPTION_KEY required}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?stability INFISICAL_AUTH_SECRET required}
+      SITE_URL: ${INFISICAL_STABILITY_SITE_URL:?stability invite-link SITE_URL required}
+      TELEMETRY_ENABLED: "false"
+      SMTP_HOST: ${INFISICAL_SMTP_HOST:?INFISICAL_SMTP_HOST required}
+      SMTP_PORT: ${INFISICAL_SMTP_PORT:-587}
+      SMTP_USERNAME: ${INFISICAL_SMTP_USERNAME:?INFISICAL_SMTP_USERNAME required}
+      SMTP_PASSWORD: ${INFISICAL_SMTP_PASSWORD:?INFISICAL_SMTP_PASSWORD required}
+      SMTP_FROM_ADDRESS: ${INFISICAL_SMTP_FROM_ADDRESS:?INFISICAL_SMTP_FROM_ADDRESS required}
+      SMTP_FROM_NAME: ${INFISICAL_SMTP_FROM_NAME:-OmniNode}
+      SMTP_REQUIRE_TLS: ${INFISICAL_SMTP_REQUIRE_TLS:-true}
+    ports:
+      - "8880:8080"
+    networks:
+      - stability
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=infisical"
+      - "com.omninode.lane=${INFISICAL_LANE_LABEL:?existing lane label required}"
+networks:
+  stability:
+    name: ${INFISICAL_NETWORK_NAME:?existing external network required}
+    external: true
