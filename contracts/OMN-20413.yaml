@@ -46,6 +46,11 @@ requirements:
     acceptance:
       - id: AC8
         statement: 'AC8: run in bash against a stub docker, the cross-build step passes after a QEMU crash followed by a clean build, fails after a QEMU crash on both attempts, fails after one attempt on a failure without the QEMU signature, and builds linux/amd64 and linux/arm64 on every attempt -- falsifier: uv run pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q'
+  - id: req-omn20413-dispatch-parity-oracle
+    statement: The committed selection-oracle-v2.json equals the oracle the live dispatch engine regenerates, so dispatch-parity-gate does not fail pull requests that did nothing wrong.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: regenerating the oracle with tests.fixtures.dispatch_parity.harness reproduces the committed selection-oracle-v2.json apart from its generation timestamp -- falsifier: diff of the regenerated file against the committed one exits non-zero at the merge base'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -145,3 +150,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
+  - id: dod-omn20413-ac9-dispatch-parity-oracle
+    description: AC9 regenerates the dispatch parity oracle from the live engine and compares it with the committed file; the comparison fails at the merge base, where the committed oracle is stale.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: bash -c 'uv run --frozen python -m tests.fixtures.dispatch_parity.harness --out /tmp/parity-ac9.json >/dev/null 2>&1 && diff -I generated_at_utc /tmp/parity-ac9.json tests/fixtures/dispatch_parity/selection-oracle-v2.json'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9
