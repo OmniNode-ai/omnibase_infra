@@ -45,8 +45,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
 
 __all__ = [
     "CONSUME_CONCURRENCY_KEY",
@@ -120,7 +121,7 @@ def load_consume_concurrency(contract_path: Path) -> ModelConsumeConcurrency:
     if not contract_path.exists():
         return ModelConsumeConcurrency()
 
-    raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    raw = read_contract_yaml(contract_path)
     if not isinstance(raw, dict):
         raise ValueError(f"{contract_path} must contain a mapping")
 

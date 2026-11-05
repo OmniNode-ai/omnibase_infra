@@ -68,6 +68,7 @@ from uuid import UUID, uuid5
 import yaml
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
 from omnibase_infra.utils import derive_event_type_from_topic
 
 logger = logging.getLogger(__name__)
@@ -193,14 +194,13 @@ def load_terminal_event_topics(contract_path: Path | None) -> frozenset[str]:
 
     if contract_path is None:
         return frozenset()
-    path = contract_path
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = read_contract_yaml(contract_path)
     except (OSError, yaml.YAMLError) as exc:
         logger.warning(
             "contract_terminal_events: could not read terminal declarations from "
             "%s (%s) — handler publishes will be forwarded un-enveloped",
-            path,
+            contract_path,
             type(exc).__name__,
         )
         return frozenset()

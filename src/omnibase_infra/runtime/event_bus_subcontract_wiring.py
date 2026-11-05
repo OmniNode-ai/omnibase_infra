@@ -125,6 +125,7 @@ from omnibase_infra.event_bus.topic_constants import (
     get_dlq_topic_for_original,
     is_dlq_topic,
 )
+from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import (
     ModelConsumerRetryConfig,
@@ -441,8 +442,8 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
         Example:
             >>> wiring = EventBusSubcontractWiring(bus, engine, "dev")
-            >>> wiring.resolve_topic("onex.evt.user.created.v1")  # onex-topic-allow: pending contract auto-wiring
-            'onex.evt.user.created.v1'  # onex-topic-allow: pending contract auto-wiring
+            >>> topic = contract.event_bus.subscribe_topics[0]
+            >>> assert wiring.resolve_topic(topic) == topic
 
         Note:
             Consumer groups still include environment for proper isolation.
@@ -488,7 +489,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         Example:
             >>> subcontract = ModelEventBusSubcontract(
             ...     version=ModelSemVer(major=1, minor=0, patch=0),
-            ...     subscribe_topics=["onex.evt.node.introspected.v1"],  # onex-topic-allow: pending contract auto-wiring
+            ...     subscribe_topics=contract.event_bus.subscribe_topics,
             ... )
             >>> await wiring.wire_subscriptions(subcontract, "registration-handler")
         """
@@ -1489,8 +1490,9 @@ def load_published_events_map(
         return {}
 
     try:
-        with contract_path.open() as f:
-            contract_data = yaml.safe_load(f)
+        # This runs for every subscribed contract during cold wiring. Share
+        # discovery's safe parser instead of reintroducing Python YAML scans.
+        contract_data = read_contract_yaml(contract_path)
     except yaml.YAMLError as e:
         _logger.warning("Failed to parse YAML in %s: %s", contract_path, e)
         return {}

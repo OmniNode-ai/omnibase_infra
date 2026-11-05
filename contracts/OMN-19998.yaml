@@ -180,6 +180,21 @@ requirements:
     acceptance:
       - id: AC38
         statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
+  - id: req-omn19998-autowiring-timeout
+    statement: Cold auto-wiring must avoid migration-service contract scans for optional runtime ports and use the shared safe contract reader for published-event routing.
+    acceptance:
+      - id: AC39
+        statement: 'AC39: optional publisher and consumer constructors perform zero migration-service builds, required migration services are still materialized, and published-event maps use the fast safe parser with a portable safe fallback and unchanged malformed-input behavior -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
+  - id: req-omn19998-subscription-preflight-parsing
+    statement: Subscription preflight must read consumer-group handover and consume-concurrency declarations through the shared safe contract reader rather than reparsing every subscribed contract with the Python YAML parser.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: consumer-group handover and consume-concurrency readers use CSafeLoader when available and SafeLoader otherwise, retaining declared values, absent-file defaults and malformed-input refusals -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
+  - id: req-omn19998-terminal-projection-parsing
+    statement: Cold wiring must use the shared safe contract reader for terminal-event and projection-topic declarations while retaining their per-contract routing and error handling.
+    acceptance:
+      - id: AC41
+        statement: 'AC41: terminal-event and projection-topic readers use CSafeLoader when available and SafeLoader otherwise, preserve declared values, and retain empty results for missing or malformed contracts -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -267,6 +282,44 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-cold-wiring-deploy-probe
+    description: Hosted-runner runtime artifact probe for AC39, AC40 and AC41. Exercises optional-port dependency construction and safe contract parsing from this checkout, requiring zero optional migration-service builds, retained required service construction and unchanged declared values and malformed-input handling. Uses temporary contracts without a live broker, lane, credentials or Docker.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC39
+      - AC40
+      - AC41
+  - id: dod-omn19998-ac38-terminal-projection-parsing
+    description: Cold-wiring regressions exercise terminal-event and projection-topic parsing through the fast and portable safe loaders and retain their missing-file and malformed-YAML behavior.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC41
+  - id: dod-omn19998-ac37-subscription-preflight-parsing
+    description: The cold-wiring reader regressions exercise both subscription-preflight readers with LibYAML, the portable parser, absent files and unsafe or malformed YAML.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac36-autowiring-timeout
+    description: Replays the optional-port constructors that caused redundant scans and the published-event loader from the recorded timeout stack; required migration-service construction remains a positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC39
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual

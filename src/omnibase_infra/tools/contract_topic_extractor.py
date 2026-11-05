@@ -32,6 +32,7 @@ from typing import Literal, cast
 import yaml
 from pydantic import BaseModel, field_validator
 
+from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
 from omnibase_infra.utils.util_runtime_packages import (
     get_active_runtime_packages,
     normalize_runtime_package_name,
@@ -708,8 +709,7 @@ def read_projection_api_topics(contract_path: Path) -> tuple[str, ...]:
     contract of ``_read_dlq_topics``.
     """
     try:
-        with contract_path.open(encoding="utf-8") as fh:
-            raw_yaml = yaml.safe_load(fh)
+        raw_yaml = read_contract_yaml(contract_path)
     except Exception:  # noqa: BLE001 — boundary: degrade to no topics, never raise
         return ()
 
