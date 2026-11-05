@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21708
+title: Third-party endpoint URLs are declared in YAML and loaded via a model (omnibase_infra#5505 contract split)
+summary: >-
+  omnibase_infra#5505 declared the GitHub, Linear, Slack, Gmail, Claude Code schema and loopback-probe URLs in models/third_party_endpoints/third_party_endpoints.yaml, loads them through ModelThirdPartyEndpoints, and moved eleven modules onto load_third_party_endpoints(). The contracts_and_di check over those eleven modules went from 16 literal_url findings to 0, and over src/omnibase_infra from 42 to 26 at the PR head. Its acceptance items were written into the shared OMN-21623 contract, which other slices also edit. This contract holds them for this ticket, bound to tests/unit/models/third_party_endpoints/test_third_party_endpoints_contract_omn21708.py, and leaves contracts/OMN-21623.yaml unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21708-third-party-endpoints
+    statement: The modules omnibase_infra#5505 moved read their third-party URLs from the declared endpoints file through the model, and this ticket's contract holds that slice's acceptance items.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the third-party endpoint URLs of omnibase_infra#5505 are declared in YAML and loaded via a model and the contracts_and_di literal_url count drops as the PR states -- falsifier: uv run pytest tests/unit -q over the touched modules plus the contracts_and_di checker re-run on the PR paths'
+      - id: AC2
+        statement: 'AC2: the PR''s acceptance items live in contracts/OMN-21708.yaml and the PR does not edit contracts/OMN-21623.yaml -- falsifier: git diff --stat origin/dev...HEAD on the PR head lists contracts/OMN-21708.yaml and not contracts/OMN-21623.yaml'
+evidence_requirements:
+  - kind: tests
+    description: The eleven modules import the endpoints loader, the loaded model equals the declared file, and the contracts_and_di check over the slice paths reports only the planted URL.
+    command: uv run --frozen pytest tests/unit/models/third_party_endpoints/test_third_party_endpoints_contract_omn21708.py -q -k ac1
+  - kind: tests
+    description: This contract declares AC1 and AC2, binds both, and every check runs this ticket's test file.
+    command: uv run --frozen pytest tests/unit/models/third_party_endpoints/test_third_party_endpoints_contract_omn21708.py -q -k ac2
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21708-ac1-declared-endpoints
+    description: The eleven modules import load_third_party_endpoints, the loaded model equals the declared file, and the contracts_and_di check over those modules and the model package reports no literal_url finding while reporting the planted URL in the same call. Fails at the merge base, where this test file does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/third_party_endpoints/test_third_party_endpoints_contract_omn21708.py -q -k ac1
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21708-ac2-contract-split
+    description: This contract declares AC1 and AC2, binds both, and every check runs this ticket's test file, none naming the shared OMN-21623 contract. Fails at the merge base, where this test file does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/third_party_endpoints/test_third_party_endpoints_contract_omn21708.py -q -k ac2
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
