@@ -53,12 +53,7 @@ _ENTRY_HEADING: Final[re.Pattern[str]] = re.compile(
 )
 _ENTRY_SINCE: Final[re.Pattern[str]] = re.compile(r"^### Included Since (.+)$")
 _ENTRY_PR_NUMBER: Final[re.Pattern[str]] = re.compile(r"\(#\d+\)$")
-_NEWEST_RELEASE_SECTION: Final[re.Pattern[str]] = re.compile(
-    r"^## v\d+\.\d+\.\d+ ", flags=re.MULTILINE
-)
-_TOP_LEVEL_KEY: Final[re.Pattern[str]] = re.compile(
-    r"^([A-Za-z_]\w*):", flags=re.MULTILINE
-)
+_FENCE: Final[re.Pattern[str]] = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _PY_LINE_LIMIT: Final = 88
 
 
@@ -115,13 +110,84 @@ def parse_release_entry(entry: str) -> ModelParsedReleaseEntry:
     )
 
 
+def _release_sections(text: str) -> list[tuple[tuple[int, ...], int]]:
+    """Read release headings outside Markdown fences, retaining character offsets."""
+    sections: list[tuple[tuple[int, ...], int]] = []
+    fence = ""
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.rstrip("\r\n")
+        marker = _FENCE.fullmatch(stripped)
+        if marker is not None:
+            run, suffix = marker.groups()
+            if not fence:
+                fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and not suffix.strip():
+                fence = ""
+        elif not fence and (heading := _ENTRY_HEADING.fullmatch(stripped)):
+            sections.append((tuple(map(int, heading.group(1).split("."))), offset))
+        offset += len(line)
+    return sections
+
+
 def _insert_entry_in_readme(readme: str, entry: str) -> str:
     """Put the block above the newest existing release section, else at the end."""
     block = entry.rstrip("\n") + "\n"
-    match = _NEWEST_RELEASE_SECTION.search(readme)
-    if match is None:
+    sections = _release_sections(readme)
+    if not sections:
         return readme.rstrip("\n") + "\n\n" + block
-    return readme[: match.start()] + block + "\n" + readme[match.start() :]
+    _, offset = max(sections, key=lambda section: section[0])
+    return readme[:offset] + block + "\n" + readme[offset:]
+
+
+def _refuse_duplicate_release(text: str, parsed: ModelParsedReleaseEntry) -> None:
+    version = tuple(map(int, parsed.version.split(".")))
+    if any(existing == version for existing, _ in _release_sections(text)):
+        msg = f"release {parsed.version} already has notes"
+        raise ValueError(msg)
+
+
+def _validate_companions(
+    contract_text: str, test_text: str, parsed: ModelParsedReleaseEntry
+) -> None:
+    """Validate YAML structure and duplicate identities before any file is changed."""
+    try:
+        contract = yaml.compose(contract_text, Loader=yaml.SafeLoader)
+        explicit_end = any(
+            isinstance(event, yaml.DocumentEndEvent) and event.explicit
+            for event in yaml.parse(contract_text, Loader=yaml.SafeLoader)
+        )
+    except yaml.YAMLError as exc:
+        msg = f"{_RELEASE_CONTRACT_PATH} does not parse: {exc}"
+        raise ValueError(msg) from exc
+    if explicit_end or not isinstance(contract, yaml.MappingNode) or not contract.value:
+        msg = f"{_RELEASE_CONTRACT_PATH} does not end with its dod_evidence list"
+        raise ValueError(msg)
+    key, value = contract.value[-1]
+    if not (
+        isinstance(key, yaml.ScalarNode)
+        and key.value == "dod_evidence"
+        and isinstance(value, yaml.SequenceNode)
+        and not value.flow_style
+        and value.start_mark.column == 2
+    ):
+        msg = f"{_RELEASE_CONTRACT_PATH} does not end with its dod_evidence list"
+        raise ValueError(msg)
+    item_id = f"dod-omn18595-ac1-release-{parsed.version.replace('.', '-')}-notes"
+    for item in value.value:
+        if isinstance(item, yaml.MappingNode) and any(
+            isinstance(k, yaml.ScalarNode)
+            and k.value == "id"
+            and isinstance(v, yaml.ScalarNode)
+            and v.value == item_id
+            for k, v in item.value
+        ):
+            msg = f"release {parsed.version} already has dod_evidence"
+            raise ValueError(msg)
+    function = f"test_release_changelog_retains_version_{parsed.version.replace('.', '_')}_in_root_readme"
+    if re.search(rf"^def {re.escape(function)}\(", test_text, flags=re.MULTILINE):
+        msg = f"release {parsed.version} already has an identity test"
+        raise ValueError(msg)
 
 
 def _identity_test_source(parsed: ModelParsedReleaseEntry) -> str:
@@ -209,14 +275,15 @@ def apply_release_notes(
     clone: Path, entry: str, *, repo_name: str | None = None
 ) -> tuple[str, list[str]]:
     """Write the release block into ``clone``; return the target and paths to stage."""
+    parsed = parse_release_entry(entry)
     target = release_notes_target(clone)
     if target == _CHANGELOG_PATH:
         changelog = clone / _CHANGELOG_PATH
         existing = changelog.read_text(encoding="utf-8") if changelog.exists() else ""
+        _refuse_duplicate_release(existing, parsed)
         changelog.write_text(entry.rstrip("\n") + "\n\n" + existing, encoding="utf-8")
         return target, [_CHANGELOG_PATH]
 
-    parsed = parse_release_entry(entry)
     readme = clone / _README_PATH
     if not readme.is_file():
         msg = f"{README_ONLY_DOCS_FILE} routes release notes to README.md, which is absent"
@@ -225,13 +292,14 @@ def apply_release_notes(
     test = clone / _RELEASE_IDENTITY_TEST_PATH
     companions = contract.is_file() and test.is_file()
     contract_text = contract.read_text(encoding="utf-8") if companions else ""
-    top_level_keys = _TOP_LEVEL_KEY.findall(contract_text)
-    if companions and (not top_level_keys or top_level_keys[-1] != "dod_evidence"):
-        msg = f"{_RELEASE_CONTRACT_PATH} does not end with its dod_evidence list"
-        raise ValueError(msg)
+    test_text = test.read_text(encoding="utf-8") if companions else ""
+    if companions:
+        _validate_companions(contract_text, test_text, parsed)
+    readme_text = readme.read_text(encoding="utf-8")
+    _refuse_duplicate_release(readme_text, parsed)
 
     readme.write_text(
-        _insert_entry_in_readme(readme.read_text(encoding="utf-8"), entry),
+        _insert_entry_in_readme(readme_text, entry),
         encoding="utf-8",
     )
     staged = [_README_PATH]
@@ -243,9 +311,7 @@ def apply_release_notes(
         item = _contract_item_source(parsed, repo_name or clone.resolve().name)
         contract.write_text(contract_text.rstrip("\n") + "\n" + item, encoding="utf-8")
         test.write_text(
-            test.read_text(encoding="utf-8").rstrip("\n")
-            + "\n"
-            + _identity_test_source(parsed),
+            test_text.rstrip("\n") + "\n" + _identity_test_source(parsed),
             encoding="utf-8",
         )
         staged += [_RELEASE_CONTRACT_PATH, _RELEASE_IDENTITY_TEST_PATH]

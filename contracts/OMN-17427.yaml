@@ -758,6 +758,8 @@ requirements:
         statement: 'For a repo carrying .readme-only-docs.yaml that does not except CHANGELOG.md, node_release_notes_apply_effect puts the release block in root README.md above the newest release section, deletes a root CHANGELOG.md, and extends the release-cut contract and identity test the repository carries; a repo without the file keeps the CHANGELOG.md prepend -- falsifier: uv run pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q -n 0 fails when the node emits CHANGELOG.md for a README-only clone'
       - id: AC17427700002
         statement: 'The release-train-nightly cut job writes through `onex node node_release_notes_apply_effect` and carries no inline CHANGELOG.md write -- falsifier: the workflow test in tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py fails on an inline CHANGELOG.md write'
+      - id: AC17427700003
+        statement: Release headings inside fenced examples do not select the insert position, the highest semantic release version selects it, and empty entries, duplicate release identities and contracts whose final YAML field is not a dod_evidence sequence refuse before writes.
   - id: req-omn17427-auto-wiring-dir-effect-archetype
     statement: handler_wiring.py under src/omnibase_infra/runtime/auto_wiring/ passes the no-io-outside-effects hook because the directory declares the effect archetype.
     acceptance:
@@ -3473,3 +3475,11 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427680001, AC17427680002]
+  - id: dod-omn17427-release-notes-safe-append
+    description: Hosted-runner check exercises Markdown fences, semantic version ordering, trailing YAML keys and document boundaries, duplicate notes and partial companion cuts, plus real node CLI readbacks and refusals against disposable local checkouts. Requires Bash and jq, with no containers, credentials or broker.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/integration/cli/test_release_notes_apply_node_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac: [AC17427700001, AC17427700002, AC17427700003]

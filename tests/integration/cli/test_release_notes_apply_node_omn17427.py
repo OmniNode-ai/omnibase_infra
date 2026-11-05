@@ -201,6 +201,38 @@ class TestRunThroughTheNodeCli:
         assert code == 1, output
         assert not (clone / "README.md").exists()
 
+    def test_the_node_ignores_fenced_examples_and_refuses_a_duplicate_cut(
+        self, tmp_path: Path
+    ) -> None:
+        clone = _readme_only_clone(tmp_path / "clone")
+        example = "```markdown\n## v0.47.66 (2026-11-04)\n```\n\n"
+        (clone / "README.md").write_text(example + _README, encoding="utf-8")
+        entry = tmp_path / "entry.md"
+        entry.write_text(_ENTRY, encoding="utf-8")
+        code, output = _run_node(tmp_path, clone, entry, repo_name="omnibase_core")
+        assert code == 0, output
+        readme = (clone / "README.md").read_text(encoding="utf-8")
+        assert readme.startswith(example + "# omnibase_core\n\n## v0.47.66 (")
+        before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
+        code, output = _run_node(tmp_path, clone, entry, repo_name="omnibase_core")
+        assert code == 1, output
+        assert "already has" in output
+        assert {p: p.read_bytes() for p in before} == before
+
+    def test_the_node_refuses_a_trailing_contract_key_without_writes(
+        self, tmp_path: Path
+    ) -> None:
+        clone = _readme_only_clone(tmp_path / "clone")
+        contract = clone / "contracts/OMN-18595.yaml"
+        contract.write_text(_CONTRACT_YAML + '"x-foo": true\n', encoding="utf-8")
+        entry = tmp_path / "entry.md"
+        entry.write_text(_ENTRY, encoding="utf-8")
+        before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
+        code, output = _run_node(tmp_path, clone, entry, repo_name="omnibase_core")
+        assert code == 1, output
+        assert "dod_evidence" in output
+        assert {p: p.read_bytes() for p in before} == before
+
     def test_a_repo_without_a_docs_policy_keeps_the_changelog_prepend(
         self, tmp_path: Path
     ) -> None:

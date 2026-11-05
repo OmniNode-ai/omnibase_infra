@@ -243,6 +243,116 @@ class TestApplyReleaseNotes:
         with pytest.raises(ValueError, match=r"README\.md, which is absent"):
             apply_release_notes(tmp_path, _ENTRY)
 
+    @pytest.mark.parametrize("fence", ["```markdown", "~~~~"])
+    def test_release_examples_in_fences_do_not_choose_the_insert_position(
+        self, tmp_path: Path, fence: str
+    ) -> None:
+        clone = _readme_only_clone(tmp_path)
+        example = f"{fence}\n## v9.0.0 (2026-01-01)\n{fence[0] * 4}\n\n"
+        (clone / "README.md").write_text(example + _README, encoding="utf-8")
+        apply_release_notes(clone, _ENTRY)
+        text = (clone / "README.md").read_text(encoding="utf-8")
+        assert text.startswith(example + "# omnibase_core\n\nIntro line.\n\n")
+        assert text.index("## v0.47.66 (") < text.index("## v0.47.62 (")
+
+    def test_the_highest_release_version_selects_the_insert_position(
+        self, tmp_path: Path
+    ) -> None:
+        clone = _readme_only_clone(tmp_path)
+        older = "## v0.9.99 (2026-01-01)\n\nOlder section first.\n\n"
+        (clone / "README.md").write_text(older + _README, encoding="utf-8")
+        apply_release_notes(clone, _ENTRY)
+        text = (clone / "README.md").read_text(encoding="utf-8")
+        assert text.startswith(older + "# omnibase_core\n\nIntro line.\n\n")
+        assert text.index("## v0.47.66 (") < text.index("## v0.47.62 (")
+
+    @pytest.mark.parametrize(
+        "tail",
+        ["x-foo: true\n", '"quoted-key": true\n', "---\nx: true\n", "...\n"],
+    )
+    def test_a_contract_with_a_trailing_yaml_structure_refuses_without_writes(
+        self, tmp_path: Path, tail: str
+    ) -> None:
+        clone = _readme_only_clone(tmp_path)
+        contract = clone / "contracts/OMN-18595.yaml"
+        contract.write_text(contract.read_text(encoding="utf-8") + tail, "utf-8")
+        before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
+        with pytest.raises(ValueError, match=r"dod_evidence|does not parse"):
+            apply_release_notes(clone, _ENTRY)
+        assert {p: p.read_bytes() for p in before} == before
+
+    @pytest.mark.parametrize(
+        "evidence", ["[]", "{}", "null", "\n- id: indentless", "\n    - id: deep"]
+    )
+    def test_an_unsupported_evidence_list_shape_refuses_before_writes(
+        self, tmp_path: Path, evidence: str
+    ) -> None:
+        clone = _readme_only_clone(tmp_path)
+        contract = clone / "contracts/OMN-18595.yaml"
+        contract.write_text(f"dod_evidence: {evidence}\n", encoding="utf-8")
+        before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
+        with pytest.raises(ValueError, match="dod_evidence"):
+            apply_release_notes(clone, _ENTRY)
+        assert {p: p.read_bytes() for p in before} == before
+
+    def test_a_contract_scalar_that_mentions_a_top_level_key_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        clone = _readme_only_clone(tmp_path)
+        contract = clone / "contracts/OMN-18595.yaml"
+        contract.write_text(
+            "summary: |\n  trailing-key: is scalar content\n" + _CONTRACT_YAML,
+            encoding="utf-8",
+        )
+        apply_release_notes(clone, _ENTRY)
+        loaded = yaml.safe_load(contract.read_text(encoding="utf-8"))
+        assert len(loaded["dod_evidence"]) == 2
+
+    @pytest.mark.parametrize("readme_only", [True, False])
+    def test_a_repeated_cut_refuses_before_changing_any_file(
+        self, tmp_path: Path, readme_only: bool
+    ) -> None:
+        clone = _readme_only_clone(tmp_path) if readme_only else tmp_path
+        apply_release_notes(clone, _ENTRY)
+        before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
+        with pytest.raises(ValueError, match="already has"):
+            apply_release_notes(clone, _ENTRY)
+        assert {p: p.read_bytes() for p in before} == before
+
+    @pytest.mark.parametrize(
+        "path",
+        ["contracts/OMN-18595.yaml", "tests/ci/test_release_cut_identity_omn18595.py"],
+    )
+    def test_a_partial_cut_with_existing_evidence_refuses_without_writes(
+        self, tmp_path: Path, path: str
+    ) -> None:
+        clone = _readme_only_clone(tmp_path)
+        apply_release_notes(clone, _ENTRY)
+        (clone / "README.md").write_text(_README, encoding="utf-8")
+        other = (
+            "tests/ci/test_release_cut_identity_omn18595.py"
+            if path.startswith("contracts/")
+            else "contracts/OMN-18595.yaml"
+        )
+        (clone / other).write_text(
+            _IDENTITY_TEST if other.startswith("tests/") else _CONTRACT_YAML,
+            encoding="utf-8",
+        )
+        before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
+        with pytest.raises(ValueError, match="already has"):
+            apply_release_notes(clone, _ENTRY)
+        assert {p: p.read_bytes() for p in before} == before
+
+    @pytest.mark.parametrize("readme_only", [True, False])
+    def test_an_empty_release_block_refuses_before_writes(
+        self, tmp_path: Path, readme_only: bool
+    ) -> None:
+        clone = _readme_only_clone(tmp_path) if readme_only else tmp_path
+        before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
+        with pytest.raises(ValueError, match="must start with"):
+            apply_release_notes(clone, "")
+        assert {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()} == before
+
     def test_an_entry_in_another_shape_refuses(self) -> None:
         with pytest.raises(ValueError, match="must start with"):
             parse_release_entry("# not a release block\n")
