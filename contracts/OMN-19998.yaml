@@ -188,8 +188,8 @@ requirements:
   - id: req-omn19998-dispatch-derived-machine-grants
     statement: The lab machine profile must derive the serialized lane dispatch node's caller and local runtime topic access from wire bindings, with canonical consumer groups, without granting dispatch to the shared developer profile.
     acceptance:
-      - id: AC39
-        statement: 'AC39: machine bindings derive literal READ, WRITE and DESCRIBE on lane-dispatch-requested and lane-dispatch-completed and READ on the canonical local handler and terminal groups; the committed JSON equals the compute handler output, trusted machine rows receive the grants and developer rows or an absent overlay do not -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov -k dispatch fails against the merge-base machine bindings.'
+      - id: AC40
+        statement: 'AC40: machine bindings derive literal READ, WRITE and DESCRIBE on lane-dispatch-requested and lane-dispatch-completed and READ on the canonical local handler and terminal groups; the committed JSON equals the compute handler output, trusted machine rows receive the grants and developer rows or an absent overlay do not -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov -k dispatch fails against the merge-base machine bindings.'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -307,16 +307,16 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC39
-  - id: dod-omn19998-ac39-dispatch-derived-machine-grants
-    description: AC39 drives HandlerBrokerGrantDerive with the shipped machine bindings, compares its serialized output byte for byte, resolves the issuer's real trusted overlay selection for machine and developer principals, and checks group names with RuntimeLocal's derivation. It exercises issuance, apply and audit with the focused module's fake broker and makes no live ACL or credential change.
+  - id: dod-omn19998-ac40-dispatch-derived-machine-grants
+    description: AC40 drives HandlerBrokerGrantDerive with the shipped machine bindings, compares its serialized output byte for byte, resolves the issuer's real trusted overlay selection for machine and developer principals, and checks group names with RuntimeLocal's derivation. It exercises issuance, apply and audit with the focused module's fake broker and makes no live ACL or credential change.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov
         cwd: .
     binds_ac:
-      - AC39
-  - id: dod-omn19998-ac39-dispatch-grants-deploy-probe
+      - AC40
+  - id: dod-omn19998-ac40-dispatch-grants-deploy-probe
     description: Hosted-runner artifact probe loads the shipped grant policy and derived machine JSON through the actual issuer, exercises apply-grants and audit-grants against a fake broker, and requires exact node output and denial for an ordinary developer row. This checks the deployable grant documents without asserting live broker convergence.
     source: manual
     checks:
@@ -324,7 +324,7 @@ dod_evidence:
         check_value: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov
         cwd: .
     binds_ac:
-      - AC39
+      - AC40
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual
