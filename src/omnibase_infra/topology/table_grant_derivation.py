@@ -354,15 +354,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # vendored infra-first ahead of omnimarket#4277. Both carry the source
     # contract's read_write access and table-name role. Removable once the
     # pin advances past that pull request; the expiry module names both.
-    _vendored_read_write(
-        "delegation_lab_jobs",
-        "node_llm_delegation_call_effect",
-        "0000_delegation_lab_job_execution.sql",
-    ),
-    _vendored_read_write(
-        "delegation_lab_job_outbox",
-        "node_llm_delegation_call_effect",
-        "0000_delegation_lab_job_execution.sql",
+    *(
+        _vendored_read_write(
+            t,
+            "node_llm_delegation_call_effect",
+            "0000_delegation_lab_job_execution.sql",
+        )
+        for t in ("delegation_lab_jobs", "delegation_lab_job_outbox")
     ),
     #
     # OMN-19861: same infra-first window; this repo vendors
@@ -386,7 +384,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_add_context_audit_event_key.sql",
         schema="public",
     ),
-    # The four bridges below share one shape: 0000_create_<table>.sql under the
+    # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
         _vendored_read_write(t, d)
@@ -415,6 +413,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             # node_projection_compaction_receipts contract merges and the omnimarket
             # pin advances past it; the OMN-18863 expiry module names this bridge.
             ("compaction_receipts", None),
+            # OMN-22260: the transcript mirror runs precede the omnimarket contract
+            # pin. The vendor delivers exactly SELECT/INSERT/UPDATE to
+            # omninode_runtime, the principal the reducer writes through; expire
+            # this bridge when node_projection_transcript_mirror_run reaches the pin.
+            ("transcript_mirror_runs", "node_projection_transcript_mirror_run"),
         )
     ),
     # OMN-21920: infra vendors node_projection_agent_actions/0000-0001 ahead of the

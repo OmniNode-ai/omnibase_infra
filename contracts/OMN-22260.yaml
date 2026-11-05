@@ -1,0 +1,131 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22260
+title: omnibase_infra forward migration for the transcript mirror run projection (infra companion of plan task T0a)
+summary: >-
+  Infra half only, of plan task T0a. Adds the forward migration that creates omninode_internal.transcript_mirror_runs (one row per mirror attempt, keyed by run id and attempt id, holding the attempt's counts and its terminal state) and the grant that makes the runtime role its only writer, with a checksum-bound ledger row and a forward-only class for the create migration and an expand-only class for the grant, the interim table-grant declaration, the regenerated topology instances and catalogs, and its expiry entry. It is proven on a real Postgres. The mirror nodes, the Postgres row store behind the reducer and the omnimarket integration test that applies this migration are the omnimarket half, resumed by a later lane once this change is merged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22260-infra-mirror-runs
+    statement: >-
+      The transcript_mirror_runs table exists with the columns of the reducer's row model, keyed by (run id, attempt id), and the reducer's principal is its only writer.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: a forward migration creates omninode_internal.transcript_mirror_runs with one column per field of the reducer's row model and the key (run_id, attempt_id), bound to a ledger row and the required rollback class -- falsifier: the vendor test pins the migration bytes, the ledger row, the class, the columns and the key, and fails at the merge base where the migration does not exist
+      - id: AC2
+        statement: >-
+          AC2: the migration applies cleanly on an empty database and on a database at the head of other projection chains, a second pass changes nothing, and the schema diff of one pass is exactly the table, its key index and its start-time index -- falsifier: the live-apply test applies the migration twice with psql on a real Postgres, compares schema, ACL and rows between passes, and drops only a freshly created table to show the catalog returns to what it was; reconciliation of a pre-existing table remains a forward-only rollback barrier
+      - id: AC3
+        statement: >-
+          AC3: the table's writer principal is the runtime role the reducer writes through and no other principal holds any privilege on it -- falsifier: the topology test finds omninode_runtime as the only principal granted the table, with exactly SELECT, INSERT and UPDATE, in every shipped profile; the live-apply test finds the table ACL naming only its owner and the runtime role, and every other role refused SELECT, INSERT, UPDATE and DELETE
+evidence_requirements:
+  - kind: tests
+    description: The vendored bytes, ledger row, class, columns and key, the topology grant, and the live-apply proofs on a disposable Postgres.
+    command: uv run pytest tests/unit/migrations/test_omn22260_transcript_mirror_runs_vendor.py tests/unit/topology/test_transcript_mirror_runs_grant_omn22260.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22260-infra-vendor
+    description: The migration bytes are bound to one ledger row each and the required rollback class, the file creates exactly one table with the row model's columns and the key (run_id, attempt_id), and removes nothing. It fails at the merge base, where the migration does not exist.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn22260_transcript_mirror_runs_vendor.py -q --no-cov
+        cwd: .
+  - id: dod-omn22260-infra-live-apply
+    description: Apply the migration twice with psql on a disposable Postgres from an empty database and from a database at the head of other projection chains; the second pass leaves schema, ACL and rows unchanged, the schema diff is exactly the table with its key and start-time indexes, a table that already exists with only its key columns converges, and malformed rows are refused.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      # Disjoint selections preserve every case within the hosted 180s per-check budget.
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'unsafe_existing_grants'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'incompatible_column_type'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'not unsafe_existing_grants and not incompatible_column_type and (index or column_shape or primary_key or named_constraint)'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'not unsafe_existing_grants and not incompatible_column_type and not (index or column_shape or primary_key or named_constraint)'
+        cwd: .
+  - id: dod-omn22260-infra-writer-topology
+    description: Every shipped topology profile grants the runtime principal exactly SELECT, INSERT and UPDATE on the table and grants no other principal anything on it. It fails at the merge base, where the table has no declaration.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_transcript_mirror_runs_grant_omn22260.py -q --no-cov
+        cwd: .
+  - id: dod-omn22260-infra-writer-live
+    description: On a disposable Postgres the table ACL names only its owner and the runtime role, the runtime role writes the way the reducer does and is refused DELETE and TRUNCATE, and every other role with schema access is refused every privilege on the table.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k writer_principal
+        cwd: .
+  - id: dod-omn22260-reconcile-constraints
+    description: A pre-existing table converges to the fresh table's complete catalog, retains its rows, refuses malformed writes, and rejects incompatible existing rows without partial schema changes. The original nullable-column migration fails these regression cases.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      # Disjoint selections preserve every case within the hosted 180s per-check budget.
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'unsafe_existing_grants'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'incompatible_column_type'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'not unsafe_existing_grants and not incompatible_column_type and (index or column_shape or primary_key or named_constraint)'
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'not unsafe_existing_grants and not incompatible_column_type and not (index or column_shape or primary_key or named_constraint)'
+        cwd: .
+  - id: dod-omn22260-atomic-grant-boundary
+    description: The grant migration refuses extra runtime, PUBLIC, other-role and column privileges, grant options and runtime ownership or inherited owner access; a failure preserves existing ACLs and rows and leaves no partial schema or table grants.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC2
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'grant_failure or unsafe_existing_grants'
+        cwd: .
+  - id: dod-omn22260-hosted-deploy-reconciliation
+    description: Deploy the create migration over a key-column-only table in the hosted verifier's disposable PostgreSQL service and read back the required NOT NULL, primary key and validated CHECK constraints. Explicit integration-service coordinates prevent selecting an ambient database.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: |-
+          env PGHOST="${INTEGRATION_POSTGRES_HOST:?}" PGPORT="${INTEGRATION_POSTGRES_PORT:?}" PGUSER="${INTEGRATION_POSTGRES_USER:?}" PGPASSWORD="${INTEGRATION_POSTGRES_PASSWORD:?}" PGDATABASE="${INTEGRATION_POSTGRES_DB:?}" psql -X -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS omninode_internal' -c 'CREATE TABLE IF NOT EXISTS omninode_internal.transcript_mirror_runs (run_id TEXT, attempt_id TEXT)' -f docker/migrations/forward/nodes/node_projection_transcript_mirror_run/0000_create_transcript_mirror_runs.sql -c "DO \$proof\$ BEGIN IF (SELECT count(*) FROM pg_attribute WHERE attrelid = 'omninode_internal.transcript_mirror_runs'::regclass AND attnum > 0 AND NOT attisdropped AND attnotnull) <> 13 OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass AND contype = 'p' AND pg_get_constraintdef(oid) = 'PRIMARY KEY (run_id, attempt_id)') OR (SELECT count(*) FROM pg_constraint WHERE conrelid = 'omninode_internal.transcript_mirror_runs'::regclass AND contype = 'c' AND convalidated) <> 4 THEN RAISE EXCEPTION 'transcript_mirror_runs constraints did not reconcile'; END IF; END \$proof\$;"
+        cwd: .
+  - id: dod-omn22260-column-and-index-shape
+    description: PostgreSQL refuses unexpected columns, nondefault collations and domain types atomically, refuses a same-name table, sequence or divergent index including an index on another table, and accepts an unrelated same-name index in another schema. Fresh-table cleanup is distinct from rollback of forward-only reconciliation.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_transcript_mirror_runs_omn22260.py -q --no-cov -k 'incompatible_column_shape or index_name_collision or another_schema or schema_diff'
+        cwd: .
