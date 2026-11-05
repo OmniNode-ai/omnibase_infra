@@ -190,7 +190,15 @@ requirements:
     acceptance:
       - id: AC40
         statement: 'AC40: machine bindings derive literal READ, WRITE and DESCRIBE on lane-dispatch-requested and lane-dispatch-completed and READ on the canonical local handler and terminal groups; the committed JSON equals the compute handler output, trusted machine rows receive the grants and developer rows or an absent overlay do not -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov -k dispatch fails against the merge-base machine bindings.'
+  - id: req-omn19998-runner-v2338-2
+    statement: The runner image must bake runner 2.338.2 with its x64 and arm64 checksums, a matching lock version and a valid bound identity, so rebuilding does not restore the refused 2.336.0 runner.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: docker/runners/Dockerfile pins runner 2.338.2 and both architecture checksums, docker/runners/runner-image.lock.json records 2.338.2 with a valid identity, and the existing fleet-floor and multiarch tests pass; the 2.336.0 merge-base Dockerfile fails the head fleet-floor test and the exact-pin deployment probe.'
 evidence_requirements:
+  - kind: tests
+    description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
+    command: uv run pytest tests/ci/test_runner_image_node24_floor.py tests/ci/test_runner_image_multiarch.py -q -n 0
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
     command: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
@@ -280,6 +288,31 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac40-runner-pin
+    description: AC40 runs the existing runner floor and multiarch tests against the checkout. The head floor rejects the recorded 2.336.0 Dockerfile; the head's 2.338.2 Dockerfile passes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_node24_floor.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_multiarch.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac40-runner-pin-deploy-probe
+    description: Hosted deployment artifact probe for AC40. Reads this checkout's Dockerfile and lock, requires the exact 2.338.2 version and both architecture checksums, then recomputes the bound identity. The merge-base 2.336.0 image fails the exact-pin assertion. This probe requires no Docker daemon, credentials or live runner changes and makes no live installation claim.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c "import json; from pathlib import Path; d=Path('docker/runners/Dockerfile').read_text().splitlines(); assert 'ARG RUNNER_VERSION=2.338.2' in d; assert 'ENV RUNNER_SHA256_AMD64=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40' in d; assert 'ENV RUNNER_SHA256_ARM64=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945' in d; assert json.loads(Path('docker/runners/runner-image.lock.json').read_text())['runner_version']=='2.338.2'; print('runner 2.338.2 and both architecture pins match')"
+        cwd: .
+      - check_type: command
+        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: .
+    binds_ac:
+      - AC40
   - id: dod-omn19998-ac39-runtime-roll
     description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
     source: manual
