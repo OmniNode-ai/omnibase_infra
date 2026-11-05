@@ -589,13 +589,14 @@ Spec == Init /\ [][Next]_vars
 LiveSpec == Spec /\ Fairness
 LiveMinSpec == Spec /\ FairnessMin
 \* Weak in place of strong on Publish and on closing a safety failure.
-LiveWeakSpec == Spec
+FairnessWeak ==
   /\ \A t \in Tasks : WF_vars(Release(t)) /\ WF_vars(Suspend(t)) /\ WF_vars(Resume(t))
   /\ \A p \in Pieces : WF_vars(Escalates(p))
   /\ \A s \in SafetyIds : WF_vars(SafetyCloses(s))
   /\ \A t \in Tasks : K(t).k = "repair" => (SF_vars(Reserve(t)) /\ SF_vars(Consume(t)) /\ WF_vars(Finish(t)))
   /\ WF_vars(Publish) /\ WF_vars(GoesStale)
   /\ \A x \in Procs : WF_vars(Recover(x))
+LiveWeakSpec == Spec /\ FairnessWeak
 \* As the repair lane has it: a safety cause lane that keeps being admitted does start.
 LiveCauseSpec == LiveSpec /\ \A t \in Tasks : K(t).k = "scause" => (SF_vars(Reserve(t)) /\ SF_vars(Consume(t)))
 
