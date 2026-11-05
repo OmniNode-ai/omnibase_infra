@@ -18,6 +18,7 @@ dod_evidence:
   - id: dod-omn22478-infra-review-holds-no-merge
     description: A head with the reviewer's rows red or absent passes CI Summary, and no pull request starts the reviewer.
     source: manual
+    binds_ac: [AC2]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_review_gate_removed_omn22478.py -q --no-cov
