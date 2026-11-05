@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,14 +15,17 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from omnibase_core.models.delegation.wire import (
-    EnumDelegationTerminalFailureCause,
-    ModelDelegationProvenance,
-)
+from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.handlers.handler_delegation_dispatch_terminal import (
+    HandlerDelegationDispatchTerminal,
+)
+from omnibase_infra.models.delegation.model_delegation_dispatch_terminal_request import (
+    ModelDelegationDispatchTerminalRequest,
+)
 from omnibase_infra.models.delegation.model_dispatch_budget import ModelDispatchBudget
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
@@ -126,116 +130,6 @@ def _select_delegation_route(
     )
 
 
-def _resolve_delegation_provenance(normalized: Mapping[str, object]) -> str:
-    """Resolve where the delegation actually ran, from the terminal's own fields.
-
-    OMN-15471: this used to be ``normalized.get("provider", "local")``. No real
-    ``delegation-completed.v1`` payload carries a ``provider`` key — that event
-    models the resolved serving endpoint as ``endpoint_url`` plus
-    ``cost_tier_name`` — so the literal default fired on EVERY bus-path
-    delegation and stamped ``provider="local"`` on the durable terminal. A
-    Gemini-routed result (``endpoint_url`` = the Google Generative Language API,
-    ``cost_tier_name`` = ``cheap_cloud``) was recorded as a local-provider run:
-    39/39 ``delegate-skill-completed.v1`` rows read ``local`` on the onex-dev
-    lane and not one of them ran on a local model.
-
-    Provenance is therefore derived ONLY from facts the terminal payload
-    actually carries, in descending order of how directly they identify the
-    serving endpoint:
-
-    1. ``provider`` — an explicit upstream stamp, if a producer ever sets one.
-    2. ``endpoint_url`` — the host that was really called. This is the strongest
-       available provenance fact: it cannot read as local for a cloud call, and
-       for a genuinely local backend it is the private/loopback address, so the
-       local case stays identifiable.
-    3. ``cost_tier_name`` / ``cost_tier_type`` — the resolved routing tier, used
-       only when no endpoint identity survived into the terminal.
-
-    When none of those resolve, the return is the empty string. That is
-    deliberate: an absent provenance must stay absent so the consumer
-    (``handler_delegate_skill._response_from_result``, which reads
-    ``delegated_to or endpoint_url or ""``) falls through its own chain instead
-    of inheriting a fabricated deployment class. Never invent one here.
-    """
-
-    for key in ("provider", "endpoint_url", "cost_tier_name", "cost_tier_type"):
-        value = normalized.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
-
-
-def _resolve_measured_actual_cost(normalized: Mapping[str, object]) -> float | None:
-    """Resolve non-negative measured spend from the canonical terminal fields.
-
-    The cumulative total is authoritative for a current terminal, while the
-    final-attempt value keeps older/defaulted terminals compatible.  Taking the
-    maximum also enforces the domain invariant that total spend cannot be less
-    than the final attempt, without turning a genuine free-local ``0/0`` into an
-    absent measurement.
-    """
-
-    costs: list[float] = []
-    for key in ("cumulative_attempt_cost", "final_attempt_cost"):
-        value = normalized.get(key)
-        if (
-            isinstance(value, int | float)
-            and not isinstance(value, bool)
-            and value >= 0.0
-        ):
-            costs.append(float(value))
-    return max(costs) if costs else None
-
-
-def _normalize_result_payload(
-    *,
-    status: str,
-    payload: object,
-    error_message: str | None,
-) -> dict[str, object]:
-    """Flatten delegation terminal payloads into the delegate-skill port shape."""
-
-    if isinstance(payload, dict):
-        normalized = dict(payload)
-    else:
-        normalized = {}
-
-    nested_payload = normalized.get("payload")
-    if isinstance(nested_payload, dict):
-        normalized = dict(nested_payload) | {
-            key: value for key, value in normalized.items() if key != "payload"
-        }
-
-    normalized["status"] = status
-    # OMN-19558: the broker can exhaust its terminal wait without receiving a
-    # payload. Carry that timeout as a typed cause so the delegate-skill handler
-    # does not infer a provider error from the broker's diagnostic text.
-    if status == "timeout" and normalized.get("terminal_failure_cause") is None:
-        normalized["terminal_failure_cause"] = (
-            EnumDelegationTerminalFailureCause.TIMEOUT.value
-        )
-    if error_message:
-        normalized["error_message"] = error_message
-    normalized.setdefault("model_name", normalized.get("model_used", ""))
-    # OMN-15471: derive real provenance; never default to the literal "local".
-    normalized.setdefault("delegated_to", _resolve_delegation_provenance(normalized))
-    normalized.setdefault(
-        "quality_gate_passed", normalized.get("quality_passed", False)
-    )
-    normalized.setdefault("input_tokens", normalized.get("prompt_tokens", 0))
-    normalized.setdefault("output_tokens", normalized.get("completion_tokens", 0))
-    normalized.setdefault("delegation_latency_ms", normalized.get("latency_ms", 0))
-    # OMN-15520: the workflow terminal owns measured actual cost.  Total cost
-    # across an escalation ladder is cumulative; single-attempt/legacy
-    # terminals expose only the final attempt.  Preserve an explicit zero by
-    # checking for None rather than truthiness, and overwrite any stale
-    # consumer-shaped ``cost_usd`` with the upstream measurement when present.
-    actual_cost = _resolve_measured_actual_cost(normalized)
-    if actual_cost is not None:
-        normalized["cost_usd"] = actual_cost
-    return normalized
-
-
 class RuntimeDelegationDispatchPort:
     """Delegation dispatch port backed by runtime-owned Pattern B plumbing."""
 
@@ -258,6 +152,7 @@ class RuntimeDelegationDispatchPort:
         self._command_topic = command_topic
         self._response_topic = response_topic
         self._terminal_evidence_sink = terminal_evidence_sink
+        self._terminal = HandlerDelegationDispatchTerminal()
         # OMN-21271: discovery parses every installed node contract. Run per
         # dispatch on the event loop it read 1014 contracts in 4.2-7.7 s and
         # stalled the loop for up to 7.7 s on the dev effects container. The
@@ -518,6 +413,8 @@ class RuntimeDelegationDispatchPort:
             command_topic=self._command_topic or selected.route.command_topic,
             routes=routes,
         )
+        # OMN-19972: the run began here; its steps are timed from this moment.
+        run_started_at, run_started = datetime.now(UTC), time.monotonic()
         terminal_evidence_sink = self._terminal_evidence_sink
         if terminal_evidence_sink is None:
             _route, result = await broker.dispatch_request(command)
@@ -557,11 +454,28 @@ class RuntimeDelegationDispatchPort:
                 command,
                 terminal_observer=observe_terminal,
             )
-        return _normalize_result_payload(
-            status=result.status,
-            payload=result.payload,
-            error_message=result.error_message,
+        finished = await self._terminal.handle(
+            ModelDelegationDispatchTerminalRequest(
+                terminal=result,
+                correlation_id=correlation_id,
+                task_type=task_type,
+                tenant_id=tenant_id,
+                started_at=run_started_at,
+                started_monotonic=run_started,
+                engine_package=selected.route.package_name,
+                publish_steps=wait,
+            ),
+            routes=routes,
         )
+        key = str(correlation_id).encode("utf-8")
+        for message in finished.run_step_messages:
+            try:
+                await self._event_bus.publish(
+                    finished.run_step_topic or "", key, message, None
+                )
+            except Exception:  # a trace gap, never a failed delegation
+                logger.exception("a run step of %s was not published", key)
+        return dict(finished.result)
 
 
 def _named_tests_wire(named_tests: BaseModel) -> dict[str, object]:

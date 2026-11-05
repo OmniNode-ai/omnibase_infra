@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDelegationDispatchTerminalEffect
+#
+# What the runtime delegation dispatch port does once the broker has answered a
+# run: flatten the terminal into the delegate-skill result shape, and, for a run
+# the caller waited on, number the run's steps and build one event envelope per
+# step for the topic the delegation engine's package declares as
+# runtime_dispatch.run_step_event. The port sends the envelopes; the handler
+# holds no event bus. Effect: it reads the installed node contracts for that
+# topic.
+#
+# Related Tickets:
+#   - OMN-19972: the run-trace writer's steps come from the deployed dispatch path
+name: "node_delegation_dispatch_terminal_effect"
+contract_name: "node_delegation_dispatch_terminal_effect"
+node_name: "node_delegation_dispatch_terminal_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Turn a dispatched delegation run's terminal into the delegate-skill result and, for a waited run, into one run-step event envelope per step on the contract-declared run-step topic.
+
+runtime_profiles:
+  - local-dev
+input_model:
+  name: "ModelDelegationDispatchTerminalRequest"
+  module: "omnibase_infra.models.delegation.model_delegation_dispatch_terminal_request"
+  description: "The broker's terminal, the run's correlation id, task type, tenant, start time, engine package and whether to build its steps."
+output_model:
+  name: "ModelDelegationDispatchTerminalResult"
+  module: "omnibase_infra.models.delegation.model_delegation_dispatch_terminal_result"
+  description: "The flattened delegate-skill result, the declared run-step topic and the run's step envelopes in step order."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "delegation.dispatch_terminal"
+      handler:
+        name: "HandlerDelegationDispatchTerminal"
+        module: "omnibase_infra.handlers.handler_delegation_dispatch_terminal"
+      description: >
+        Normalize the terminal; for a waited run read the declared run-step topic and number the run's steps from the terminal's escalation history or its own fields.
+
+      supported_operations:
+        - "delegation.dispatch_terminal"
+      input_model:
+        name: "ModelDelegationDispatchTerminalRequest"
+        module: "omnibase_infra.models.delegation.model_delegation_dispatch_terminal_request"
+        description: "Typed request for one dispatched run's terminal."
+      output_fields:
+        - result
+        - run_step_topic
+        - run_step_messages
+io_operations:
+  - operation: "delegation.dispatch_terminal"
+    description: "Turn one dispatched run's terminal into its result and its step envelopes."
+    input_fields:
+      - terminal
+      - correlation_id
+      - task_type
+      - tenant_id
+      - started_at
+      - started_monotonic
+      - engine_package
+      - publish_steps
+    output_fields:
+      - result
+      - run_step_topic
+      - run_step_messages
+capabilities:
+  - name: "delegation.dispatch_terminal"
+    description: "Flatten a delegation terminal and derive the run's numbered step events."
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: true
+  timeout_ms: 30000
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  description: >
+    Called in process by RuntimeDelegationDispatchPort after each dispatch. Declares the local-dev runtime profile, which no deployed runtime carries, so main and effects never attach it as a subscriber.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-11-05"
+  updated: "2026-11-05"
+  tags:
+    - effect
+    - delegation
+    - run-trace
+  related_tickets:
+    - "OMN-19972"

@@ -651,6 +651,7 @@ node_declared_state_apply_effect = "omnibase_infra.nodes.node_declared_state_app
 node_declared_state_diff_compute = "omnibase_infra.nodes.node_declared_state_diff_compute"
 node_declared_state_reconcile_orchestrator = "omnibase_infra.nodes.node_declared_state_reconcile_orchestrator"
 node_delegation_chain_ledger_effect = "omnibase_infra.nodes.node_delegation_chain_ledger_effect"
+node_delegation_dispatch_terminal_effect = "omnibase_infra.nodes.node_delegation_dispatch_terminal_effect"
 node_delta_bundle_effect = "omnibase_infra.nodes.node_delta_bundle_effect"
 node_delta_metrics_effect = "omnibase_infra.nodes.node_delta_metrics_effect"
 node_dev_boot_guard_effect = "omnibase_infra.nodes.node_dev_boot_guard_effect"
