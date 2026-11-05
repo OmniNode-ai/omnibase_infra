@@ -109,6 +109,11 @@ ENV OMNI_CI_ENV_ROOT=${OMNI_CI_ENV_ROOT}
 # root, and any ad hoc bare `docker exec` inherits it). See the sudoers rule
 # below: NOPASSWD, one command, one argument pattern, confined under this
 # runner's own `_work` tree -- never a general root shell.
+# tzdata (OMN-19998): the ubuntu:22.04 base ships no IANA zoneinfo database, so
+# python's zoneinfo.ZoneInfo("America/New_York") raises ZoneInfoNotFoundError on
+# every runner built without it (a merge group for a private repository failed
+# on exactly that on two runners). A job has no passwordless package manager
+# here, so the database has to be in the image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -118,6 +123,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     rsync \
     sudo \
+    tzdata \
     libatomic1 \
     libicu-dev \
     libkrb5-3 \
