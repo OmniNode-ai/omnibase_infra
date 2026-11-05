@@ -89,6 +89,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ProjectionNotMaterializedError,
@@ -120,7 +121,6 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
 )
-from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
@@ -155,6 +155,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelDiscoveredContract,
     ModelHandlerRef,
     ModelHandlerRoutingEntry,
+    load_consume_concurrency,
 )
 from omnibase_infra.runtime.auto_wiring.report import (
     EnumWiringOutcome,
@@ -9027,16 +9028,16 @@ def _materialize_known_handler_dependencies(
             event_bus=event_bus,
             handler_name=handler_name,
         )
-    if required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS):
+    # An empty set is a subset too. Optional runtime ports must not construct
+    # migration services: the provisioner scans the installed contract tree.
+    if required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS:
         available.update(_build_topic_migration_executor_dependencies())
     if not (
         requires_event_publisher
         or requires_event_consumer
-        or required_params.intersection(
-            {"container", "ownership_query", "dispatch_port"}
-        )
+        or required_params & {"container", "ownership_query", "dispatch_port"}
         or ("dispatch_port" in constructor_params and requires_delegation_port)
-        or required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS)
+        or (required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS)
     ):
         return materialized_explicit_dependencies
     if "dispatch_port" in constructor_params and requires_delegation_port:
@@ -11486,6 +11487,7 @@ async def _subscribe_contract_topics(
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
         HandlerContractSubscribePreflight,
+        load_consumer_group_handover,
     )
     from omnibase_infra.models import ModelNodeIdentity
     from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request import (
@@ -11499,9 +11501,7 @@ async def _subscribe_contract_topics(
     )
     from omnibase_infra.utils import compute_consumer_group_id
 
-    typed_bus: ProtocolEventBusSubscriber = cast(
-        "ProtocolEventBusSubscriber", event_bus
-    )
+    typed_bus = cast("ProtocolEventBusSubscriber", event_bus)
     effective_result_applier = result_applier
     output_topic = _select_dispatch_result_output_topic(contract)
     # This is the authoritative output-capability source: the same typed
@@ -11571,7 +11571,8 @@ async def _subscribe_contract_topics(
     # topic of this contract is subscribed. See the handler's module docstring.
     preflight = HandlerContractSubscribePreflight(
         contract_name=contract.name,
-        contract_path=contract.contract_path,
+        concurrency=load_consume_concurrency(contract.contract_path),
+        handover=load_consumer_group_handover(contract.contract_path),
         event_bus=event_bus,
         environment=environment,
         consumer_group=consumer_group,
