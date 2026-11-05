@@ -44,6 +44,7 @@ from tests.helpers.lane_census_fixtures import (
     NEUTRAL_HOSTNAME,
     NEUTRAL_LANE,
     NEUTRAL_MANIFEST,
+    NEUTRAL_REGISTRY,
 )
 
 pytestmark = pytest.mark.unit
@@ -332,6 +333,7 @@ def test_empty_inventory_is_the_total_outage_signal(planner: Any) -> None:
             "runtime_tag": None,
         },
         manifest,
+        planner.load_registry(NEUTRAL_REGISTRY),
     )
     assert plan["has_drift"] is True
     # OMN-20934: pinned against the neutral manifest, so the floor is derived
@@ -427,6 +429,7 @@ def test_recorded_api_envelope_drives_the_planner(inventory: Any, planner: Any) 
     plan = planner.build_plan(
         {**envelope, "host": NEUTRAL_HOSTNAME},
         planner.load_manifest(NEUTRAL_MANIFEST),
+        planner.load_registry(NEUTRAL_REGISTRY),
     )
     assert plan["schema_version"]
     # The lane label on the recorded rows must be read through the mapping form.

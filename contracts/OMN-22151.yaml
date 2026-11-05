@@ -1,0 +1,68 @@
+schema_version: 1.0.0
+ticket_id: OMN-22151
+title: the start-first replacement effect for one dev runtime container (node_runtime_start_first_effect)
+summary: >-
+  Lane fill-hand-dev-ready-OMN-22151-0445. Adds node_runtime_start_first_effect and HandlerRuntimeStartFirst, a host-local effect the deploy agent loads from its own checkout, the way it loads node_dev_boot_guard_effect. The effect starts the replacement of one dev runtime service as a compose run container beside the running container (no host port is published), polls the replacement's own /ready inside the container, and stops the old container only after the replacement reads 200. A replacement that does not start, exits, or does not read 200 within the request's bound is removed, the old container is left running, and the result fails with a named reason. The deploy agent's runtime phase does not call the effect in this change, so the ticket's AC1 and AC2 are met at the effect level only and AC4 (the live /ready poll through a redeploy) is not met. Two prerequisites are not built: a front that owns host ports 8085 and 8086 and routes to the ready runtime, and a standby boot that keeps the replacement out of the old runtime's consumer groups until handover. No compose file changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-start-first-effect-overlap
+    statement: The start-first effect stops the old runtime container only after the replacement reads /ready 200.
+    acceptance:
+      - id: AC22151101
+        statement: "Driven over the deploy agent's executor module with a fake dev host, the effect starts the replacement without stopping the old container, the old container is running when the replacement first reads /ready 200, and the old container is stopped after that read -- falsifier: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_start_first -q -p no:cacheprovider"
+  - id: req-start-first-effect-never-ready
+    statement: A replacement that does not reach /ready 200 within the bound is removed and the old runtime keeps running.
+    acceptance:
+      - id: AC22151102
+        statement: "A replacement that never reads 200 within the bound, or exits, or does not start, is removed, the old container is never stopped, and the result names replacement-never-ready, replacement-exited-before-ready or replacement-not-started -- falsifier: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_start_first_never_ready -q -p no:cacheprovider"
+evidence_requirements:
+  - kind: tests
+    description: The start-first effect tests beside the deploy agent and the contract-to-handler integration test under tests/integration/handlers.
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_start_first_omn22151.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22151-effect-start-first
+    description: >-
+      The effect, loaded from the checkout beside the agent and driven over the agent's executor module whose _run answers Docker as a fake dev host, starts the replacement with compose run and no --service-ports, reads /ready inside the replacement, and stops the old container once, after the first 200, while the old container was still running. A mutant that stops the old container before polling fails four of the nine tests.
+    source: manual
+    binds_ac:
+      - AC22151101
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_start_first -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22151-effect-never-ready
+    description: >-
+      A replacement that never reads 200 within a 60 s bound, one that exits, and one whose compose run exits 1 are each removed, the old container is never stopped, and the result carries the named failure. A mutant that stops the old container on the never-ready path fails two of the three tests.
+    source: manual
+    binds_ac:
+      - AC22151102
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -k runtime_start_first_never_ready -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22151-contract-routes-effect
+    description: >-
+      The node contract on disk routes the replace operation to HandlerRuntimeStartFirst, an INFRA_HANDLER EFFECT, and the routed handler keeps the old container until the replacement is ready.
+    source: manual
+    binds_ac:
+      - AC22151101
+      - AC22151102
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_runtime_start_first_omn22151.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22151-deploy-source
+    description: >-
+      Deploy probe. GitHub serves the checked-out commit with the start-first effect's handler. The read fails on a tree without it, including origin/dev. This proves source identity only, not a running deployment, a wired runtime phase or the ticket's AC4.
+    source: manual
+    binds_ac:
+      - AC22151101
+    checks:
+      - check_type: command
+        check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_runtime_start_first.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c "class HandlerRuntimeStartFirst"'

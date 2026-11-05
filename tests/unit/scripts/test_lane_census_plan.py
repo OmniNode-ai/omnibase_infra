@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 
+from omnibase_infra.models.lane_census import ModelLaneCensusRegistry
 from tests.helpers.lane_census_fixtures import NEUTRAL_SNAPSHOT
 
 pytestmark = pytest.mark.unit
@@ -61,9 +62,6 @@ PLAN = _load_planner()
 #
 # This is the lab compose lane only. Production is the AWS `onex-prod` namespace.
 _RETIRED_PROD_LANE: dict[str, Any] = {
-    # OMN-19088 added the one field the manifest schema now requires; the lane ran
-    # on the lab host until its removal. Nothing else in this spec moved.
-    "hosts": ["lab-201"],
     "compose_file": "docker/docker-compose.prod.yml",
     "compose_project": "omnibase-infra-prod",
     "network": "omnibase-infra-prod-network",
@@ -87,8 +85,8 @@ _RETIRED_PROD_LANE: dict[str, Any] = {
     ],
 }
 
-# OMN-19088: the planner resolves the host it runs on through the manifest's
-# hosts registry. The lab host's hostname, as the census reports it there.
+# OMN-19088: the planner resolves the host it runs on through the host registry.
+# The lab host's hostname, as the census reports it there.
 _LAB_HOST = "omninode-pc"
 
 _LAB_SYNC_FIXTURES = _REPO / "tests" / "fixtures" / "lab_sync"
@@ -113,7 +111,6 @@ def _lane_from_capture(capture: Path) -> tuple[str, dict[str, Any]]:
         else:
             services.append({"name": row["Names"], "kind": "service", "replicas": 1})
     return lane, {
-        "hosts": list(_RETIRED_PROD_LANE["hosts"]),
         "compose_project": rows[0]["Labels"]["com.docker.compose.project"],
         "network": next(n for n in envelope["networks"] if lane in n),
         "image_tag_pattern": ".+",
@@ -133,7 +130,6 @@ def _lane_from_capture(capture: Path) -> tuple[str, dict[str, Any]]:
 # today is a fact about the lab, checked where its manifest lives.
 _DEV_LANE: dict[str, Any] = {
     "optional": True,
-    "hosts": list(_RETIRED_PROD_LANE["hosts"]),
     "compose_file": "docker/docker-compose.generated.yml",
     "compose_project": "omnibase-infra",
     "network": "omnibase-infra-network",
@@ -239,14 +235,19 @@ _CAPTURED_LANE, _CAPTURED_LANE_SPEC = _lane_from_capture(
 MANIFEST: dict[str, Any] = {
     "schema_version": "1.0.0",
     "default_image_tag_pattern": ".+",
-    "hosts": {_RETIRED_PROD_LANE["hosts"][0]: {"aliases": [_LAB_HOST]}},
     "lanes": {
         "prod": copy.deepcopy(_RETIRED_PROD_LANE),
         "dev": copy.deepcopy(_DEV_LANE),
         _CAPTURED_LANE: _CAPTURED_LANE_SPEC,
     },
 }
-PLAN.validate_hosts(MANIFEST)
+# OMN-22152: where a lane may run is the host registry's, not the manifest's. One
+# neutral host carries every frozen lane and reports the lab host's hostname.
+_REGISTRY_ROWS: list[dict[str, Any]] = [
+    {"name": "host-a", "aliases": [_LAB_HOST], "lanes": list(MANIFEST["lanes"])}
+]
+REGISTRY = ModelLaneCensusRegistry.from_rows(_REGISTRY_ROWS)
+PLAN.validate_hosts(MANIFEST, REGISTRY)
 PLAN.validate_service_bounds(MANIFEST)
 
 
@@ -308,7 +309,7 @@ def test_healthy_prod_lane_no_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     assert plan["has_drift"] is False, plan["findings"]
     assert plan["lanes_checked"] == ["prod"]
 
@@ -341,7 +342,7 @@ def test_tonight_prod_red_fixture_runtime_absent_and_network_detached() -> None:
         "networks": [],  # broker network detached
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
 
     assert plan["has_drift"] is True
     kinds = _kinds(plan["findings"])
@@ -380,7 +381,7 @@ def test_worker_replicas_zero_silent_drop_is_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     absent = {
         f["container"] for f in plan["findings"] if f["kind"] == "container_absent"
     }
@@ -402,7 +403,7 @@ def test_oneshot_failed_exit_nonzero_is_critical_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     failed = [f for f in plan["findings"] if f["kind"] == "oneshot_failed"]
     assert failed and failed[0]["severity"] == "critical", plan["findings"]
 
@@ -423,7 +424,7 @@ def test_oneshot_stuck_running_is_warning_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     stuck = [f for f in plan["findings"] if f["kind"] == "oneshot_stuck"]
     assert stuck and stuck[0]["severity"] == "warning"
 
@@ -431,6 +432,11 @@ def test_oneshot_stuck_running_is_warning_drift() -> None:
 # Recorded alarms: cloud-migration "Up Less than a second" and
 # forward-migration "Up 15 seconds". Only the names/statuses are recorded;
 # exact timestamps below are a deterministic replay of those ages.
+ONESHOT_REGISTRY = ModelLaneCensusRegistry.from_rows(
+    [{"name": "host-a", "aliases": ["box-a"], "lanes": ["dev"]}]
+)
+
+
 def _oneshot_replay(
     *, age: float = 0.25, status: str = "Up Less than a second"
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -439,10 +445,8 @@ def _oneshot_replay(
     observed = datetime(2026, 11, 1, 14, 23, tzinfo=UTC)
     started = observed - timedelta(seconds=age)
     manifest = {
-        "hosts": {"host-a": {"aliases": ["box-a"]}},
         "lanes": {
             "dev": {
-                "hosts": ["host-a"],
                 "services": [
                     {"name": "omnibase-infra-cloud-migration", "kind": "oneshot"},
                 ],
@@ -476,7 +480,7 @@ def test_oneshot_recorded_fresh_rows_request_followup(age: float, status: str) -
             "omnibase-infra-forward-migration"
         )
         envelope["containers"][0]["Names"] = "omnibase-infra-forward-migration"
-    plan = PLAN.build_plan(envelope, manifest)
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
     assert plan["findings"] == []
     pending = plan["pending_oneshots"]
     assert len(pending) == 1
@@ -488,7 +492,7 @@ def test_oneshot_recorded_fresh_rows_request_followup(age: float, status: str) -
 @pytest.mark.parametrize("age", [300, 300.01, 21600])
 def test_oneshot_completion_bound_remains_an_alarm(age: float) -> None:
     envelope, manifest = _oneshot_replay(age=age, status="Up 6 hours")
-    plan = PLAN.build_plan(envelope, manifest)
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
     assert [f["kind"] for f in plan["findings"]] == ["oneshot_stuck"]
     assert plan["findings"][0]["severity"] == "warning"
     assert plan["pending_oneshots"] == []
@@ -509,7 +513,7 @@ def test_oneshot_unknown_timing_is_observable(missing: str) -> None:
         envelope["containers"][0]["StartedAt"] = "not-a-time"
     else:
         envelope["containers"][0].pop(missing)
-    plan = PLAN.build_plan(envelope, manifest)
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
     assert [f["kind"] for f in plan["findings"]] == ["oneshot_unobservable"]
     assert plan["pending_oneshots"] == []
 
@@ -517,10 +521,10 @@ def test_oneshot_unknown_timing_is_observable(missing: str) -> None:
 @pytest.mark.parametrize("code", [0, 1, 137])
 def test_oneshot_followup_exit_retains_failure(code: int) -> None:
     envelope, manifest = _oneshot_replay()
-    assert PLAN.build_plan(envelope, manifest)["pending_oneshots"]
+    assert PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)["pending_oneshots"]
     row = envelope["containers"][0]
     row.update(State="exited", Status=f"Exited ({code}) Less than a second ago")
-    plan = PLAN.build_plan(envelope, manifest)
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
     assert plan["pending_oneshots"] == []
     assert [f["kind"] for f in plan["findings"]] == (["oneshot_failed"] if code else [])
 
@@ -533,7 +537,7 @@ def test_oneshot_fresh_does_not_hide_health_or_restart_alarm() -> None:
         HealthcheckIntervalSeconds=30,
         RestartCount=6,
     )
-    plan = PLAN.build_plan(envelope, manifest)
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
     assert {f["kind"] for f in plan["findings"]} == {
         "container_unhealthy",
         "container_restart_loop",
@@ -562,7 +566,7 @@ def test_keepalive_migration_gate_running_is_not_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     stuck = [f for f in plan["findings"] if f["kind"] == "oneshot_stuck"]
     assert not stuck, f"keepalive migration-gate flagged oneshot_stuck: {stuck}"
     assert plan["has_drift"] is False, plan["findings"]
@@ -582,7 +586,7 @@ def test_keepalive_exited_nonzero_is_still_critical_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     failed = [f for f in plan["findings"] if f["kind"] == "oneshot_failed"]
     assert failed and failed[0]["severity"] == "critical", plan["findings"]
 
@@ -598,7 +602,7 @@ def test_unexpected_lane_labeled_container_is_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     unexpected = {
         f["container"] for f in plan["findings"] if f["kind"] == "unexpected_container"
     }
@@ -625,7 +629,7 @@ def test_image_tag_mismatch_is_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, manifest)
+    plan = PLAN.build_plan(envelope, manifest, REGISTRY)
     mism = [f for f in plan["findings"] if f["kind"] == "image_tag_mismatch"]
     assert mism and mism[0]["container"] == "omninode-prod-runtime"
 
@@ -639,7 +643,7 @@ def test_optional_dev_lane_entirely_down_is_not_drift() -> None:
         "networks": [],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     assert plan["has_drift"] is False, plan["findings"]
 
 
@@ -655,7 +659,7 @@ def test_optional_dev_lane_partially_up_is_drift() -> None:
         "networks": ["omnibase-infra_default"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     absent = {
         f["container"] for f in plan["findings"] if f["kind"] == "container_absent"
     }
@@ -672,6 +676,7 @@ def test_unknown_lane_raises() -> None:
                 "networks": [],
             },
             MANIFEST,
+            REGISTRY,
         )
 
 
@@ -684,7 +689,7 @@ def test_all_lanes_default_excludes_nothing_required() -> None:
         "networks": [],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     # OMN-19088: every lane is either checked on this host or reported
     # not-applicable because the manifest declares it for another host. None is
     # silently dropped.
@@ -727,7 +732,7 @@ def test_profile_gated_absent_is_not_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     assert plan["has_drift"] is False, plan["findings"]
     absent = [f for f in plan["findings"] if f["container"] in gated]
     assert not absent, f"profile_gated services flagged while absent: {absent}"
@@ -754,7 +759,7 @@ def test_profile_gated_running_is_warning_drift() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     present = [f for f in plan["findings"] if f["kind"] == "profile_gated_present"]
     assert present, f"running profile_gated container not flagged: {plan['findings']}"
     assert present[0]["container"] == gated
@@ -782,7 +787,7 @@ def test_profile_gated_running_is_not_reported_unexpected() -> None:
         "networks": ["omnibase-infra-prod-network"],
         "runtime_tag": None,
     }
-    plan = PLAN.build_plan(envelope, MANIFEST)
+    plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     unexpected = [f for f in plan["findings"] if f["kind"] == "unexpected_container"]
     assert not unexpected, f"declared profile_gated flagged unexpected: {unexpected}"
 
@@ -1004,7 +1009,7 @@ def _fixture_v1(path: Path) -> dict[str, Any]:
 def _plan_with_desired(fixture: dict[str, Any]) -> dict[str, Any]:
     envelope = dict(fixture["envelope"])
     envelope["desired_state"] = _desired_v1(fixture)
-    plan: dict[str, Any] = PLAN.build_plan(envelope, _frozen_manifest())
+    plan: dict[str, Any] = PLAN.build_plan(envelope, _frozen_manifest(), REGISTRY)
     return plan
 
 
@@ -1176,7 +1181,7 @@ def test_unhealthy_lower_service_bound() -> None:
     for row in fixture["envelope"]["containers"]:
         if row["Names"] == "omninode-stability-test-runtime":
             row["Health"]["FailingStreak"] = 2
-    plan = PLAN.build_plan(fixture["envelope"], manifest)
+    plan = PLAN.build_plan(fixture["envelope"], manifest, REGISTRY)
     assert any(f["kind"] == "container_unhealthy" for f in plan["findings"])
 
 
@@ -1280,7 +1285,7 @@ def _event_over(fixture: dict[str, Any]) -> dict[str, Any]:
     events = _load_event_module()
     plan = {
         "schema_version": PLAN.SCHEMA_VERSION,
-        "host": "lab-201",
+        "host": "host-a",
         "lanes_checked": [fixture["envelope"]["lane"]],
         "lanes_not_applicable": [],
         "lanes_skipped_optional_down": [],
@@ -1620,7 +1625,7 @@ def test_unreadable_null_desired_state_is_critical_drift_not_clean() -> None:
 def test_unreadable_malformed_desired_states(desired: Any) -> None:
     envelope = dict(_fixture(_CLEAN)["envelope"])
     envelope["desired_state"] = desired
-    plan = PLAN.build_plan(envelope, _frozen_manifest())
+    plan = PLAN.build_plan(envelope, _frozen_manifest(), REGISTRY)
     kinds = [f["kind"] for f in plan["findings"]]
     if desired == {}:
         # An empty document is a document: nothing declared, nothing to compare.
@@ -1633,14 +1638,14 @@ def test_unreadable_reason_rides_in_the_detail() -> None:
     envelope = dict(_fixture(_CLEAN)["envelope"])
     envelope["desired_state"] = None
     envelope["desired_state_error"] = "containers[2].config_hash: not a sha256"
-    plan = PLAN.build_plan(envelope, _frozen_manifest())
+    plan = PLAN.build_plan(envelope, _frozen_manifest(), REGISTRY)
     assert "containers[2].config_hash: not a sha256" in plan["findings"][0]["detail"]
 
 
 def test_unreadable_envelope_without_a_desired_state_key_is_not_evaluated() -> None:
     """Before the driver supplies a state, the plan says the kinds were not graded."""
     envelope = dict(_fixture(_CLEAN)["envelope"])
-    plan = PLAN.build_plan(envelope, _frozen_manifest())
+    plan = PLAN.build_plan(envelope, _frozen_manifest(), REGISTRY)
     assert plan["lab_sync_evaluated"] is False
     assert not _lab_sync_pairs(plan)
 
@@ -1654,6 +1659,9 @@ def _run_planner(
     manifest.write_text(yaml.safe_dump(_frozen_manifest()), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if k != "LANE_CENSUS_DESIRED_STATE"}
     env["LANE_MANIFEST"] = str(manifest)
+    registry = tmp_path / "overlay.yaml"
+    registry.write_text(yaml.safe_dump({"registry": _REGISTRY_ROWS}), encoding="utf-8")
+    env["LANE_CENSUS_REGISTRY"] = str(registry)
     if desired_state is not None:
         env["LANE_CENSUS_DESIRED_STATE"] = desired_state
     return subprocess.run(
@@ -1778,6 +1786,12 @@ def test_oneshot_driver_automatically_samples_recorded_start(
     manifest["lanes"]["dev"]["services"][0]["restart_bound"] = 5
     manifest_path = tmp_path / "manifest.yaml"
     manifest_path.write_text(yaml.safe_dump(manifest))
+    registry_path = tmp_path / "overlay.yaml"
+    registry_path.write_text(
+        yaml.safe_dump(
+            {"registry": [{"name": "host-a", "aliases": ["box-a"], "lanes": ["dev"]}]}
+        )
+    )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "calls"
@@ -1817,6 +1831,7 @@ elif sys.argv[1] == "exec":
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "LANE_MANIFEST": str(manifest_path),
+        "LANE_CENSUS_REGISTRY": str(registry_path),
         "LANE_CENSUS_HOST": "box-a",
         "LANE_CENSUS_LOG_FILE": str(tmp_path / "census.log"),
         "LANE_CENSUS_DOCKER_SOCKET": "/nonexistent/oneshot-replay.sock",
@@ -1886,9 +1901,11 @@ def test_oneshot_completion_bound_is_the_deploy_agents_bound(
 
 def test_oneshot_same_execution_crosses_its_deadline() -> None:
     envelope, manifest = _oneshot_replay()
-    pending = PLAN.build_plan(envelope, manifest)["pending_oneshots"][0]
+    pending = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)["pending_oneshots"][
+        0
+    ]
     envelope["observed_at"] = pending["deadline"]
-    plan = PLAN.build_plan(envelope, manifest)
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
     assert plan["pending_oneshots"] == []
     assert [f["kind"] for f in plan["findings"]] == ["oneshot_stuck"]
     assert envelope["containers"][0]["StartedAt"] == pending["started_at"]

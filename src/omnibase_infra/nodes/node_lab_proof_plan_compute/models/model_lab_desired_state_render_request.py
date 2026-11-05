@@ -20,6 +20,9 @@ class ModelLabDesiredStateRenderRequest(BaseModel):
     compose artifacts with the deploy's file order, project, environment and
     working directory. broker_yaml is the mounted bootstrap profile at that ref;
     explicit one-shot cluster-config declarations in compose override it.
+    registry_yaml is the lab host registry (``registry:`` rows of name, aliases
+    and lanes), overlay data of the lane census node: it says which hosts exist
+    and which lanes each may host, which the manifest does not (OMN-22152).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -30,6 +33,7 @@ class ModelLabDesiredStateRenderRequest(BaseModel):
     lane: str = Field(min_length=1)
     surface_kind: Literal["compose_lane", "runner_fleet", "host"] = "compose_lane"
     manifest_yaml: str
+    registry_yaml: str
     lock_toml: str
     compose_json: str
     compose_hashes: str
