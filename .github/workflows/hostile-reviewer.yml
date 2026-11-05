@@ -64,7 +64,10 @@ name: Hostile Reviewer
 
 on:
   pull_request:
-    branches: [main, dev]
+    # OMN-22478, operator RULING 2026-11-05T20:27:56Z: the automated review holds
+    # no merge and runs on no pull request until the review route is fixed. No
+    # branch has this name, so GitHub starts no run. To restore: branches: [main, dev]
+    branches: [review-stopped-omn-22478]
     # OMN-16216: labeled/unlabeled/ready_for_review so applying/removing
     # ci:ready or a draft->ready flip retriggers this workflow's evaluation
     # of the hostile-review job's if:. `edited` is absent: no job here reads
