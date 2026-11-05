@@ -6,8 +6,8 @@ Recorded case (friction class 449): a lane brought slot N up standalone with
 ``prepr_verify_lane.sh``, read "slot N is READY ... when the proof is done,
 destroy it", and exercised the slot. The standalone lease stopped heartbeating
 when the bring-up exited, so the reaper removed the slot five minutes later.
-The bring-up now names the lease expiry and the one-command path that keeps the
-lease alive; the lease and the reaper are unchanged.
+The completion message now names the default expiry window and the existing
+one-command path that keeps the lease alive; the lease and the reaper are unchanged.
 """
 
 from __future__ import annotations
@@ -15,8 +15,6 @@ from __future__ import annotations
 import importlib.util
 import os
 import subprocess
-import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -51,18 +49,6 @@ def standalone_lease(reaper: Any, root: Path) -> dict[str, Any]:
     )
 
 
-def test_notice_names_the_recorded_expiry_and_the_one_command_path(
-    reaper: Any, tmp_path: Path
-) -> None:
-    record = standalone_lease(reaper, tmp_path)
-    notice = reaper.exit_notice(tmp_path, 1, "standalone-token")
-    expires = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record["expires"]))
-    assert f"expires at {expires}" in notice
-    assert "(300s after its last heartbeat)" in notice
-    assert "standalone-4242" in notice
-    assert "prepr_teardown_slot.py run --slot 1 --holder <lane> -- bash" in notice
-
-
 def test_the_notice_matches_what_the_reaper_does_at_that_expiry(
     reaper: Any, tmp_path: Path
 ) -> None:
@@ -76,43 +62,48 @@ def test_the_notice_matches_what_the_reaper_does_at_that_expiry(
     assert after["verdict"] == "WOULD_REAP"
 
 
-def test_notice_refuses_another_runs_lease(reaper: Any, tmp_path: Path) -> None:
-    standalone_lease(reaper, tmp_path)
-    with pytest.raises(reaper.LeaseRefusedError):
-        reaper.exit_notice(tmp_path, 1, "other-token")
-
-
-def test_exit_notice_cli_reads_the_inherited_token(reaper: Any, tmp_path: Path) -> None:
-    standalone_lease(reaper, tmp_path)
-    env = {
-        **os.environ,
-        "ONEX_PREPR_LEASE_DIR": str(tmp_path),
-        "ONEX_PREPR_LEASE_TOKEN": "standalone-token",
-    }
+@pytest.mark.parametrize("inherited_token", ["", "outer-run-token"])
+def test_completion_output_names_standalone_expiry_and_safe_path(
+    tmp_path: Path, inherited_token: str
+) -> None:
+    descriptor = tmp_path / "slot.json"
+    descriptor.write_text('{"slot": 1}\n')
+    # Execute the shipped completion block without building or starting a slot.
+    completion = VERIFY.read_text().split('log "slot ${SLOT} is READY.', 1)[1]
     done = subprocess.run(
-        [sys.executable, str(HELPER), "exit-notice", "--slot", "1"],
-        env=env,
+        [
+            "bash",
+            "-eu",
+            "-c",
+            'log() { printf "%s\\n" "$*"; }; log "slot ${SLOT} is READY.' + completion,
+        ],
+        env={
+            **os.environ,
+            "SLOT": "1",
+            "DESCRIPTOR_OUT": str(descriptor),
+            "ONEX_PREPR_LEASE_TOKEN": inherited_token,
+        },
         capture_output=True,
         text=True,
         check=False,
     )
     assert done.returncode == 0, done.stderr
-    assert "the reaper removes the slot once the lease expires at" in done.stdout
-    refused = subprocess.run(
-        [sys.executable, str(HELPER), "exit-notice", "--slot", "1"],
-        env={**env, "ONEX_PREPR_LEASE_TOKEN": "other-token"},
-        capture_output=True,
-        text=True,
-        check=False,
+    output = done.stdout
+    assert "slot 1 is READY." in output
+    assert "standalone" in output
+    assert "last heartbeat" in output
+    assert "300s" in output
+    assert (
+        "prepr_teardown_slot.py run --slot 1 --holder <lane> -- bash <proof.sh>"
+        in output
     )
-    assert refused.returncode == 8
-    assert "belongs to another run" in refused.stderr
+    assert "prepr_teardown_slot.sh --slot 1 --reason <text>" in output
+    assert (
+        output.index("READY") < output.index("standalone") < output.index('{"slot": 1}')
+    )
 
 
-def test_only_a_standalone_bringup_prints_the_notice_after_ready() -> None:
-    text = VERIFY.read_text()
-    assert 'ONEX_PREPR_STANDALONE=1 exec "${PY}" "${LEASE_PY}" run' in text
-    ready = text.index('log "slot ${SLOT} is READY.')
-    gate = text.index('if [[ "${ONEX_PREPR_STANDALONE:-}" == "1" ]]; then')
-    notice = text.index('"${PY}" "${LEASE_PY}" exit-notice --slot "${SLOT}"')
-    assert ready < gate < notice
+def test_warning_describes_the_current_default_ttl(reaper: Any) -> None:
+    text = VERIFY.read_text().split('log "slot ${SLOT} is READY.', 1)[1]
+    assert f"{reaper.LEASE_DEFAULT_TTL:g}s" in text
+    assert "by default" in text
