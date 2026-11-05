@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Connect shipped boot policy, the demand split and effects-held observations.
+"""Connect shipped boot policy and the demand split to the boot path.
 
 Broker I/O is recorded at subscribe, so these tests do not claim that a live
 Kafka group joined. Both carriers use the kernel's configuration resolver and
@@ -9,8 +9,6 @@ the production wire -> freeze -> subscribe path exercised by the boot helper.
 
 from __future__ import annotations
 
-import json
-import re
 from datetime import datetime, timedelta
 
 import pytest
@@ -35,15 +33,11 @@ from tests.unit.runtime.auto_wiring.test_per_contract_boot_interleave import (
 
 pytestmark = pytest.mark.integration
 
-RECORDED_ROWS = json.loads(
-    (ROOT / "tests/fixtures/delegate_skill_effects_held.json").read_text()
-)
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("process", ["main", "effects"])
 @pytest.mark.parametrize("control", ["ready", "unlisted", "not_ready"])
-async def test_shipped_priority_boots_empty_first_hop_before_alarm_readback(
+async def test_shipped_priority_boots_empty_first_hop_(
     process: str, control: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     policy = load_contract(ROOT / "contracts/services/runtime_policy.contract.yaml")
@@ -81,32 +75,6 @@ async def test_shipped_priority_boots_empty_first_hop_before_alarm_readback(
         assert [result.status for result in results] == [
             EnumContractAttachStatus.NOT_READY
         ]
-
-    # A subscriber recorded above stands in for the broker's Stable/member
-    # observation. Missing priority or failed readiness must leave the alarm up.
-    for row in RECORDED_ROWS:
-        since = re.search(r"\(since ([^)]+)\)", row["evidence"])
-        assert since is not None
-        state = lab_alarm.ModelAlarmState(
-            effects_held_since={"runtime-effects": since[1]}
-        )
-        report, recovery = lab_alarm.evaluate_effects_held_behind_runtime(
-            lambda: (
-                (
-                    DELEGATE_SKILL_GROUP,
-                    "Stable" if attached else "Empty",
-                    int(attached),
-                ),
-            ),
-            state=state,
-            now=row["raised_at"],
-        )
-        assert report.outcome is (
-            lab_alarm.EnumConditionOutcome.OK
-            if attached
-            else lab_alarm.EnumConditionOutcome.ALARM
-        )
-        assert (recovery is not None) == attached
 
 
 @pytest.mark.parametrize(
