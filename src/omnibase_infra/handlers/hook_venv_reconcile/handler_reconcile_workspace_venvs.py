@@ -10,7 +10,6 @@ bound by node_reconcile_workspace_venvs for local bootstrap (OMN-19998).
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -225,16 +224,17 @@ class HandlerHookVenvReconcileHost:
         self, request: ModelHookVenvReconcileRequest, flag: str | None = None
     ) -> tuple[int, str]:
         """Run uv against exactly the requested project as the host owner."""
-        env = dict(os.environ)
+        env = scrub_git_location_env()
         env.pop("PYTHONPATH", None)
         env.pop("UV_PROJECT_ENVIRONMENT", None)
         args = [
             str(request.uv_bin),
             "sync",
-            "--frozen",
-            "--project",
-            str(request.project),
         ]
+        # uv before 0.7 refuses --frozen together with --dry-run (CI pins 0.6.14).
+        if flag != "--dry-run":
+            args.append("--frozen")
+        args += ["--project", str(request.project)]
         if flag:
             args.append(flag)
         try:

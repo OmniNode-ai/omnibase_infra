@@ -24,10 +24,15 @@ _CONTRACT = (
 )
 
 
-def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run(
+    args: list[str], cwd: Path, source_tree: bool = False
+) -> subprocess.CompletedProcess[str]:
     env = scrub_git_location_env(os.environ)
     env.pop("UV_PROJECT_ENVIRONMENT", None)
     env.pop("PYTHONPATH", None)
+    if source_tree:
+        # The runtime module is this checkout's; a cached CI env may hold an older install.
+        env["PYTHONPATH"] = str(_ROOT / "src")
     env["UV_OFFLINE"] = "true"
     return subprocess.run(
         args, cwd=cwd, env=env, capture_output=True, text=True, check=False, timeout=90
@@ -125,6 +130,7 @@ def test_bootstrap_reads_back_installer_revision_with_real_uv(
             str(_CONTRACT),
         ],
         _ROOT,
+        source_tree=True,
     )
     assert result.returncode == (0 if forward else 2), result.stdout + result.stderr
     expected = approved if forward else installed
