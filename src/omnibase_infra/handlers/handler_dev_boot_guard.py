@@ -16,18 +16,20 @@ import json
 import logging
 import math
 import re
-import subprocess
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import JsonValue, TypeAdapter
+from pydantic import JsonValue, RootModel
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.coding_agent.model_subprocess_outcome import (
+    ModelSubprocessOutcome,
+)
 from omnibase_infra.models.handlers.model_value_holder import ModelValueHolder
 from omnibase_infra.models.model_dev_boot_container import ModelDevBootContainer
 from omnibase_infra.models.model_dev_boot_point import ModelDevBootPoint
@@ -86,6 +88,105 @@ def _safe(text: str) -> str:
         .replace("|", " ")
         .split()
     )[:2000]
+
+
+def run_runtime_roll_step(
+    argv: list[str],
+    timeout: int,
+    *,
+    execution: ModuleType,
+    extra_env: Mapping[str, str] | None = None,
+) -> ModelSubprocessOutcome:
+    """Wait for one dev replacement's declared health before touching its peer.
+
+    The executor retains its compose model, environment and I/O boundary. A
+    failed wait is terminal even if a later read could find the project running
+    or at the expected config hash: those reads cannot prove the remaining
+    services were updated or that the replacement finished booting.
+    """
+    service = argv[-1]
+    lane = execution.EnumRuntimeLane.DEV
+    wait_budget = execution.runtime_health_probe_budget(lane, service)
+    command = list(argv)
+    index = command.index("--no-deps")
+    command[index:index] = ["--wait", "--wait-timeout", str(wait_budget)]
+    try:
+        result = execution._run(
+            command,
+            timeout=max(
+                timeout, wait_budget + execution.RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS
+            ),
+            env=execution._compose_env(extra_env),
+        )
+    except execution.subprocess.TimeoutExpired as exc:
+        raise DevBootFailedError(
+            f"Runtime roll stopped at {service}: compose up timed out"
+        ) from exc
+    if result.returncode != 0:
+        raise DevBootFailedError(
+            f"Runtime roll stopped at {service}: "
+            f"{_safe(result.stderr) or 'compose health wait failed'}"
+        )
+    if not execution.verify_containers_up(
+        [service], timeout_s=execution.CONTAINER_VERIFY_TIMEOUT_SECONDS, lane=lane
+    )[0]:
+        raise DevBootFailedError(
+            f"Runtime roll stopped at {service}: container did not reach running state"
+        )
+    return ModelSubprocessOutcome(
+        returncode=int(result.returncode),
+        stdout=str(result.stdout),
+        stderr=str(result.stderr),
+        timed_out=False,
+    )
+
+
+def run_compose_up_steps(
+    steps: list[list[str]],
+    timeout: int,
+    *,
+    rolling: bool,
+    lane: str,
+    execution: ModuleType,
+    extra_env: Mapping[str, str] | None = None,
+) -> tuple[ModelSubprocessOutcome, DevBootFailedError | None]:
+    """Stop a failed dev roll, retaining its verdict for container recovery.
+
+    Other lanes keep their running-state check and subprocess timeout path.
+    The executor may restore stopped containers after a dev failure, but must
+    raise the retained error even when that recovery succeeds.
+    """
+    env = execution._compose_env(extra_env)
+    result = ModelSubprocessOutcome(returncode=0, stdout="", stderr="", timed_out=False)
+    for step in steps:
+        if rolling and lane is execution.EnumRuntimeLane.DEV:
+            try:
+                result = run_runtime_roll_step(
+                    step, timeout, execution=execution, extra_env=extra_env
+                )
+            except DevBootFailedError as exc:
+                return ModelSubprocessOutcome(
+                    returncode=1, stdout="", stderr=str(exc), timed_out=False
+                ), exc
+        else:
+            process = execution._run(step, timeout=timeout, env=env)
+            result = ModelSubprocessOutcome(
+                returncode=int(process.returncode),
+                stdout=str(process.stdout),
+                stderr=str(process.stderr),
+                timed_out=False,
+            )
+        if result.returncode != 0 or (
+            rolling
+            and lane is not execution.EnumRuntimeLane.DEV
+            and not execution.verify_containers_up(
+                step[-1:],
+                timeout_s=execution.CONTAINER_VERIFY_TIMEOUT_SECONDS,
+                lane=lane,
+            )[0]
+        ):
+            break
+    return result, None
 
 
 def preflight_dev_images(
@@ -169,10 +270,12 @@ def _window(container: ModelDevBootContainer) -> int:
 def _unchanged_and_healthy(
     point: ModelDevBootPoint,
     read_containers: Callable[[], list[ModelDevBootContainer]],
+    *,
+    execution: ModuleType,
 ) -> bool:
     try:
         current = read_containers()
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+    except (OSError, ValueError, RuntimeError, execution.subprocess.SubprocessError):
         return False
     return (
         all(_healthy(c) for c in current)
@@ -181,10 +284,12 @@ def _unchanged_and_healthy(
     )
 
 
-def _all_healthy(read_containers: Callable[[], list[ModelDevBootContainer]]) -> bool:
+def _all_healthy(
+    read_containers: Callable[[], list[ModelDevBootContainer]], *, execution: ModuleType
+) -> bool:
     try:
         return all(_healthy(c) for c in read_containers())
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+    except (OSError, ValueError, RuntimeError, execution.subprocess.SubprocessError):
         return False
 
 
@@ -331,8 +436,12 @@ class HandlerDevBootGuard:
         ).split()
         if not ids:
             raise DevBootFailedError("dev runtime containers are absent")
-        raw = TypeAdapter(list[ModelDevBootContainer]).validate_json(
-            _checked(["docker", "inspect", *ids], execution=self.execution)
+        raw = (
+            RootModel[list[ModelDevBootContainer]]
+            .model_validate_json(
+                _checked(["docker", "inspect", *ids], execution=self.execution)
+            )
+            .root
         )
         containers: list[ModelDevBootContainer] = []
         for container in raw:
@@ -352,7 +461,7 @@ class HandlerDevBootGuard:
 
     def wait(self) -> None:
         """All replicas must be Docker healthy; exhausted boots fail immediately."""
-        started = time.monotonic()
+        started = self.execution._dev_boot_clock()
         containers = self._containers()
         window = max(_window(c) for c in containers)
         logger.info(
@@ -389,7 +498,7 @@ class HandlerDevBootGuard:
                 failures.append(service)
             if not failures:
                 return
-            remaining = window - (time.monotonic() - started)
+            remaining = window - (self.execution._dev_boot_clock() - started)
             if remaining <= 0:
                 raise DevBootFailedError(
                     f"dev boot window exhausted ({window}s): {', '.join(failures)}"
@@ -401,26 +510,30 @@ class HandlerDevBootGuard:
         containers = self._containers()
         if not all(_healthy(c) for c in containers):
             raise DevBootFailedError("cannot capture an unhealthy dev runtime")
-        rendered = TypeAdapter(dict[str, JsonValue]).validate_json(
-            _checked(
-                [
-                    "docker",
-                    "compose",
-                    *self.execution._compose_file_args(
-                        self.execution.EnumRuntimeLane.DEV
-                    ),
-                    "-p",
-                    self.config.compose_project,
-                    "--profile",
-                    "runtime",
-                    "config",
-                    "--format",
-                    "json",
-                ],
-                self.execution.CONFIG_HASH_TIMEOUT_SECONDS,
-                env=self.execution._compose_env(),
-                execution=self.execution,
+        rendered = (
+            RootModel[dict[str, JsonValue]]
+            .model_validate_json(
+                _checked(
+                    [
+                        "docker",
+                        "compose",
+                        *self.execution._compose_file_args(
+                            self.execution.EnumRuntimeLane.DEV
+                        ),
+                        "-p",
+                        self.config.compose_project,
+                        "--profile",
+                        "runtime",
+                        "config",
+                        "--format",
+                        "json",
+                    ],
+                    self.execution.CONFIG_HASH_TIMEOUT_SECONDS,
+                    env=self.execution._compose_env(),
+                    execution=self.execution,
+                )
             )
+            .root
         )
         hashes = self.config_hashes(self.services)
         for container in containers:
@@ -499,12 +612,19 @@ class HandlerDevBootGuard:
         try:
             self.point.hold(self._capture())
             return
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        except (
+            OSError,
+            ValueError,
+            RuntimeError,
+            self.execution.subprocess.SubprocessError,
+        ):
             if not self.snapshot_path.is_file():
                 raise DevBootFailedError(
                     "no last healthy dev revision; refusing runtime replacement"
                 ) from None
-        point = ModelDevBootPoint.model_validate_json(self.snapshot_path.read_text())
+        point = ModelDevBootPoint.model_validate_json(
+            self.execution._read_private_text(self.snapshot_path)
+        )
         if point.project != self.config.compose_project:
             raise DevBootFailedError("last healthy snapshot belongs to another project")
         # A snapshot of another fold generation is held, not refused here: the
@@ -585,7 +705,12 @@ class HandlerDevBootGuard:
                     boot_causes.extend(
                         line for line in logs.splitlines() if "BOOT FAILED" in line
                     )
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                self.execution.subprocess.SubprocessError,
+            ):
                 logger.warning("Cannot read failed dev boot causes")
             reason = _safe(f"{exc}; {'; '.join(dict.fromkeys(boot_causes))}")
             incident: dict[str, JsonValue] = {
@@ -594,7 +719,7 @@ class HandlerDevBootGuard:
                 "error": reason,
                 "status": "failed",
                 "project": self.config.compose_project,
-                "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "at": self.execution._dev_boot_timestamp(),
                 "restored_revision": self.point.current.revision,
                 "recovery_verified": False,
                 "ledger_pending": True,
@@ -608,12 +733,14 @@ class HandlerDevBootGuard:
             except (OSError, RuntimeError):
                 logger.exception("Cannot persist failed dev deploy before recovery")
             try:
-                unchanged = _unchanged_and_healthy(self.point.current, self._containers)
+                unchanged = _unchanged_and_healthy(
+                    self.point.current, self._containers, execution=self.execution
+                )
                 kept_revision: str | None = None
                 if (
                     isinstance(exc, DevCompanionLaneFailedError)
                     and not unchanged
-                    and _all_healthy(self._containers)
+                    and _all_healthy(self._containers, execution=self.execution)
                 ):
                     # OMN-21645: the companion lane failed after the new
                     # runtime was replaced and verified. Rolling that healthy
@@ -629,7 +756,7 @@ class HandlerDevBootGuard:
                         OSError,
                         ValueError,
                         RuntimeError,
-                        subprocess.SubprocessError,
+                        self.execution.subprocess.SubprocessError,
                     ):
                         kept_revision = None
                 if kept_revision is not None:
@@ -642,7 +769,7 @@ class HandlerDevBootGuard:
                 OSError,
                 ValueError,
                 RuntimeError,
-                subprocess.SubprocessError,
+                self.execution.subprocess.SubprocessError,
             ) as recovery:
                 incident["recovery_error"] = _safe(str(recovery))
                 logger.exception("Dev recovery failed for commit=%s", commit)
@@ -680,7 +807,11 @@ def deliver_reports(
     plugin = config.plugin_dir
     interpreter = str(config.registry_root / ".onex-dispatch-venv" / "bin" / "python")
     for path in root.glob("incident-*.json"):
-        incident = TypeAdapter(dict[str, JsonValue]).validate_json(path.read_text())
+        incident = (
+            RootModel[dict[str, JsonValue]]
+            .model_validate_json(execution._read_private_text(path))
+            .root
+        )
         evidence = (
             f"commit={incident['commit']} job={incident['job']} error={incident['error']} "
             f"restored_revision={incident['restored_revision']} recovery_verified={incident['recovery_verified']}"
@@ -746,7 +877,7 @@ def deliver_reports(
                 if acknowledged:
                     incident[pending] = False
                     execution._atomic_write_private_json(path, incident)
-            except (OSError, subprocess.SubprocessError):
+            except (OSError, execution.subprocess.SubprocessError):
                 logger.warning(
                     "Dev boot incident %s delivery still pending: %s",
                     incident["job"],
