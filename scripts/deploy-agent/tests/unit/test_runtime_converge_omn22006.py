@@ -68,7 +68,10 @@ class _Lane:
         self.largest_recreate = 0
         self.fail_up_for = ""
         self.not_running = ""
+        self.not_healthy = ""
+        self.timed_out = ""
         self.events: list[str] = []
+        self.phases: list[tuple[Phase, PhaseStatus]] = []
 
     def run(self, cmd: list[str], timeout: int = 0, **_: Any) -> Any:
         if "config" in cmd and "--hash" in cmd:
@@ -84,7 +87,11 @@ class _Lane:
     def _compose_up(self, cmd: list[str]) -> Any:
         self.ups.append(list(cmd))
         services = cmd[cmd.index("--no-deps") + 1 :]
+        if self.timed_out in services:
+            raise subprocess.TimeoutExpired(cmd, 900)
         if self.fail_up_for in services:
+            return _ok(returncode=1)
+        if "--wait" in cmd and self.not_healthy in services:
             return _ok(returncode=1)
         forced = "--force-recreate" in cmd
         replaced = [
@@ -129,12 +136,18 @@ def _run_runtime_phase(lane: _Lane, **kwargs: Any) -> None:
         patch.object(executor_mod, "finish_recreate_renames", lambda lane: []),
         patch.object(executor_mod, "preflight_dev_images", lambda *a, **k: None),
         patch.object(executor_mod, "runtime_compose_up_budget", lambda *a: budget),
+        patch.object(executor_mod, "runtime_health_probe_budget", lambda *a: 900),
         patch.object(executor, "_ensure_runtime_migrations_ready"),
         patch.object(executor, "rerun_changed_oneshots", return_value=[]),
         patch.object(executor, "_retire_folded_dev_services"),
     ):
         executor._compose_up(
-            Phase.RUNTIME, Scope.RUNTIME, [], _noop, lane=EnumRuntimeLane.DEV, **kwargs
+            Phase.RUNTIME,
+            Scope.RUNTIME,
+            [],
+            lambda phase, status: lane.phases.append((phase, status)),
+            lane=EnumRuntimeLane.DEV,
+            **kwargs,
         )
 
 
@@ -234,16 +247,44 @@ class TestRuntimePhaseRolling:
         assert lane.recreated == issued[:-1]
         assert len(issued) < 19
 
-    def test_runtime_phase_rolling_stops_at_the_first_service_that_is_not_running(
+    @pytest.mark.parametrize("failed_service", ["omninode-runtime", "runtime-effects"])
+    def test_runtime_phase_rolling_refuses_a_service_that_is_not_running(
+        self,
+        failed_service: str,
+    ) -> None:
+        lane = _fixture_lane()
+        lane.current_image = NEW_IMAGE
+        lane.not_running = failed_service
+        with pytest.raises(RuntimeError, match=failed_service):
+            _run_runtime_phase(lane)
+        issued = [a[-1] for a in lane.ups]
+        assert issued[-1] == failed_service
+        assert len(issued) < 19
+        assert (Phase.RUNTIME, PhaseStatus.SUCCESS) not in lane.phases
+
+    def test_runtime_phase_rolling_does_not_replace_a_peer_while_boot_is_unhealthy(
         self,
     ) -> None:
         lane = _fixture_lane()
         lane.current_image = NEW_IMAGE
-        lane.not_running = "runtime-effects"
-        _run_runtime_phase(lane)
-        issued = [a[-1] for a in lane.ups]
-        assert issued[-1] == "runtime-effects"
-        assert len(issued) < 19
+        lane.not_healthy = "omninode-runtime"
+        with pytest.raises(RuntimeError, match="omninode-runtime"):
+            _run_runtime_phase(lane)
+        assert [a[-1] for a in lane.ups] == ["omninode-runtime"]
+        assert lane.running["runtime-effects"]["image"] == OLD_IMAGE
+        assert (Phase.RUNTIME, PhaseStatus.SUCCESS) not in lane.phases
+
+    def test_runtime_phase_rolling_timeout_does_not_report_a_partial_roll_successful(
+        self,
+    ) -> None:
+        lane = _fixture_lane()
+        lane.current_image = NEW_IMAGE
+        lane.timed_out = "runtime-effects"
+        with pytest.raises(RuntimeError, match="runtime-effects: compose up timed out"):
+            _run_runtime_phase(lane)
+        assert [a[-1] for a in lane.ups] == ["omninode-runtime", "runtime-effects"]
+        assert lane.running["runtime-worker"]["image"] == OLD_IMAGE
+        assert (Phase.RUNTIME, PhaseStatus.SUCCESS) not in lane.phases
 
     def test_runtime_phase_rolling_restore_path_still_forces_one_up(self) -> None:
         """The auto-rollback restore passes ``build=False`` and keeps its force."""

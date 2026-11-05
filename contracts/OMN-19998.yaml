@@ -180,7 +180,23 @@ requirements:
     acceptance:
       - id: AC38
         statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
+  - id: req-omn19998-gapless-roll-failure
+    statement: A rolling dev runtime update must wait for each service's declared health before updating its peer, and must fail at a non-running, unhealthy or timed-out step without reporting a partial roll successful.
+    acceptance:
+      - id: AC39
+        statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-runner-v2338-2
+    statement: The runner image must bake runner 2.338.2 with its x64 and arm64 checksums, a matching lock version and a valid bound identity, so rebuilding does not restore the refused 2.336.0 runner.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: docker/runners/Dockerfile pins runner 2.338.2 and both architecture checksums, docker/runners/runner-image.lock.json records 2.338.2 with a valid identity, and the existing fleet-floor and multiarch tests pass; the 2.336.0 merge-base Dockerfile fails the head fleet-floor test and the exact-pin deployment probe.'
 evidence_requirements:
+  - kind: tests
+    description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
+    command: uv run pytest tests/ci/test_runner_image_node24_floor.py tests/ci/test_runner_image_multiarch.py -q -n 0
+  - kind: tests
+    description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
@@ -267,6 +283,58 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac40-runner-pin
+    description: AC40 runs the existing runner floor and multiarch tests against the checkout. The head floor rejects the recorded 2.336.0 Dockerfile; the head's 2.338.2 Dockerfile passes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_node24_floor.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_multiarch.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac40-runner-pin-deploy-probe
+    description: Hosted deployment artifact probe for AC40. Reads this checkout's Dockerfile and lock, requires the exact 2.338.2 version and both architecture checksums, then recomputes the bound identity. The merge-base 2.336.0 image fails the exact-pin assertion. This probe requires no Docker daemon, credentials or live runner changes and makes no live installation claim.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c "import json; from pathlib import Path; d=Path('docker/runners/Dockerfile').read_text().splitlines(); assert 'ARG RUNNER_VERSION=2.338.2' in d; assert 'ENV RUNNER_SHA256_AMD64=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40' in d; assert 'ENV RUNNER_SHA256_ARM64=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945' in d; assert json.loads(Path('docker/runners/runner-image.lock.json').read_text())['runner_version']=='2.338.2'; print('runner 2.338.2 and both architecture pins match')"
+        cwd: .
+      - check_type: command
+        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac39-runtime-roll
+    description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_compose_budget_omn18057.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_executor_runtime_timeout_recovery_omn18057.py scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC39
+  - id: dod-omn19998-ac39-runtime-roll-deploy-source
+    description: Hosted behavioral probe for AC39 from this checkout. The real executor loads its boot-guard effect and replays failed running checks, health waits and deadlines through the Docker adapter, requiring a failed roll after recovery without advancing peer images or emitting success. The convergence replay also exercises successful and unchanged rolls and forced rollback. No network source read, live installation or uninterrupted readiness is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+    binds_ac:
+      - AC39
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual

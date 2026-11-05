@@ -751,6 +751,22 @@ requirements:
     acceptance:
       - id: AC17427650001
         statement: 'A sleep made outside the probe is not recorded by the test fixture, and the probe retry assertions still hold -- falsifier: uv run pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q fails at the merge base on test_a_sleep_outside_the_probe_is_not_recorded'
+  - id: req-omn17427-release-train-readme-only-notes
+    statement: The release train writes a release's notes where the target repo's documentation policy accepts them, through node_release_notes_apply_effect, so a README-only repo's release PR is not born red on a root CHANGELOG.md.
+    acceptance:
+      - id: AC17427700001
+        statement: 'For a repo carrying .readme-only-docs.yaml that does not except CHANGELOG.md, node_release_notes_apply_effect puts the release block in root README.md above the newest release section, deletes a root CHANGELOG.md, and extends the release-cut contract and identity test the repository carries; a repo without the file keeps the CHANGELOG.md prepend -- falsifier: uv run pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q -n 0 fails when the node emits CHANGELOG.md for a README-only clone'
+      - id: AC17427700002
+        statement: 'The release-train-nightly cut job writes through `onex node node_release_notes_apply_effect` and carries no inline CHANGELOG.md write -- falsifier: the workflow test in tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py fails on an inline CHANGELOG.md write'
+      - id: AC17427700003
+        statement: Release headings inside fenced examples do not select the insert position, the highest semantic release version selects it, and empty entries, duplicate release identities and contracts whose final YAML field is not a dod_evidence sequence refuse before writes.
+  - id: req-omn17427-auto-wiring-dir-effect-archetype
+    statement: handler_wiring.py under src/omnibase_infra/runtime/auto_wiring/ passes the no-io-outside-effects hook because the directory declares the effect archetype.
+    acceptance:
+      - id: AC17427680001
+        statement: 'The auto-wiring directory contract declares node_type EFFECT_GENERIC and node_archetype effect, handler_wiring.py passes the no-io-outside-effects validator beside it, and a copy of the module passes with the local effect declaration and fails with the six expected I/O rule codes after that declaration is removed beneath an explicit compute boundary -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q fails at the merge base because the contract file does not exist there'
+      - id: AC17427680002
+        statement: The auto-wiring EFFECT boundary does not exempt a sibling COMPUTE component, and a nearer COMPUTE contract overrides it for a nested component; both refuse an environment read with env_read at its source line.
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -971,6 +987,9 @@ evidence_requirements:
   - kind: tests
     description: Every baseline entry is matched against sha1 of the stripped lines of the file it names; a planted absent line and a missing file are each reported. At the merge base 37 entries are stale.
     command: uv run --frozen pytest tests/ci/test_model_config_baseline_no_stale_omn17427.py -n 0 -q --no-cov
+  - kind: tests
+    description: The release-notes target is read from the clone's .readme-only-docs.yaml; a README-only clone gets the block in README.md with the pinned identity test and dod_evidence item and no CHANGELOG.md, a changelog repo keeps the prepend, and the cut job runs the node.
+    command: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q -n 0 --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -3416,3 +3435,51 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q --no-cov
         cwd: .
     binds_ac: [AC17427650001]
+  - id: dod-omn17427-release-train-readme-only-notes
+    description: The release-notes target is read from the clone's .readme-only-docs.yaml; a README-only clone gets the block in README.md with the pinned identity test and dod_evidence item and no CHANGELOG.md, a changelog repo keeps the prepend, and the cut job runs the node.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427700001, AC17427700002]
+  - id: dod-omn17427-release-notes-effect-deploy
+    description: Hosted-runner deploy check validates the effect contract with the core I/O validator and runs the real node CLI against disposable local checkouts. Reads every staged path from the runtime receipt through the cut job's shell expression, including a checkout path with spaces. Requires Bash and jq but no Docker daemon, credentials, broker or deployed lane.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/integration/cli/test_release_notes_apply_node_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac: [AC17427700001, AC17427700002]
+  - id: dod-omn17427-auto-wiring-dir-effect-archetype
+    description: Runs the no-io-outside-effects validator on handler_wiring.py beside the directory contract and on the same copy before and after removing its local effect declaration. An explicit compute boundary beneath an outer effect declaration isolates lookup; the negative control requires exactly the six I/O rule codes. The contract file is new, so the test fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427680001]
+  - id: dod-omn17427-auto-wiring-effect-boundary
+    description: Plants an environment read in sibling and nested compute components and requires the env_read diagnostic at the source line in both. The nested contract must override the auto-wiring EFFECT declaration.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q -k non_effect_components --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427680002]
+  - id: dod-omn17427-auto-wiring-effect-hosted-deploy
+    description: Hosted-runner deploy check reads the shipped runtime contract and wiring source and executes the paired EFFECT/COMPUTE controls plus sibling and nested isolation. Requires no containers, credentials, network or deployed lane; it does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_auto_wiring_dir_declares_effect_archetype_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427680001, AC17427680002]
+  - id: dod-omn17427-release-notes-safe-append
+    description: Hosted-runner check exercises Markdown fences, semantic version ordering, trailing YAML keys and document boundaries, duplicate notes and partial companion cuts, plus real node CLI readbacks and refusals against disposable local checkouts. Requires Bash and jq, with no containers, credentials or broker.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/integration/cli/test_release_notes_apply_node_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac: [AC17427700001, AC17427700002, AC17427700003]
