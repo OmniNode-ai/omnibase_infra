@@ -33,10 +33,10 @@ requirements:
       - id: AC8
         statement: Every h051 merge-queue runner has a CPU quota of at least four CPUs for the slower host cores.
   - id: req-lane-tmp-age-bound
-    statement: Retired pytest scratch under the temporary directory is age bound without sweeping live test, lane or service trees.
+    statement: Retired pytest scratch under the host's /tmp is age bound without sweeping live test, lane or service trees; custom TMPDIR, basetemp and PrivateTmp namespaces need their owners' cleanup policies.
     acceptance:
       - id: AC9
-        statement: deploy/disk-gc/onex-lane-tmp.tmpfiles.conf bounds retired pytest garbage trees at 12h and leaves numbered pytest runs, lane trees and unrelated service directories untouched.
+        statement: deploy/disk-gc/onex-lane-tmp.tmpfiles.conf bounds retired pytest garbage trees under /tmp at 12h, removes their empty directories and leaves every other entry, including numbered pytest runs, locks, stray files, lane trees and service directories untouched.
 evidence_requirements:
   - kind: tests
     description: The merge-queue pool declaration test and the existing pool and fleet tests pass.
@@ -129,10 +129,19 @@ dod_evidence:
           bash -o pipefail -c 'for p in hp051 hp053; do gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-${p}-ci-mq-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "${p}-ci-mq-runner-4" > /dev/null; done'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-lane-tmp-age-bound
-    description: The tmpfiles rule file bounds only retired pytest garbage trees; the real cleaner removes retired contents and preserves live and unrelated trees.
+    description: The tmpfiles exclusions protect every name outside garbage-*, including partial prefixes and dot entries. The real cleaner removes old retired contents and directories, keeps fresh garbage and preserves numbered runs, locks, stray files, symlinks and empty pytest-of parents.
     source: manual
     binds_ac: [AC9]
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_lane_tmp_sweep.py -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-lane-tmp-published-definition
+    description: Hosted deployment-definition readback fetches the tmpfiles configuration at the evaluated commit through the GitHub contents API. It requires a 12h parent rule, exclusions for numbered runs, locks and stray names, and no exclusion of retired garbage. This probes the published definition only; installation and custom temporary namespaces remain the host owner's responsibility.
+    source: manual
+    binds_ac: [AC9]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/deploy/disk-gc/onex-lane-tmp.tmpfiles.conf?ref=$(git rev-parse HEAD)" --jq .content | env PYTHONDONTWRITEBYTECODE=1 uv run python -c '\''import base64, fnmatch, sys; text = base64.b64decode(sys.stdin.read()).decode(); rows = [line.split() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]; assert all(len(row) == 6 for row in rows); assert [row for row in rows if row[0] == "e"] == [["e", "/tmp/pytest-of-*", "-", "-", "-", "12h"]]; exclusions = [row[1] for row in rows if row[0] == "x"]; names = [".lock", "pytest-0", "pytest-current", "stray.txt", "custom-run", "g", "ga", "gar", "garb", "garba", "garbag", "garbage", "garbagex"]; assert all(any(fnmatch.fnmatchcase("/tmp/pytest-of-lane/" + name, pattern) for pattern in exclusions) for name in names); assert not any(fnmatch.fnmatchcase("/tmp/pytest-of-lane/garbage-retired", pattern) for pattern in exclusions)'\'''
         cwd: ${OMNI_HOME}/omnibase_infra

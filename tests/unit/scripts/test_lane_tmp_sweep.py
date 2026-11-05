@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import subprocess
@@ -85,9 +86,22 @@ def test_a_malformed_age_is_refused() -> None:
 
 
 def test_only_retired_pytest_trees_have_an_age_bound() -> None:
-    # Numbered runs are excluded; generic lane/service roots are not matched.
+    # The parent rule can remove empty retired directories. Its exclusions must
+    # shield every other entry, including names sharing part of garbage-.
     assert _ages() == {_ROOT + "/pytest-of-*": 12 * 3600}
-    assert [r[1] for r in _rules() if r[0] == "x"] == [_ROOT + "/pytest-of-*/pytest-*"]
+    exclusions = [r[1] for r in _rules() if r[0] == "x"]
+    names = [".lock", "pytest-current", "pytest-0", "stray.txt", "service"]
+    for length in range(len("garbage-")):
+        prefix = "garbage-"[:length]
+        names.extend((prefix, prefix + "x", prefix + "x-tail"))
+    for name in filter(None, names):
+        assert any(
+            fnmatch.fnmatchcase(f"{_ROOT}/pytest-of-lane/{name}", p) for p in exclusions
+        ), name
+    for name in ("garbage-", "garbage-old", "garbage-fresh"):
+        assert not any(
+            fnmatch.fnmatchcase(f"{_ROOT}/pytest-of-lane/{name}", p) for p in exclusions
+        ), name
 
 
 def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
@@ -96,9 +110,13 @@ def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
     scratch = root / "tmp"
     fixtures = {
         "pytest-of-lane/pytest-0/input.db": "live fixture",
-        "pytest-of-lane/pytest-0/.lock": str(os.getpid()),
+        "pytest-of-lane/pytest-0/.lock": "lock contents are not a liveness check",
         "pytest-of-lane/garbage-retired/nested/input.db": "retired fixture",
         "pytest-of-lane/garbage-empty/.keep": "retired marker",
+        "pytest-of-retired-only/garbage-old/input.db": "retired fixture",
+        "pytest-of-lane/stray.txt": "unrelated user file",
+        "pytest-of-lane/.lock": "unrelated lock",
+        "pytest-of-lane/custom-run/input.db": "unrelated tree",
         "claude-lane/input.db": "live lane",
         "service-worker/input.db": "service state",
     }
@@ -106,6 +124,23 @@ def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
         path = scratch / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(contents)
+    parent = scratch / "pytest-of-lane"
+    preserved_names = ["g", "ga", "gar", "garb", "garba", "garbag", "garbage"]
+    preserved_names += [
+        "x",
+        "gx",
+        "gax",
+        "garx",
+        "garbx",
+        "garbax",
+        "garbagx",
+        "garbagex",
+    ]
+    for name in preserved_names:
+        (parent / name).write_text("unrelated prefix")
+    (parent / "pytest-current").symlink_to("pytest-0", target_is_directory=True)
+    (parent / "garbage-already-empty").mkdir()
+    (scratch / "pytest-of-empty").mkdir()
     config = tmp_path / "cleanup.conf"
     # Scale only the age; retain the shipped rule types and path globs.
     config.write_text(
@@ -114,8 +149,22 @@ def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
         )
         + "\n"
     )
-    # ctime cannot be set with utime: let every fixture age beyond the test bound.
-    time.sleep(2)
+    # Default aging includes file ctime, which utime cannot backdate. Wait for
+    # the measured timestamps, with a full second margin for coarse clocks.
+    newest = max(p.stat().st_ctime for p in scratch.rglob("*"))
+    deadline = time.monotonic() + 10
+    while time.time() <= newest + 2:
+        assert time.monotonic() < deadline, (
+            "clock did not advance past old fixture timestamps"
+        )
+        time.sleep(0.05)
+    fresh = parent / "garbage-fresh" / "input.db"
+    fresh.parent.mkdir()
+    fresh.write_text("fresh retired fixture")
+    # A future mtime keeps this side of the boundary stable even on a busy host.
+    future = time.time() + 3600
+    os.utime(fresh, (future, future))
+    os.utime(fresh.parent, (future, future))
     cleaned = subprocess.run(
         ["systemd-tmpfiles", "--clean", f"--root={root}", str(config)],
         capture_output=True,
@@ -129,7 +178,17 @@ def test_cleanup_preserves_live_and_unrelated_trees(tmp_path: Path) -> None:
             assert not (scratch / relative).exists(), "retired scratch must be cleaned"
         else:
             assert (scratch / relative).read_text() == contents
-    for retired in ("garbage-retired", "garbage-empty"):
+    for retired in ("garbage-retired", "garbage-empty", "garbage-already-empty"):
         assert not (scratch / "pytest-of-lane" / retired).exists(), (
             "retired directory must be removed, not left empty"
         )
+    assert fresh.read_text() == "fresh retired fixture"
+    assert parent.is_dir()
+    assert (scratch / "pytest-of-empty").is_dir()
+    emptied = scratch / "pytest-of-retired-only"
+    assert emptied.is_dir()
+    assert list(emptied.iterdir()) == []
+    assert (parent / "pytest-current").is_symlink()
+    assert (parent / "pytest-current").readlink() == Path("pytest-0")
+    for name in preserved_names:
+        assert (parent / name).read_text() == "unrelated prefix"
