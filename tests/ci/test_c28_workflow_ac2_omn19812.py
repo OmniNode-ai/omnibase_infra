@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""AC2 coverage for the scheduled C28 dev-lane request and its record."""
+"""AC2 coverage for the scheduled C28 lane request and its record."""
 
 from pathlib import Path
 
@@ -16,16 +16,18 @@ WORKFLOW = (
 )
 
 
-def test_c28_resolves_the_dev_compose_project() -> None:
+def test_c28_resolves_the_stability_compose_project() -> None:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     resolver = workflow["jobs"]["resolve-lane"]
     step = next(step for step in resolver["steps"] if step.get("id") == "lane")
     assert step["uses"] == "./.github/actions/resolve-lab-lane"
-    assert step["with"]["lanes-json"] == "${{ vars.LAB_LANES_JSON }}"
-    assert step["with"]["match"] == "compose_project=omnibase-infra"
+    # OMN-21485: C28 grades the stability lane, never the dev lane.
+    assert step["with"]["lanes-json"] == "${{ vars.LAB_PROOF_LANES_JSON }}"
+    assert step["with"]["match"] == "lane_role=stability"
     assert set(step["with"]["require"].split()) == {
         "projection_url",
         "docker_runs_on",
+        "compose_project",
     }
     assert resolver["outputs"]["lane"] == "${{ steps.lane.outputs.name }}"
     assert resolver["outputs"]["lane_json"] == "${{ steps.lane.outputs.lane }}"

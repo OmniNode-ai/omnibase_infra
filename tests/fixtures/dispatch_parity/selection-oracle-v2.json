@@ -614,6 +614,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f": {
+      "category": "command",
+      "contract_name": "node_deploy_runners",
+      "event_model_module": "omnibase_infra.models.model_deploy_runners_request",
+      "event_model_name": "ModelDeployRunnersRequest",
+      "handler_id": "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f",
+      "handler_module": "omnibase_infra.handlers.handler_deploy_runners",
+      "handler_name": "HandlerDeployRunners",
+      "message_types": [
+        "ModelDeployRunnersRequest",
+        "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
+        "platform.runner-tmp-prepare"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_4314b56c": {
       "category": "event",
       "contract_name": "node_dlq_replay_effect",
@@ -3779,15 +3795,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 148
+        "omnibase_infra": 149
       },
-      "contracts_discovered": 169,
+      "contracts_discovered": 170,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 101,
-      "probe_count": 1130,
-      "registered_dispatchers": 135,
-      "registered_routes": 118,
-      "type_scoped_dispatchers": 82
+      "distinct_subscribe_topics": 102,
+      "probe_count": 1133,
+      "registered_dispatchers": 136,
+      "registered_routes": 119,
+      "type_scoped_dispatchers": 83
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3833,7 +3849,7 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-06T02:03:10.298980+00:00",
+    "generated_at_utc": "2026-11-06T01:56:32.324537+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.66",
       "omnibase-infra": "0.38.77",
@@ -4529,6 +4545,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}"
+    },
+    "P1a::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.runner-tmp-prepare",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.runner-tmp-prepare",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}"
     },
     "P1a::${topic:contract:platform.CMD_TICKET_CONTRACT_COMPOSE_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -6069,6 +6100,21 @@
       },
       "topic": "${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}"
     },
+    "P1b::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}"
+    },
     "P1b::${topic:contract:platform.CMD_TICKET_CONTRACT_COMPOSE_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -7573,6 +7619,26 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnimarket.EVT_DELEGATE_SKILL_FAILED_V1}"
+    },
+    "P4::dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f",
+      "event_model": "omnibase_infra.models.model_deploy_runners_request.ModelDeployRunnersRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runner-tmp-prepare",
+        "payload": "ModelDeployRunnersRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.runner-tmp-prepare",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}"
     },
     "P4::dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6::${topic:contract:platform.CMD_HOTPATCH_LEDGER_RECONCILE_V1}": {
       "construct_only": true,
@@ -25787,6 +25853,16 @@
       "route_id": "route.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e.onex_evt_omnimarket_delegate_skill_completed_v1",
       "topic": "${topic:contract:omnimarket.EVT_DELEGATE_SKILL_COMPLETED_V1}",
       "topic_pattern": "*.evt.omnimarket.delegate-skill-completed.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_deploy_runners",
+      "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f",
+      "handler_id": "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f",
+      "message_category": "command",
+      "route_id": "route.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f.onex_cmd_platform_runner_tmp_prepare_v1",
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
+      "topic_pattern": "*.cmd.platform.runner-tmp-prepare.*",
       "type_scoped": true
     },
     {

@@ -18,26 +18,18 @@
 name: ARM64 Verify Runner Proof
 
 on:
-  # PATH-SCOPED, and the scope is the point. A change to the runner image, the
-  # host inventory or a host's compose file is exactly the change whose author
-  # should learn immediately that the arm64 host is not actually able to run a
-  # job -- that is the defect class this whole change exists to remove, and
-  # learning it at provisioning time rather than at merge time is the lab-first
-  # rule applied to the fleet itself. No other PR triggers this, so no unrelated
-  # change depends on one desk machine being awake.
-  pull_request:
-    branches: [main, dev, develop]
-    paths:
-      - 'docker/runners/**'
-      - 'docker/docker-compose.runners*.yml'
-      - 'config/runner_fleet.yaml'
-      - '.github/workflows/arm64-verify-runner-proof.yml'
-      - '.github/actions/resolve-arm64-proof-legs/**'
+  # RULING 2026-11-05T17:39:59Z: a public repository's job on an internal
+  # runner is a mistake, and the arm64 verify host is an internal runner. The
+  # pull_request trigger (path-scoped to runner image, inventory and compose
+  # changes) and the daily schedule are gone, because each placed a public job
+  # on the lab verify pool and the arm64 leg waited on the one host that is
+  # offline, so it held every pull request that touched those paths. What is
+  # left is the operator's own hand: a dispatch from the Actions tab, which runs
+  # the same four assertions on the same legs. When the verify runner group
+  # stops taking public repositories this workflow cannot start at all. No
+  # scheduled replacement for the daily reading exists yet; the pull request
+  # that removed these triggers names that gap.
   workflow_dispatch:
-  schedule:
-    # Once a day. The host is a desk machine, not a datacentre: a frequent poll
-    # buys nothing and a daily reading is enough to notice it has gone away.
-    - cron: '17 6 * * *'
 
 permissions:
   contents: read

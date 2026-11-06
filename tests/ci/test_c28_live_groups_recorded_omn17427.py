@@ -23,6 +23,9 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
     ConsumerFlowLane,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 from scripts.ci import c28_consumer_flow_probe as script
 
 pytestmark = pytest.mark.unit
@@ -56,7 +59,10 @@ def test_recorded_index_backed_read_returns_the_same_groups_as_the_scan(
         return subprocess.CompletedProcess(argv, 0, stdout, "")
 
     lane = ConsumerFlowLane(
-        docker="docker", base_url="http://projection.test", runner=runner
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        docker="docker",
+        base_url="http://projection.test",
+        runner=runner,
     )
 
     live = lane.live_groups()
