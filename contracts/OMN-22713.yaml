@@ -20,3 +20,9 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q'
+  - id: dod-002
+    description: The Docker-free install regression passes, and fails at the merge base where the plist and manifest entry exist
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_docker_free_install_units_omn22713.py -q
