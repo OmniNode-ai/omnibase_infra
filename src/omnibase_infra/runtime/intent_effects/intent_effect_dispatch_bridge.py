@@ -2,70 +2,70 @@
 # SPDX-License-Identifier: MIT
 """Generic intent-effect bridge to a write-effect handler's canonical handle().
 
-One adapter for every intent-emitting audit/projection consumer (OMN-14516).
+One adapter for every intent-emitting audit/projection consumer (OMN-14516): it
+adapts ``ProtocolIntentEffect.execute(payload, *, correlation_id)`` to the
+target's ``handle()`` and owns the conversion to the shape that ``handle()``
+declares (OMN-21700):
 
-Replaces the former per-node ``IntentEffect*`` bridge classes
-(``IntentEffectLedgerAppend`` / ``IntentEffectBuildLoopAppend`` /
-``IntentEffectPrStateUpsert``). Each of those hand-wrote the same shape: take an
-intent payload, coerce it to a per-node typed payload, and call a per-node method
-(``append`` / ``upsert``). That per-node surface is exactly what the kernel had
-to know by NAME, which is why a new audit/projection consumer silently died until
-someone remembered to hand-add it to the kernel's result-applier allowlist.
-
-Every write-effect handler already exposes the canonical
-``handle(envelope) -> ModelHandlerOutput`` dispatch entrypoint (the same one the
-runtime's auto-wiring binds), and that entrypoint already coerces the payload and
-resolves the correlation_id. This bridge therefore needs to know nothing about
-any specific node — it wraps *any* handler with a canonical ``handle()`` and
-adapts the ``ProtocolIntentEffect.execute(payload, *, correlation_id)`` surface to
-it. The kernel derives which handler to wrap from the projection contract's
-``intent_consumption.intent_routing_table`` — no by-name lookup, no bespoke class.
+- ``handle(request: <pydantic model>)`` gets the validated model, with a
+  dispatch envelope carrying the intent's correlation_id bound for the call.
+- any other ``handle()`` gets ``{"payload": ..., "correlation_id": ...}``.
 """
 
 from __future__ import annotations
 
-import logging
-from typing import Protocol
+import inspect
+from collections.abc import Callable
+from typing import Protocol, get_type_hints
 from uuid import UUID
 
-logger = logging.getLogger(__name__)
+from pydantic import BaseModel
+
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.runtime.dispatch_envelope_context import bind_dispatch_envelope
 
 
 class DispatchTarget(Protocol):
-    """Minimal surface the bridge requires: an async canonical ``handle()``."""
-
     async def handle(self, envelope: object) -> object: ...
 
 
-class IntentEffectDispatchBridge:
-    """Adapt a write-effect handler's ``handle()`` to ``ProtocolIntentEffect``.
+def _request_model(handle: Callable[..., object]) -> type[BaseModel] | None:
+    params = list(inspect.signature(handle).parameters)
+    try:
+        hint = get_type_hints(handle).get(params[0]) if len(params) == 1 else None
+    except NameError:  # TYPE_CHECKING-only annotation: not a runtime model
+        return None
+    return hint if isinstance(hint, type) and issubclass(hint, BaseModel) else None
 
-    The dispatch path delivers the emitted intent to
-    ``DispatchResultApplier`` -> ``IntentExecutor``, which routes on
-    ``payload.intent_type`` and calls ``execute(payload, correlation_id=...)`` on
-    the registered effect. This bridge forwards that payload to the write-effect
-    handler through the very same dict-shaped envelope the live runtime dispatch
-    path materializes (``{"payload": ..., "correlation_id": ...}``), so the
-    handler's own ``handle()`` performs the payload coercion and persistence.
-    """
+
+class IntentEffectDispatchBridge:
+    """Adapt a write-effect handler's ``handle()`` to ``ProtocolIntentEffect``."""
 
     def __init__(self, target: DispatchTarget) -> None:
         self._target = target
+        self._model = _request_model(target.handle)
 
     async def execute(
-        self,
-        payload: object,
-        *,
-        correlation_id: UUID | None = None,
+        self, payload: object, *, correlation_id: UUID | None = None
     ) -> None:
-        await self._target.handle(
-            {"payload": payload, "correlation_id": correlation_id}
+        model = self._model
+        if model is None:
+            await self._target.handle(
+                {"payload": payload, "correlation_id": correlation_id}
+            )
+            return
+        request = (
+            payload if isinstance(payload, model) else model.model_validate(payload)
         )
-        logger.debug(
-            "intent bridged to %s.handle() (correlation_id=%s)",
-            type(self._target).__name__,
-            str(correlation_id) if correlation_id is not None else None,
+        envelope = (
+            ModelEventEnvelope[object](
+                payload=request, correlation_id=correlation_id, tenant_id=None
+            )
+            if correlation_id is not None
+            else None
         )
+        with bind_dispatch_envelope(envelope):
+            await self._target.handle(request)
 
 
 __all__ = ["IntentEffectDispatchBridge"]
