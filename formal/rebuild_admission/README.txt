@@ -160,14 +160,19 @@ Scopes, every one in its cfg; results/SUMMARY.txt gives workers and states per r
   Base_holder   a continuation lane delivered twice, piece-2 ordinary, two steps, crash, restart,
                 handover, outage
   Base_wip2     three ordinaries and the join, limit 2
-  Base_union    every class and environment at once
+  Base_union    every class and environment at once; declared infeasible below, kept so the
+                digest names it
   live_ext_*    o1, a cause lane, a safety cause lane, a repair lane, a stop on 1, outage
 
-INFEASIBLE declarations, read by the test: (none)
+INFEASIBLE declarations, read by the test (one line each; such a config is not proven and has no
+result that says it holds):
+INFEASIBLE Base_union: it does not fit a lab unit. Every behaviour of Base_admit is one of its behaviours with the extra tasks idle, so it has at least Base_admit's 8,512,000 distinct states (38 min on 8 workers), and it adds three tasks (c3, kf, g), a third stoppable piece, two outward steps of two actions, a duplicate delivery, outages, crashes and the handover on top. At 6403d05a5's bytes on h053 it reached 720,548 distinct states with 574,187 still queued after 7 min on 4 workers (stopped to keep h053 under 85C), and 5,606,682 with 4,302,254 queued and growing after 22 min on 8 workers in an earlier run whose bytes are unconfirmed (its run directory is gone); its size is estimated, not measured. Each environment holds in its own config (Base_admit, Base_outage, Base_fence, Base_holder, Base_wip2); their interleaving all at once is what no run covers.
 
 Rerun, for each cfg:
   java -XX:+UseParallelGC -Xmx24g -cp tla2tools.jar tlc2.TLC -config <cfg> -workers 16 \
-    -lncheck final -checkpoint 30 -gzip -metadir <fresh dir> <module>
+    -lncheck final -checkpoint 30 -gzip -metadir <fresh dir> -fp <n> <module>
+Give -fp: TLC picks a new fingerprint polynomial on -recover unless -fp is given, and a resumed run
+then explores everything again (found in round 2).
 where <module> is RebuildAdmissionExt.tla for the *_ext_* configs and RebuildAdmission.tla for every
 other. Exit 0 is required of Base_* and live_*, 12 of mut_* and wit_*, 13 of the *_ext_* breaks.
 
