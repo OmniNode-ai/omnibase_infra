@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22555
+title: "The scoped login on the CI bus can read and write the dev-merge redeploy node's receipt topic and consumer group"
+summary: "The CI broker one-shots create and grant the dev-merge redeploy node's receipt topic and the node's consumer-group prefix to the scoped login, so the node can run on a pool host. The live broker changes only when the operator runs the one-shot."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22555-redeploy-receipt-acl
+    statement: The CI broker bring-up one-shots must create the dev-merge redeploy node's receipt topic and grant it, with the node's consumer-group prefix, to the scoped login, without making that login a superuser.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the compose creates the receipt topic, grants it with the other eighteen pool topics and the group prefix list includes the node prefix, and removing the receipt topic from either one-shot fails the test -- falsifier: uv run pytest tests/unit/docker/test_ci_bus_broker_isolation_omn18691.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The broker isolation tests pass at the head.
+    command: uv run pytest tests/unit/docker/test_ci_bus_broker_isolation_omn18691.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22555-isolation-tests
+    description: The broker isolation tests pass, including the pinned topic set, the granted receipt topic and the node group prefix.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_ci_bus_broker_isolation_omn18691.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
