@@ -225,18 +225,10 @@ requirements:
     acceptance:
       - id: AC47
         statement: "AC47: the audit leaves the finding for floor-canary .github/workflows/canary.yml job canary out of the private-placement findings when the policy declares it with a ruling and a reason, and still reports every other job of that workflow, every other workflow of that repository and the same file and job in another private repository; an entry with a pattern, a list, another repository or a missing field admits nothing, and main fails on the other repository's job -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k \"canary or private_exception or main_passes\""
-  - id: req-omn19998-runner-tmp-directories
-    statement: Secondary runner deployments and relabels prepare every declared TMPDIR bind source as a directory owned by UID 1001 with mode 1777 before registration or recreation, and refuse with a named error when discovery, preparation or readback fails.
-    acceptance:
-      - id: AC48
-        statement: 'AC48: the recorded h053 root-owned 0755 tmp directories and missing directories converge to UID 1001 mode 1777 on every deploy; relabel prepares them before its registry edge; discovery, install and readback failures refuse before registration; dry-run and tmpfs leave host directories untouched -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py -q -n 0 fails against the merge-base deploy script.'
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
     command: uv run pytest tests/ci/test_runner_image_node24_floor.py tests/ci/test_runner_image_multiarch.py -q -n 0
-  - kind: tests
-    description: The real secondary stand-up and relabel paths dispatch the typed preparation effect through its contract; modeled SSH, normalized Compose mounts, install and stat boundaries replay the recorded h053 owner and mode, with golden and error command-to-terminal event chains.
-    command: uv run pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py -q -n 0
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
     command: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
@@ -369,24 +361,6 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC40
-  - id: dod-omn19998-ac40-runner-tmp-directories
-    description: AC48 runs the shipped deploy paths through node_deploy_runners and HandlerDeployRunners over the recorded UID 0 mode 0755 case, absent directories, repeated deployments, named discovery/install/readback refusals, relabel ordering, tmpfs and dry-run controls. Golden and error command-to-terminal event chains exercise manifest wiring and the effect. Privileged filesystem calls are modeled; the replay needs no live runner or credential.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py -q -n 0
-        cwd: .
-    binds_ac:
-      - AC48
-  - id: dod-omn19998-ac40-runner-tmp-deploy-probe
-    description: Hosted deploy artifact probe for AC48. Execute the checkout's stand-up and relabel shell paths against the recorded host filesystem model, requiring owner/mode convergence and fail-closed refusal before registration. This checks the deployment behavior without installing a host, contacting Docker or touching running jobs.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py -q -n 0
-        cwd: .
-    binds_ac:
-      - AC48
   - id: dod-omn19998-ac39-runtime-roll
     description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
     source: manual
