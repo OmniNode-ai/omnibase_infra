@@ -19,7 +19,7 @@ from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 from deploy_agent.agent import _unit_drift_report
 from deploy_agent.events import EnumSelfUpdateBoundary
-from deploy_agent.executor import DeployExecutor
+from deploy_agent.executor import SELF_RESTART_COMMAND, DeployExecutor
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 from deploy_agent.unit_drift import (
@@ -123,6 +123,7 @@ def test_self_update_syncs_before_code_check_and_preserves_command_on_failure(
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
     monkeypatch.delenv("DEPLOY_AGENT_NO_SELF_UPDATE", raising=False)
     actions: list[str] = []
+    commands: list[list[str]] = []
     read_text = Path.read_text
 
     def read_cgroup(path: Path, *args: object, **kwargs: object) -> str:
@@ -137,6 +138,7 @@ def test_self_update_syncs_before_code_check_and_preserves_command_on_failure(
             stdout = "old" if pull and cmd[-1] == "HEAD" else "current"
         if "pull" in cmd:
             actions.append("pull")
+        commands.append(cmd)
         if "daemon-reload" in cmd:
             assert installed.read_bytes() == b"PATH=new\n"
             actions.append("reload")
@@ -150,7 +152,6 @@ def test_self_update_syncs_before_code_check_and_preserves_command_on_failure(
         patch.object(Path, "home", return_value=home),
         patch.object(Path, "read_text", read_cgroup),
         patch("deploy_agent.executor._run", side_effect=run),
-        patch("deploy_agent.executor.subprocess.run") as restart,
         patch("deploy_agent.executor.os.execv") as reexec,
     ):
         DeployExecutor().self_update(
@@ -164,14 +165,13 @@ def test_self_update_syncs_before_code_check_and_preserves_command_on_failure(
     expected = (["pull"] if pull else []) + ["reload"]
     if reload_exit == 0:
         assert actions == [*expected, "rewind"]
-        restart.assert_called_once_with(
-            ["systemctl", "--user", "restart", "agent.service"],
-            check=True,
-            timeout=60,
-        )
+        restarts = [cmd for cmd in commands if cmd[0] == "systemd-run"]
+        assert restarts == [
+            [*SELF_RESTART_COMMAND.split(), "agent.service"],
+        ]
     else:
         assert actions == expected
-        restart.assert_not_called()
+        assert all(cmd[0] != "systemd-run" for cmd in commands)
         assert "daemon-reload" in caplog.text
     reexec.assert_not_called()
 
