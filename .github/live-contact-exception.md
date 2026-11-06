@@ -1,1 +1,0 @@
-Live-contact exception: the diff swaps the omnimarket pin value on existing ref lines and rewords one comment that named a runner home path; it adds no step, command, trigger, permission or logic, so it reaches no new contact surface.
