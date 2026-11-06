@@ -71,7 +71,7 @@ services:
         # THE OPERATOR ENV FILE IS NOT GIVEN TO THIS RUNNER (OMN-22478). It was
         # mounted and copied into the creds volume for parity with the primary
         # host's deploy runner while no job on this class consumed it; the
-        # measured readers of $OMNIBASE_OPERATOR_ENV_FILE are the deploy
+        # measured readers of OMNIBASE_OPERATOR_ENV_FILE are the deploy
         # handlers, which only release-train-lab.yml on the deploy runner calls.
         # The creds volume outlives a recreate and holds the 0400 copy an earlier
         # revision of this file installed, so the root phase removes it at every
