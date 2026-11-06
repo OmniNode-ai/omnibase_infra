@@ -716,7 +716,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         # Runtime import to avoid circular dependency:
         # mixins/__init__ -> mixin_llm_http_transport -> handlers.models -> handlers/__init__
         # -> handler_consul -> mixins/__init__ (cycle)
-        from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
+        from omnibase_infra.models.resilience.model_retry_state import ModelRetryState
 
         # ── Pre-flight security checks (fail-closed) ────────────────
         # These run BEFORE any HTTP call to enforce the local trust boundary.

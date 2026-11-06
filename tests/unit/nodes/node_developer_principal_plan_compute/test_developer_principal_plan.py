@@ -28,8 +28,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from omnibase_infra.handlers import handler_developer_principal_plan
 from omnibase_infra.handlers.handler_developer_principal_plan import (
+    handler as handler_developer_principal_plan,
+)
+from omnibase_infra.handlers.handler_developer_principal_plan.handler import (
     HandlerDeveloperPrincipalPlan,
 )
 from omnibase_infra.models.developer_principal import (
@@ -90,7 +92,7 @@ REFUSED: dict[str, Callable[[], dict[str, object]]] = {
     "unknown_operation": lambda: _with_grant(
         {
             "resource": "topic",
-            "name": "onex.evt.x.v1",
+            "name": _local()["grants"][0]["name"],
             "pattern": "literal",
             "operations": ["alter"],
         }

@@ -10,7 +10,7 @@ import io
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Self, cast
+from typing import Self, cast
 
 import pytest
 import yaml
@@ -468,31 +468,29 @@ def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
     reader = _TrackingReader(payload)
 
     original_stat = Path.stat
+    original_open = Path.open
 
     def fail_stat(path: Path, *, follow_symlinks: bool = True) -> object:
         if path == example_path:
             raise AssertionError("loader must not stat before opening the descriptor")
         return original_stat(path, follow_symlinks=follow_symlinks)
 
-    other_path = tmp_path / "other.bin"
-    other_path.write_bytes(b"other")
-
-    original_open = Path.open
-
-    # Path.open is patched for the whole process, so any other caller of it while
-    # the test runs would be handed the tracking reader and advance its stream.
-    # Only the example path gets the reader; every other path reaches the real open.
-    def open_once(path: Path, *args: Any, **kwargs: Any) -> Any:
+    # Both stubs are installed on Path itself, so they see every read the
+    # process makes while this test runs, not only the document under test.
+    # ModelRsdPinnedModelIdentity.from_contract() reads the packaged pin
+    # contract through Path.read_text the first time a field validator resolves
+    # a pin, and that read is functools.cache'd -- so whether it lands inside
+    # this test depends on which tests ran before it in this worker, which
+    # pytest-xdist decides at run time. Delegating every other path keeps the
+    # assertion about the document under test and nothing else (OMN-17427).
+    def open_once(path: Path, mode: str = "r", **kwargs: object) -> object:
         if path != example_path:
-            return original_open(path, *args, **kwargs)
-        assert (args or (kwargs.get("mode"),)) == ("rb",)
+            return original_open(path, mode, **kwargs)
+        assert mode == "rb"
         return reader
 
     monkeypatch.setattr(Path, "stat", fail_stat)
     monkeypatch.setattr(Path, "open", open_once)
-
-    with other_path.open("rb") as other_stream:
-        assert other_stream.read() == b"other"
 
     assert load_rsd_model_artifact_provenance(example_path).execute_enabled is False
     assert reader.read_sizes == [64 * 1024 + 1]

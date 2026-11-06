@@ -2822,9 +2822,6 @@ entries:
   - path: src/omnibase_infra/handlers/mcp/adapter_onex_to_mcp.py
     family: O
     content_sha1: bed1987e9d958a1d4cc2034c4c6d2c7c971326f0
-  - path: src/omnibase_infra/handlers/models/model_operation_context.py
-    family: O
-    content_sha1: 3212107661a199b76ba8bef18452451fd1d61349
   - path: src/omnibase_infra/handlers/placement/handler_placement_etcd.py
     family: O
     content_sha1: 673c51e55aa87fb220ce9b81469e8eead254681f
@@ -2924,6 +2921,9 @@ entries:
   - path: src/omnibase_infra/models/projection/model_snapshot_topic_config.py
     family: O
     content_sha1: 98384abd0a729f79da6cf18947a91851319e2315
+  - path: src/omnibase_infra/models/resilience/model_operation_context.py
+    family: O
+    content_sha1: 3212107661a199b76ba8bef18452451fd1d61349
   - path: src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_imperative_orchestrator_ratchet.py
     family: F
     content_sha1: c05e8880fb661f1c518614c1ccd91e488767893c

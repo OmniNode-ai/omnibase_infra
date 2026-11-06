@@ -200,6 +200,7 @@ import time
 from collections import OrderedDict, defaultdict
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Final, cast
 from uuid import UUID, uuid4
@@ -284,6 +285,9 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 )
 from omnibase_infra.event_bus.topic_constants import is_dlq_topic
 from omnibase_infra.event_bus.topic_violation_alerter import TopicViolationAlerter
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
+    HandlerConsumerCoordinatorRejoin,
+)
 from omnibase_infra.handlers.kafka_permanent_failure import (
     classify_permanent_kafka_failure,
     kafka_failure_types,
@@ -343,9 +347,6 @@ from omnibase_infra.observability.wiring_health import (
 )
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
-)
-from omnibase_infra.protocols.protocol_rejoinable_consumer import (
-    ProtocolRejoinableConsumer,
 )
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
@@ -3842,13 +3843,8 @@ class EventBusKafka(
         if existing is not None:
             return existing
 
-        async def _recreate() -> ProtocolRejoinableConsumer:
-            return cast(
-                "ProtocolRejoinableConsumer",
-                await self._rebuild_consumer_for_rejoin(topic, group_id),
-            )
-
         supervisor = ConsumerRejoinSupervisor(
+            coordinator_handler=HandlerConsumerCoordinatorRejoin(),
             topic=topic,
             group_id=group_id,
             policy=ModelConsumerRejoinPolicy(
@@ -3860,7 +3856,9 @@ class EventBusKafka(
                 sync_unready_seconds=self._config.consumer_sync_unready_seconds,
             ),
             poll_timeout_ms=self._config.consumer_poll_timeout_ms,
-            recreate_consumer=_recreate,
+            recreate_consumer=partial(
+                self._rebuild_consumer_for_rejoin, topic, group_id
+            ),
             emit_event=self._record_consumer_rejoin_event,
             clock=self._clock,
             broker=self._sanitize_bootstrap_servers(self._bootstrap_servers),
