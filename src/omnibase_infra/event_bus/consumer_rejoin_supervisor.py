@@ -55,7 +55,7 @@ from omnibase_infra.event_bus.consumer_rejoin_policy import (
     ModelConsumerRejoinPolicy,
     evaluate_consumer_stall,
 )
-from omnibase_infra.handlers.handler_consumer_coordinator_rejoin import (
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
     HandlerConsumerCoordinatorRejoin,
 )
 from omnibase_infra.models.health.enum_consumer_stall_reason import (
@@ -201,6 +201,7 @@ class ConsumerRejoinSupervisor:
         *,
         topic: str,
         group_id: str,
+        coordinator_handler: HandlerConsumerCoordinatorRejoin,
         policy: ModelConsumerRejoinPolicy,
         poll_timeout_ms: int,
         recreate_consumer: Callable[[], Awaitable[ProtocolRejoinableConsumer]],
@@ -219,6 +220,7 @@ class ConsumerRejoinSupervisor:
         Args:
             topic: Topic being consumed.
             group_id: Effective consumer group id.
+            coordinator_handler: Injected pure coordinator decision handler.
             policy: Stall thresholds.
             poll_timeout_ms: Deadline for one ``getmany``. This is what turns
                 an unbounded wait into a loop that can ask questions.
@@ -235,6 +237,7 @@ class ConsumerRejoinSupervisor:
             probe_timeout_seconds: Deadline for leader and position probes.
             emit_alarm: Optional best-effort sink for the episode's typed alarm.
         """
+        self._coordinator_handler = coordinator_handler
         self._topic = topic
         self._group_id = group_id
         self._policy = policy
@@ -381,42 +384,31 @@ class ConsumerRejoinSupervisor:
         now = self._clock()
         measurement = self._latest_measurement
         since_poll = max(0.0, now - self._last_poll_at)
+        evaluated = self._evaluated
+        reason = self._latest_reason
+        stalled_seconds = (
+            0.0
+            if self._stall_started_at is None
+            else max(0.0, now - self._stall_started_at)
+        )
         if since_poll >= self._policy.sync_unready_seconds:
-            # OMN-17427: nothing has polled for the whole readiness window, so
-            # the last evaluation describes a loop that is no longer running.
-            # Report the group as stalled from its last poll instead.
-            return ModelConsumerSyncStatus(
-                topic=self._topic,
-                consumer_group=self._group_id,
-                evaluated=True,
-                reason=EnumConsumerStallReason.CONSUME_TASK_PARKED,
-                backlog_records=measurement.backlog_records if measurement else 0,
-                seconds_since_last_record=max(0.0, now - self._last_record_at),
-                stalled_seconds=since_poll,
-                assigned_partitions=(
-                    measurement.assigned_partitions if measurement else 0
-                ),
-                broker_reachable=measurement.broker_reachable if measurement else True,
-                rejoin_count=self._rejoin_count,
-                last_rejoin_failed=self._last_rejoin_failed,
-                unready_after_seconds=self._policy.sync_unready_seconds,
-            )
+            # Nothing has polled for the readiness window: the last
+            # evaluation describes a loop that is no longer running.
+            evaluated = True
+            reason = EnumConsumerStallReason.CONSUME_TASK_PARKED
+            stalled_seconds = since_poll
         return ModelConsumerSyncStatus(
             topic=self._topic,
             consumer_group=self._group_id,
-            evaluated=self._evaluated,
-            reason=self._latest_reason,
+            evaluated=evaluated,
+            reason=reason,
             # From the last evaluation that actually PROBED the leaders. An
             # evaluation inside the stall window short-circuits before the
             # probe and reports a placeholder zero; carrying that forward
             # would erase a real backlog every time the loop ticked.
             backlog_records=measurement.backlog_records if measurement else 0,
             seconds_since_last_record=max(0.0, now - self._last_record_at),
-            stalled_seconds=(
-                0.0
-                if self._stall_started_at is None
-                else max(0.0, now - self._stall_started_at)
-            ),
+            stalled_seconds=stalled_seconds,
             assigned_partitions=(measurement.assigned_partitions if measurement else 0),
             broker_reachable=measurement.broker_reachable if measurement else True,
             rejoin_count=self._rejoin_count,
@@ -692,14 +684,13 @@ class ConsumerRejoinSupervisor:
             else max(0.0, now - self._coordinator_lost_at)
         )
         request = self._coordinator_request(known, reachable, unavailable, now)
-        handler = HandlerConsumerCoordinatorRejoin()
-        decision = handler.handle(request)
+        decision = self._coordinator_handler.handle(request)
         if decision.rejoin and self._episode_rejoin_pending:
             # A started replacement that needs another rebuild did not restore
             # its coordinator. Count it once, just like a failed start.
             self._failed_rejoins += 1
             self._episode_rejoin_pending = False
-            decision = handler.handle(
+            decision = self._coordinator_handler.handle(
                 request.model_copy(update={"failed_rejoins": self._failed_rejoins})
             )
         if decision.alarm:
@@ -981,7 +972,7 @@ class ConsumerRejoinSupervisor:
                 verdict.reason
                 is EnumConsumerStallReason.STALLED_COORDINATOR_UNAVAILABLE
             ):
-                decision = HandlerConsumerCoordinatorRejoin().handle(
+                decision = self._coordinator_handler.handle(
                     self._coordinator_request(False, True, unavailable, self._clock())
                 )
                 await self._raise_alarm(

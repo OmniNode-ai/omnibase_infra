@@ -75,5 +75,5 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_consumer_coordinator_rejoin.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class HandlerConsumerCoordinatorRejoin' > /dev/null
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_consumer_coordinator_rejoin/handler.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class HandlerConsumerCoordinatorRejoin' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra

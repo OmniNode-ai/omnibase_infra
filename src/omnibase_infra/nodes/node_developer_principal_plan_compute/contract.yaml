@@ -26,6 +26,8 @@ node_version:
   minor: 0
   patch: 0
 node_type: "COMPUTE_GENERIC"
+descriptor:
+  node_archetype: compute
 description: >
   Plan a developer machine's broker principal (name, create or rotate, exact grants, declaration digest) from a grants declaration under the lab issuer's rules, without I/O.
 
@@ -45,7 +47,7 @@ handler_routing:
     - operation: "developer_principal.plan"
       handler:
         name: "HandlerDeveloperPrincipalPlan"
-        module: "omnibase_infra.handlers.handler_developer_principal_plan"
+        module: "omnibase_infra.handlers.handler_developer_principal_plan.handler"
       description: >
         Pure compute: validate the declaration as the lab issuer does, name the principal, decide create, rotate or the device-cap refusal, and resolve its grants.
 
