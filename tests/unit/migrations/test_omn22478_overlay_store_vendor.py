@@ -17,7 +17,7 @@ _FORWARD = _ROOT / "docker" / "migrations" / "forward"
 _NODE = "node_projection_overlay_store"
 _VENDOR = _FORWARD / "nodes" / _NODE
 _CREATE = "0000_create_overlay_store.sql"
-_SHA256 = "4db2223adb9acd589ad1c1c473a11f172a017b11e2b14a47b0c02749c2a10bb7"
+_SHA256 = "b7da031f1b11da3e5f7f1d60d953d610e7498422f8458e8d033607f32c867956"
 _GRANT = "0001_grant_omninode_runtime_overlay_store.sql"
 _GRANT_SHA256 = "796344234e9bb22f007a517ce63e7a48feb62c68d52a6aa47dd851f4039ded9d"
 
