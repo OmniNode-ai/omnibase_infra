@@ -34,3 +34,10 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_moved_model_import_paths_omn22478.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22478-infra-moved-model-paths-in-runtime
+    description: In the deployed dev runtime the old Infisical path is the moved model, which reads false on any image built before this change.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: command
+        check_value: 'docker exec omninode-runtime python -c "from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig as old; from omnibase_infra.models.security.model_infisical_config import ModelInfisicalConfig as new; assert old is new"'
