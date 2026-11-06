@@ -181,10 +181,10 @@ def test_a_machine_never_reads_a_ledger_row_event(declaration: lpi.Declaration) 
 
 
 def test_dispatch_bindings_derive_the_shipped_machine_grants() -> None:
-    from omnibase_infra.handlers.handler_broker_grant_derive import (
+    from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
         HandlerBrokerGrantDerive,
     )
-    from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+    from omnibase_infra.models.security.model_broker_grant_bindings import (
         ModelBrokerGrantBindings,
     )
 
@@ -251,10 +251,10 @@ def test_dispatch_groups_match_runtime_local(
     authorized: bool,
 ) -> None:
     from omnibase_core.runtime.runtime_local import derive_runtime_local_group_id
-    from omnibase_infra.handlers.handler_broker_grant_derive import (
+    from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
         HandlerBrokerGrantDerive,
     )
-    from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+    from omnibase_infra.models.security.model_broker_grant_bindings import (
         ModelBrokerGrantBindings,
     )
 
