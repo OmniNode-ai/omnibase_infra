@@ -368,6 +368,14 @@ class TestCiSummaryGate:
         report must name Lint. With Lint green again the same snapshot passes,
         so the failure is Lint's and nothing else's.
         """
+        # The snapshot below is the real outcome of a red Lint only if the test
+        # matrix does not wait for it: a matrix still behind Lint would be
+        # skipped, and a merge-base workflow shows exactly that.
+        jobs = _load_workflow(CI_WORKFLOW)["jobs"]
+        for name in ("detect-changes", "test-parallel"):
+            needs = jobs[name].get("needs", [])
+            needs = [needs] if isinstance(needs, str) else needs
+            assert "lint" not in needs, f"{name} still waits for lint: {needs!r}"
         green = _all_gates("success") + [_job("Detect Changes", "success")]
         code, _ = evaluate(green)
         assert code == EXIT_SUCCESS
