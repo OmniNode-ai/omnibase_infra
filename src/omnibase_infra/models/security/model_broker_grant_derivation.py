@@ -4,7 +4,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant import (
+from omnibase_infra.models.security.model_broker_grant import (
     ModelBrokerGrant,
 )
 
