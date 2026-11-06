@@ -83,6 +83,7 @@ from deploy_agent.instance_lanes import (
     handle_lane_mirror,
     load_instance_lanes,
     load_instance_runtime_lanes,
+    parse_lane_env_fragment,
     read_lane_env_fragment,
 )
 from deploy_agent.lane_lock_client import (
@@ -186,6 +187,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "protocols/protocol_cost_estimator_build_io.py",
         "handlers/handler_cost_estimator_build.py",
         "nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py",
+        "nodes/node_setup_local_provision_effect/runtime_lane_env_overlay.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
@@ -1815,25 +1817,27 @@ def _lane_env_overlay() -> dict[str, str]:
     """
     clone = _LaneOverlayClone.path
     raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
-    if clone is None or not raw:
-        return {}
-    if not is_lab_dev_fence(parse_allowed_lanes(raw)):
-        return {}
     # OMN-19998: a lab dev agent may also deploy the stability lane; a compose
     # command of that job must never take the dev lane's settings.
-    if _ActiveDeployLane.lane not in (None, EnumRuntimeLane.DEV):
+    if clone is None or not (
+        raw
+        and is_lab_dev_fence(parse_allowed_lanes(raw))
+        and _ActiveDeployLane.lane in (None, EnumRuntimeLane.DEV)
+    ):
         return {}
     lane_id = DEV_INSTANCE_RUNTIME_LANES[active_dev_instance()]
-    overlay = read_lane_env_fragment(clone, lane_id)
-    if overlay != _LaneEnvOverlayLog.last:
-        logger.info(
-            "lane env fragment for %s from %s: %s",
-            lane_id,
-            clone,
-            ", ".join(f"{k}={v}" for k, v in sorted(overlay.items())) or "none",
-        )
-        _LaneEnvOverlayLog.last = dict(overlay)
-    return overlay
+    # OMN-22634: the overlay home's runtime_lane_env overlay is a second source for
+    # the same keys, through the same allowlist; a key the two set differently refuses.
+    return load_dev_boot_guard(
+        "nodes.node_setup_local_provision_effect.runtime_lane_env_overlay"
+    ).lane_env_with_overlay_home(
+        sys.modules[__name__],
+        read_lane_env_fragment(clone, lane_id),
+        os.environ,
+        lane_id=lane_id,
+        fragment_clone=clone,
+        parse_fragment=parse_lane_env_fragment,
+    )
 
 
 class _ActiveDeployLane:
@@ -1857,12 +1861,6 @@ def active_deploy_lane(lane: EnumRuntimeLane) -> Iterator[None]:
         yield
     finally:
         _ActiveDeployLane.lane = previous
-
-
-class _LaneEnvOverlayLog:
-    """The fragment last logged, so a change is logged once, not per command."""
-
-    last: dict[str, str] | None = None
 
 
 def _load_dotenv_file(env_path: Path) -> dict[str, str]:

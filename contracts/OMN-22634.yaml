@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22634
+title: "The deploy agent reads the runtime_lane_env overlay from the overlay home clone and refuses a key set differently in two sources"
+summary: >-
+  The dev deploy agent took a lane's env from one source, the deployment fragment, which holds neither of the cost estimator's source settings, so every runtime or full dev deploy was refused by dev_lane_build_settings. The agent now also reads the overlay home's runtime_lane_env overlay from the clone its unit names in DEPLOY_AGENT_OVERLAY_HOME_CLONE (no default), at origin/main, through the same allowlist; a key the two sources set to different values is refused. The unit declares the variable and protects it from the env store. The settings check is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22634-overlay-home-lane-env
+    statement: The dev deploy agent applies the overlay home's runtime_lane_env env for its lane to the compose environment, through the deployment fragment's allowlist, and refuses a key the two sources set differently.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: with the variable naming a clone whose origin/main holds the overlay the compose env carries the lane''s two settings, and with the variable unset it carries neither -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_overlay_home_omn22478.py -q --no-cov'
+      - id: AC2
+        statement: 'AC2: a key set to different values by the fragment and the overlay home is refused by name, the same value in both is accepted, and a key outside the allowlist, a wrong schema, a missing ref and a clone that is not a git clone are each refused -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_overlay_home_omn22478.py -q --no-cov'
+      - id: AC3
+        statement: 'AC3: the dev unit declares the variable and lists it in DEPLOY_AGENT_ENV_PROTECTED, and removing it from the list fails the launcher test -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_overlay_home_omn22478.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q --no-cov'
+      - id: AC4
+        statement: 'AC4: dev_lane_build_settings still refuses a missing gate password and an invalid gate switch with the overlay home in place -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_overlay_home_omn22478.py scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: The overlay home source, its refusals and the unchanged settings check pass at the head.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_overlay_home_omn22478.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22634-overlay-home-lane-env
+    description: The overlay home source tests pass, the fragment, launcher and estimator build tests still pass.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1, AC2, AC3, AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_overlay_home_omn22478.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
