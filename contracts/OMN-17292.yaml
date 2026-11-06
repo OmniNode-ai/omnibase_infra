@@ -44,6 +44,9 @@ evidence_requirements:
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
   - kind: tests
+    description: The pin refresh edits the omnimarket pin in this contract and nothing else, and the old whole-file template fails the same reading.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q"
+  - kind: tests
     description: A first-publish stall lands in the sustained-load benchmark's discarded warm-up interval.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
   - kind: tests
@@ -76,6 +79,14 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn-17292-ac1-refresh-edits-pin-only
+    description: The pin refresh edits the omnimarket pin in this contract and nothing else, so a refresh keeps every criterion, check and retirement dev holds; the whole-file template it replaced drops AC2 to AC4 and fails the same test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
   - id: dod-omn-17292-ac3-sustained-load-warmup
     description: A first-publish stall lands in the sustained-load benchmark's discarded warm-up interval; at the merge base it lands in measured interval 1 and the variance assertion fails.
     source: manual
