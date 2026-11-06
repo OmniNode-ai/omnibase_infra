@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 74 and seed -1859916989649455690 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 9] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 112 and seed -5654094103284087753 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-5207908023830060856/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-5207908023830060856/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-5207908023830060856/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-5207908023830060856/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-5207908023830060856/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-5207908023830060856/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-5207908023830060856/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-3858586969217139162/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-3858586969217139162/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-3858586969217139162/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-3858586969217139162/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-3858586969217139162/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-3858586969217139162/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-3858586969217139162/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,9 +19,9 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 15:06:25)
+Starting... (2026-11-06 18:18:38)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 15:06:26.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 18:18:39.
 Error: Invariant ConsumedAtMostOnce is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -58,7 +58,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 2: <Reserve("g") line 209, col 3 to line 214, col 73 of module RebuildAdmission>
+State 2: <Reserve("g") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -92,7 +92,7 @@ State 2: <Reserve("g") line 209, col 3 to line 214, col 73 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 3: <ConsRead("g",2) line 258, col 3 to line 260, col 81 of module RebuildAdmission>
+State 3: <ConsRead("g",1) line 267, col 3 to line 269, col 81 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -110,11 +110,11 @@ State 3: <ConsRead("g",2) line 258, col 3 to line 260, col 81 of module RebuildA
 /\ stop = <<"none", "none", "none">>
 /\ credit = 1
 /\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = [g |-> {2}]
+/\ rd = [g |-> {1}]
 /\ pendKey = [F |-> 0, H |-> 0]
 /\ fl = <<>>
 /\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = [g |-> {1}]
+/\ msgs = [g |-> {2}]
 /\ overrun = <<>>
 /\ safety = {}
 /\ rows = <<{}, {}, {}>>
@@ -126,7 +126,7 @@ State 3: <ConsRead("g",2) line 258, col 3 to line 260, col 81 of module RebuildA
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 4: <ConsRead("g",1) line 258, col 3 to line 260, col 81 of module RebuildAdmission>
+State 4: <ConsRead("g",2) line 267, col 3 to line 269, col 81 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -160,7 +160,7 @@ State 4: <ConsRead("g",1) line 258, col 3 to line 260, col 81 of module RebuildA
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 5: <ConsWrite("g",1) line 262, col 3 to line 267, col 40 of module RebuildAdmission>
+State 5: <ConsWrite("g",1) line 271, col 3 to line 276, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -194,7 +194,7 @@ State 5: <ConsWrite("g",1) line 262, col 3 to line 267, col 40 of module Rebuild
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 6: <CreditFreed line 323, col 3 to line 324, col 91 of module RebuildAdmission>
+State 6: <CreditFreed line 341, col 3 to line 342, col 91 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -228,7 +228,7 @@ State 6: <CreditFreed line 323, col 3 to line 324, col 91 of module RebuildAdmis
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 7: <ConsWrite("g",2) line 262, col 3 to line 267, col 40 of module RebuildAdmission>
+State 7: <ConsWrite("g",2) line 271, col 3 to line 276, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -262,14 +262,7 @@ State 7: <ConsWrite("g",2) line 262, col 3 to line 267, col 40 of module Rebuild
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
-Attempted to apply the operator overridden by the Java method
-public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
-but it produced the following error:
-./RebuildAdmission_TTrace_1793977585.bin (Read-only file system)
-3328 states generated, 1401 distinct states found, 939 states left on queue.
+4421 states generated, 1789 distinct states found, 1169 states left on queue.
 The depth of the complete state graph search is 7.
-Checkpointing of run /m/mut_p4_consume_split/26-11-06-15-06-25.321
-Checkpointing completed at (2026-11-06 15:06:26)
-Finished in 01s at (2026-11-06 15:06:26)
-Failed to generate trace exploration spec; error message: ./RebuildAdmission_TTrace_1793977585.tla (Read-only file system)
+Finished in 02s at (2026-11-06 18:18:40)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793989117.tla

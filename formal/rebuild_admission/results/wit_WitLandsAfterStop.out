@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 74 and seed 1674259426250376768 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 9] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 22 and seed 3541954929920971132 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-11739811427628364968/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-11739811427628364968/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-11739811427628364968/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-11739811427628364968/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-11739811427628364968/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-11739811427628364968/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-11739811427628364968/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-4414792559570928955/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-4414792559570928955/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-4414792559570928955/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-4414792559570928955/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-4414792559570928955/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-4414792559570928955/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-4414792559570928955/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,9 +19,9 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 15:06:54)
+Starting... (2026-11-06 18:20:16)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 15:06:54.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 18:20:16.
 Error: Invariant WitLandsAfterStop is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -58,7 +58,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 2: <Reserve(o1) line 209, col 3 to line 214, col 73 of module RebuildAdmission>
+State 2: <Reserve(o1) line 218, col 3 to line 223, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -92,7 +92,7 @@ State 2: <Reserve(o1) line 209, col 3 to line 214, col 73 of module RebuildAdmis
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 3: <Consume(o1) line 242, col 3 to line 245, col 40 of module RebuildAdmission>
+State 3: <Consume(o1) line 251, col 3 to line 254, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -126,7 +126,7 @@ State 3: <Consume(o1) line 242, col 3 to line 245, col 40 of module RebuildAdmis
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 4: <Begin(o1) line 294, col 3 to line 303, col 86 of module RebuildAdmission>
+State 4: <Begin(o1) line 311, col 3 to line 321, col 86 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -160,7 +160,7 @@ State 4: <Begin(o1) line 294, col 3 to line 303, col 86 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 5: <Breaks(1) line 356, col 3 to line 363, col 37 of module RebuildAdmission>
+State 5: <Breaks(1) line 374, col 3 to line 381, col 37 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -194,7 +194,7 @@ State 5: <Breaks(1) line 356, col 3 to line 363, col 37 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 6: <Act(o1) line 305, col 3 to line 309, col 78 of module RebuildAdmission>
+State 6: <Act(o1) line 323, col 3 to line 327, col 78 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -228,14 +228,7 @@ State 6: <Act(o1) line 305, col 3 to line 309, col 78 of module RebuildAdmission
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
-Attempted to apply the operator overridden by the Java method
-public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
-but it produced the following error:
-./RebuildAdmission_TTrace_1793977613.bin (Read-only file system)
-360 states generated, 174 distinct states found, 125 states left on queue.
+574 states generated, 259 distinct states found, 180 states left on queue.
 The depth of the complete state graph search is 6.
-Checkpointing of run /m/wit_WitLandsAfterStop/26-11-06-15-06-53.966
-Checkpointing completed at (2026-11-06 15:06:54)
-Finished in 00s at (2026-11-06 15:06:54)
-Failed to generate trace exploration spec; error message: ./RebuildAdmission_TTrace_1793977613.tla (Read-only file system)
+Finished in 01s at (2026-11-06 18:20:17)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793989215.tla

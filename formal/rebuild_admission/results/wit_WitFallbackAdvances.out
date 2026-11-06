@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 74 and seed 5840969994534737259 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 9] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 16 and seed 8094959354516679733 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-14623662655948170256/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-14623662655948170256/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-14623662655948170256/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-14623662655948170256/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-14623662655948170256/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-14623662655948170256/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-14623662655948170256/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-3237232712675294367/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-3237232712675294367/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-3237232712675294367/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-3237232712675294367/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-3237232712675294367/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-3237232712675294367/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-3237232712675294367/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,9 +19,9 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 15:06:52)
+Starting... (2026-11-06 18:19:37)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 15:06:52.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 18:19:37.
 Error: Invariant WitFallbackAdvances is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -58,7 +58,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 2: <EngRead("H") line 406, col 3 to line 409, col 91 of module RebuildAdmission>
+State 2: <EngRead("H") line 424, col 3 to line 427, col 91 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 1]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -92,7 +92,7 @@ State 2: <EngRead("H") line 406, col 3 to line 409, col 91 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 3: <StepPut("H") line 412, col 3 to line 425, col 71 of module RebuildAdmission>
+State 3: <StepPut("H") line 430, col 3 to line 443, col 71 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 1]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -126,7 +126,7 @@ State 3: <StepPut("H") line 412, col 3 to line 425, col 71 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<1, 0>>
 
-State 4: <EngRead("F") line 406, col 3 to line 409, col 91 of module RebuildAdmission>
+State 4: <EngRead("F") line 424, col 3 to line 427, col 91 of module RebuildAdmission>
 /\ phase = [F |-> 2, H |-> 1]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -160,7 +160,7 @@ State 4: <EngRead("F") line 406, col 3 to line 409, col 91 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<1, 0>>
 
-State 5: <Handover line 450, col 3 to line 453, col 64 of module RebuildAdmission>
+State 5: <Handover line 468, col 3 to line 471, col 64 of module RebuildAdmission>
 /\ phase = [F |-> 2, H |-> 1]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -194,7 +194,7 @@ State 5: <Handover line 450, col 3 to line 453, col 64 of module RebuildAdmissio
 /\ storeUp = TRUE
 /\ effects = <<1, 0>>
 
-State 6: <StepPut("F") line 412, col 3 to line 425, col 71 of module RebuildAdmission>
+State 6: <StepPut("F") line 430, col 3 to line 443, col 71 of module RebuildAdmission>
 /\ phase = [F |-> 2, H |-> 1]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -228,14 +228,7 @@ State 6: <StepPut("F") line 412, col 3 to line 425, col 71 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<1, 1>>
 
-Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
-Attempted to apply the operator overridden by the Java method
-public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
-but it produced the following error:
-./RebuildAdmission_TTrace_1793977611.bin (Read-only file system)
-3299 states generated, 1256 distinct states found, 774 states left on queue.
-The depth of the complete state graph search is 8.
-Checkpointing of run /m/wit_WitFallbackAdvances/26-11-06-15-06-51.882
-Checkpointing completed at (2026-11-06 15:06:53)
-Finished in 01s at (2026-11-06 15:06:53)
-Failed to generate trace exploration spec; error message: ./RebuildAdmission_TTrace_1793977611.tla (Read-only file system)
+3016 states generated, 1165 distinct states found, 733 states left on queue.
+The depth of the complete state graph search is 7.
+Finished in 01s at (2026-11-06 18:19:38)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793989176.tla

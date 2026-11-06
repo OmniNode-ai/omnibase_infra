@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 74 and seed -681357342302225441 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 9] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 2 and seed 8323369485774881647 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-10872810019225797875/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-10872810019225797875/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-10872810019225797875/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-10872810019225797875/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-10872810019225797875/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-10872810019225797875/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-10872810019225797875/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-5808916750050653206/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-5808916750050653206/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-5808916750050653206/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-5808916750050653206/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-5808916750050653206/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-5808916750050653206/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-5808916750050653206/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,10 +19,10 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 15:02:05)
+Starting... (2026-11-06 18:17:46)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 15:02:05.
-Progress(9) at 2026-11-06 15:02:08: 27,316 states generated (27,316 s/min), 9,906 distinct states found (9,906 ds/min), 7,618 states left on queue.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 18:17:47.
+Progress(7) at 2026-11-06 18:17:50: 9,637 states generated (9,637 s/min), 3,603 distinct states found (3,603 ds/min), 2,804 states left on queue.
 Error: Invariant NoStartAgainstRules is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -67,10 +67,10 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 2: <Reserve(o1) line 209, col 3 to line 214, col 73 of module RebuildAdmission>
+State 2: <SrcBad("s1") line 346, col 3 to line 347, col 94 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
-/\ src = [s1 |-> FALSE]
+/\ src = [s1 |-> TRUE]
 /\ fresh = TRUE
 /\ handed = FALSE
 /\ cur = 1
@@ -78,7 +78,7 @@ State 2: <Reserve(o1) line 209, col 3 to line 214, col 73 of module RebuildAdmis
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -109,7 +109,7 @@ State 2: <Reserve(o1) line 209, col 3 to line 214, col 73 of module RebuildAdmis
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 3: <SrcBad("s1") line 328, col 3 to line 329, col 94 of module RebuildAdmission>
+State 3: <SafetyOpens("s1") line 349, col 3 to line 352, col 57 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> TRUE]
@@ -120,49 +120,7 @@ State 3: <SrcBad("s1") line 328, col 3 to line 329, col 94 of module RebuildAdmi
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
-  o2 :> "idle" @@
-  "j" :> "idle" @@
-  "u" :> "idle" @@
-  "c1" :> "idle" @@
-  "c1b" :> "idle" @@
-  "s1" :> "idle" @@
-  "r1" :> "idle" @@
-  "r2" :> "idle" )
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"none", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 4: <SafetyOpens("s1") line 331, col 3 to line 334, col 57 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = TRUE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {o1}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -193,18 +151,18 @@ State 4: <SafetyOpens("s1") line 331, col 3 to line 334, col 57 of module Rebuil
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 5: <Reserve("s1") line 209, col 3 to line 214, col 73 of module RebuildAdmission>
+State 4: <Reserve("s1") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> TRUE]
 /\ fresh = TRUE
 /\ handed = FALSE
 /\ cur = 1
-/\ dirty = {o1}
+/\ dirty = {}
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -235,18 +193,18 @@ State 5: <Reserve("s1") line 209, col 3 to line 214, col 73 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 6: <Consume("s1") line 242, col 3 to line 245, col 40 of module RebuildAdmission>
+State 5: <Consume("s1") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> TRUE]
 /\ fresh = TRUE
 /\ handed = FALSE
 /\ cur = 1
-/\ dirty = {o1}
+/\ dirty = {}
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -277,18 +235,18 @@ State 6: <Consume("s1") line 242, col 3 to line 245, col 40 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 7: <SafetyFix("s1") line 315, col 3 to line 317, col 94 of module RebuildAdmission>
+State 6: <SafetyFix("s1") line 333, col 3 to line 335, col 94 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
 /\ fresh = TRUE
 /\ handed = FALSE
 /\ cur = 1
-/\ dirty = {o1}
+/\ dirty = {}
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -319,18 +277,18 @@ State 7: <SafetyFix("s1") line 315, col 3 to line 317, col 94 of module RebuildA
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 8: <Ends("s1") line 275, col 3 to line 280, col 58 of module RebuildAdmission>
+State 7: <Ends("s1") line 288, col 3 to line 293, col 58 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
 /\ fresh = TRUE
 /\ handed = FALSE
 /\ cur = 1
-/\ dirty = {o1}
+/\ dirty = {}
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -361,18 +319,18 @@ State 8: <Ends("s1") line 275, col 3 to line 280, col 58 of module RebuildAdmiss
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 9: <Reserve("s1") line 209, col 3 to line 214, col 73 of module RebuildAdmission>
+State 8: <Reserve("s1") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
 /\ fresh = TRUE
 /\ handed = FALSE
 /\ cur = 1
-/\ dirty = {o1}
+/\ dirty = {}
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -403,18 +361,18 @@ State 9: <Reserve("s1") line 209, col 3 to line 214, col 73 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 10: <SafetyCloses("s1") line 336, col 3 to line 339, col 57 of module RebuildAdmission>
+State 9: <SafetyCloses("s1") line 354, col 3 to line 357, col 57 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
 /\ fresh = TRUE
 /\ handed = FALSE
 /\ cur = 1
-/\ dirty = {o1, "s1"}
+/\ dirty = {"s1"}
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -445,18 +403,18 @@ State 10: <SafetyCloses("s1") line 336, col 3 to line 339, col 57 of module Rebu
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 11: <Consume("s1") line 242, col 3 to line 245, col 40 of module RebuildAdmission>
+State 10: <Consume("s1") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {"start", "epoch"}
 /\ src = [s1 |-> FALSE]
 /\ fresh = TRUE
 /\ handed = FALSE
 /\ cur = 1
-/\ dirty = {o1}
+/\ dirty = {}
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -487,14 +445,7 @@ State 11: <Consume("s1") line 242, col 3 to line 245, col 40 of module RebuildAd
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
-Attempted to apply the operator overridden by the Java method
-public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
-but it produced the following error:
-./RebuildAdmission_TTrace_1793977324.bin (Read-only file system)
-2769144 states generated, 607677 distinct states found, 391256 states left on queue.
-The depth of the complete state graph search is 12.
-Checkpointing of run /m/mut_p1_no_advance_safety/26-11-06-15-02-04.733
-Checkpointing completed at (2026-11-06 15:02:33)
-Finished in 28s at (2026-11-06 15:02:33)
-Failed to generate trace exploration spec; error message: ./RebuildAdmission_TTrace_1793977324.tla (Read-only file system)
+2117481 states generated, 459115 distinct states found, 296805 states left on queue.
+The depth of the complete state graph search is 11.
+Finished in 45s at (2026-11-06 18:18:31)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793989066.tla

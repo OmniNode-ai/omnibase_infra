@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 74 and seed -1988601764561895073 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 9] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 41 and seed -7033562817338112518 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-3979844601671628732/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-3979844601671628732/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-3979844601671628732/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-3979844601671628732/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-3979844601671628732/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-3979844601671628732/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-3979844601671628732/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-8924076657099963923/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-8924076657099963923/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-8924076657099963923/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-8924076657099963923/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-8924076657099963923/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-8924076657099963923/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-8924076657099963923/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,10 +19,10 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 15:06:13)
+Starting... (2026-11-06 18:18:59)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 15:06:13.
-Progress(9) at 2026-11-06 15:06:16: 46,128 states generated (46,128 s/min), 15,190 distinct states found (15,190 ds/min), 11,427 states left on queue.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 18:18:59.
+Progress(7) at 2026-11-06 18:19:02: 9,638 states generated (9,638 s/min), 3,625 distinct states found (3,625 ds/min), 2,824 states left on queue.
 Error: Invariant StopClearsOnlyWithEvidence is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -67,7 +67,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 2: <Breaks(1) line 356, col 3 to line 363, col 37 of module RebuildAdmission>
+State 2: <Breaks(1) line 374, col 3 to line 381, col 37 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -109,7 +109,7 @@ State 2: <Breaks(1) line 356, col 3 to line 363, col 37 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 3: <Reserve("c1") line 209, col 3 to line 214, col 73 of module RebuildAdmission>
+State 3: <Reserve("c1b") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -124,8 +124,8 @@ State 3: <Reserve("c1") line 209, col 3 to line 214, col 73 of module RebuildAdm
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
-  "c1" :> "resv" @@
-  "c1b" :> "idle" @@
+  "c1" :> "idle" @@
+  "c1b" :> "resv" @@
   "s1" :> "idle" @@
   "r1" :> "idle" @@
   "r2" :> "idle" )
@@ -151,7 +151,7 @@ State 3: <Reserve("c1") line 209, col 3 to line 214, col 73 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 4: <SeeRow(1) line 365, col 3 to line 367, col 72 of module RebuildAdmission>
+State 4: <SeeRow(1) line 383, col 3 to line 385, col 72 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -166,8 +166,8 @@ State 4: <SeeRow(1) line 365, col 3 to line 367, col 72 of module RebuildAdmissi
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
-  "c1" :> "resv" @@
-  "c1b" :> "idle" @@
+  "c1" :> "idle" @@
+  "c1b" :> "resv" @@
   "s1" :> "idle" @@
   "r1" :> "idle" @@
   "r2" :> "idle" )
@@ -193,7 +193,7 @@ State 4: <SeeRow(1) line 365, col 3 to line 367, col 72 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 5: <Consume("c1") line 242, col 3 to line 245, col 40 of module RebuildAdmission>
+State 5: <Consume("c1b") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -208,8 +208,8 @@ State 5: <Consume("c1") line 242, col 3 to line 245, col 40 of module RebuildAdm
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
-  "c1" :> "run" @@
-  "c1b" :> "idle" @@
+  "c1" :> "idle" @@
+  "c1b" :> "run" @@
   "s1" :> "idle" @@
   "r1" :> "idle" @@
   "r2" :> "idle" )
@@ -235,7 +235,7 @@ State 5: <Consume("c1") line 242, col 3 to line 245, col 40 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 6: <Fix("c1") line 311, col 3 to line 313, col 55 of module RebuildAdmission>
+State 6: <Fix("c1b") line 329, col 3 to line 331, col 55 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -250,8 +250,8 @@ State 6: <Fix("c1") line 311, col 3 to line 313, col 55 of module RebuildAdmissi
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
-  "c1" :> "run" @@
-  "c1b" :> "idle" @@
+  "c1" :> "idle" @@
+  "c1b" :> "run" @@
   "s1" :> "idle" @@
   "r1" :> "idle" @@
   "r2" :> "idle" )
@@ -277,7 +277,7 @@ State 6: <Fix("c1") line 311, col 3 to line 313, col 55 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 7: <Probe(1) line 369, col 3 to line 371, col 70 of module RebuildAdmission>
+State 7: <Probe(1) line 387, col 3 to line 389, col 70 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -292,8 +292,8 @@ State 7: <Probe(1) line 369, col 3 to line 371, col 70 of module RebuildAdmissio
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
-  "c1" :> "run" @@
-  "c1b" :> "idle" @@
+  "c1" :> "idle" @@
+  "c1b" :> "run" @@
   "s1" :> "idle" @@
   "r1" :> "idle" @@
   "r2" :> "idle" )
@@ -319,7 +319,7 @@ State 7: <Probe(1) line 369, col 3 to line 371, col 70 of module RebuildAdmissio
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 8: <Clears(1) line 373, col 3 to line 383, col 40 of module RebuildAdmission>
+State 8: <Clears(1) line 391, col 3 to line 401, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {"cleared", "clear"}
 /\ src = [s1 |-> FALSE]
@@ -334,8 +334,8 @@ State 8: <Clears(1) line 373, col 3 to line 383, col 40 of module RebuildAdmissi
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
-  "c1" :> "run" @@
-  "c1b" :> "idle" @@
+  "c1" :> "idle" @@
+  "c1b" :> "run" @@
   "s1" :> "idle" @@
   "r1" :> "idle" @@
   "r2" :> "idle" )
@@ -361,14 +361,7 @@ State 8: <Clears(1) line 373, col 3 to line 383, col 40 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
-Attempted to apply the operator overridden by the Java method
-public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
-but it produced the following error:
-./RebuildAdmission_TTrace_1793977573.bin (Read-only file system)
-244858 states generated, 64106 distinct states found, 44739 states left on queue.
-The depth of the complete state graph search is 10.
-Checkpointing of run /m/mut_p3_see_before_lease/26-11-06-15-06-13.032
-Checkpointing completed at (2026-11-06 15:06:20)
-Finished in 07s at (2026-11-06 15:06:20)
-Failed to generate trace exploration spec; error message: ./RebuildAdmission_TTrace_1793977573.tla (Read-only file system)
+260301 states generated, 66938 distinct states found, 46549 states left on queue.
+The depth of the complete state graph search is 9.
+Finished in 13s at (2026-11-06 18:19:12)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793989138.tla

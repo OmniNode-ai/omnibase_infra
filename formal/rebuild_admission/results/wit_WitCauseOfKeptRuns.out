@@ -1,0 +1,182 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 121 and seed -5638263383708882151 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 9] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/RebuildAdmission.tla
+Parsing file /tmp/tlc-7285970534832530944/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-7285970534832530944/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-7285970534832530944/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-7285970534832530944/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-7285970534832530944/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-7285970534832530944/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-7285970534832530944/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-06 18:19:41)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-06 18:19:42.
+Error: Invariant WitCauseOfKeptRuns is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ phase = [F |-> 0, H |-> 0]
+/\ bad = {}
+/\ src = [s1 |-> FALSE]
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ cur = 1
+/\ dirty = {}
+/\ ghSee = <<FALSE, FALSE, FALSE, FALSE>>
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pubUp = TRUE
+/\ pc = ( o1 :> "idle" @@
+  "c1" :> "idle" @@
+  "c8" :> "idle" @@
+  "c3" :> "idle" @@
+  "kf" :> "idle" )
+/\ keys = [F |-> {}, H |-> {}]
+/\ checked = {}
+/\ wread = <<FALSE, FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none", "none">>
+/\ credit = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ rd = <<>>
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ fl = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE, FALSE>>
+/\ msgs = <<>>
+/\ overrun = <<>>
+/\ safety = {}
+/\ rows = <<{}, {}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ starts = <<>>
+/\ broken = {}
+/\ started = {1}
+/\ unadm = {}
+/\ storeUp = TRUE
+/\ effects = <<0>>
+
+State 2: <Breaks(3) line 374, col 3 to line 381, col 37 of module RebuildAdmission>
+/\ phase = [F |-> 0, H |-> 0]
+/\ bad = {}
+/\ src = [s1 |-> FALSE]
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ cur = 1
+/\ dirty = {}
+/\ ghSee = <<FALSE, FALSE, FALSE, FALSE>>
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pubUp = TRUE
+/\ pc = ( o1 :> "idle" @@
+  "c1" :> "idle" @@
+  "c8" :> "idle" @@
+  "c3" :> "idle" @@
+  "kf" :> "idle" )
+/\ keys = [F |-> {}, H |-> {}]
+/\ checked = {}
+/\ wread = <<FALSE, FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "open", "none">>
+/\ credit = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ rd = <<>>
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ fl = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE, FALSE>>
+/\ msgs = <<>>
+/\ overrun = <<>>
+/\ safety = {}
+/\ rows = <<{}, {}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ starts = <<>>
+/\ broken = {3}
+/\ started = {1}
+/\ unadm = {}
+/\ storeUp = TRUE
+/\ effects = <<0>>
+
+State 3: <Reserve("c8") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+/\ phase = [F |-> 0, H |-> 0]
+/\ bad = {}
+/\ src = [s1 |-> FALSE]
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ cur = 1
+/\ dirty = {}
+/\ ghSee = <<FALSE, FALSE, FALSE, FALSE>>
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pubUp = TRUE
+/\ pc = ( o1 :> "idle" @@
+  "c1" :> "idle" @@
+  "c8" :> "resv" @@
+  "c3" :> "idle" @@
+  "kf" :> "idle" )
+/\ keys = [F |-> {}, H |-> {}]
+/\ checked = {}
+/\ wread = <<FALSE, FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "open", "none">>
+/\ credit = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ rd = <<>>
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ fl = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE, FALSE>>
+/\ msgs = <<>>
+/\ overrun = <<>>
+/\ safety = {}
+/\ rows = <<{}, {}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ starts = <<>>
+/\ broken = {3}
+/\ started = {1}
+/\ unadm = {}
+/\ storeUp = TRUE
+/\ effects = <<0>>
+
+State 4: <Consume("c8") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
+/\ phase = [F |-> 0, H |-> 0]
+/\ bad = {}
+/\ src = [s1 |-> FALSE]
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ cur = 1
+/\ dirty = {}
+/\ ghSee = <<FALSE, FALSE, FALSE, FALSE>>
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pubUp = TRUE
+/\ pc = ( o1 :> "idle" @@
+  "c1" :> "idle" @@
+  "c8" :> "run" @@
+  "c3" :> "idle" @@
+  "kf" :> "idle" )
+/\ keys = [F |-> {}, H |-> {}]
+/\ checked = {}
+/\ wread = <<FALSE, FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "open", "none">>
+/\ credit = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ rd = <<>>
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ fl = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE, FALSE>>
+/\ msgs = <<>>
+/\ overrun = <<>>
+/\ safety = {}
+/\ rows = <<{}, {}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ starts = <<>>
+/\ broken = {3}
+/\ started = {1}
+/\ unadm = {}
+/\ storeUp = TRUE
+/\ effects = <<0>>
+
+386 states generated, 209 distinct states found, 163 states left on queue.
+The depth of the complete state graph search is 5.
+Finished in 01s at (2026-11-06 18:19:42)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793989181.tla

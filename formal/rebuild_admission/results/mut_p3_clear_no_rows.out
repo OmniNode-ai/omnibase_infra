@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 74 and seed -1497865562839570504 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 9] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 26 and seed -7503301503690664327 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 7] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-2429492850077801659/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-2429492850077801659/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-2429492850077801659/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-2429492850077801659/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-2429492850077801659/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-2429492850077801659/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-2429492850077801659/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-1901063521196797107/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-1901063521196797107/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-1901063521196797107/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-1901063521196797107/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-1901063521196797107/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-1901063521196797107/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-1901063521196797107/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,10 +19,10 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 15:03:14)
+Starting... (2026-11-06 18:18:50)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 15:03:14.
-Progress(8) at 2026-11-06 15:03:17: 24,514 states generated (24,514 s/min), 8,744 distinct states found (8,744 ds/min), 6,707 states left on queue.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 18:18:51.
+Progress(7) at 2026-11-06 18:18:54: 12,143 states generated (12,143 s/min), 4,270 distinct states found (4,270 ds/min), 3,277 states left on queue.
 Error: Invariant StopClearsOnlyWithEvidence is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -67,7 +67,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 2: <Breaks(1) line 356, col 3 to line 363, col 37 of module RebuildAdmission>
+State 2: <Breaks(1) line 374, col 3 to line 381, col 37 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -109,7 +109,7 @@ State 2: <Breaks(1) line 356, col 3 to line 363, col 37 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 3: <Reserve("c1") line 209, col 3 to line 214, col 73 of module RebuildAdmission>
+State 3: <Reserve("c1") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -151,7 +151,7 @@ State 3: <Reserve("c1") line 209, col 3 to line 214, col 73 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 4: <Consume("c1") line 242, col 3 to line 245, col 40 of module RebuildAdmission>
+State 4: <Consume("c1") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -193,7 +193,7 @@ State 4: <Consume("c1") line 242, col 3 to line 245, col 40 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 5: <Fix("c1") line 311, col 3 to line 313, col 55 of module RebuildAdmission>
+State 5: <Fix("c1") line 329, col 3 to line 331, col 55 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -235,7 +235,7 @@ State 5: <Fix("c1") line 311, col 3 to line 313, col 55 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 6: <Probe(1) line 369, col 3 to line 371, col 70 of module RebuildAdmission>
+State 6: <Probe(1) line 387, col 3 to line 389, col 70 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -277,7 +277,7 @@ State 6: <Probe(1) line 369, col 3 to line 371, col 70 of module RebuildAdmissio
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 7: <Clears(1) line 373, col 3 to line 383, col 40 of module RebuildAdmission>
+State 7: <Clears(1) line 391, col 3 to line 401, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {"cleared", "clear"}
 /\ src = [s1 |-> FALSE]
@@ -319,14 +319,7 @@ State 7: <Clears(1) line 373, col 3 to line 383, col 40 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
-Attempted to apply the operator overridden by the Java method
-public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
-but it produced the following error:
-./RebuildAdmission_TTrace_1793977393.bin (Read-only file system)
-61580 states generated, 18949 distinct states found, 13982 states left on queue.
-The depth of the complete state graph search is 9.
-Checkpointing of run /m/mut_p3_clear_no_rows/26-11-06-15-03-13.525
-Checkpointing completed at (2026-11-06 15:03:18)
-Finished in 05s at (2026-11-06 15:03:18)
-Failed to generate trace exploration spec; error message: ./RebuildAdmission_TTrace_1793977393.tla (Read-only file system)
+62054 states generated, 18579 distinct states found, 13635 states left on queue.
+The depth of the complete state graph search is 8.
+Finished in 07s at (2026-11-06 18:18:57)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1793989129.tla

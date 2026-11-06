@@ -1,14 +1,14 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 74 and seed -7567470341312467202 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 9] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 43 and seed -1166627895950300578 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmissionExt.tla
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-11071950867560444352/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-11071950867560444352/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-11071950867560444352/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-11071950867560444352/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-11071950867560444352/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-11071950867560444352/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-11071950867560444352/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-11146363183225349599/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-11146363183225349599/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-11146363183225349599/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-11146363183225349599/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-11146363183225349599/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-11146363183225349599/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-11146363183225349599/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -22,468 +22,362 @@ Linting of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmissionExt
-Starting... (2026-11-06 14:54:03)
+Starting... (2026-11-06 18:16:28)
 Implied-temporal checking--satisfiability problem has 1 branches.
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 14:54:03.
-Progress(11) at 2026-11-06 14:54:06: 23,897 states generated (23,897 s/min), 6,371 distinct states found (6,371 ds/min), 3,014 states left on queue.
-Progress(34) at 2026-11-06 14:54:43: 1,976,395 states generated, 239,512 distinct states found, 0 states left on queue.
-Checking temporal properties for the complete state space with 239512 total distinct states at (2026-11-06 14:54:43)
+Finished computing initial states: 1 distinct state generated at 2026-11-06 18:16:28.
+Progress(9) at 2026-11-06 18:16:31: 6,428 states generated (6,428 s/min), 2,037 distinct states found (2,037 ds/min), 1,108 states left on queue.
+Progress(25) at 2026-11-06 18:17:31: 1,696,024 states generated (1,689,596 s/min), 213,988 distinct states found (211,951 ds/min), 12,377 states left on queue.
+Progress(34) at 2026-11-06 18:17:41: 2,039,815 states generated, 239,512 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 239512 total distinct states at (2026-11-06 18:17:41)
 Error: Temporal property StopClearsOrEscalates was violated.
 
 Error: The following behavior constitutes a counter-example:
 
 State 1: <Initial predicate>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> FALSE]
-/\ fresh = TRUE
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
 /\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ fresh = TRUE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
+/\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
 /\ pubUp = TRUE
-/\ pc = (o1 :> "idle" @@ "c1" :> "idle" @@ "s1" :> "idle" @@ "r1" :> "idle")
+/\ phase = [F |-> 0, H |-> 0]
 /\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pc = (o1 :> "idle" @@ "c1" :> "idle" @@ "s1" :> "idle" @@ "r1" :> "idle")
 /\ stop = <<"none", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
 /\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 2: <Breaks(1) line 356, col 3 to line 363, col 37 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ src = [s1 |-> FALSE]
-/\ fresh = TRUE
-/\ handed = FALSE
-/\ cur = 1
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
 /\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = TRUE
-/\ pc = (o1 :> "idle" @@ "c1" :> "idle" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
+/\ rows = <<{}, {}, {}>>
 /\ safety = {}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {1}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 3: <SrcBad("s1") line 328, col 3 to line 329, col 94 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = TRUE
-/\ handed = FALSE
 /\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = TRUE
-/\ pc = (o1 :> "idle" @@ "c1" :> "idle" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
 /\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ storeUp = TRUE
+
+State 2: <SrcBad("s1") line 346, col 3 to line 347, col 94 of module RebuildAdmission>
 /\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
 /\ overrun = <<>>
+/\ broken = {}
+/\ handed = FALSE
+/\ fresh = TRUE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
+/\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = TRUE
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pc = (o1 :> "idle" @@ "c1" :> "idle" @@ "s1" :> "idle" @@ "r1" :> "idle")
+/\ stop = <<"none", "none", "none">>
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
+/\ rd = <<>>
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ rows = <<{}, {}, {}>>
 /\ safety = {}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {1}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 4: <SafetyOpens("s1") line 331, col 3 to line 334, col 57 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = TRUE
-/\ handed = FALSE
 /\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ storeUp = TRUE
+
+State 3: <Breaks(1) line 374, col 3 to line 381, col 37 of module RebuildAdmission>
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {1}
+/\ handed = FALSE
+/\ fresh = TRUE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
+/\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
 /\ pubUp = TRUE
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pc = (o1 :> "idle" @@ "c1" :> "idle" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
 /\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
 /\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {1}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 5: <Reserve("c1") line 209, col 3 to line 214, col 73 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ storeUp = TRUE
+
+State 4: <PubDies line 361, col 3 to line 362, col 92 of module RebuildAdmission>
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {1}
+/\ handed = FALSE
 /\ fresh = TRUE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = TRUE
-/\ pc = (o1 :> "idle" @@ "c1" :> "resv" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
 /\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {1}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 6: <PubDies line 343, col 3 to line 344, col 92 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = TRUE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = FALSE
-/\ pc = (o1 :> "idle" @@ "c1" :> "resv" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
 /\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
 /\ starts = <<>>
-/\ broken = {1}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
 /\ effects = <<0>>
-
-State 7: <GoesStale line 346, col 3 to line 347, col 92 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = FALSE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
 /\ pubUp = FALSE
-/\ pc = (o1 :> "idle" @@ "c1" :> "resv" @@ "s1" :> "idle" @@ "r1" :> "idle")
+/\ phase = [F |-> 0, H |-> 0]
 /\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {1}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 8: <Consume("c1") line 242, col 3 to line 245, col 40 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = FALSE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = FALSE
-/\ pc = (o1 :> "idle" @@ "c1" :> "run" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {1}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 9: <Fix("c1") line 311, col 3 to line 313, col 55 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = FALSE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = FALSE
-/\ pc = (o1 :> "idle" @@ "c1" :> "run" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 10: <SeeRow(1) line 365, col 3 to line 367, col 72 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = FALSE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<TRUE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = FALSE
-/\ pc = (o1 :> "idle" @@ "c1" :> "run" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{"see"}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 11: <Ends("c1") line 275, col 3 to line 280, col 58 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = FALSE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<TRUE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = FALSE
 /\ pc = (o1 :> "idle" @@ "c1" :> "idle" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
 /\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{"see"}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 12: <Reserve("c1") line 209, col 3 to line 214, col 73 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = FALSE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
-/\ ghSee = <<TRUE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = FALSE
-/\ pc = (o1 :> "idle" @@ "c1" :> "resv" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
 /\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
+/\ checked = {}
 /\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{"see"}, {}, {}>>
-/\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {}
-/\ started = {1}
-/\ unadm = {}
-/\ storeUp = TRUE
-/\ effects = <<0>>
-
-State 13: <Consume("c1") line 242, col 3 to line 245, col 40 of module RebuildAdmission>
-/\ phase = [F |-> 0, H |-> 0]
-/\ bad = {}
-/\ src = [s1 |-> TRUE]
-/\ fresh = FALSE
-/\ handed = FALSE
-/\ cur = 1
-/\ dirty = {}
 /\ ghSee = <<FALSE, FALSE, FALSE>>
-/\ snap = [F |-> FALSE, H |-> FALSE]
-/\ pubUp = FALSE
-/\ pc = (o1 :> "idle" @@ "c1" :> "run" @@ "s1" :> "idle" @@ "r1" :> "idle")
-/\ keys = [F |-> {}, H |-> {}]
-/\ checked = {}
-/\ wread = <<FALSE, FALSE, FALSE>>
-/\ stop = <<"open", "none", "none">>
-/\ credit = 1
-/\ pendEff = [F |-> 0, H |-> 0]
-/\ rd = <<>>
-/\ pendKey = [F |-> 0, H |-> 0]
-/\ fl = <<>>
-/\ ghRead = <<FALSE, FALSE, FALSE>>
-/\ msgs = <<>>
-/\ overrun = <<>>
-/\ safety = {"s1"}
-/\ rows = <<{}, {}, {}>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
 /\ up = [F |-> TRUE, H |-> TRUE]
-/\ starts = <<>>
-/\ broken = {}
-/\ started = {1}
-/\ unadm = {}
+/\ dirty = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ pendEff = [F |-> 0, H |-> 0]
 /\ storeUp = TRUE
+
+State 5: <GoesStale line 364, col 3 to line 365, col 92 of module RebuildAdmission>
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {1}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
 /\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pc = (o1 :> "idle" @@ "c1" :> "idle" @@ "s1" :> "idle" @@ "r1" :> "idle")
+/\ stop = <<"open", "none", "none">>
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
+/\ rd = <<>>
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ storeUp = TRUE
 
-Back to state 10: <SeeRow(1) line 365, col 3 to line 367, col 72 of module RebuildAdmission>
+State 6: <Reserve("c1") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {1}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
+/\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pc = (o1 :> "idle" @@ "c1" :> "resv" @@ "s1" :> "idle" @@ "r1" :> "idle")
+/\ stop = <<"open", "none", "none">>
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
+/\ rd = <<>>
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ storeUp = TRUE
 
-Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
-Attempted to apply the operator overridden by the Java method
-public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
-but it produced the following error:
-./RebuildAdmissionExt_TTrace_1793976842.bin (Read-only file system)
-Finished checking temporal properties in 00s at 2026-11-06 14:54:44
-1976395 states generated, 239512 distinct states found, 0 states left on queue.
+State 7: <Consume("c1") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {1}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
+/\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pc = (o1 :> "idle" @@ "c1" :> "run" @@ "s1" :> "idle" @@ "r1" :> "idle")
+/\ stop = <<"open", "none", "none">>
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
+/\ rd = <<>>
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ storeUp = TRUE
+
+State 8: <Fix("c1") line 329, col 3 to line 331, col 55 of module RebuildAdmission>
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
+/\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pc = (o1 :> "idle" @@ "c1" :> "run" @@ "s1" :> "idle" @@ "r1" :> "idle")
+/\ stop = <<"open", "none", "none">>
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
+/\ rd = <<>>
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ storeUp = TRUE
+
+State 9: <SeeRow(1) line 383, col 3 to line 385, col 72 of module RebuildAdmission>
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
+/\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pc = (o1 :> "idle" @@ "c1" :> "run" @@ "s1" :> "idle" @@ "r1" :> "idle")
+/\ stop = <<"open", "none", "none">>
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
+/\ rd = <<>>
+/\ ghSee = <<TRUE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ rows = <<{"see"}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ storeUp = TRUE
+
+State 10: <Reserve("r1") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+/\ msgs = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ handed = FALSE
+/\ fresh = FALSE
+/\ fl = <<>>
+/\ credit = 1
+/\ starts = <<>>
+/\ effects = <<0>>
+/\ unadm = {}
+/\ started = {1}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ pubUp = FALSE
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pc = (o1 :> "idle" @@ "c1" :> "run" @@ "s1" :> "idle" @@ "r1" :> "resv")
+/\ stop = <<"open", "none", "none">>
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ checked = {}
+/\ rd = <<>>
+/\ ghSee = <<TRUE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ rows = <<{"see"}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ storeUp = TRUE
+
+Back to state 9: <Expire("r1") line 229, col 3 to line 231, col 102 of module RebuildAdmission>
+
+Finished checking temporal properties in 00s at 2026-11-06 18:17:42
+2039815 states generated, 239512 distinct states found, 0 states left on queue.
 The depth of the complete state graph search is 34.
-Finished in 41s at (2026-11-06 14:54:44)
-Failed to generate trace exploration spec; error message: ./RebuildAdmissionExt_TTrace_1793976842.tla (Read-only file system)
+Finished in 01min 15s at (2026-11-06 18:17:42)
+Trace exploration spec path: ./RebuildAdmissionExt_TTrace_1793988986.tla
