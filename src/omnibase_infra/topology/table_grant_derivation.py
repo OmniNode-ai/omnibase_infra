@@ -522,17 +522,14 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # The gateway_link_health_status VIEW is not declared at all: no runtime
     # node reads or writes it, so its privileges are revoked rather than
     # declared.
-    _vendored_read_write(
-        "savings_injection_signals",
-        "node_savings_estimation_compute",
-        "0001_create_savings_signal_tables.sql",
-        node="infra_direct_sql:node_savings_estimation_compute",
-    ),
-    _vendored_read_write(
-        "savings_validator_catch_signals",
-        "node_savings_estimation_compute",
-        "0001_create_savings_signal_tables.sql",
-        node="infra_direct_sql:node_savings_estimation_compute",
+    *(
+        _vendored_read_write(
+            table,
+            "node_savings_estimation_compute",
+            "0001_create_savings_signal_tables.sql",
+            node="infra_direct_sql:node_savings_estimation_compute",
+        )
+        for table in ("savings_injection_signals", "savings_validator_catch_signals")
     ),
     _vendored_read_write(
         "savings_correlation_finalizations",
