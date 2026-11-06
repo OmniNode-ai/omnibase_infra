@@ -27,8 +27,6 @@ edges:
   - omnibase_infra.gateway.client.gateway_session_keeper -> omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_session:ModelGatewaySession
   - omnibase_infra.gateway.models.model_gateway_attachment -> omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_renewal_directive:ModelGatewayRenewalDirective
   - omnibase_infra.gateway.models.model_gateway_attachment -> omnibase_infra.nodes.node_gateway_attach_effect.models.model_gateway_session:ModelGatewaySession
-  - omnibase_infra.handlers.handler_broker_grant_derive -> omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant:ModelBrokerGrant
-  - omnibase_infra.handlers.handler_broker_grant_derive -> omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_derivation:ModelBrokerGrantDerivation
   - omnibase_infra.handlers.models.qdrant.model_qdrant_handler_config -> omnibase_infra.nodes.node_vector_store_effect.contract_descriptor:contract_qdrant_url
   - omnibase_infra.handlers.registration_storage -> omnibase_infra.nodes.node_registration_storage_effect.models:ModelRegistrationRecord
   - omnibase_infra.handlers.registration_storage -> omnibase_infra.nodes.node_registration_storage_effect.models:ModelStorageResult

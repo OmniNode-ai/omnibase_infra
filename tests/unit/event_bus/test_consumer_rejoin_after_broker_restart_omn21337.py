@@ -23,6 +23,9 @@ from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
     LOST_CONSUMER_RETRY_SECONDS,
     ConsumerRejoinSupervisor,
 )
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
+    HandlerConsumerCoordinatorRejoin,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.models.health.model_consumer_rejoin_alarm import (
@@ -186,6 +189,9 @@ class Harness:
             return self.replacement
 
         self.supervisor = ConsumerRejoinSupervisor(
+            coordinator_handler=kwargs.pop(
+                "coordinator_handler", HandlerConsumerCoordinatorRejoin()
+            ),
             topic=TOPIC,
             group_id=GROUP,
             policy=POLICY,
@@ -672,3 +678,31 @@ async def test_consumer_rejoins_after_broker_restart_within_five_minutes_at_ship
         elapsed += poll_seconds
     assert h.recreates == 2
     assert elapsed < 300.0
+
+
+@pytest.mark.asyncio
+async def test_supervisor_reuses_injected_coordinator_handler_after_failed_rejoin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
+        HandlerConsumerCoordinatorRejoin,
+    )
+
+    handler = HandlerConsumerCoordinatorRejoin()
+    requests = []
+    decide = handler.handle
+
+    def record(request):
+        requests.append(request)
+        return decide(request)
+
+    monkeypatch.setattr(handler, "handle", record)
+    h = Harness(fail=True, coordinator_handler=handler)
+    await h.poll(0)
+    for _ in range(polls_for(COORDINATOR_UNAVAILABLE_SECONDS)):
+        await h.poll()
+
+    assert h.recreates == 1
+    assert len(h.supervisor.alarms) == 1
+    assert any(request.failed_rejoins == 0 for request in requests)
+    assert any(request.failed_rejoins == 1 for request in requests)
