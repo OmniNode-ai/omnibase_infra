@@ -12,7 +12,7 @@
 (* (7.5), so a transaction on it is one action: Reserve, Consume, Begin,   *)
 (* SafetyOpens, Publish, Breaks, Clears, StepPut. Everything outside it is *)
 (* its own action, and those races are in the protocol's own runs: a       *)
-(* source going bad before it is recorded, time passing with no write, a   *)
+(* source going bad before it is read and recorded, time passing with no write, a *)
 (* process dying before anyone reads it, an in-flight step acting after a  *)
 (* failure opened, an engine acting on what it read before a handover, a   *)
 (* probe read before the store came back. A split inside a transaction     *)
@@ -21,11 +21,11 @@
 (* Abstractions, stated:                                                   *)
 (* - No epoch number: an advance kills every live reservation, which is    *)
 (*   what comparing numbers decides.                                       *)
-(* - WORKING for 24 hours is one published bit (3.5 keeps two predicates). *)
+(* - WORKING for 24 hours is one published bit; 3.5 settles it in the text: pull needs the window, a clear one dated probe. *)
 (* - No wall clock: a stale table and an expired reservation are actions.  *)
 (* - A debit taken afterwards by an exempt lane is not counted.            *)
 (***************************************************************************)
-EXTENDS Integers, FiniteSets, TLC
+EXTENDS Integers, FiniteSets, Sequences, TLC
 
 CONSTANTS
   o1, o2, o3, o4, o5, o6, o7, o8, o9,   \* see Ords
@@ -68,7 +68,7 @@ Steps == 1..NSteps
 
 KindOf(t) ==
   CASE t \in Ords -> [k |-> "ord", p |-> 1, s |-> "-", r |-> "pub"]
-    [] t = "j"  -> [k |-> "join", p |-> 2, s |-> "-", r |-> "pub"]
+    [] t \in {"j", "j2"} -> [k |-> "join", p |-> 2, s |-> "-", r |-> "pub"]
     [] t = "j3" -> [k |-> "join", p |-> 3, s |-> "-", r |-> "pub"]
     [] t = "u"  -> [k |-> "ord", p |-> 2, s |-> "-", r |-> "pub"]
     [] t \in {"c1", "c1b"} -> [k |-> "cause", p |-> 1, s |-> "-", r |-> "pub"]
@@ -106,6 +106,14 @@ VARIABLES
   cur,       \* the lowest unfinished piece
   joined,    \* pieces whose join has passed
   started,   \* pieces whose join has been consumed
+  built,     \* pieces an ordinary lane has built, or that exist already (8 and 9)
+  everW,     \* pieces with a first WORKING reading: past BUILDING (3.5)
+  bEsc,      \* pieces with their still-BUILDING escalation row
+  sRead,     \* [SafetyIds -> a probe of the source read clean since the failure opened], in the store
+  ghClean,   \* ghost: the same, dated apart from what the guard reads
+  dirty,     \* ghost: live reservations older than a write to a fact: {} unless a Kill is missing
+  rid,       \* [DupTasks -> the identity of the task's reservation, modulo 3]
+  dupId,     \* [DupTasks -> the identity the held redelivery carries]
   credit,    \* credits at hand
   storeUp,   \* the gate store and broker answer
   probeDown, \* the local probe's last read says down; may be behind the truth
@@ -120,14 +128,14 @@ VARIABLES
   ghSee,     \* ghost: [Pieces -> go-and-see written after the stop and the last lease]
   ghRead,    \* ghost: [Pieces -> WORKING probed after the stop and the last lease]
   bad,       \* ghost: names of the safety properties that broke; stays {} in the protocol
-  tok, checked, oldResv, pend, pendKey   \* state of mutations only
+  tok, checked, pend, pendKey   \* state of mutations only
 
 laneV  == <<pc, parked, inflight, overrun, dup>>
-gateV  == <<src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit>>
+gateV  == <<src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit, built, everW, bEsc, sRead>>
 storeV == <<storeUp, probeDown, emCount>>
 engV   == <<up, handed, phase, snap, keys, effects, escUp>>
-ghV    == <<ghSee, ghRead, bad>>
-mutV   == <<tok, checked, oldResv, pend, pendKey>>
+ghV    == <<ghSee, ghRead, ghClean, dirty, rid, dupId, bad>>
+mutV   == <<tok, checked, pend, pendKey>>
 vars   == <<laneV, gateV, storeV, engV, ghV, mutV>>
 
 K(t) == KindOf(t)
@@ -162,15 +170,20 @@ RepairFree == M("repair_unbounded") \/ \A t \in Tasks : K(t).k = "repair" => pc[
 
 \* The freed-place guard: a safety cause lane, a repair lane and a stop's cause lane debit afterwards.
 NeedsCredit(k) ==
-  /\ k.k \notin {"ro", "scause", "repair", "em", "b0"}
+  /\ k.k \notin {"ro", "scause", "repair", "em"}
   /\ (k.k = "cause" => M("plan_cause_needs_credit"))
 CreditOK(k) == (NeedsCredit(k) \/ (M("credit_refuses_safety") /\ k.k = "scause")) => credit > 0
 
 RepairCredit == ~M("credit_refuses_repair") \/ credit > 0
 
+\* Step 0b: a safety cause lane passes, and the repair lane is admitted as a cause lane of the failure.
+PrivateAllowed(k) ==
+  \/ (k.k = "scause" /\ ~M("scause_filtered"))
+  \/ (k.k = "repair" /\ safety # {})
+
 \* ---- the table of 7.1 ("next" passes on) ----
 Step0b(k) ==
-  IF k.r = "priv" /\ (k.k # "scause" \/ M("scause_filtered")) THEN "refuse" ELSE "next"
+  IF k.r = "priv" /\ ~PrivateAllowed(k) THEN "refuse" ELSE "next"
 Step1(k) ==
   IF safety = {} THEN "next"
   ELSE IF k.k = "scause" /\ k.s \in safety THEN (IF CreditOK(k) THEN "admit" ELSE "refuse")
@@ -179,7 +192,7 @@ Step1(k) ==
 Step2(k) ==
   IF fresh THEN "next"
   ELSE IF k.k = "repair" THEN (IF RepairFree /\ RepairCredit THEN "admit" ELSE "refuse")
-  ELSE IF k.k = "kept" \/ (Rebuild(k) /\ k.p > Seven) THEN "refuse"
+  ELSE IF (k.k = "kept" \/ Rebuild(k)) /\ k.p > Seven THEN "refuse"
   ELSE "next"
 PredOK(k) == M("no_pred") \/ (Pred(k.p) /\ Joined(k.p))
 OrdOK(k) == k.p = cur /\ PredOK(k) /\ Room(k.p) /\ CreditOK(k)
@@ -187,6 +200,7 @@ JoinOK(k) ==
   /\ M("no_join_target") \/ k.p = cur + 1
   /\ k.p \notin joined
   /\ M("no_pred") \/ Pred(k.p)
+  /\ M("join_no_slot") \/ \A t \in Tasks : (K(t).k = "join" /\ K(t).p = k.p) => pc[t] = "idle"
   /\ Room(k.p) /\ CreditOK(k)
 KeptOK(k) == (k.p \in KeptPieces \/ k.p = cur) /\ CreditOK(k)
 Step3(k) ==
@@ -200,15 +214,13 @@ Step3(k) ==
               IF ~M("kept_refused_under_stop") /\ k.p \in KeptPieces /\ CreditOK(k) THEN "admit" ELSE "refuse"
          [] k.k = "ord"  -> IF k.p < Low /\ OrdOK(k) THEN "admit" ELSE "refuse"
          [] k.k = "join" -> IF k.p < Low /\ JoinOK(k) THEN "admit" ELSE "refuse"
-         [] k.k = "b0"   -> "admit"
-         [] k.k = "cont" -> IF CreditOK(k) THEN "admit" ELSE "refuse"
+         [] k.k \in {"b0", "cont"} -> IF CreditOK(k) THEN "admit" ELSE "refuse"
          [] OTHER -> "refuse"
 StepOrder(k) ==
   CASE k.k = "ord"  -> IF OrdOK(k) THEN "admit" ELSE "refuse"
     [] k.k = "join" -> IF JoinOK(k) THEN "admit" ELSE "refuse"
     [] k.k = "kept" -> IF KeptOK(k) THEN "admit" ELSE "refuse"
-    [] k.k = "cont" -> IF CreditOK(k) THEN "admit" ELSE "refuse"
-    [] k.k = "b0"   -> "admit"
+    [] k.k \in {"b0", "cont"} -> IF CreditOK(k) THEN "admit" ELSE "refuse"
     [] OTHER -> "refuse"
 First(a, b, c, d, e) ==
   IF a # "next" THEN a ELSE IF b # "next" THEN b ELSE IF c # "next" THEN c ELSE IF d # "next" THEN d ELSE e
@@ -216,7 +228,7 @@ Decide(k) ==
   IF k.k = "ro" /\ ~M("ro_after_safety") THEN "admit"
   ELSE IF M("stale_before_safety") THEN First(Step0b(k), Step2(k), Step1(k), Step3(k), StepOrder(k))
   ELSE IF M("stop_before_stale") THEN First(Step0b(k), Step1(k), Step3(k), Step2(k), StepOrder(k))
-  ELSE IF M("cont_in_safety") /\ k.k = "cont" THEN "admit"
+  ELSE IF M("cont_in_safety") /\ k.k = "cont" /\ k.r = "pub" THEN "admit"
   ELSE IF k.k = "ro" THEN First(Step1(k), "next", "next", "next", "admit")
   ELSE First(Step0b(k), Step1(k), Step2(k), Step3(k), StepOrder(k))
 
@@ -227,11 +239,11 @@ OrderForbids(k) ==
   \/ (k.k = "join" /\ ~(k.p = cur + 1 /\ k.p \notin joined /\ Pred(k.p)))
 Against(k) ==
   IF k.k = "ro" THEN FALSE
-  ELSE IF k.r = "priv" /\ k.k # "scause" THEN TRUE
+  ELSE IF k.r = "priv" /\ ~(k.k = "scause" \/ (k.k = "repair" /\ safety # {})) THEN TRUE
   ELSE IF k.k = "em" THEN storeUp /\ ~probeDown
   ELSE IF safety # {} THEN ~((k.k = "scause" /\ k.s \in safety) \/ (k.k = "repair" /\ ~fresh))
   ELSE IF k.k = "scause" THEN TRUE
-  ELSE IF ~fresh /\ (k.k = "kept" \/ (Rebuild(k) /\ k.p > Seven)) THEN TRUE
+  ELSE IF ~fresh /\ (k.k = "kept" \/ Rebuild(k)) /\ k.p > Seven THEN TRUE
   ELSE IF ~fresh /\ k.k = "repair" THEN FALSE
   ELSE IF k.k \in {"other", "repair"} THEN TRUE
   ELSE IF Stops # {} THEN
@@ -249,14 +261,15 @@ LagAgainst(k) ==
 
 \* The epoch re-read does not cover what changes with no write: age and the table it ages.
 TimeOK(k) ==
-  /\ (safety = {} /\ ~fresh) => ~(k.k = "kept" \/ (Rebuild(k) /\ k.p > Seven))
+  /\ (safety = {} /\ ~fresh) => ~((k.k = "kept" \/ Rebuild(k)) /\ k.p > Seven)
+  /\ k.k = "repair" => ~fresh
   /\ k.k \in {"ord", "join"} => Pred(k.p)
 
 \* ---- the fence: who may begin an outward step ----
 OwnCause(t) ==
   \/ (K(t).k = "scause" /\ K(t).s \in safety)
   \/ (K(t).k = "repair" /\ ~fresh)
-  \/ K(t).k = "em"
+  \/ (K(t).k = "em" /\ (~storeUp \/ probeDown))
 SafetyParks(t) == safety # {} /\ ~OwnCause(t)
 StopParks(t) ==
   /\ Stops # {}
@@ -265,24 +278,31 @@ StopParks(t) ==
 ParkCond(t) == SafetyParks(t) \/ StopParks(t)
 
 \* ---- the epoch ----
-Kill ==
-  IF M("no_epoch") THEN pc
+Kill(site) ==
+  IF M("no_epoch") \/ M("no_kill_" \o site) THEN pc
   ELSE [t \in Tasks |-> IF pc[t] = "resv" THEN (IF M("consume_after_epoch") THEN "rold" ELSE "idle")
                         ELSE pc[t]]
+\* Reservations alive after a write to a fact. No guard reads this; Consume reports one consumed.
+Older(site) == {t \in Tasks : Kill(site)[t] = "resv"} \cup dirty
 
 Init ==
   /\ pc = [t \in Tasks |-> "idle"] /\ parked = {} /\ inflight = {}
   /\ overrun = [t \in FlightTasks |-> 0] /\ dup = {}
   /\ src = [s \in SafetyIds |-> FALSE] /\ safety = {} /\ sEsc = {}
-  /\ fresh = TRUE /\ pubUp = TRUE /\ broken = {} /\ working = Pieces
+  /\ fresh = TRUE /\ pubUp = TRUE /\ broken = {}
+  /\ working = IF M("init_all_working") THEN Pieces ELSE {}
+  /\ built = KeptPieces /\ bEsc = {}
+  /\ everW = IF M("init_all_working") THEN Pieces ELSE {}
+  /\ sRead = [s \in SafetyIds |-> FALSE] /\ ghClean = [s \in SafetyIds |-> FALSE]
+  /\ dirty = {} /\ rid = [t \in DupTasks |-> 0] /\ dupId = [t \in DupTasks |-> 0]
   /\ stop = [p \in Pieces |-> "none"] /\ rows = [p \in Pieces |-> {}]
   /\ cur = 1 /\ joined = {} /\ started = {} /\ credit = 1
   /\ storeUp = TRUE /\ probeDown = FALSE /\ emCount = 0
   /\ up = [x \in Procs |-> TRUE] /\ handed = FALSE
   /\ phase = [x \in Procs |-> 0] /\ snap = [x \in Procs |-> <<TRUE, FALSE>>]
   /\ keys = [x \in Procs |-> {}] /\ effects = [i \in Steps |-> 0] /\ escUp = TRUE
-  /\ ghSee = [p \in Pieces |-> FALSE] /\ ghRead = [p \in Pieces |-> TRUE] /\ bad = {}
-  /\ tok = {} /\ checked = {} /\ oldResv = {} /\ pend = {} /\ pendKey = [x \in Procs |-> 0]
+  /\ ghSee = [p \in Pieces |-> FALSE] /\ ghRead = [p \in Pieces |-> FALSE] /\ bad = {}
+  /\ tok = {} /\ checked = {} /\ pend = {} /\ pendKey = [x \in Procs |-> 0]
 
 \* ---- the admission path, each a store transaction ----
 Reserve(t) ==
@@ -291,7 +311,8 @@ Reserve(t) ==
   /\ M("holder_in_engine") => up[Owner]
   /\ Decide(K(t)) = "admit"
   /\ pc' = [pc EXCEPT ![t] = IF M("late_bind") THEN "dec" ELSE "resv"]
-  /\ UNCHANGED <<parked, inflight, overrun, dup, gateV, storeV, engV, ghV, mutV>>
+  /\ rid' = IF t \in DupTasks THEN [rid EXCEPT ![t] = (@ + 1) % 3] ELSE rid
+  /\ UNCHANGED <<parked, inflight, overrun, dup, gateV, storeV, engV, ghSee, ghRead, ghClean, dirty, dupId, bad, mutV>>
 Bind(t) ==     \* late_bind only: the facts were read before the epoch
   /\ M("late_bind") /\ pc[t] = "dec"
   /\ pc' = [pc EXCEPT ![t] = "resv"]
@@ -300,8 +321,8 @@ Expire(t) ==   \* a lifetime ended: the store re-lets the place
   /\ pc[t] \in {"resv", "rold", "dec"} /\ storeUp
   /\ pc' = [pc EXCEPT ![t] = "idle"]
   /\ tok' = IF M("expired_token") /\ pc[t] = "resv" THEN tok \cup {t} ELSE tok
-  /\ oldResv' = oldResv \ {t}
-  /\ UNCHANGED <<parked, inflight, overrun, dup, gateV, storeV, engV, ghV, checked, pend, pendKey>>
+  /\ dirty' = dirty \ {t}
+  /\ UNCHANGED <<parked, inflight, overrun, dup, gateV, storeV, engV, ghSee, ghRead, ghClean, rid, dupId, bad, checked, pend, pendKey>>
 Consume(t) ==  \* the compare: reservation live (a killed one is gone), expiry, age, credit
   /\ \/ pc[t] = "resv"
      \/ (M("consume_after_epoch") /\ pc[t] = "rold")
@@ -313,7 +334,8 @@ Consume(t) ==  \* the compare: reservation live (a killed one is gone), expiry, 
   /\ pc' = [pc EXCEPT ![t] = IF M("row_gap") /\ Wip(K(t)) THEN "cons" ELSE "run"]
   /\ credit' = IF CreditOn /\ NeedsCredit(K(t)) THEN credit - 1 ELSE credit
   /\ dup' = IF t \in DupTasks THEN dup \cup {t} ELSE dup
-  /\ tok' = tok \ {t} /\ oldResv' = oldResv \ {t}
+  /\ dupId' = IF t \in DupTasks THEN [dupId EXCEPT ![t] = rid[t]] ELSE dupId
+  /\ tok' = tok \ {t} /\ dirty' = dirty \ {t}
   /\ started' = IF K(t).k = "join" THEN started \cup {K(t).p} ELSE started
   \* a cause lane's lease voids the evidence that came before it
   /\ rows' = IF K(t).k = "cause" /\ ~M("see_before_lease") THEN [rows EXCEPT ![K(t).p] = @ \ {"see"}] ELSE rows
@@ -321,16 +343,18 @@ Consume(t) ==  \* the compare: reservation live (a killed one is gone), expiry, 
   /\ ghSee' = IF K(t).k = "cause" THEN [ghSee EXCEPT ![K(t).p] = FALSE] ELSE ghSee
   /\ ghRead' = IF K(t).k = "cause" THEN [ghRead EXCEPT ![K(t).p] = FALSE] ELSE ghRead
   /\ bad' = bad \cup (IF Against(K(t)) \/ LagAgainst(K(t)) THEN {"start"} ELSE {})
-                \cup (IF pc[t] = "rold" \/ t \in oldResv THEN {"epoch"} ELSE {})
+                \cup (IF pc[t] = "rold" \/ t \in dirty THEN {"epoch"} ELSE {})
                 \cup (IF ~storeUp THEN {"down"} ELSE {})
                 \cup (IF credit' < 0 THEN {"credit"} ELSE {})
-  /\ UNCHANGED <<parked, inflight, overrun, src, safety, sEsc, fresh, pubUp, broken, stop, cur, joined,
-                 storeV, engV, checked, pend, pendKey>>
-Redeliver(t) ==  \* the bus delivers the start again, maybe after a new reservation exists
-  /\ t \in dup /\ dup' = dup \ {t}
-  /\ bad' = bad \cup (IF (M("reservation_reused") /\ pc[t] = "run") \/ (M("redelivery_aba") /\ pc[t] = "resv")
-                      THEN {"double"} ELSE {})
-  /\ UNCHANGED <<pc, parked, inflight, overrun, gateV, storeV, engV, ghSee, ghRead, mutV>>
+  /\ UNCHANGED <<parked, inflight, overrun, src, safety, sEsc, fresh, pubUp, broken, stop, cur, joined, built, everW, bEsc, sRead,
+                 storeV, engV, ghClean, rid, checked, pend, pendKey>>
+Redeliver(t) ==  \* the bus delivers the start again: the same compare, on the reservation's identity
+  LET idOK   == M("redelivery_no_identity") \/ rid[t] = dupId[t]
+      liveOK == M("redelivery_no_used_check") \/ pc[t] = "resv"
+      passes == idOK /\ liveOK /\ pc[t] \in {"resv", "run"}
+  IN /\ t \in dup /\ dup' = dup \ {t} /\ storeUp
+     /\ bad' = IF passes /\ (pc[t] = "run" \/ rid[t] # dupId[t]) THEN bad \cup {"double"} ELSE bad
+     /\ UNCHANGED <<pc, parked, inflight, overrun, gateV, storeV, engV, ghSee, ghRead, ghClean, dirty, rid, dupId, mutV>>
 EmStart(t) ==    \* with the store unreachable: a local probe and a journalled single-use credential
   /\ K(t).k = "em" /\ pc[t] = "idle"
   /\ probeDown \/ M("em_caller_word")
@@ -339,14 +363,14 @@ EmStart(t) ==    \* with the store unreachable: a local probe and a journalled s
   /\ pc' = [pc EXCEPT ![t] = "run"]
   /\ emCount' = IF emCount < 2 THEN emCount + 1 ELSE emCount
   /\ bad' = bad \cup (IF Against(K(t)) THEN {"start"} ELSE {}) \cup (IF emCount >= 1 THEN {"em"} ELSE {})
-  /\ UNCHANGED <<parked, inflight, overrun, dup, gateV, storeUp, probeDown, engV, ghSee, ghRead, mutV>>
+  /\ UNCHANGED <<parked, inflight, overrun, dup, gateV, storeUp, probeDown, engV, ghSee, ghRead, ghClean, dirty, rid, dupId, mutV>>
 
 \* ---- a running lane ----
 Ends(t) ==       \* the process exits; a lane that fails ends the same way and leaves nothing
   /\ pc[t] = "run"
   /\ pc' = [pc EXCEPT ![t] = IF t \in DeadTasks THEN "dead" ELSE "idle"]
   /\ parked' = parked \ {t} /\ inflight' = inflight \ {t} /\ checked' = checked \ {t}
-  /\ UNCHANGED <<overrun, dup, gateV, storeV, engV, ghV, tok, oldResv, pend, pendKey>>
+  /\ UNCHANGED <<overrun, dup, gateV, storeV, engV, ghV, tok, pend, pendKey>>
 ReadGone(t) ==   \* the only thing that frees a place: the process read as gone
   /\ pc[t] = "dead" /\ (storeUp \/ K(t).k = "em")   \* the credential's holder reads its own lane locally
   /\ pc' = [pc EXCEPT ![t] = "idle"]
@@ -367,18 +391,19 @@ FenceHolds(t) ==
         ELSE IF M("no_stop_park") THEN SafetyParks(t)
         ELSE ParkCond(t)
   IN /\ ~checkedFor
-     /\ storeUp \/ OwnCause(t) \/ M("fence_off") \/ M("plan_cloud_lane")
+     /\ storeUp \/ K(t).k = "em" \/ M("fence_off") \/ M("plan_cloud_lane") \/ M("store_down_lets_cause_act")
 Check(t) ==      \* fence_split only: the fence read, the write to come
   /\ M("fence_split") /\ pc[t] = "run" /\ t \in FlightTasks /\ t \notin checked /\ FenceHolds(t)
   /\ checked' = checked \cup {t}
-  /\ UNCHANGED <<laneV, gateV, storeV, engV, ghV, tok, oldResv, pend, pendKey>>
-Begin(t) ==      \* a store write: the fence is checked in it
+  /\ UNCHANGED <<laneV, gateV, storeV, engV, ghV, tok, pend, pendKey>>
+Begin(t) ==      \* a store write: the fence is checked in it; with the store out only the emergency lane steps
   /\ pc[t] = "run" /\ t \in FlightTasks /\ t \notin inflight /\ t \notin parked
   /\ IF M("fence_split") THEN t \in checked ELSE FenceHolds(t)
   /\ inflight' = inflight \cup {t} /\ checked' = checked \ {t}
   /\ overrun' = IF TrackOverrun /\ ~ParkCond(t) THEN [overrun EXCEPT ![t] = 0] ELSE overrun
-  /\ bad' = IF ParkCond(t) THEN bad \cup {"begin"} ELSE bad
-  /\ UNCHANGED <<pc, parked, dup, gateV, storeV, engV, ghSee, ghRead, tok, oldResv, pend, pendKey>>
+  /\ bad' = bad \cup (IF ParkCond(t) THEN {"begin"} ELSE {})
+                \cup (IF ~storeUp /\ K(t).k # "em" THEN {"outage_step"} ELSE {})
+  /\ UNCHANGED <<pc, parked, dup, gateV, storeV, engV, ghSee, ghRead, ghClean, dirty, rid, dupId, tok, pend, pendKey>>
 Act(t) ==        \* the push, merge or deploy: outside the store, and it may land after a failure opens
   /\ t \in inflight
   /\ inflight' = IF M("fence_once") THEN inflight ELSE inflight \ {t}
@@ -388,52 +413,67 @@ Sweep ==         \* one read: lanes under a park condition park, the others come
   LET now == {t \in Tasks : pc[t] = "run" /\ ParkCond(t)} IN
   /\ SweepOn /\ storeUp /\ parked # now /\ parked' = now
   /\ UNCHANGED <<pc, inflight, overrun, dup, gateV, storeV, engV, ghV, mutV>>
-Unparked(t) == pc[t] = "run" /\ t \notin parked /\ ~ParkCond(t) /\ (storeUp \/ OwnCause(t))
-JoinPasses(t) ==
+Unparked(t) == pc[t] = "run" /\ t \notin parked /\ ~ParkCond(t) /\ (storeUp \/ K(t).k = "em")
+Build(t) ==      \* an ordinary lane builds its piece; it may never happen. BUILDING ends with a WORKING reading
+  /\ K(t).k = "ord" /\ Unparked(t) /\ K(t).p \notin built /\ storeUp
+  /\ built' = built \cup {K(t).p}
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit, everW, bEsc, sRead,
+                 storeV, engV, ghV, mutV>>
+JoinPasses(t) ==  \* a write to a fact Decide reads: it advances the epoch
   /\ K(t).k = "join" /\ Unparked(t) /\ storeUp /\ K(t).p \notin joined
   /\ joined' = joined \cup {K(t).p}
-  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, started, credit,
-                 storeV, engV, ghV, mutV>>
+  /\ pc' = Kill("join") /\ dirty' = Older("join")
+  /\ UNCHANGED <<parked, inflight, overrun, dup, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, started, credit,
+                 built, everW, bEsc, sRead, storeV, engV, ghSee, ghRead, ghClean, rid, dupId, bad, mutV>>
 RepairWorks(t) ==  \* it may never happen: a repair lane can end without this
   /\ K(t).k = "repair" /\ Unparked(t) /\ ~pubUp /\ pubUp' = TRUE
-  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, broken, working, stop, rows, cur, joined, started, credit,
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, broken, working, stop, rows, cur, joined, started, credit, built, everW, bEsc, sRead,
                  storeV, engV, ghV, mutV>>
 Fix(t) ==          \* nothing assumes a cause lane ever succeeds
   /\ K(t).k = "cause" /\ Unparked(t) /\ K(t).p \in broken
   /\ broken' = broken \ {K(t).p}
-  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, working, stop, rows, cur, joined, started, credit,
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, working, stop, rows, cur, joined, started, credit, built, everW, bEsc, sRead,
                  storeV, engV, ghV, mutV>>
 SafetyFix(t) ==
-  /\ pc[t] = "run" /\ K(t).k = "scause" /\ K(t).s \in safety /\ src[K(t).s]
+  /\ Unparked(t) /\ K(t).k = "scause" /\ K(t).s \in safety /\ src[K(t).s]
   /\ src' = [src EXCEPT ![K(t).s] = FALSE]
-  /\ UNCHANGED <<laneV, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit,
+  /\ UNCHANGED <<laneV, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit, built, everW, bEsc, sRead,
                  storeV, engV, ghV, mutV>>
 CreditFreed ==     \* a merge or closure read in the class
   /\ CreditOn /\ credit = 0 /\ credit' = 1
-  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started,
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, built, everW, bEsc, sRead,
                  storeV, engV, ghV, mutV>>
 
-\* ---- safety failures: from their own sources, never the table ----
-SrcBad(s) ==       \* the world changes; the store has not read it: the base lag
-  /\ SrcOn /\ ~src[s] /\ s \notin safety /\ src' = [src EXCEPT ![s] = TRUE]
-  /\ UNCHANGED <<laneV, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit,
+\* ---- safety failures: from their own sources, never the table. The source is outside the store ----
+SrcBad(s) ==       \* the world changes; the store has not read it: the base lag. It can go bad while open too
+  /\ SrcOn /\ ~src[s] /\ src' = [src EXCEPT ![s] = TRUE]
+  /\ UNCHANGED <<laneV, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit, built, everW, bEsc, sRead,
                  storeV, engV, ghV, mutV>>
 SafetyOpens(s) ==
   /\ src[s] /\ s \notin safety /\ storeUp
-  /\ safety' = safety \cup {s} /\ pc' = Kill
+  /\ safety' = safety \cup {s} /\ pc' = Kill("safety_opens") /\ dirty' = Older("safety_opens")
+  /\ sRead' = IF M("old_probe") THEN sRead ELSE [sRead EXCEPT ![s] = FALSE]
+  /\ ghClean' = [ghClean EXCEPT ![s] = FALSE]
   /\ UNCHANGED <<parked, inflight, overrun, dup, src, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined,
-                 started, credit, storeV, engV, ghV, mutV>>
-SafetyCloses(s) ==   \* its own source read clean after it opened (the read is at the commit)
-  /\ s \in safety /\ ~src[s] /\ storeUp
+                 started, credit, built, everW, bEsc, storeV, engV, ghSee, ghRead, rid, dupId, bad, mutV>>
+ProbeSource(s) ==  \* one read of the source, dated: clean after the failure opened, or bad
+  /\ SrcOn /\ s \in safety /\ storeUp /\ sRead[s] # ~src[s]
+  /\ sRead' = [sRead EXCEPT ![s] = ~src[s]] /\ ghClean' = [ghClean EXCEPT ![s] = ~src[s]]
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit, built, everW, bEsc,
+                 storeV, engV, ghSee, ghRead, dirty, rid, dupId, bad, mutV>>
+SafetyCloses(s) ==   \* on that read; the source may have gone bad since, and it is then read and opens again
+  /\ s \in safety /\ storeUp
+  /\ IF M("close_no_probe") THEN TRUE ELSE sRead[s]
   /\ M("close_on_table") => fresh
-  /\ safety' = safety \ {s} /\ sEsc' = sEsc \ {s} /\ pc' = Kill
+  /\ safety' = safety \ {s} /\ sEsc' = sEsc \ {s} /\ pc' = Kill("safety_closes") /\ dirty' = Older("safety_closes")
+  /\ bad' = IF ghClean[s] THEN bad ELSE bad \cup {"safety_close"}
   /\ UNCHANGED <<parked, inflight, overrun, dup, src, fresh, pubUp, broken, working, stop, rows, cur, joined,
-                 started, credit, storeV, engV, ghV, mutV>>
+                 started, credit, built, everW, bEsc, sRead, storeV, engV, ghSee, ghRead, ghClean, rid, dupId, mutV>>
 Timer == escUp /\ storeUp /\ (M("escalate_on_reader") => pubUp)
 SafetyEscalates(s) ==
   /\ EscOn /\ ~M("safety_no_escalation") /\ s \in safety /\ s \notin sEsc /\ Timer
   /\ sEsc' = sEsc \cup {s}
-  /\ UNCHANGED <<laneV, src, safety, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit,
+  /\ UNCHANGED <<laneV, src, safety, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit, built, everW, bEsc, sRead,
                  storeV, engV, ghV, mutV>>
 EscDies ==
   /\ EscOn /\ EscDieOn /\ escUp /\ escUp' = FALSE
@@ -441,52 +481,63 @@ EscDies ==
 EscBack ==
   /\ ~escUp /\ escUp' = TRUE
   /\ UNCHANGED <<laneV, gateV, storeV, up, handed, phase, snap, keys, effects, ghV, mutV>>
+\* A piece started and still BUILDING at its frozen time gets one escalation row (3.5).
+BuildEscalates(p) ==
+  /\ EscOn /\ p \notin KeptPieces /\ (p <= cur \/ p \in started) /\ p \notin everW /\ p \notin bEsc /\ Timer
+  /\ bEsc' = bEsc \cup {p}
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, cur, joined, started, credit, built, everW, sRead,
+                 storeV, engV, ghV, mutV>>
 
 \* ---- the reading writer and the table; readings live in the store ----
 PubDies ==
   /\ PubDieOn /\ pubUp /\ pubUp' = FALSE
-  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, broken, working, stop, rows, cur, joined, started, credit,
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, broken, working, stop, rows, cur, joined, started, credit, built, everW, bEsc, sRead,
                  storeV, engV, ghV, mutV>>
 GoesStale ==       \* time passing: no writer, so no advance; Consume re-reads it
   /\ fresh /\ ~pubUp /\ fresh' = FALSE
-  /\ UNCHANGED <<laneV, src, safety, sEsc, pubUp, broken, working, stop, rows, cur, joined,
-                 started, credit, storeV, engV, ghV, mutV>>
-Publish ==         \* a republish with the same readings is no write that advances
-  LET w == Pieces \ broken IN
+  /\ UNCHANGED <<laneV, src, safety, sEsc, pubUp, broken, working, stop, rows, cur, joined, started, credit, built, everW, bEsc, sRead,
+                 storeV, engV, ghV, mutV>>
+\* An unbuilt piece reads UNKNOWN, never WORKING. A republish with the same readings advances nothing.
+ReadingNow == IF M("init_all_working") THEN Pieces \ broken ELSE built \ broken
+Publish ==
+  LET w == ReadingNow IN
   /\ pubUp /\ storeUp /\ (~fresh \/ w # working)
-  /\ working' = w /\ fresh' = TRUE /\ pc' = Kill
+  /\ working' = w /\ fresh' = TRUE
+  /\ everW' = everW \cup w
+  /\ pc' = IF w # working THEN Kill("publish") ELSE pc
+  /\ dirty' = IF w # working THEN Older("publish") ELSE dirty
   /\ ghRead' = [q \in Pieces |-> ghRead[q] \/ q \in w]
   /\ UNCHANGED <<parked, inflight, overrun, dup, src, safety, sEsc, pubUp, broken, stop, rows, cur, joined,
-                 started, credit, storeV, engV, ghSee, bad, mutV>>
+                 started, credit, built, bEsc, sRead, storeV, engV, ghSee, ghClean, rid, dupId, bad, mutV>>
 
 \* ---- the stop; every row binds to the open stop, which Breaks and Clears end ----
-Started(p) == p <= cur \/ p \in KeptPieces \/ p \in joined \/ p \in started
+MayStop(p) == p \in KeptPieces \/ p \in everW
 Breaks(p) ==
   /\ ~M("gate_lag") /\ p \in BreakPieces /\ stop[p] = "none" /\ storeUp
-  /\ Started(p) \/ M("stop_on_unstarted")
+  /\ MayStop(p) \/ M("stop_while_building")
   /\ stop' = [stop EXCEPT ![p] = "open"] /\ broken' = broken \cup {p}
   /\ working' = IF M("old_reading") THEN working ELSE working \ {p}
   /\ rows' = IF M("rows_survive") THEN rows ELSE [rows EXCEPT ![p] = {}]
   /\ ghSee' = [ghSee EXCEPT ![p] = FALSE] /\ ghRead' = [ghRead EXCEPT ![p] = FALSE]
-  /\ pc' = Kill
+  /\ pc' = Kill("breaks") /\ dirty' = Older("breaks")
   /\ UNCHANGED <<parked, inflight, overrun, dup, src, safety, sEsc, fresh, pubUp, cur, joined, started, credit,
-                 storeV, engV, bad, mutV>>
+                 built, everW, bEsc, sRead, storeV, engV, ghClean, rid, dupId, bad, mutV>>
 RowOnLedger(p) ==  \* gate_lag only: the row is on the ledger, the gate has not taken it
   /\ M("gate_lag") /\ p \in BreakPieces /\ stop[p] = "none" /\ p \notin pend
   /\ pend' = pend \cup {p}
-  /\ UNCHANGED <<laneV, gateV, storeV, engV, ghV, tok, checked, oldResv, pendKey>>
+  /\ UNCHANGED <<laneV, gateV, storeV, engV, ghV, tok, checked, pendKey>>
 GateTakes(p) ==
   /\ p \in pend /\ pend' = pend \ {p}
   /\ stop' = [stop EXCEPT ![p] = "open"] /\ broken' = broken \cup {p} /\ working' = working \ {p}
-  /\ pc' = Kill
+  /\ pc' = Kill("breaks") /\ dirty' = Older("breaks")
   /\ UNCHANGED <<parked, inflight, overrun, dup, src, safety, sEsc, fresh, pubUp, rows, cur, joined, started, credit,
-                 storeV, engV, ghV, tok, checked, oldResv, pendKey>>
+                 built, everW, bEsc, sRead, storeV, engV, ghSee, ghRead, ghClean, rid, dupId, bad, tok, checked, pendKey>>
 EvidenceRow(p, r) ==  \* go-and-see is read-only: it needs no admission; it counts once durable
   /\ stop[p] # "none" /\ storeUp /\ r \notin rows[p] /\ (r = "typed" => NeedTyped)
   /\ rows' = [rows EXCEPT ![p] = @ \cup {r}]
   /\ ghSee' = IF r = "see" THEN [ghSee EXCEPT ![p] = TRUE] ELSE ghSee
-  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, stop, cur, joined, started, credit,
-                 storeV, engV, ghRead, bad, mutV>>
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, stop, cur, joined, started, credit, built, everW, bEsc, sRead,
+                 storeV, engV, ghRead, ghClean, dirty, rid, dupId, bad, mutV>>
 Required == IF NeedTyped THEN {"see", "typed"} ELSE {"see"}
 Evidence(p) == Required \subseteq rows[p]
 Clears(p) ==
@@ -499,13 +550,13 @@ Clears(p) ==
   /\ bad' = bad \cup (IF ghSee[p] /\ ghRead[p] /\ fresh /\ p \notin broken THEN {} ELSE {"clear"})
                 \cup (IF M("track_cleared") THEN {"wit_cleared"} ELSE {})
   /\ ghSee' = [ghSee EXCEPT ![p] = FALSE]
-  /\ pc' = Kill
+  /\ pc' = Kill("clears") /\ dirty' = Older("clears")
   /\ UNCHANGED <<parked, inflight, overrun, dup, src, safety, sEsc, fresh, pubUp, broken, working, cur, joined,
-                 started, credit, storeV, engV, ghRead, mutV>>
+                 started, credit, built, everW, bEsc, sRead, storeV, engV, ghRead, ghClean, rid, dupId, mutV>>
 Escalates(p) ==
   /\ EscOn /\ ~M("no_escalation") /\ stop[p] = "open" /\ Timer
   /\ stop' = [stop EXCEPT ![p] = "esc"]
-  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, rows, cur, joined, started, credit,
+  /\ UNCHANGED <<laneV, src, safety, sEsc, fresh, pubUp, broken, working, rows, cur, joined, started, credit, built, everW, bEsc, sRead,
                  storeV, engV, ghV, mutV>>
 
 \* ---- the store and the emergency start ----
@@ -546,14 +597,15 @@ StepPut(x) ==      \* one put in the store: compare, key and effect together
   /\ keys' = IF M("effect_then_key") THEN keys ELSE [keys EXCEPT ![KeyStore(x)] = @ \cup {i}]
   /\ pendKey' = IF M("effect_then_key") THEN [pendKey EXCEPT ![x] = i] ELSE pendKey
   /\ cur' = IF cur = i THEN i + 1 ELSE cur
-  /\ pc' = IF cur = i THEN Kill ELSE pc
+  /\ pc' = IF cur = i THEN Kill("advance") ELSE pc
+  /\ dirty' = IF cur = i THEN Older("advance") ELSE dirty
   /\ bad' = bad \cup (IF x # Owner THEN {"owner"} ELSE {}) \cup (IF effects[i] >= 1 THEN {"repeat"} ELSE {})
   /\ UNCHANGED <<parked, inflight, overrun, dup, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, joined,
-                 started, credit, storeV, up, handed, phase, snap, escUp, ghSee, ghRead, tok, checked, oldResv, pend>>
+                 started, credit, built, everW, bEsc, sRead, storeV, up, handed, phase, snap, escUp, ghSee, ghRead, ghClean, rid, dupId, tok, checked, pend>>
 KeyWrite(x) ==     \* effect_then_key only
   /\ pendKey[x] # 0 /\ up[x]
   /\ keys' = [keys EXCEPT ![KeyStore(x)] = @ \cup {pendKey[x]}] /\ pendKey' = [pendKey EXCEPT ![x] = 0]
-  /\ UNCHANGED <<laneV, gateV, storeV, up, handed, phase, snap, effects, escUp, ghV, tok, checked, oldResv, pend>>
+  /\ UNCHANGED <<laneV, gateV, storeV, up, handed, phase, snap, effects, escUp, ghV, tok, checked, pend>>
 StepDone(x) ==     \* the compare refuses a stale engine or a replay; the engine reads afresh
   /\ EngRace /\ phase[x] # 0 /\ up[x] /\ storeUp
   /\ ~FenceCmp(x) \/ KeyCmp(phase[x], x)
@@ -562,33 +614,32 @@ StepDone(x) ==     \* the compare refuses a stale engine or a replay; the engine
 EngStep(x) ==      \* outside the holder part: the read and the put as one, with no local state
   /\ ~EngRace /\ up[x] /\ storeUp /\ x = Owner /\ cur <= NSteps /\ Ready(cur)
   /\ effects' = [effects EXCEPT ![cur] = @ + 1] /\ keys' = [keys EXCEPT !["H"] = @ \cup {cur}]
-  /\ cur' = cur + 1 /\ pc' = Kill
+  /\ cur' = cur + 1 /\ pc' = Kill("advance") /\ dirty' = Older("advance")
   /\ UNCHANGED <<parked, inflight, overrun, dup, src, safety, sEsc, fresh, pubUp, broken, working, stop, rows, joined,
-                 started, credit, storeV, up, handed, phase, snap, escUp, ghV, mutV>>
+                 started, credit, built, everW, bEsc, sRead, storeV, up, handed, phase, snap, escUp, ghSee, ghRead, ghClean, rid, dupId, bad, mutV>>
 \* Outside the holder part nothing reads a non-owner's up bit, so only the owner's is tracked there.
 Crash(x) ==        \* the engine's history survives: phase is what it replays
   /\ CrashOn /\ up[x] /\ (EngRace \/ x = Owner) /\ up' = [up EXCEPT ![x] = FALSE] /\ pendKey' = [pendKey EXCEPT ![x] = 0]
-  /\ UNCHANGED <<laneV, gateV, storeV, handed, phase, snap, keys, effects, escUp, ghV, tok, checked, oldResv, pend>>
+  /\ UNCHANGED <<laneV, gateV, storeV, handed, phase, snap, keys, effects, escUp, ghV, tok, checked, pend>>
 Recover(x) ==
   /\ CrashOn /\ ~M("no_restart") /\ ~up[x] /\ up' = [up EXCEPT ![x] = TRUE]
   /\ UNCHANGED <<laneV, gateV, storeV, handed, phase, snap, keys, effects, escUp, ghV, mutV>>
 Handover ==        \* one way, a write in the store; the old engine may not know
   /\ CrashOn /\ ~handed /\ storeUp /\ handed' = TRUE
-  /\ pc' = IF M("handover_keeps_reservation") THEN pc ELSE Kill
-  /\ oldResv' = IF M("handover_keeps_reservation") THEN {t \in Tasks : pc[t] = "resv"} ELSE oldResv
+  /\ pc' = Kill("handover") /\ dirty' = Older("handover")
   /\ up' = IF EngRace THEN up ELSE [up EXCEPT !["H"] = TRUE]
-  /\ UNCHANGED <<parked, inflight, overrun, dup, gateV, storeV, phase, snap, keys, effects, escUp, ghV,
-                 tok, checked, pend, pendKey>>
+  /\ UNCHANGED <<parked, inflight, overrun, dup, gateV, storeV, phase, snap, keys, effects, escUp, ghSee, ghRead, ghClean, rid, dupId, bad, mutV>>
 
 Next ==
   \/ \E t \in Tasks :
-       \/ Reserve(t) \/ Bind(t) \/ Expire(t) \/ Consume(t) \/ Redeliver(t) \/ EmStart(t)
+       \/ Reserve(t) \/ Bind(t) \/ Expire(t) \/ Consume(t) \/ EmStart(t)
        \/ Ends(t) \/ ReadGone(t) \/ ClaimRow(t) \/ CloseRow(t) \/ ZombieEnds(t)
        \/ Check(t) \/ Begin(t) \/ Act(t)
-       \/ JoinPasses(t) \/ RepairWorks(t) \/ Fix(t) \/ SafetyFix(t)
-  \/ \E s \in SafetyIds : SrcBad(s) \/ SafetyOpens(s) \/ SafetyCloses(s) \/ SafetyEscalates(s)
+       \/ Build(t) \/ JoinPasses(t) \/ RepairWorks(t) \/ Fix(t) \/ SafetyFix(t)
+  \/ \E t \in DupTasks : Redeliver(t)
+  \/ \E s \in SafetyIds : SrcBad(s) \/ SafetyOpens(s) \/ ProbeSource(s) \/ SafetyCloses(s) \/ SafetyEscalates(s)
   \/ \E p \in Pieces :
-       \/ Breaks(p) \/ RowOnLedger(p) \/ GateTakes(p) \/ Clears(p) \/ Escalates(p)
+       \/ Breaks(p) \/ RowOnLedger(p) \/ GateTakes(p) \/ Clears(p) \/ Escalates(p) \/ BuildEscalates(p)
        \/ \E r \in {"see", "typed"} : EvidenceRow(p, r)
   \/ \E x \in Procs :
        \/ EngRead(x) \/ StepPut(x) \/ KeyWrite(x) \/ StepDone(x) \/ EngStep(x) \/ Crash(x) \/ Recover(x)
@@ -616,8 +667,8 @@ Fairness ==
   \* a safety source is read, bad or clean
   /\ \A o \in On("safetyopen"), s \in Flap(SafetyIds) : SF_vars(SafetyOpens(s))
   /\ \A o \in On("safetyopen"), s \in Calm(SafetyIds) : WF_vars(SafetyOpens(s))
-  /\ \A o \in On("safetyclose"), s \in Flap(SafetyIds) : SF_vars(SafetyCloses(s))
-  /\ \A o \in On("safetyclose"), s \in Calm(SafetyIds) : WF_vars(SafetyCloses(s))
+  /\ \A o \in On("probesource"), s \in SafetyIds : SF_vars(ProbeSource(s))
+  /\ \A o \in On("safetyclose"), s \in SafetyIds : SF_vars(SafetyCloses(s))
   \* the escalation timer fires, off the table, the holder and the reading writer
   /\ \A o \in On("esc"), p \in (IF EscOn /\ TimerFlaps THEN BreakPieces ELSE {}) : SF_vars(Escalates(p))
   /\ \A o \in On("esc"), p \in (IF EscOn /\ ~TimerFlaps THEN BreakPieces ELSE {}) : WF_vars(Escalates(p))
@@ -632,6 +683,13 @@ Fairness ==
   /\ \A o \in On("recover"), x \in Procs : WF_vars(Recover(x))
   /\ \A o \in On("step"), x \in (IF CrashOn THEN Procs ELSE {}) : SF_vars(EngStep(x))
   /\ \A o \in On("step"), x \in (IF CrashOn THEN {} ELSE Procs) : WF_vars(EngStep(x))
+  \* with the engine's read apart from its put, the owner reads, puts and takes its refusal
+  /\ \A o \in On("engrace"), x \in (IF EngRace THEN Procs ELSE {}) :
+       SF_vars(EngRead(x)) /\ SF_vars(StepPut(x)) /\ SF_vars(StepDone(x))
+  \* the sweep runs: a parked lane comes back
+  /\ \A o \in On("sweep") : SF_vars(Sweep)
+  \* the BUILDING timer, as the stop's
+  /\ \A o \in On("buildesc"), p \in (IF EscOn THEN Pieces \ KeptPieces ELSE {}) : WF_vars(BuildEscalates(p))
 
 LiveSpec == Spec /\ Fairness
 
@@ -646,7 +704,10 @@ DecideFollowsOrder == \A k \in AllKinds : Decide(k) = "admit" => ~Against(k)
 NoStartAgainstOrder == "start" \notin bad
 \* Step 0b, stale table, stops, credit at zero: a safety cause lane still gets in.
 SafetyCauseAdmitted == \A k \in AllKinds : (k.k = "scause" /\ k.s \in safety) => Decide(k) = "admit"
-RepairNeverRefusedForCredit == (~fresh /\ RepairFree) => Decide([k |-> "repair", p |-> 0, s |-> "-", r |-> "pub"]) = "admit"
+RepairNeverRefusedForCredit ==
+  (~fresh /\ RepairFree) =>
+    /\ Decide([k |-> "repair", p |-> 0, s |-> "-", r |-> "pub"]) = "admit"
+    /\ safety # {} => Decide([k |-> "repair", p |-> 0, s |-> "-", r |-> "priv"]) = "admit"
 ReadOnlyAdmitted == \A k \in AllKinds : k.k = "ro" => Decide(k) = "admit"
 \* A stop gates no kept fix; a cause lane of 8 or 9 runs whatever the active piece.
 KeptPassesStop == \A q \in KeptPieces :
@@ -660,6 +721,9 @@ EveryStopHasAWayIn ==
     LET c == [k |-> "cause", p |-> Low, s |-> "-", r |-> "pub"]
         r == [k |-> "repair", p |-> 0, s |-> "-", r |-> "pub"]
     IN IF fresh \/ Low <= Seven THEN (Decide(c) = "admit" \/ ~Slot(c)) ELSE (Decide(r) = "admit" \/ ~RepairFree)
+\* 4b: admit nothing else of the next piece until its join passes.
+OneJoinLane == \A p \in Pieces :
+  Cardinality({t \in Tasks : K(t).k = "join" /\ K(t).p = p /\ pc[t] \in {"resv", "run"}}) <= 1
 OneRepairLane == Cardinality({t \in Tasks : K(t).k = "repair" /\ pc[t] \in {"resv", "run"}}) <= 1
 OneCauseLane == \A p \in Pieces :
   Cardinality({t \in Tasks : K(t).k = "cause" /\ K(t).p = p /\ pc[t] \in {"resv", "run"}}) <= 1
@@ -667,6 +731,8 @@ OneCauseLane == \A p \in Pieces :
 NoStepBeginsWhileParked == "begin" \notin bad
 \* The in-flight bound: at most one outward action of a lane lands after its park condition holds.
 AtMostOneStepAfterPark == \A t \in FlightTasks : overrun[t] <= 1
+\* An outage holds every outward step but the emergency lane's.
+OutageHoldsSteps == "outage_step" \notin bad
 
 (***************************************************************************)
 (* Property 2: lanes per piece stay within the limit. Alive counts          *)
@@ -680,7 +746,11 @@ CreditNotOverdrawn == "credit" \notin bad
 (* escalates. A stop opens only on a started piece or 8 or 9.              *)
 (***************************************************************************)
 StopClearsOnlyWithEvidence == "clear" \notin bad
-StopsOnlyOnStarted == \A p \in Pieces : stop[p] # "none" => Started(p)
+StopsOnlyPastBuilding == \A p \in Pieces : stop[p] # "none" => MayStop(p)
+\* A start with nothing WORKING: the order moves over a piece only once it was built and read WORKING.
+OrderOnlyOverWorkingPiece == \A i \in Steps : cur > i => (i \in built /\ i \in everW /\ (i + 1) \in joined)
+\* It closes on its own source's clean read, dated after it opened.
+SafetyClosesOnCleanProbe == "safety_close" \notin bad
 StopClearsOrEscalates == \A p \in BreakPieces : (stop[p] = "open") ~> (stop[p] # "open")
 SafetyStopClearsOrEscalates == \A s \in SafetyIds : (s \in safety) ~> (s \notin safety \/ s \in sEsc)
 
@@ -707,9 +777,14 @@ SafetyCauseStarts == \A s \in SafetyIds :
 WriterRepairStarts == (~pubUp) ~> (pubUp \/ \E t \in Tasks : K(t).k = "repair" /\ pc[t] = "run")
 StopCauseStarts == \A p \in BreakPieces :
   (stop[p] # "none" /\ Low = p) ~> (stop[p] = "none" \/ Low # p \/ safety # {} \/ ~fresh \/ \E t \in Tasks : K(t).k = "cause" /\ K(t).p = p /\ pc[t] = "run")
-FixedSafetyCloses == \A s \in SafetyIds : (s \in safety /\ ~src[s]) ~> (s \notin safety)
+FixedSafetyCloses == \A s \in SafetyIds : (s \in safety /\ ~src[s]) ~> (s \notin safety \/ src[s])
+BuildingEscalates == \A p \in Pieces \ KeptPieces : ((p <= cur \/ p \in started) /\ p \notin everW) ~> (p \in everW \/ p \in bEsc)
+ParkedLaneComesBack == \A t \in Tasks : (<>[](pc[t] = "run" /\ ~ParkCond(t) /\ storeUp)) => <>[](t \notin parked)
 BadSourceRecorded == \A s \in SafetyIds : (src[s]) ~> (s \in safety \/ ~src[s])
-ReadyStepAdvances == \A i \in Steps : ([]<>Ready(i)) => <>(cur > i)
+\* <>[], not []<>: a safety failure and a crash can take turns so Ready and an up owner never meet.
+\* So this restates the owner's fairness and the supervisor's; it carries weight only under EngRace,
+\* where the put can be refused and the engine must read again (live_engine_race).
+ReadyStepAdvances == \A i \in Steps : (<>[]Ready(i)) => <>(cur > i)
 EmergencyStarts == (~storeUp /\ emCount = 0) ~> (storeUp \/ emCount > 0 \/ AnyRun("em"))
 
 (***************************************************************************)
@@ -718,6 +793,8 @@ EmergencyStarts == (~storeUp /\ emCount = 0) ~> (storeUp \/ emCount > 0 \/ AnyRu
 (***************************************************************************)
 Has(t) == t \in Tasks
 WitOrderAdvances == cur = 1
+WitPieceReadsBuilding == ~(cur = 1 /\ 1 \in built /\ 1 \notin everW)
+WitClosedWhileSourceBad == ~(\E s \in SafetyIds : s \notin safety /\ src[s] /\ ghClean[s])
 WitLimitReached == Alive(1) < Limit
 WitSafetyCauseStartsOnStaleTable == ~(~fresh /\ safety # {} /\ AnyRun("scause"))
 WitRepairDuringSafety == ~(~fresh /\ safety # {} /\ AnyRun("repair"))
