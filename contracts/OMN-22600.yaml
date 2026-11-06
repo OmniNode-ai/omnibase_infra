@@ -1,0 +1,42 @@
+schema_version: 1.0.0
+ticket_id: OMN-22600
+title: The ARM64 Verify Runner Proof starts from no public pull request and no schedule
+summary: Under the ruling of 2026-11-05T17:39:59Z the proof keeps only its operator dispatch.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22600-arm64-proof-dispatch-only
+    statement: The ARM64 Verify Runner Proof workflow declares workflow_dispatch and neither pull_request nor schedule, so no public event places a job on the lab verify pool.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the workflow declares workflow_dispatch and neither pull_request nor schedule -- falsifier: uv run pytest tests/ci/test_arm64_proof_not_public_lab_trigger.py -q -n 0 --no-cov fails on the merge base workflow, which declares both'
+      - id: AC2
+        statement: 'AC2: the four assertion steps and the legs job are unchanged by the edit, so a hand dispatch proves what it proved -- falsifier: uv run pytest tests/integration/observability/test_runner_fleet_multihost_contract.py -q -n 0 --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: The proof declares only the operator dispatch
+    command: uv run pytest tests/ci/test_arm64_proof_not_public_lab_trigger.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22600-triggers
+    description: The workflow read as YAML declares only workflow_dispatch; the same test fails on the merge base workflow.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_arm64_proof_not_public_lab_trigger.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn22600-legs-unchanged
+    description: The multihost contract test still reads the legs job and the proof job unchanged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_arm64_proof_not_public_lab_trigger.py tests/integration/observability/test_runner_fleet_multihost_contract.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC2

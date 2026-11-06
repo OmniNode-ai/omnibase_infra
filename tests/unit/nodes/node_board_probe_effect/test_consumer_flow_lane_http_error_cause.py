@@ -18,6 +18,9 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane i
 from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
     ConsumerFlowInputError,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -33,7 +36,12 @@ def _refusing(code: int, body: bytes | None) -> Any:
 
 
 def _message(urlopen: Any) -> str:
-    lane = ConsumerFlowLane(docker="fake-docker", base_url=BASE, urlopen=urlopen)
+    lane = ConsumerFlowLane(
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        docker="fake-docker",
+        base_url=BASE,
+        urlopen=urlopen,
+    )
     with pytest.raises(ConsumerFlowInputError) as caught:
         lane.page({})
     return str(caught.value)
@@ -74,5 +82,10 @@ def test_a_served_page_is_returned_unchanged() -> None:
     def urlopen(url: str, **_kwargs: Any) -> IO[bytes]:
         return io.BytesIO(json.dumps(page).encode())
 
-    lane = ConsumerFlowLane(docker="fake-docker", base_url=BASE, urlopen=urlopen)
+    lane = ConsumerFlowLane(
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        docker="fake-docker",
+        base_url=BASE,
+        urlopen=urlopen,
+    )
     assert lane.page({}) == page
