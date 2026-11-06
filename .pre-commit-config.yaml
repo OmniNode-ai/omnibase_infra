@@ -418,6 +418,15 @@ repos:
         stages: [manual]
   - repo: local
     hooks:
+      # Collected by CI's existing unit-test gate as well as this focused hook.
+      - id: delegation-boot-priority
+        name: Delegation boot priority and recorded effects holds (OMN-19998)
+        entry: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/(runtime/auto_wiring/handler_wiring|event_bus/model_topic_readiness_config|models/model_runtime_boot_policy)\.py|contracts/services/runtime_policy\.contract\.yaml|docker/(runtime-policy\.env|docker-compose\.(infra|dev-lane)\.yml)|tests/(unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority\.py|fixtures/delegate_skill_effects_held\.json)|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       # OMN-18713: CI's required Lint job runs the same discovery reconciliation gate.
       - id: contract-discovery-reconciliation
         name: Contract discovery reports every path outcome (OMN-18713)

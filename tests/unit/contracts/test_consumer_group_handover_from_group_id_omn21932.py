@@ -20,6 +20,9 @@ from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
 from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request import (
     ModelContractSubscribePreflightRequest,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
+    load_consume_concurrency,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -75,9 +78,11 @@ def test_the_contract_loader_refuses_an_invalid_from_group_id(
 async def test_the_preflight_hands_over_from_the_literal_group(tmp_path: Path) -> None:
     bus = EventBusInmemory(environment=ENVIRONMENT)
     await bus.start()
+    contract_path = _contract(tmp_path)
     preflight = HandlerContractSubscribePreflight(
         contract_name="agent_observability",
-        contract_path=_contract(tmp_path),
+        concurrency=load_consume_concurrency(contract_path),
+        handover=load_consumer_group_handover(contract_path),
         event_bus=bus,
         environment=ENVIRONMENT,
         consumer_group=CONSUMER_GROUP,

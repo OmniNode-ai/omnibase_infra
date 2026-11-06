@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from functools import cache, lru_cache
+from functools import cache, lru_cache, partial
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -89,6 +89,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.errors import (
     EnvelopeValidationError,
     ProjectionNotMaterializedError,
@@ -120,7 +121,6 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
 )
-from omnibase_infra.handlers.handler_package_announcer import read_contract_yaml
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
@@ -155,6 +155,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelDiscoveredContract,
     ModelHandlerRef,
     ModelHandlerRoutingEntry,
+    load_consume_concurrency,
 )
 from omnibase_infra.runtime.auto_wiring.report import (
     EnumWiringOutcome,
@@ -9027,16 +9028,16 @@ def _materialize_known_handler_dependencies(
             event_bus=event_bus,
             handler_name=handler_name,
         )
-    if required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS):
+    # An empty set is a subset too. Optional runtime ports must not construct
+    # migration services: the provisioner scans the installed contract tree.
+    if required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS:
         available.update(_build_topic_migration_executor_dependencies())
     if not (
         requires_event_publisher
         or requires_event_consumer
-        or required_params.intersection(
-            {"container", "ownership_query", "dispatch_port"}
-        )
+        or required_params & {"container", "ownership_query", "dispatch_port"}
         or ("dispatch_port" in constructor_params and requires_delegation_port)
-        or required_params.issubset(_TOPIC_MIGRATION_EXECUTOR_DEPS)
+        or (required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS)
     ):
         return materialized_explicit_dependencies
     if "dispatch_port" in constructor_params and requires_delegation_port:
@@ -10507,10 +10508,9 @@ async def subscribe_wired_contract_topics(
     if demand_source is not None:
         eligible = await _split_boot_set_by_demand(
             eligible,
+            priority_contracts=knobs.priority_contracts,
             demand_source=demand_source,
-            start=lambda result, contract: _provision_ready_attach(
-                result, contract, auto_offset_reset="earliest"
-            ),
+            start=partial(_provision_ready_attach, auto_offset_reset="earliest"),
             exclude=_exclude,
             watch_stops_out=demand_watch_stops_out,
         )
@@ -10539,21 +10539,25 @@ async def _split_boot_set_by_demand(
     ],
     exclude: Callable[[str, EnumContractAttachExclusionReason, str], None],
     watch_stops_out: list[Callable[[], Awaitable[None]]] | None,
+    priority_contracts: Sequence[str] = (),
 ) -> list[tuple[ModelContractWiringResult, ModelDiscoveredContract]]:
-    """Keep the contracts in use for boot; start the rest on their first record.
+    """Boot priority contracts and contracts whose topics hold retained records.
 
-    OMN-18087. A contract is in use when any topic it subscribes holds a
-    retained record. The rest are watched by one group-less reader, which costs
+    The rest are watched by one group-less reader, which costs
     no group join, and each is attached by *start* when a record first reaches
     one of its topics. Each start runs as its own task, so a slow join never
     holds up the watch, and a start that does not attach is retried with the
     unattached-contract reconciliation's bounded backoff.
     """
+    # Clients can require a live first hop before publishing. Priority consumers
+    # therefore take the normal provision->ready->attach path without waiting
+    # for demand, and only nonpriority contracts need a first-record watch.
     topics_of = {
         contract.name: tuple(contract.event_bus.subscribe_topics)
         if contract.event_bus is not None
         else ()
         for _, contract in eligible
+        if contract.name not in priority_contracts
     }
     all_topics = {topic for topics in topics_of.values() for topic in topics}
     deferred_by_topic: dict[
@@ -10608,8 +10612,8 @@ async def _split_boot_set_by_demand(
         watch_stops_out.append(stop)
     boot: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []
     for result, contract in eligible:
-        topics = topics_of[contract.name]
-        if any(topic in in_use for topic in topics):
+        topics = topics_of.get(contract.name, ())
+        if contract.name in priority_contracts or in_use.intersection(topics):
             boot.append((result, contract))
             continue
         for topic in topics:
@@ -10620,7 +10624,7 @@ async def _split_boot_set_by_demand(
             f"idle_topics={list(topics)}",
         )
     logger.info(
-        "Boot subscription split: %d contract(s) in use attach at boot, %d "
+        "Boot subscription split: %d priority or in-use contract(s) attach at boot, %d "
         "start on their first request; %d of %d topic(s) are in use (hold a "
         "record, or cannot be read here); watched_topics=%s (OMN-18087)",
         len(boot),
@@ -11483,6 +11487,7 @@ async def _subscribe_contract_topics(
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
         HandlerContractSubscribePreflight,
+        load_consumer_group_handover,
     )
     from omnibase_infra.models import ModelNodeIdentity
     from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request import (
@@ -11496,9 +11501,7 @@ async def _subscribe_contract_topics(
     )
     from omnibase_infra.utils import compute_consumer_group_id
 
-    typed_bus: ProtocolEventBusSubscriber = cast(
-        "ProtocolEventBusSubscriber", event_bus
-    )
+    typed_bus = cast("ProtocolEventBusSubscriber", event_bus)
     effective_result_applier = result_applier
     output_topic = _select_dispatch_result_output_topic(contract)
     # This is the authoritative output-capability source: the same typed
@@ -11568,7 +11571,8 @@ async def _subscribe_contract_topics(
     # topic of this contract is subscribed. See the handler's module docstring.
     preflight = HandlerContractSubscribePreflight(
         contract_name=contract.name,
-        contract_path=contract.contract_path,
+        concurrency=load_consume_concurrency(contract.contract_path),
+        handover=load_consumer_group_handover(contract.contract_path),
         event_bus=event_bus,
         environment=environment,
         consumer_group=consumer_group,
