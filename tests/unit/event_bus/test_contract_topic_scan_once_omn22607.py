@@ -128,3 +128,15 @@ def test_clearing_forgets_every_stored_scan(
     ModelContractTopicScan.clear()
     ModelContractTopicScan.read(contracts_root=tmp_path)
     assert len(extract_calls) == 2
+
+
+def test_bytecode_written_by_an_import_is_not_a_change(
+    tmp_path: Path, extract_calls: list[Path]
+) -> None:
+    (tmp_path / "contract.yaml").write_text("name: probe\n")
+    ModelContractTopicScan.read(contracts_root=tmp_path)
+    cache = tmp_path / "__pycache__"
+    cache.mkdir()
+    (cache / "handler.cpython-312.pyc").write_bytes(b"\0")
+    ModelContractTopicScan.read(contracts_root=tmp_path)
+    assert len(extract_calls) == 1

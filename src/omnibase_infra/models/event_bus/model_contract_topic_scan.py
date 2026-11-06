@@ -37,13 +37,17 @@ _MAX_STORED = 16
 
 
 def _fingerprint(roots: Sequence[Path | None]) -> int:
-    """Hash of (path, size, mtime) for every file under the given roots."""
+    """Hash of (path, size, mtime) for every source file under the given roots.
+
+    Bytecode caches are left out: importing a module writes them, and that is not a
+    change to anything a scan reads.
+    """
     seen = (
         (str(path), path.stat().st_size, path.stat().st_mtime_ns)
         for root in roots
         if root is not None and root.is_dir()
         for path in sorted(root.rglob("*"))
-        if path.is_file()
+        if path.is_file() and "__pycache__" not in path.parts
     )
     return hash(tuple(seen))
 
