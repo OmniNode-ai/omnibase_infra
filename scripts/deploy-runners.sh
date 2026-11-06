@@ -48,6 +48,12 @@
 #   9. Retry once with fresh token if poll times out
 #   10. Print stale runner report (offline runners with no host container)
 #
+# --artifacts-only mode (OMN-19998; the runner hook directory only):
+#   1. Rsync runner artifacts to the host, or the --host host
+#   Touches no container, image, token or cron. A runner reads the hook file from
+#   its bind mount at each job start, so a hook change is live at the next job.
+#   Rollback: rerun from the previous revision. Wins over every other mode flag.
+#
 # --soft mode (entrypoint-only update, no recreate):
 #   1. Rsync runner artifacts to host
 #   2. Rebuild the Docker image (for future containers)
@@ -442,6 +448,7 @@ SYNC_PATHS=(
 DRY_RUN=false
 SKIP_BUILD=false
 SOFT_DEPLOY=false
+ARTIFACTS_ONLY=false
 ROLLING_DEPLOY=false
 # OMN-19077: scale the general pool DOWN to expected_count, one idle runner at
 # a time. See the --retire-surplus block in the header.
@@ -480,6 +487,7 @@ for arg in "$@"; do
         --dry-run)    DRY_RUN=true ;;
         --skip-build) SKIP_BUILD=true ;;
         --soft)       SOFT_DEPLOY=true ;;
+        --artifacts-only) ARTIFACTS_ONLY=true ;;
         --rolling)    ROLLING_DEPLOY=true ;;
         --retire-surplus) RETIRE_SURPLUS=true ;;
         --relabel)    RELABEL_ROLL=true; RELABEL_LABEL="${RELABEL_DEFAULT_LABEL}" ;;
@@ -2560,12 +2568,11 @@ relabel_roll() {
 
 main() {
     log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY}, retire_surplus=${RETIRE_SURPLUS}, add=${ADD_SERVICES:-<none>})"
-    log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP}"
-    log "Runner count: ${RUNNER_COUNT} | Compose file: ${COMPOSE_FILE}"
+    log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP} | Runner count: ${RUNNER_COUNT} | Compose file: ${COMPOSE_FILE}"
 
-    if "${DRY_RUN}"; then
-        log "[DRY RUN MODE] No remote commands will be executed."
-    fi
+    if "${DRY_RUN}"; then log "[DRY RUN MODE] No remote commands will be executed."; fi
+
+    if "${ARTIFACTS_ONLY}"; then rsync_artifacts; return 0; fi
 
     if "${RELABEL_ROLL}"; then
         if "${SOFT_DEPLOY}" || "${ROLLING_DEPLOY}" || "${RETIRE_SURPLUS}" || [[ -n "${ADD_SERVICES}" ]]; then

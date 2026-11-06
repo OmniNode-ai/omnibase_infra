@@ -1,0 +1,50 @@
+schema_version: 1.0.0
+ticket_id: OMN-22543
+title: The verify runner root phase removes the operator env copy an earlier image left in its creds volume
+summary: The creds volume of each verify runner outlives a recreate and holds the operator env copy the root phase used to install, so the root phase removes it at every start.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22543-verify-runner-stale-env-removed
+    statement: A verify runner leaves no operator env file readable to its jobs, whether through a bind mount or through a copy an earlier image left in its creds volume.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the root phase of omninode-verify-runner-1, -2 and -3 removes the creds-volume operator env copy at every start and never installs or copies one -- falsifier: uv run pytest tests/ci/test_verify_runner_credential_read_only_omn18408.py -q -n 0 fails on a compose file whose verify root phase lacks the removal'
+      - id: AC2
+        statement: 'AC2: after the roll, neither the operator env bind-mount path nor the creds-volume copy exists inside each of the three containers -- falsifier: docker exec omninode-verify-runner-N test -e on each path exits non-zero, run on the lab server for N in 1 to 3 with no content printed'
+evidence_requirements:
+  - kind: tests
+    description: The verify root phase removes the operator env copy and never installs one
+    command: uv run pytest tests/ci/test_verify_runner_credential_read_only_omn18408.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22543-verify-root-phase
+    description: The compose file read as YAML, the removal line present once in each verify root phase and no install or copy of the file.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_verify_runner_credential_read_only_omn18408.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-omn22543-live-roll
+    description: Each of the three verify runner containers on the lab server holds neither the operator env mount path nor the creds-volume copy; the probe exits non-zero when either path exists and prints no contents.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh omni-201 'for n in 1 2 3; do c=omninode-verify-runner-$n; docker exec $c test ! -e /run/omnibase-operator.env && docker exec -u runner $c sh -c "test ! -e \$HOME/.runner-creds/operator.env" || exit 1; done'
+        cwd: .
+  - id: dod-omn22543-integration-proof
+    description: Run this pull request's own check on a lab host at the pushed head. Hosted CI cannot reach the lab, so only the local Done gate runs this unbound check.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-22543 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_verify_runner_credential_read_only_omn18408.py -q -n 0 --no-cov
+        cwd: .

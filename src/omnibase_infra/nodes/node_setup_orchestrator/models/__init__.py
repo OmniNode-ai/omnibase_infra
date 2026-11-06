@@ -16,9 +16,13 @@ from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrato
 from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_output import (
     ModelSetupOrchestratorOutput,
 )
+from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_request import (
+    ModelSetupOrchestratorRequest,
+)
 
 __all__: list[str] = [
     "ModelSetupEvent",
     "ModelSetupOrchestratorInput",
     "ModelSetupOrchestratorOutput",
+    "ModelSetupOrchestratorRequest",
 ]

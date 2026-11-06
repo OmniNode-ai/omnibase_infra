@@ -201,3 +201,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-18595-core-dev-20261104102410-pin
+    description: The core dev-20261104102410-b002ec3ceab1 bump keeps the core pin tests and the recorded dev-tag lineage consistent with pyproject.toml and uv.lock.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_dep_provenance_core_lineage_live_contact_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
