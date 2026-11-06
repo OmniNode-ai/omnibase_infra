@@ -515,6 +515,10 @@ def test_trajectory_rendered_file_adds_only_dharma_mappings(tmp_path: Path) -> N
             "logical_name": "dharma.org_id",
             "source": {"source_type": "env", "source_path": "DHARMA_ORG_ID"},
         },
+        "llm.typesafe.api_key": {
+            "logical_name": "llm.typesafe.api_key",
+            "source": {"source_type": "env", "source_path": "LLM_TYPESAFE_API_KEY"},
+        },
     }
     before = {row["logical_name"]: row for row in baseline["mappings"]}
     after = {row["logical_name"]: row for row in observed["mappings"]}
