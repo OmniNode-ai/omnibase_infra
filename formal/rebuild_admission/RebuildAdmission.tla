@@ -1,11 +1,13 @@
 -------------------------- MODULE RebuildAdmission --------------------------
 (***************************************************************************)
-(* M0 of the subsystem rebuild plan (OMN-22478, plan section 12), round 4: *)
+(* M0 of the subsystem rebuild plan (OMN-22478, plan section 12), round 5: *)
 (* admission, the stop and the holder as one state machine, written to    *)
 (* the 11-06 text of sections 6.2, 7.1 and 7.5. It implements and wires   *)
 (* nothing. Round 4 is round 3 with reader m0-reader-1650's findings      *)
 (* fixed: the fence fails closed (D1, RULING 2026-11-06T17:52:26Z), an     *)
-(* unanswered consume proceeds logged (F2), two kept pieces (F3).          *)
+(* unanswered consume proceeds logged (F2), two kept pieces (F3). Round 5 *)
+(* adds reader m0-reader-1755's F9: a lane the fence never holds does not *)
+(* wait for the store (UnfencedNotHeld).                                   *)
 (*                                                                         *)
 (* Mut = {} is the protocol; each name in Mut is one break, and the scope  *)
 (* constants bound the environment only. Liveness and its fairness are in  *)
@@ -300,7 +302,10 @@ CloseRow(t) ==      \* close_frees only: a TERMINAL row frees the place while th
 \* step is a store write with the fence in it, so with no answer the step is not taken and the
 \* lane waits (RULING 2026-11-06T17:52:26Z). A lane cannot know without an answer whether its
 \* piece was stopped, so every fenced step waits, not only those of stopped pieces. A step
-\* begun before the outage may still land (Act needs no store).
+\* begun before the outage may still land (Act needs no store). A lane the fence never holds (a
+\* cause lane, a kept fix, any lane that is not ordinary or join work) knows its own kind, so it
+\* does not wait: with no answer its step is taken, logged, and an outage never blocks a stopped
+\* piece's fix (reader m0-reader-1755's F9; its variant RebuildAdmissionCX, folded here).
 Fenced(t) == Wip(K(t)) /\ Stopped(WorkPiece(K(t)))
 Check(t) ==         \* fence_split only: the fence read apart from the write
   /\ M("fence_split") /\ t \in FlightTasks /\ pc[t] = "run" /\ fl[t] = "none" /\ storeUp
@@ -309,11 +314,12 @@ Check(t) ==         \* fence_split only: the fence read apart from the write
   /\ UNCHANGED <<pc, unadm, fl, overrun, msgs, rd, starts, factV, evV, engV, ghV>>
 Begin(t) ==         \* a store write with the fence in it; with no answer it is not taken
   /\ t \in FlightTasks /\ pc[t] = "run" /\ fl[t] = "none"
-  /\ storeUp \/ M("down_proceeds")
+  /\ storeUp \/ (~Wip(K(t)) /\ ~M("unfenced_waits")) \/ M("down_proceeds")
   /\ IF storeUp
      THEN /\ IF M("fence_split") THEN t \in checked ELSE (M("fence_off") \/ ~Fenced(t))
           /\ fl' = [fl EXCEPT ![t] = "chk"]
-     ELSE fl' = [fl EXCEPT ![t] = "log"]     \* down_proceeds: round 3's step taken unfenced, logged
+     ELSE fl' = [fl EXCEPT ![t] = "log"]     \* an unfenced lane's step with no answer, logged;
+                                             \* under down_proceeds, round 3's fenced step
   \* the ghost records what happened, whatever the guard read
   /\ bad' = IF Fenced(t) THEN bad \cup {"begin"} ELSE bad
   /\ overrun' = IF Fenced(t) THEN overrun ELSE [overrun EXCEPT ![t] = 0]
@@ -500,6 +506,11 @@ NoStepBeginsAfterStop == "begin" \notin bad
 \* Reader m0-reader-1650's StrongFence; down_proceeds breaks it with that reader's trace.
 StepFence == [][\A t \in FlightTasks : (fl[t] = "none" /\ fl'[t] # "none") => ~Fenced(t)]_vars
 AtMostOneStepAfterStop == \A t \in FlightTasks : overrun[t] <= 1
+\* The fence's exemption (7.1 O3 "except its cause lane", step 3 "kept fixes excepted"): a running
+\* lane the fence never holds can always begin its outward step, whether or not the store answers.
+\* unfenced_waits (round 4's Begin, where every lane waited in an outage) breaks it.
+UnfencedNotHeld == \A t \in FlightTasks :
+  (~Wip(K(t)) /\ pc[t] = "run" /\ fl[t] = "none") => ENABLED Begin(t)
 
 (***************************************************************************)
 (* P2. Processes per piece within the limit, counted until read gone.      *)
@@ -545,6 +556,9 @@ WitEscalated == \A p \in Pieces : stop[p] # "esc"
 WitLandsAfterStop == \A t \in FlightTasks : overrun[t] = 0
 \* The in-flight bound under an outage: a step begun before the stop lands while the store is down.
 WitInFlightLandsInOutage == ~(\E t \in FlightTasks : overrun[t] = 1 /\ ~storeUp)
+\* A stopped piece's cause lane begins an outward step while the store gives no answer.
+WitCauseStepsInOutage ==
+  ~(\E t \in FlightTasks : K(t).k = "cause" /\ Stopped(K(t).p) /\ fl[t] = "log" /\ ~storeUp)
 \* A kept fix runs under its own piece's stop, and a kept piece's cause lane runs under its stop.
 WitKeptRunsUnderOwnStop == ~(\E t \in Tasks : K(t).k = "kept" /\ Stopped(K(t).p) /\ pc[t] = "run" /\ t \notin unadm)
 WitCauseOfKeptRuns ==

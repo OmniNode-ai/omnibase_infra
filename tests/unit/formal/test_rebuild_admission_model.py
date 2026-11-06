@@ -93,6 +93,9 @@ def test_each_break_reports_its_named_property(name: str) -> None:
     text = _out(name)
     prop = _expected(name)
     assert re.search(
-        rf"Invariant {prop} is violated|Temporal property {prop} was violated", text
-    ) or (prop in text and "violated" in text), name
+        rf"Invariant {prop} is violated"
+        rf"|Action property {prop} is violated"
+        rf"|Temporal property {prop} was violated",
+        text,
+    ), name
     assert "Model checking completed. No error has been found." not in text
