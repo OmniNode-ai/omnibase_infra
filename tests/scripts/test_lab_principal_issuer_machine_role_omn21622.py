@@ -173,8 +173,8 @@ def test_a_machine_never_reads_a_ledger_row_event(declaration: lpi.Declaration) 
 # --- the overlay names which principals are machines ----------------------------
 
 
-def test_the_overlay_role_vocabulary_is_developer_and_machine() -> None:
-    assert {"developer", "machine"} == lpi.OVERLAY_ROLES
+def test_the_overlay_role_vocabulary_is_developer_machine_and_read_only() -> None:
+    assert {"developer", "machine", "read_only"} == lpi.OVERLAY_ROLES
 
 
 def test_a_machine_row_loads_with_its_role(

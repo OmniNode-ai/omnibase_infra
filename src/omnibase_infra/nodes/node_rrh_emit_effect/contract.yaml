@@ -9,6 +9,8 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 description: >
   Effect node that collects environment data for Release Readiness Handshake (RRH) validation.  Three handlers gather independent data dimensions: repository git state, deployment runtime targets, and build-toolchain versions.  The composite output feeds into node_rrh_validate_compute.
 
@@ -32,6 +34,9 @@ handler_routing:
       handler:
         name: "HandlerRepoStateCollect"
         module: "omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_repo_state_collect"
+      input_model:
+        name: "ModelRepoStateCollectRequest"
+        module: "omnibase_infra.nodes.node_rrh_emit_effect.models.model_repo_state_collect_request"
       supported_operations:
         - "rrh.collect.repo_state"
       description: "Collect git repository state (branch, SHA, dirty flag)."

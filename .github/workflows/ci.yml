@@ -1761,7 +1761,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
+          ref: 3aa4e8b26af664b2e5f210f3a5af90b4726db684 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -2409,7 +2409,13 @@ jobs:
   detect-changes:
     timeout-minutes: 30
     name: Detect Changes
-    needs: [lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
+    # OMN-22545: `lint` is deliberately NOT in this list. Lint ended at a median
+    # 9.4 min over 68 completed runs while the 14 gates below ended at a median
+    # 3.0 min, so waiting for it started the tests a median 6.4 min late. Lint
+    # still gates the merge: it is in STRICT_GATE_JOBS of
+    # scripts/ci/ci_summary_gate.py, and the NO-`needs` CI Summary poller fails
+    # when it fails (tests/ci/test_ci_test_matrix_not_gated_on_lint.py).
+    needs: [onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
     # OMN-19927: on a push or a dispatch this job must run even when the
     # docs-only tier skipped its lint-class needs, because the provenance
     # step below decides whether that push may skip tests at all. On every
@@ -2554,7 +2560,8 @@ jobs:
   # -n 2 rather than -n auto, after repeated xdist OOM crashes on shard 3.
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
+    # OMN-22545: no `lint` here either, for the reason given on `detect-changes`.
+    needs: [zone-filter, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
     # OMN-16216: draft-state CI admission gate (mirrors onex_change_control
     # PR #6686 / OMN-15731). The heavy split-matrix test run only dispatches
     # once the PR is out of draft; `contains(...'ci:ready')` is retained as a
@@ -4552,6 +4559,40 @@ jobs:
           fi
           uv run --no-project --with "$RUNNER_PLACEMENT_CORE" \
             python -m omnibase_core.handlers.handler_public_runner_placement_cli "${args[@]}"
+      # OMN-19998: the same refusal as the check-public-lab-selection hook, at that
+      # hook's rev. The job is registered in the CI Summary sweep, so this is required.
+      - name: Read the core pin of the lab selection hook
+        run: |
+          set -eu
+          spec="$(uv run --no-project --with pyyaml python -c '
+          import yaml
+          config = yaml.safe_load(open(".pre-commit-config.yaml"))
+          blocks = [r for r in config["repos"] if any(h["id"] == "check-public-lab-selection" for h in r["hooks"])]
+          assert len(blocks) == 1, blocks
+          print("omnibase-core @ git+" + blocks[0]["repo"] + "@" + blocks[0]["rev"])
+          ')"
+          echo "LAB_SELECTION_CORE=${spec}" >> "$GITHUB_ENV"
+      - name: Failing control (planted lab job refused)
+        run: |
+          set -u
+          planted="$RUNNER_TEMP/planted"
+          mkdir -p "$planted/.github/workflows"
+          printf 'on: push\njobs:\n  planted:\n    runs-on: [self-hosted, omnibase-ci]\n    steps:\n      - run: "true"\n' \
+            > "$planted/.github/workflows/zz-planted.yml"
+          if uv run --no-project --with "$LAB_SELECTION_CORE" \
+            python -m omnibase_core.validation.validator_public_lab_selection \
+            --root "$planted" --repo omnibase_infra --visibility public; then
+            echo "FAILING CONTROL FAILED: a planted lab job was accepted"
+            exit 1
+          fi
+          echo "failing control: a planted lab job refused"
+      - name: Refuse a public workflow selecting a lab runner
+        env:
+          LIVE_VARIABLES: ${{ toJSON(vars) }}
+        run: |
+          uv run --no-project --with "$LAB_SELECTION_CORE" \
+            python -m omnibase_core.validation.validator_public_lab_selection \
+            --repo omnibase_infra --visibility public --variables-json "$LIVE_VARIABLES"
 
   # OMN-21538: omnibase_core's generic validators run in CI as the hook ids of
   # .pre-commit-config.yaml over the files a change touches, so this job and the local hooks
@@ -4631,7 +4672,7 @@ jobs:
   # needs/if. A CI Summary member through STRICT_GATE_JOBS in
   # scripts/ci/ci_summary_gate.py ("<caller job id> / <inner job name>").
   dependency-pins:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261103173624-74e0b0f12767
+    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261105190003-87a6f5ddcbcc
     permissions:
       contents: read
 

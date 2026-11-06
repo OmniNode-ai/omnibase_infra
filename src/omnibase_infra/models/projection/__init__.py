@@ -53,6 +53,9 @@ if TYPE_CHECKING:
     from omnibase_infra.models.projection.model_projection_contract import (
         ModelProjectionContract,
     )
+    from omnibase_infra.models.projection.model_projection_derived_write_request import (
+        ModelProjectionDerivedWriteRequest,
+    )
     from omnibase_infra.models.projection.model_projection_ordering_contract import (
         DISPATCH_EVAL_RESULTS_ORDERING_CONTRACT,
         PROJECTION_ORDERING_CONTRACTS,
@@ -82,6 +85,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ModelCursorContract": "omnibase_infra.models.projection.model_cursor_contract",
     "ModelProjectedFlagMeta": "omnibase_infra.models.projection.model_projected_flag_meta",
     "ModelProjectionContract": "omnibase_infra.models.projection.model_projection_contract",
+    "ModelProjectionDerivedWriteRequest": "omnibase_infra.models.projection.model_projection_derived_write_request",
     "ModelProjectionIntent": "omnibase_core.models.projectors.model_projection_intent",
     "ModelProjectionOrderingContract": "omnibase_infra.models.projection.model_projection_ordering_contract",
     "ModelRegistrationProjection": "omnibase_infra.models.projection.model_registration_projection",
@@ -101,6 +105,7 @@ __all__ = [
     "EnumProjectionOrderingDirection",
     "ModelProjectedFlagMeta",
     "ModelProjectionContract",
+    "ModelProjectionDerivedWriteRequest",
     "ModelProjectionIntent",
     "ModelProjectionOrderingContract",
     "PROJECTION_ORDERING_CONTRACTS",

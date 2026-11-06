@@ -1,0 +1,20 @@
+{
+  "base_ref": "65e3994c3d870c6d24a9c233872b3498c3c9ec39",
+  "canonical_handler_module": "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan",
+  "legacy_handler_module": "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan",
+  "node_id": "omnibase_infra.nodes.node_validation_orchestrator",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:6ccf35d3f15c437d0e0ff0feed8fe4918758cfed452522f5ef2d15f2b7576077",
+      "sha256:97fd32f0cd3956f1fa4fe1c8df199c6f3145c06a5dc3e5e1131065025dffadef"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_handler_shape_signatures_omn21536.py::test_validation_orchestrator_handle_takes_one_typed_request"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerBuildPlan.handler_type"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

@@ -25,7 +25,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.validation.model_adjudicator_state import (
@@ -40,6 +39,7 @@ from omnibase_infra.models.validation.model_validation_adjudication_requested im
 from omnibase_infra.models.validation.model_verdict import (
     ModelVerdict,
 )
+from omnibase_infra.runtime.dispatch_envelope_context import current_dispatch_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -65,19 +65,16 @@ class HandlerAdjudicate:
     async def handle(
         self,
         request: ModelValidationAdjudicationRequested,
-        correlation_id: UUID | None = None,
     ) -> ModelValidationAdjudicationCompleted:
         """Return the verdict for ``request``'s check results.
 
-        The runtime hands the handler the typed request alone, so
-        ``correlation_id`` is optional; it is only used to tag error context.
         The request's plan id is the FSM event id: a redelivered request is
-        the same event.
+        the same event. Under runtime dispatch the incoming envelope's
+        correlation ID tags the FSM error context and the verdict; a
+        standalone call has no envelope and carries none.
 
         Args:
             request: Check results of one executed validation plan.
-            correlation_id: Correlation ID for error context, when the caller
-                has one.
 
         Returns:
             The verdict, published as ``validation-adjudication-completed``.
@@ -85,6 +82,8 @@ class HandlerAdjudicate:
         Raises:
             RuntimeHostError: If the FSM refuses the transition.
         """
+        envelope = current_dispatch_envelope()
+        correlation_id = envelope.correlation_id if envelope is not None else None
         collecting = ModelAdjudicatorState(
             candidate_id=request.candidate_id,
             plan_id=request.plan_id,
