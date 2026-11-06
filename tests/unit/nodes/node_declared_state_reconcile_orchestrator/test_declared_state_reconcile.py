@@ -13,7 +13,7 @@ from omnibase_core.models.config_overlay.model_declared_state_observation import
 from omnibase_infra.handlers.handler_declared_state_apply import (
     HandlerDeclaredStateApply,
 )
-from omnibase_infra.handlers.handler_declared_state_diff import (
+from omnibase_infra.handlers.handler_declared_state_diff.handler import (
     HandlerDeclaredStateDiff,
 )
 from omnibase_infra.handlers.handler_declared_state_lease_local import (

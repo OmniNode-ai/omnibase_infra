@@ -16,7 +16,7 @@ from omnibase_infra.handlers.placement.enum_placement_health_verdict import (
 from omnibase_infra.handlers.placement.handler_placement_election import (
     HandlerPlacementElection,
 )
-from omnibase_infra.handlers.placement.handler_placement_epoch_guard import (
+from omnibase_infra.handlers.placement.handler_placement_epoch_guard.handler import (
     HandlerPlacementEpochGuard,
 )
 from omnibase_infra.handlers.placement.handler_placement_etcd import (

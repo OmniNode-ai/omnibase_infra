@@ -73,9 +73,8 @@ always reaches a terminal state.
    caller's deadline converts to FAILURE. This is the presence assertion
    OMN-14456 AC4 asked for.
 
-   *Why this was load-bearing:* PR #2555 merged with ``CI Summary`` = **success**
-   (all 53 in-run jobs green) while ``deploy-gate / deploy-gate`` = **failure**
-   on the same head SHA: the failing check was in another run.
+   *Why this was load-bearing:* PR #2555 merged with ``CI Summary`` green while
+   ``deploy-gate / deploy-gate`` was red on the same head, in another run.
 
 5. **Default-deny EXTERNAL sweep (OMN-18960).** Check 4 is a whitelist
    LOOKUP: it walks the expected tuple and asks the head for each name. It
@@ -356,6 +355,15 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # SUCCESS. The job is unconditional in ci.yml (no needs/if), so a skip or an
     # absence is anomalous and fails closed here instead of reading green.
     "Stack Shape (OMN-21891)",  # stack-shape
+    # OMN-22360: the core dependency-pin validator (layer order, no cycle, release
+    # bound, pin style, core hook revs), called from ci.yml's `dependency-pins` job as
+    # a reusable, so it surfaces as "<caller job id> / <inner job name>". THIS LINE IS
+    # HALF THE MECHANISM: the default-deny sweep fails CI Summary when the job FAILS,
+    # but an unregistered job that is `skipped` or absent yields SUCCESS. The job is
+    # unconditional in ci.yml (no needs/if), so a skip or an absence is anomalous and
+    # fails closed here instead of reading green. Renaming either half makes the gate
+    # permanently PENDING.
+    "dependency-pins / Dependency Pins",  # dependency-pins
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
@@ -836,32 +844,14 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # all reported this context successful before merge. Recorded rows and
     # failure/skip/absence controls live in test_hook_push_rehearsal_caller_omn17427.py.
     "hook-push-rehearsal / rehearse",
-    # OMN-17427 (operator RULING 2026-10-21T13:00:04Z: "put it on Dev and then
-    # we can do a override if necessary but that requires a human"). The
-    # hostile-reviewer finding gate (hostile-reviewer.yml, re-run on every
-    # thread reply by hostile-review-thread-gate.yml): on a PR into dev every
-    # hostile-reviewer thread needs a reply `fixed-in <sha>` whose commit
-    # touched the cited lines, or `rejected: <reason>`. With no thread at all
-    # it passes, so a reviewer that was skipped, degraded or down never holds
-    # a merge. Asserted on PRs into dev ONLY: scoped_to_base() drops
-    # DEV_BASE_ONLY_CONTEXTS on any other base, so a PR into main is not held.
-    #
-    # Admission, measured 2026-10-21 through onex scm on the bus: the 20 most
-    # recent merged dev PRs (#5145..#5219) all carried this context at their
-    # head, 20/20 present and 20/20 `success`, including the 5 bot PRs the
-    # reviewer skips (#5184, #5198, #5203, #5209, #5219). Before this entry a
-    # red thread gate was caught only by the default-deny sweep, and only when
-    # CI Summary polled after the gate had posted; an absent or still-running
-    # gate was read by nothing. Placed at the tail and admitted under
-    # POST_FIXTURE_WINDOW_CONTEXTS for the reason the `Governed helper
-    # primitive gate` entry states.
-    "Hostile Review Thread Gate",
 )
 
 # OMN-17427: members of EXPECTED_EXTERNAL_CONTEXTS asserted only on a pull
-# request into `dev` (see the entry above). A subset, never an addition: every
-# name here must also be in EXPECTED_EXTERNAL_CONTEXTS.
-DEV_BASE_ONLY_CONTEXTS: frozenset[str] = frozenset({"Hostile Review Thread Gate"})
+# request into `dev`. A subset, never an addition: every name here must also be
+# in EXPECTED_EXTERNAL_CONTEXTS. Empty since OMN-22478 (operator RULING
+# 2026-11-05T20:27:56Z): its one member, the Hostile Review Thread Gate, no
+# longer holds a merge. The mechanism stays for the gate's return.
+DEV_BASE_ONLY_CONTEXTS: frozenset[str] = frozenset()
 
 
 def scoped_to_base(contexts: tuple[str, ...], base_ref: str) -> tuple[str, ...]:
@@ -895,10 +885,6 @@ def scoped_to_base(contexts: tuple[str, ...], base_ref: str) -> tuple[str, ...]:
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
-        # OMN-17427: admitted 2026-10-21 on a 20/20 present-and-green record
-        # over merged dev heads #5145..#5219, read through onex scm; no
-        # fixture window covering it is captured yet.
-        "Hostile Review Thread Gate",
         # OMN-20413: October rehearsal rows postdate the July/August fixtures.
         # Its separate sixteen-PR admission replay retains the recorded rows.
         "hook-push-rehearsal / rehearse",
@@ -1375,6 +1361,12 @@ SWEEP_EXCLUSION_MAX_DAYS: int = 90
 # will change. It is what forces a premise that has held for a quarter to be
 # re-read by a person, which is the whole difference between this list and an
 # allowlist.
+_REVIEW_HOLDS_NO_MERGE = SweepExclusion(
+    reason="The operator ruled on 2026-11-05 that the automated review holds no merge.",
+    ticket="OMN-22478",
+    added="2026-11-05",
+    expires="2027-02-03",
+)
 EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
     "verify": SweepExclusion(
         reason=(
@@ -1429,19 +1421,12 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
         added="2026-09-21",
         expires="2026-12-20",
     ),
-    "Hostile Reviewer (adversarial gate)": SweepExclusion(
-        reason=(
-            "The check run Hostile Reviewer (adversarial gate) succeeded on thirteen "
-            "heads and skipped on three. This entry differs from the others because "
-            "the check does reach success when it runs. It skips on some pull request "
-            "shapes due to a condition involving the draft state and base branch. The "
-            "exclusion covers only the skip case to prevent the gate from failing "
-            "when the check is conditionally inactive."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
+    # OMN-22478: the automated review holds no merge, so the sweep judges none of
+    # its rows. A red copy can still sit on a head from before its trigger stopped.
+    "Hostile Reviewer (adversarial gate)": _REVIEW_HOLDS_NO_MERGE,
+    "Hostile Review Gate": _REVIEW_HOLDS_NO_MERGE,
+    "Hostile Review Thread Gate": _REVIEW_HOLDS_NO_MERGE,
+    "Hostile Review Judge": _REVIEW_HOLDS_NO_MERGE,
     # OMN-19218 — the eleventh name, missed by the 16-PR window because none of
     # those heads touched prod-promotion-lineage.yml's path filter.
     "Enforce clean + promoted build source": SweepExclusion(
@@ -3092,7 +3077,7 @@ def main(argv: list[str] | None = None) -> int:
     external_contexts = (
         EXPECTED_EXTERNAL_CONTEXTS if args.event_name == "pull_request" else ()
     )
-    # OMN-17427: the Hostile Review Thread Gate holds PRs into dev only.
+    # OMN-17427: DEV_BASE_ONLY_CONTEXTS hold PRs into dev only.
     external_contexts = scoped_to_base(external_contexts, args.base_ref)
     code, report = evaluate(
         jobs,

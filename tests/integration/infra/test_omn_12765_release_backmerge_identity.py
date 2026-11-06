@@ -21,9 +21,9 @@ def _declared_pins() -> dict[str, str]:
     verbatim, so a substring assertion is satisfied by prose and keeps passing
     after the pin it names has moved (OMN-18918).
 
-    SPI and compat retain exact release pins. Core publishes a floor range
-    and resolves solely from its dev-merge tag; its lock identity is checked
-    separately below (OMN-17427).
+    Compat retains an exact release pin. Core and SPI publish ranges (core
+    resolves solely from its dev-merge tag; its lock identity is checked
+    separately below, OMN-17427), so neither appears here (OMN-22360).
     """
 
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -103,7 +103,8 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     pins = _declared_pins()
 
-    # Core uses a dev-merge tag; SPI retains its exact published release.
+    # Core uses a dev-merge tag; SPI is a range (OMN-22360) the lock resolves
+    # to the newest published release.
     locked = tomllib.loads(uv_lock)
     core_packages = [p for p in locked["package"] if p["name"] == "omnibase-core"]
     assert len(core_packages) == 1
@@ -111,7 +112,10 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     assert violations(tomllib.loads(pyproject), "omnibase-core") == []
     assert tuple(int(part) for part in core["version"].split(".")) >= (0, 47, 44)
     assert "git" in core["source"]
-    assert pins["omnibase-spi"] == "0.23.12"
+    assert "omnibase-spi" not in pins
+    spi_packages = [p for p in locked["package"] if p["name"] == "omnibase-spi"]
+    assert len(spi_packages) == 1
+    assert spi_packages[0]["version"] == "0.23.12"
 
     # The retired git-rev overrides must be gone from both manifest and lock:
     # the OMN-13762 core rev and the OMN-12549 seam core/spi revs.

@@ -47,12 +47,6 @@ entries:
   - path: .github/workflows/build-workspace-candidate-runtime.yml
     family: O
     content_sha1: d513212182edffef6563d2b5dfc6a6c3b85bccf6
-  - path: .github/workflows/canonical-inference-gate.yml
-    family: G
-    content_sha1: b12ea5e3379a841f73a663bff43bf2aa65187e47
-  - path: .github/workflows/canonical-inference-gate.yml
-    family: G
-    content_sha1: e8101b3c97f3abdee56607d9351a46b6941f2860
   - path: .github/workflows/ci.yml
     family: E-LAN
     content_sha1: 88afc870896a457882ee53cb90caa59739dfdc2d
@@ -64,16 +58,7 @@ entries:
     content_sha1: 02c6504809a91bd45dcc6706f756a41ab5961fa0
   - path: .github/workflows/ci.yml
     family: G
-    content_sha1: 0c73ce6e76ac863e4f93207f14c2c0cebc07ab38
-  - path: .github/workflows/ci.yml
-    family: G
-    content_sha1: 1f78c18c4c8ed2e6f62cb3ae547dc8fd967ce1e9
-  - path: .github/workflows/ci.yml
-    family: G
     content_sha1: 391ef6e84a36bcc4e1e00e62f358e8bc9bea99c2
-  - path: .github/workflows/ci.yml
-    family: G
-    content_sha1: 415a8d723cee643b19b43610c69ef13f9e35fb96
   - path: .github/workflows/ci.yml
     family: O
     content_sha1: 04216c912e3554324d8b25f255175391f7d61833
@@ -140,9 +125,6 @@ entries:
   - path: .github/workflows/dev-baseline-publisher.yml
     family: E-LAN
     content_sha1: 88afc870896a457882ee53cb90caa59739dfdc2d
-  - path: .github/workflows/direct-model-call.yml
-    family: G
-    content_sha1: bee0543d5689d95476d6261f39453f5b065b146f
   - path: .github/workflows/dispatch-parity-gate.yml
     family: E-LAN
     content_sha1: 88afc870896a457882ee53cb90caa59739dfdc2d
@@ -2822,9 +2804,6 @@ entries:
   - path: src/omnibase_infra/handlers/mcp/adapter_onex_to_mcp.py
     family: O
     content_sha1: bed1987e9d958a1d4cc2034c4c6d2c7c971326f0
-  - path: src/omnibase_infra/handlers/models/model_operation_context.py
-    family: O
-    content_sha1: 3212107661a199b76ba8bef18452451fd1d61349
   - path: src/omnibase_infra/handlers/placement/handler_placement_etcd.py
     family: O
     content_sha1: 673c51e55aa87fb220ce9b81469e8eead254681f
@@ -2924,6 +2903,9 @@ entries:
   - path: src/omnibase_infra/models/projection/model_snapshot_topic_config.py
     family: O
     content_sha1: 98384abd0a729f79da6cf18947a91851319e2315
+  - path: src/omnibase_infra/models/resilience/model_operation_context.py
+    family: O
+    content_sha1: 3212107661a199b76ba8bef18452451fd1d61349
   - path: src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_imperative_orchestrator_ratchet.py
     family: F
     content_sha1: c05e8880fb661f1c518614c1ccd91e488767893c

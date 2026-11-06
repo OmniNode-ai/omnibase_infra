@@ -165,7 +165,63 @@ requirements:
     acceptance:
       - id: AC35
         statement: 'AC35: the test-parallel job runs one step, with a timeout-minutes ceiling and no pytest, before both of its pytest steps, that installs the verifier at the caller tag through install_verifier and fails when the install fails -- falsifier: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0 fails at the merge base, where the step does not exist'
+  - id: req-omn19998-wrapper-venv-peer-floor
+    statement: The onex wrapper must wait while either a host reconcile or a venv-only reconcile can prove the floor, including overlapping locks and a handoff between them, and must refuse a floor that remains stale without reclaiming either lock.
+    acceptance:
+      - id: AC36
+        statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
+  - id: req-omn19998-refresh-recovery-census
+    statement: The dev refresh completion must run the existing closing lane census after recovery as well as success, while preserving the failed refresh's result and exit code.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: the refresh completion removes only declared same-lane recreate leftovers after recovery, preserves failure results and exit codes, records remaining drift or unreadable inventory, and retains success census exit codes -- falsifier: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q fails ten recovery cases against the merge-base refresh_dev_lane.sh.'
+  - id: req-omn19998-broker-listener-recorded-rows
+    statement: The broker_listener lab alarm must keep raising on the recorded friction rows, a refused connect and an unreachable network on every bootstrap address, and must not read either as INDETERMINATE; the same bootstrap with an answering listener reads OK.
+    acceptance:
+      - id: AC38
+        statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
+  - id: req-omn19998-gapless-roll-failure
+    statement: A rolling dev runtime update must wait for each service's declared health before updating its peer, and must fail at a non-running, unhealthy or timed-out step without reporting a partial roll successful.
+    acceptance:
+      - id: AC39
+        statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
+  - id: req-omn19998-autowiring-timeout
+    statement: Cold auto-wiring must avoid migration-service contract scans for optional runtime ports and use the shared safe contract reader for published-event routing.
+    acceptance:
+      - id: AC42
+        statement: 'AC42: optional publisher and consumer constructors perform zero migration-service builds, required migration services are still materialized, and published-event maps use the fast safe parser with a portable safe fallback and unchanged malformed-input behavior -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
+  - id: req-omn19998-subscription-preflight-parsing
+    statement: Subscription preflight must read consumer-group handover and consume-concurrency declarations through the shared safe contract reader rather than reparsing every subscribed contract with the Python YAML parser.
+    acceptance:
+      - id: AC45
+        statement: 'AC45: consumer-group handover and consume-concurrency readers use CSafeLoader when available and SafeLoader otherwise, retaining declared values, absent-file defaults and malformed-input refusals -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
+  - id: req-omn19998-terminal-projection-parsing
+    statement: Cold wiring must use the shared safe contract reader for terminal-event and projection-topic declarations while retaining their per-contract routing and error handling.
+    acceptance:
+      - id: AC41
+        statement: 'AC41: terminal-event and projection-topic readers use CSafeLoader when available and SafeLoader otherwise, preserve declared values, and retain empty results for missing or malformed contracts -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
+  - id: req-omn19998-contract-reader-layering
+    statement: Low-level contract readers must share a safe YAML utility without importing the package-announcer handler when reading declarations.
+    acceptance:
+      - id: AC43
+        statement: 'AC43: concurrency, published-event, terminal-event and projection-topic readers retain declared values when imports of handler_package_announcer are refused during reads, while terminal-event and projection-topic modules import without loading that handler -- falsifier: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov'
+  - id: req-omn19998-runner-v2338-2
+    statement: The runner image must bake runner 2.338.2 with its x64 and arm64 checksums, a matching lock version and a valid bound identity, so rebuilding does not restore the refused 2.336.0 runner.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: docker/runners/Dockerfile pins runner 2.338.2 and both architecture checksums, docker/runners/runner-image.lock.json records 2.338.2 with a valid identity, and the existing fleet-floor and multiarch tests pass; the 2.336.0 merge-base Dockerfile fails the head fleet-floor test and the exact-pin deployment probe.'
+  - id: req-omn19998-canary-hosted-exception
+    statement: The runner routing audit admits exactly one hosted job in a private repository, the outside canary, and refuses every other hosted job there.
+    acceptance:
+      - id: AC47
+        statement: "AC47: the audit leaves the finding for floor-canary .github/workflows/canary.yml job canary out of the private-placement findings when the policy declares it with a ruling and a reason, and still reports every other job of that workflow, every other workflow of that repository and the same file and job in another private repository; an entry with a pattern, a list, another repository or a missing field admits nothing, and main fails on the other repository's job -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k \"canary or private_exception or main_passes\""
 evidence_requirements:
+  - kind: tests
+    description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
+    command: uv run pytest tests/ci/test_runner_image_node24_floor.py tests/ci/test_runner_image_multiarch.py -q -n 0
+  - kind: tests
+    description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
@@ -252,6 +308,114 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac43-reader-layering
+    description: AC43 executes four low-level readers against a temporary contract in a fresh interpreter, refusing imports of the announcer during reads and checking the declared values. Unsafe Python object tags remain refused by the shared utility.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC43
+  - id: dod-omn19998-ac43-reader-layering-deploy-probe
+    description: Hosted-runner runtime artifact probe for AC43. Executes this checkout's concurrency and routing readers in a fresh interpreter with package-announcer imports refused during reads, requiring the declared values from a temporary contract. Requires no live lane, broker, credentials or Docker and makes no live deployment claim.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC43
+  - id: dod-omn19998-ac40-runner-pin
+    description: AC40 runs the existing runner floor and multiarch tests against the checkout. The head floor rejects the recorded 2.336.0 Dockerfile; the head's 2.338.2 Dockerfile passes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_node24_floor.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_multiarch.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac40-runner-pin-deploy-probe
+    description: Hosted deployment artifact probe for AC40. Reads this checkout's Dockerfile and lock, requires the exact 2.338.2 version and both architecture checksums, then recomputes the bound identity. The merge-base 2.336.0 image fails the exact-pin assertion. This probe requires no Docker daemon, credentials or live runner changes and makes no live installation claim.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c "import json; from pathlib import Path; d=Path('docker/runners/Dockerfile').read_text().splitlines(); assert 'ARG RUNNER_VERSION=2.338.2' in d; assert 'ENV RUNNER_SHA256_AMD64=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40' in d; assert 'ENV RUNNER_SHA256_ARM64=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945' in d; assert json.loads(Path('docker/runners/runner-image.lock.json').read_text())['runner_version']=='2.338.2'; print('runner 2.338.2 and both architecture pins match')"
+        cwd: .
+      - check_type: command
+        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac39-runtime-roll
+    description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_compose_budget_omn18057.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_executor_runtime_timeout_recovery_omn18057.py scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC39
+  - id: dod-omn19998-ac39-runtime-roll-deploy-source
+    description: Hosted behavioral probe for AC39 from this checkout. The real executor loads its boot-guard effect and replays failed running checks, health waits and deadlines through the Docker adapter, requiring a failed roll after recovery without advancing peer images or emitting success. The convergence replay also exercises successful and unchanged rolls and forced rollback. No network source read, live installation or uninterrupted readiness is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+    binds_ac:
+      - AC39
+  - id: dod-omn19998-cold-wiring-deploy-probe
+    description: Hosted-runner runtime artifact probe for AC42, AC45 and AC41. Exercises optional-port dependency construction and safe contract parsing from this checkout, requiring zero optional migration-service builds, retained required service construction and unchanged declared values and malformed-input handling. Uses temporary contracts without a live broker, lane, credentials or Docker.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC42
+      - AC45
+      - AC41
+  - id: dod-omn19998-ac38-terminal-projection-parsing
+    description: Cold-wiring regressions exercise terminal-event and projection-topic parsing through the fast and portable safe loaders and retain their missing-file and malformed-YAML behavior.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC41
+  - id: dod-omn19998-ac37-subscription-preflight-parsing
+    description: The cold-wiring reader regressions exercise both subscription-preflight readers with LibYAML, the portable parser, absent files and unsafe or malformed YAML.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC45
+  - id: dod-omn19998-ac36-autowiring-timeout
+    description: Replays the optional-port constructors that caused redundant scans and the published-event loader from the recorded timeout stack; required migration-service construction remains a positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC42
   - id: dod-omn19998-ac24-routing-audit-git-rest
     description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
     source: manual
@@ -683,3 +847,48 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC35
+  - id: dod-omn19998-ac36-wrapper-venv-peer-floor
+    description: AC36 runs the actual wrapper in a disposable workspace with a stale or proven floor and a stub dispatch entrypoint. A deterministic poll clock drives both lock release orders and both handoff directions, and checks refusal without lock reclamation when the floor stays stale.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC36
+  - id: dod-omn19998-ac36-wrapper-deploy-probe
+    description: Hosted-runner wrapper artifact probe for AC36. Executes scripts/onex from this checkout against disposable floor metadata, lock directories and a stub CLI, requiring successful dispatch only after proof and refusal while the floor remains stale. Uses Bash and Python without a live lane, broker, credentials or Docker; this checks the shipped wrapper rather than live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC36
+  - id: dod-omn19998-refresh-recovery-census
+    description: Replay the recorded dev recreate leftover through the refresh completion block, real census reader and Docker shim. Recovery removes only declared same-lane leftovers, preserves failure results and exit codes, and records remaining drift or unreadable inventory. Success controls retain the census exit code.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q
+        cwd: .
+    binds_ac:
+      - AC37
+  - id: dod-omn19998-ac38-broker-listener-recorded-rows
+    description: AC38 drives evaluate_broker_listener with the recorded refused and network-unreachable rows, a mixed two-address bootstrap and an answering positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network"
+        cwd: .
+    binds_ac:
+      - AC38
+  - id: dod-omn19998-ac47-canary-hosted-exception
+    description: AC47 drives the real private-placement pass over fixture private repositories with and without the policy entry, with entries that are patterns, lists, another repository or incomplete, and through main.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "canary or private_exception or main_passes"
+        cwd: .
+    binds_ac:
+      - AC47

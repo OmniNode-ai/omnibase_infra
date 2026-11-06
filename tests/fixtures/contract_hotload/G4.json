@@ -1,0 +1,110 @@
+{
+  "chain": "G4",
+  "kind": "golden",
+  "title": "removal",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "cli",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "remove",
+        "contract_name": "node_x",
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "registration_request_id": "af2067d5-ff4c-5e76-99e3-0b8574e4bac4",
+        "expected_version": 2,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadRemoved",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 3,
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "operation": "remove",
+        "owner": "lab-deploy",
+        "registration_request_id": "af2067d5-ff4c-5e76-99e3-0b8574e4bac4"
+      },
+      "key": "node_x",
+      "note": "a removal is a record of its own category on the accepted topic"
+    },
+    {
+      "step": 3,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:af2067d5-ff4c-5e76-99e3-0b8574e4bac4",
+        "outcome": "accepted",
+        "reason": null,
+        "registry_version": 3
+      },
+      "key": "lab-deploy:af2067d5-ff4c-5e76-99e3-0b8574e4bac4"
+    },
+    {
+      "step": 4,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 3,
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "operation": "remove",
+        "status": "removed",
+        "reason": null,
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 5,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "state",
+      "model": "ModelRuntimeHotloadState",
+      "record": {
+        "entity_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f",
+        "bootstrap_ready": true,
+        "serving_ready": true,
+        "names": {
+          "node_x": {
+            "observed": {
+              "registry_version": 3,
+              "status": "removed",
+              "reason": null
+            },
+            "served": null
+          }
+        }
+      },
+      "key": "8c242722-5f7b-5b52-86f1-0961206fa958",
+      "note": "observed v3 removed, served nothing"
+    },
+    {
+      "step": 6,
+      "actor": "client",
+      "action": "observe",
+      "note": "no group member, no answer; the topics remain"
+    }
+  ],
+  "ends_in": "owning runtimes unwire node_x"
+}
