@@ -13,6 +13,11 @@ requirements:
         statement: 'AC1: A lock rewritten only in its revision header leaves the tree at the committed lock and reports changed=false; it reports changed=true today -- falsifier: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k revision_only'
       - id: AC2
         statement: 'AC2: The committed uv.lock is at format revision 5 after the lock refresh; the merge base carries revision 1 -- falsifier: uv run pytest tests/ci/test_uv_lock_revision_omn13902.py -q'
+  - id: req-omn13902-runner-image
+    statement: The runner image lock identity is bound to the refreshed uv.lock.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: runner_image_identity.py --mode verify exits 0 on the refreshed uv.lock; it exits non-zero when the lock identity is stale -- falsifier: python3 scripts/ci/runner_image_identity.py --mode verify'
 evidence_requirements:
   - kind: tests
     description: The refresh step's own shell runs against a throwaway git repository with a stub uv that rewrites only the revision header, and the step reports no change.
@@ -60,3 +65,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn-13902-ac5
+    description: The runner image lock identity digest matches the refreshed uv.lock; a stale digest makes the verify exit non-zero.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
