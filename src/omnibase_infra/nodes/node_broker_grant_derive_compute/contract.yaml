@@ -6,14 +6,16 @@ node_name: node_broker_grant_derive_compute
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
 description: Derive broker grants from a principal's resolved wire bindings, without I/O.
 input_model:
   name: ModelBrokerGrantBindings
-  module: omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings
+  module: omnibase_infra.models.security.model_broker_grant_bindings
   description: Physical topic bindings, explicitly inspected consumer groups and the consumer group prefixes read under.
 output_model:
   name: ModelBrokerGrantDerivation
-  module: omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_derivation
+  module: omnibase_infra.models.security.model_broker_grant_derivation
   description: Sorted topic and group permissions per logical broker; exact unless marked prefixed, and the describe-only wildcard group.
 capabilities:
   - name: broker.grant.derive
@@ -24,12 +26,12 @@ handler_routing:
     - operation: broker.grant.derive
       handler:
         name: HandlerBrokerGrantDerive
-        module: omnibase_infra.handlers.handler_broker_grant_derive
+        module: omnibase_infra.handlers.handler_broker_grant_derive.handler
       description: Pure READ, WRITE and DESCRIBE grant derivation, with prefixed group grants.
       supported_operations: [broker.grant.derive]
       input_model:
         name: ModelBrokerGrantBindings
-        module: omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings
+        module: omnibase_infra.models.security.model_broker_grant_bindings
         description: Resolved wire operations and group prefixes for one principal.
 error_handling:
   retry_policy:

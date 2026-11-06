@@ -2467,3 +2467,172 @@ def test_recorded_rate_limit_job_is_unreadable_not_drift(
     # so the annotation may not promise one.
     assert "reset time when GitHub reports one" in result.stdout
     assert "reported findings" not in result.stdout
+
+
+# OMN-22478: the private-repository refusal has one exception, for the outside
+# canary, and it covers that one job and nothing else.
+_HOSTED_JOB = "jobs:\n  {job}:\n    runs-on: ubuntu-latest\n"
+_CANARY = ".github/workflows/canary.yml"
+_CANARY_EXCEPTION = {
+    "repository": "floor-canary",
+    "path": _CANARY,
+    "job": "canary",
+    "ruling": "RULING 2026-11-05T22:32:36Z lane=orchestrator-31d9",
+    "reason": "test",
+}
+
+
+def _private_pass(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    workflows: dict[str, dict[str, str]],
+) -> None:
+    """Run the real private-placement pass over fixture private repositories."""
+    original = module.audit_private_repo_hosted_placement
+    monkeypatch.setattr(
+        module,
+        "audit_private_repo_hosted_placement",
+        lambda: original(
+            visibility_fn=lambda org: [(name, True) for name in workflows],
+            workflow_fetch_fn=lambda name: workflows[name],
+        ),
+    )
+
+
+def _scopes(findings: list[Any]) -> list[str]:
+    return sorted(f.scope for f in findings)
+
+
+def test_the_canary_job_alone_is_admitted_on_a_hosted_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    _private_pass(
+        module,
+        monkeypatch,
+        {
+            "floor-canary": {
+                _CANARY: "jobs:\n  canary:\n    runs-on: ubuntu-latest\n"
+                "  other:\n    runs-on: ubuntu-latest\n",
+                ".github/workflows/other.yml": _HOSTED_JOB.format(job="canary"),
+            },
+            "another-private": {
+                _CANARY: _HOSTED_JOB.format(job="canary"),
+                ".github/workflows/ci.yml": _HOSTED_JOB.format(job="ci"),
+            },
+        },
+    )
+    assert len(module.audit_private_repo_hosted_placement()) == 5
+
+    left = module.audit_private_repo_hosted_exception(
+        {"private_repo_hosted_exception": _CANARY_EXCEPTION}
+    )
+
+    assert _scopes(left) == sorted(
+        [
+            f"another-private:{_CANARY}:canary",
+            "another-private:.github/workflows/ci.yml:ci",
+            f"floor-canary:{_CANARY}:other",
+            "floor-canary:.github/workflows/other.yml:canary",
+        ]
+    )
+
+
+def test_without_the_policy_entry_the_canary_job_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failing control: with no entry the same job is a finding again."""
+    module = _load_script()
+    _private_pass(
+        module,
+        monkeypatch,
+        {"floor-canary": {_CANARY: _HOSTED_JOB.format(job="canary")}},
+    )
+    assert _scopes(module.audit_private_repo_hosted_exception({})) == [
+        f"floor-canary:{_CANARY}:canary"
+    ]
+
+
+@pytest.mark.parametrize(
+    "exception",
+    [
+        pytest.param({**_CANARY_EXCEPTION, "repository": "floor-*"}, id="repo-glob"),
+        pytest.param({**_CANARY_EXCEPTION, "repository": "other"}, id="other-repo"),
+        pytest.param(
+            {**_CANARY_EXCEPTION, "path": ".github/workflows/*.yml"}, id="path-glob"
+        ),
+        pytest.param({**_CANARY_EXCEPTION, "path": "canary.yml"}, id="bare-path"),
+        pytest.param({**_CANARY_EXCEPTION, "job": "can*"}, id="job-glob"),
+        pytest.param({**_CANARY_EXCEPTION, "job": ["canary"]}, id="job-list"),
+        pytest.param({**_CANARY_EXCEPTION, "ruling": ""}, id="no-ruling"),
+        pytest.param({**_CANARY_EXCEPTION, "reason": " "}, id="no-reason"),
+        pytest.param([_CANARY_EXCEPTION], id="list-of-exceptions"),
+    ],
+)
+def test_an_invalid_or_wider_private_exception_admits_nothing(
+    monkeypatch: pytest.MonkeyPatch, exception: object
+) -> None:
+    module = _load_script()
+    _private_pass(
+        module,
+        monkeypatch,
+        {"floor-canary": {_CANARY: _HOSTED_JOB.format(job="canary")}},
+    )
+
+    left = module.audit_private_repo_hosted_exception(
+        {"private_repo_hosted_exception": exception}
+    )
+
+    assert _scopes(left) == [f"floor-canary:{_CANARY}:canary"]
+
+
+def test_the_policy_names_exactly_the_canary_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text())
+    entry = policy["private_repo_hosted_exception"]
+    assert (entry["repository"], entry["path"], entry["job"]) == (
+        "floor-canary",
+        _CANARY,
+        "canary",
+    )
+    module = _load_script()
+    _private_pass(
+        module,
+        monkeypatch,
+        {
+            "floor-canary": {
+                _CANARY: "jobs:\n  canary:\n    runs-on: ubuntu-latest\n"
+                "  other:\n    runs-on: ubuntu-latest\n"
+            }
+        },
+    )
+    assert _scopes(module.audit_private_repo_hosted_exception(policy)) == [
+        f"floor-canary:{_CANARY}:other"
+    ]
+
+
+def test_main_passes_the_canary_and_still_fails_any_other_hosted_private_job(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module, "audit_github_variables", lambda policy: [])
+    monkeypatch.setattr(module, "audit_scoped_variables", lambda policy: [])
+    _private_pass(
+        module,
+        monkeypatch,
+        {
+            "floor-canary": {_CANARY: _HOSTED_JOB.format(job="canary")},
+            "other-private": {_CANARY: _HOSTED_JOB.format(job="canary")},
+        },
+    )
+
+    code, out, _ = _run_main(module, monkeypatch, tmp_path, capsys)
+
+    assert code == 1
+    assert f"other-private:{_CANARY}:canary" in out
+    assert f"floor-canary:{_CANARY}:canary" not in out

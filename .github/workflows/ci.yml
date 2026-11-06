@@ -4715,8 +4715,8 @@ jobs:
           # also absent from branch protection (dev requires exactly "CI Summary"),
           # so those checks previously blocked nothing.
           EVENT_NAME: ${{ github.event_name }}
-          # OMN-17427: only a PR into dev asserts DEV_BASE_ONLY_CONTEXTS (the
-          # Hostile Review Thread Gate). Empty off a pull request.
+          # OMN-17427: only a PR into dev asserts DEV_BASE_ONLY_CONTEXTS. Empty
+          # off a pull request.
           BASE_REF: ${{ github.base_ref }}
           # OMN-15532 — PR author login. Drops ONLY the contexts that this
           # author's PRs structurally cannot produce

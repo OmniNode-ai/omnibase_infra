@@ -23,7 +23,7 @@ from omnibase_core.models.event_bus.model_resolved_bus_bindings import (
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.handlers.handler_broker_grant_derive import (
+from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
     HandlerBrokerGrantDerive,
 )
 from omnibase_infra.runtime import gateway_forwarder
@@ -32,6 +32,9 @@ from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).parents[4]
 CONTRACT = ROOT / "src/omnibase_infra/nodes/node_bus_forwarder_effect/contract.yaml"
+FIXTURE_TOPICS = yaml.safe_load(
+    (ROOT / "tests/fixtures/broker_grant_topics/contract.yaml").read_text()
+)["event_bus"]
 
 
 def shipped_config(tmp_path: Path, *, contract_path: Path = CONTRACT):
@@ -106,7 +109,7 @@ def test_contract_topic_addition_changes_exactly_its_grants(
     monkeypatch.delenv("KAFKA_TOPIC_NAMESPACE", raising=False)
     before, _ = gateway_forwarder.build_gateway_transports(shipped_config(tmp_path))
     contract = yaml.safe_load(CONTRACT.read_text())
-    added = "onex.evt.fixture.additional.v1"
+    added = FIXTURE_TOPICS["publish_topics"][1]
     contract["config"]["gateway_forwarder"]["mirror_topics"][direction].append(added)
     path = tmp_path / "contract.yaml"
     path.write_text(yaml.safe_dump(contract))
@@ -171,7 +174,7 @@ def test_runtime_consumer_builder_matches_derived_physical_binding(
             bootstrap_servers="fixture:9092", environment="dev", instance_id=instance_id
         )
     )
-    topics = ("onex.evt.fixture.input.v1", "onex.cmd.fixture.request.v1")
+    topics = tuple(FIXTURE_TOPICS["subscribe_topics"])
     resolved = bus.resolve_bus_bindings(
         principal="runtime",
         subscribe_topics=(*topics, topics[0]),
@@ -238,7 +241,7 @@ def test_runtime_publish_and_group_truncation_use_the_same_binding(monkeypatch):
             bootstrap_servers="fixture:9092", environment="dev", instance_id="worker"
         )
     )
-    topic = "onex.evt.fixture.input.v1"
+    topic = FIXTURE_TOPICS["subscribe_topics"][0]
     resolved = bus.resolve_bus_bindings(
         principal="runtime",
         subscribe_topics=(topic,),
@@ -265,7 +268,10 @@ async def test_runtime_published_wire_topics_match_exact_derived_grants(
     bus = EventBusKafka(
         ModelKafkaEventBusConfig(bootstrap_servers="fixture:9092", environment="dev")
     )
-    topics = ("onex.evt.fixture.output.v1", "onex.cmd.fixture.request.v1")
+    topics = (
+        FIXTURE_TOPICS["publish_topics"][0],
+        FIXTURE_TOPICS["subscribe_topics"][1],
+    )
     resolved = bus.resolve_bus_bindings(
         principal="runtime",
         subscribe_topics=(),

@@ -48,10 +48,10 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.handler_manifest_persistence import (
     HandlerManifestPersistence,
 )
-from omnibase_infra.handlers.models import ModelRetryState
 from omnibase_infra.models.model_retry_error_classification import (
     ModelRetryErrorClassification,
 )
+from omnibase_infra.models.resilience import ModelRetryState
 
 # =============================================================================
 # Test Constants - From Contract Configuration

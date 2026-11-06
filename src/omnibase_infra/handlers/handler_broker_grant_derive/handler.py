@@ -9,10 +9,10 @@ from omnibase_core.models.event_bus.model_resolved_bus_bindings import (
     ModelResolvedBusBindings,
 )
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant import (
+from omnibase_infra.models.security.model_broker_grant import (
     ModelBrokerGrant,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_derivation import (
+from omnibase_infra.models.security.model_broker_grant_derivation import (
     ModelBrokerGrantDerivation,
 )
 

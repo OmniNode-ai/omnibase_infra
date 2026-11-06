@@ -14,7 +14,9 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.handlers.models.model_operation_context import ModelOperationContext
+from omnibase_infra.models.resilience.model_operation_context import (
+    ModelOperationContext,
+)
 
 
 class TestModelOperationContextNotTimedOut:
