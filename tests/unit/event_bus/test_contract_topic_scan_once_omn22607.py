@@ -39,7 +39,12 @@ def extract_calls(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     """Count the real extractor's ``extract_all`` calls; one entry per call."""
     calls: list[Path] = []
     entry = ModelContractTopicEntry(
-        topic=_TOPIC, source_contracts=[Path("scan_once/contract.yaml")]
+        topic=_TOPIC,
+        kind="evt",
+        producer="platform",
+        event_name="scan-once-probe",
+        version="v1",
+        source_contracts=(Path("scan_once/contract.yaml"),),
     )
 
     def counting_extract_all(self: ContractTopicExtractor, **kwargs: object) -> list:
