@@ -1937,13 +1937,10 @@ def test_oneshot_sampling_budget_does_not_reset_for_new_executions(
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(handler.collector.subprocess, "run", run_sample)
+    monkeypatch.setitem(handler.collector._BOUND, "directory", tmp_path)
     result = handler.HandlerCensusOneshot(
         clock=lambda: next(ticks), sleep=sleeps.append
-    ).handle(
-        ModelCensusOneshotRequest(
-            script_directory=str(tmp_path), policy=PLAN.ONESHOT_POLICY
-        )
-    )
+    ).handle(ModelCensusOneshotRequest(policy=PLAN.ONESHOT_POLICY))
     assert result.exit_code == 4
     assert "new execution pending" in result.stderr
     assert len(samples) == 2

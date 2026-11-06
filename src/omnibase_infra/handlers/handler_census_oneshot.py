@@ -138,6 +138,7 @@ class HandlerCensusOneshot:
         diagnostics: list[str] = []
         deadline = self._clock() + request.policy.phase_timeouts["runtime"]
         arguments = request.arguments
+        script_directory = collector.script_directory()
         with collector.workspace() as plan_path:
             while True:
                 remaining = deadline - self._clock()
@@ -152,7 +153,7 @@ class HandlerCensusOneshot:
                     )
                 try:
                     sample = collector.sample(
-                        request.script_directory,
+                        script_directory,
                         arguments,
                         plan_path,
                         remaining,

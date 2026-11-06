@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from omnibase_core.runtime.runtime_local import RuntimeLocal
+from omnibase_infra.handlers.census_oneshot_effect import collector
 from omnibase_infra.handlers.handler_census_oneshot import load_policy
 from omnibase_infra.models.model_census_oneshot_request import ModelCensusOneshotRequest
 from omnibase_infra.models.model_census_oneshot_result import ModelCensusOneshotResult
@@ -17,9 +18,10 @@ from omnibase_infra.models.model_census_oneshot_result import ModelCensusOneshot
 def main() -> int:
     contract_path = Path(sys.argv[2])
     policy = load_policy(contract_path)
-    request = ModelCensusOneshotRequest(
-        script_directory=sys.argv[1], policy=policy, arguments=tuple(sys.argv[3:])
-    )
+    # The collector that started this adapter names its own directory here, at the
+    # composition root; the request that crosses the bus carries none.
+    collector.start_with(Path(sys.argv[1]).resolve())
+    request = ModelCensusOneshotRequest(policy=policy, arguments=tuple(sys.argv[3:]))
     with TemporaryDirectory(prefix="census-oneshot-bus-") as scratch:
         root = Path(scratch)
         input_path = root / "request.json"

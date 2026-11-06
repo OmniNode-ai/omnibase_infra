@@ -70,8 +70,9 @@ class Samples:
 
     def run(self, monkeypatch: pytest.MonkeyPatch) -> ModelCensusOneshotResult:
         monkeypatch.setattr(handler.collector, "sample", self.sample)
+        monkeypatch.setitem(handler.collector._BOUND, "directory", Path("/unused"))
         return handler.HandlerCensusOneshot(clock=self.clock, sleep=self.sleep).handle(
-            ModelCensusOneshotRequest(script_directory="unused", policy=_POLICY)
+            ModelCensusOneshotRequest(policy=_POLICY)
         )
 
 
@@ -136,10 +137,9 @@ def test_missing_plan_refuses_clean_sample_except_help(
         return subprocess.CompletedProcess("census", 0, "collector output", "")
 
     monkeypatch.setattr(handler.collector, "sample", no_plan)
+    monkeypatch.setitem(handler.collector._BOUND, "directory", Path("/unused"))
     result = handler.HandlerCensusOneshot().handle(
-        ModelCensusOneshotRequest(
-            script_directory="unused", policy=_POLICY, arguments=arguments
-        )
+        ModelCensusOneshotRequest(policy=_POLICY, arguments=arguments)
     )
     assert result.exit_code == expected
     assert result.stdout == "collector output"
@@ -170,3 +170,57 @@ def test_relocated_deploy_agent_loads_phase_policy_from_installed_package(
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("--memory", "--json"),
+        ("--lane", "dev", "--dry-run"),
+        ("--snapshot", "-"),
+        ("--observed-out", "out/observed.json", "--memory-event-out", "out/m.json"),
+        ("--help",),
+        (),
+    ],
+)
+def test_the_collectors_own_options_are_accepted(arguments: tuple[str, ...]) -> None:
+    assert (
+        ModelCensusOneshotRequest(policy=_POLICY, arguments=arguments).arguments
+        == arguments
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("; id",),
+        ("--unknown",),
+        ("--lane",),
+        ("--lane", "--dry-run"),
+        ("--lane", "dev; id"),
+        ("--snapshot", "--json"),
+        ("--snapshot", "../../etc/passwd"),
+        ("--snapshot", "a\nb"),
+        ("--memory", "extra"),
+    ],
+)
+def test_a_payload_cannot_add_to_the_collectors_command_line(
+    arguments: tuple[str, ...],
+) -> None:
+    with pytest.raises(ValueError):
+        ModelCensusOneshotRequest(policy=_POLICY, arguments=arguments)
+
+
+def test_the_payload_cannot_name_the_collector_directory() -> None:
+    with pytest.raises(ValueError):
+        ModelCensusOneshotRequest.model_validate(
+            {"policy": _POLICY.model_dump(), "script_directory": "/evil"}
+        )
+
+
+def test_without_a_started_with_directory_the_handler_refuses_to_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delitem(handler.collector._BOUND, "directory", raising=False)
+    with pytest.raises(ValueError, match="no collector directory is bound"):
+        handler.HandlerCensusOneshot().handle(ModelCensusOneshotRequest(policy=_POLICY))
