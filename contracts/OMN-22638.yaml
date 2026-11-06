@@ -1,0 +1,47 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22638
+title: "The onex ledger query client reads state-backed point answers, names a node refusal, and the dead letter replay treats an oversize publish as non-retryable"
+summary: "The work-ledger query client demanded freshness and parity of every answer, but the node answers inbox, holds and open-claims from work_ledger_state with a status, a page size and a watermark, so onex ledger query --query inbox failed with WorkLedgerQueryError. The client contract now names those point queries and the client checks their own facts; a node refusal (status refused) raises a typed error carrying the node's bound and bounded form, which the CLI prints. EventPayloadTooLargeError and MessageSizeTooLargeError join the non-retryable set so a dead letter for an oversize publish is not replayed."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22638-point-answers
+    statement: The client returns a point-query answer that carries status ok, a watermark and a page size, and still refuses one that lacks them and every other answer that lacks freshness or parity.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the recorded inbox, holds and open-claims answers are returned by the client -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_query_point_answers_omn22478.py -k golden -q --no-cov'
+      - id: AC2
+        statement: 'AC2: a point answer without a watermark, status ok or page size, a rows answer without freshness and a refusal without a bound are each refused, and a node refusal names its bound on the CLI error line -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_query_point_answers_omn22478.py -k error -q --no-cov'
+      - id: AC3
+        statement: 'AC3: the point-answer test file is red on the client before the change (Ledger reply lacks freshness or parity) and green after it -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_query_point_answers_omn22478.py -q --no-cov'
+  - id: req-omn22638-oversize-not-replayed
+    statement: A dead letter whose error type or failure reason names EventPayloadTooLargeError or MessageSizeTooLargeError is not eligible for replay, and a transient publish failure still is.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: an oversize dead letter is not eligible for replay and an InfraConnectionError one is -- falsifier: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_oversize_publish_not_replayed_omn22478.py -q --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: The point-answer and oversize-replay tests, with the existing client and replay suites
+    command: uv run pytest tests/unit/cli/test_work_ledger_query_point_answers_omn22478.py tests/unit/cli/test_work_ledger_query_client_omn20740.py tests/unit/nodes/node_dlq_replay_effect -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22638-point-answers
+    description: Replays the point answers recorded from the node's own fixtures through the client and checks the refusals that keep it strict.
+    source: manual
+    binds_ac: [AC1, AC2, AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_work_ledger_query_point_answers_omn22478.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22638-oversize-replay
+    description: The replay eligibility check refuses both oversize class names and keeps a transient failure eligible.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_oversize_publish_not_replayed_omn22478.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
