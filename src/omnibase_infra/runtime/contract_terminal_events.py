@@ -193,14 +193,15 @@ def load_terminal_event_topics(contract_path: Path | None) -> frozenset[str]:
 
     if contract_path is None:
         return frozenset()
-    path = contract_path
+    from omnibase_infra.contracts.contract_yaml import read_contract_yaml
+
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = read_contract_yaml(contract_path)
     except (OSError, yaml.YAMLError) as exc:
         logger.warning(
             "contract_terminal_events: could not read terminal declarations from "
             "%s (%s) — handler publishes will be forwarded un-enveloped",
-            path,
+            contract_path,
             type(exc).__name__,
         )
         return frozenset()

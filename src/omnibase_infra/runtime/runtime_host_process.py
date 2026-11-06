@@ -6732,7 +6732,7 @@ class RuntimeHostProcess:
         Args:
             correlation_id: Correlation ID for distributed tracing.
         """
-        from omnibase_infra.handlers.handler_registration_from_announcement import (
+        from omnibase_infra.handlers.handler_registration_from_announcement.handler import (
             HandlerRegistrationFromAnnouncement,
         )
         from omnibase_infra.handlers.handler_runtime_introspection_startup import (
