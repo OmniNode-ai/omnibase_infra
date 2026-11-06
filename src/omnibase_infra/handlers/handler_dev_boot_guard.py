@@ -672,6 +672,41 @@ class HandlerDevBootGuard:
                 "Dev recovery phase=%s status=%s", phase.value, status.value
             ),
         )
+        try:
+            self._retain_recovered_ids()
+        except (
+            OSError,
+            ValueError,
+            RuntimeError,
+            self.execution.subprocess.SubprocessError,
+        ):
+            # The family is already recovered and verified; a snapshot that
+            # keeps the old ids is the previous behaviour, not a failed recovery.
+            logger.warning("Cannot record recovered dev container ids", exc_info=True)
+
+    def _retain_recovered_ids(self) -> None:
+        """Record the container ids the recovery just created in the snapshot.
+
+        A recovery recreates the family from ``recovery-compose.json``: the same
+        retained images and settings, new container ids, and a compose config
+        hash that differs from the regular compose model (the image is the
+        retained tag). ``prepare`` can therefore never re-capture that family
+        (``_capture`` refuses a hash mismatch), so without this the snapshot
+        keeps the ids of containers that no longer exist, and the next failed
+        job, even one that failed before touching a container, reads the
+        healthy family as changed and force-recreates it again (OMN-22478,
+        job 54914064 on 2026-11-06 took the dev runtime down this way).
+        """
+        retained = self.point.current
+        if retained is None:
+            raise DevBootFailedError("no last healthy dev revision")
+        refreshed = retained.model_copy(
+            update={"container_ids": tuple(sorted(c["Id"] for c in self._containers()))}
+        )
+        self.execution._atomic_write_private_json(
+            self.snapshot_path, refreshed.model_dump(mode="json")
+        )
+        self.point.hold(refreshed)
 
     @contextlib.contextmanager
     def protect(

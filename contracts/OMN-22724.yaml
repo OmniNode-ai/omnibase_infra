@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22724
+title: "The dev boot guard records the container ids a recovery created, so a later failed job leaves the recovered family running"
+summary: "After a recovery verified healthy, the boot guard writes the recovered container ids into last-healthy.json and its held point, so a later job that fails before any roll reads the healthy recovered family as unchanged and does not force-recreate it."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22724-recovered-ids-are-recorded
+    statement: A recovery that verified healthy records the ids of the containers it created, and a later failed job leaves that family running; the lab read from the branch is in the pull request body.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: after a recovery verified healthy, a fresh guard prepares from a snapshot holding the recovered container ids, and a later job that fails before the roll leaves that family running with no second recreate (incident recovery_skipped_healthy true) -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q --no-cov'
+      - id: AC2
+        statement: "AC2: a regression test built from the incident's recorded data (the 209869f7 then 54914064 sequence, with the recovered family's new container ids and a config hash the regular compose model never reproduces, built in the test's own fixture) fails on the code without the snapshot refresh and passes with it -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q --no-cov with the handler change reverted shows 1 failed"
+evidence_requirements:
+  - kind: tests
+    description: The boot guard tests pass at the head, and the new test fails on the origin/dev handler.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22724-boot-guard-tests
+    description: The boot guard tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22724-installed-on-dev
+    description: After the deploy agent installs this change, the dev host's handler carries the snapshot refresh. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" grep -c _retain_recovered_ids /data/omninode/omnibase_infra/src/omnibase_infra/handlers/handler_dev_boot_guard.py
+        cwd: ${OMNI_HOME}/omnibase_infra
