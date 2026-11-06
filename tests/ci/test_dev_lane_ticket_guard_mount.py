@@ -16,6 +16,8 @@ from them. The running container is read on the lab after the deploy agent conve
 
 from __future__ import annotations
 
+import posixpath
+
 import pytest
 
 from tests.ci._compose_render_omn21099 import (
@@ -88,5 +90,8 @@ def test_runtime_effects_renders_the_clone_root_as_the_mount_source() -> None:
     )
     volumes = services["runtime-effects"]["volumes"]
     mounts = [v for v in volumes if v["target"] == GUARD_ROOT_IN_CONTAINER]
-    assert [m["source"] for m in mounts] == ["/data/omninode/omniclaude"]
+    # Compose keeps the dots; the engine's mount resolves them, and the clone root is where they land.
+    assert [posixpath.normpath(m["source"]) for m in mounts] == [
+        "/data/omninode/omniclaude"
+    ]
     assert mounts[0]["read_only"] is True
