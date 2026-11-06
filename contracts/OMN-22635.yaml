@@ -18,7 +18,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The directory carrier is admitted, the refusals still hold, and the two-branch merge is clean.
-    command: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py tests/ci/test_ci_live_contact.py -q
+    command: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py tests/integration/test_ci_live_contact_directory_carrier_omn22635.py tests/ci/test_ci_live_contact.py -q
 emergency_bypass:
   enabled: false
   justification: ""
@@ -30,7 +30,7 @@ dod_evidence:
     binds_ac: [AC1, AC2, AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py tests/ci/test_ci_live_contact.py -q
+        check_value: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py tests/integration/test_ci_live_contact_directory_carrier_omn22635.py tests/ci/test_ci_live_contact.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22635-live-contact-node-readback
     description: The live-contact node, run through onex node over a scratch repository with a staged change to CI tooling and one staged carrier file under .github/live-contact-exception/, completes with success true; without the carrier the same run fails.
