@@ -31,6 +31,7 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC1
+      - AC2
   - id: dod-omn22622-live-roll
     description: The mini runner container holds neither the operator env mount path nor the creds-volume copy; the probe exits non-zero when either path exists and prints no contents. Hosted CI cannot reach the mini host, so only the local Done gate runs it.
     source: manual
@@ -39,8 +40,6 @@ dod_evidence:
       - check_type: command
         check_value: "ssh \"$(python3 -c \"import yaml;print([h['host'] for h in yaml.safe_load(open('config/runner_fleet.yaml'))['hosts'] if h.get('runner_name_prefix')=='omninode-mini-runner'][0])\")\" 'export PATH=$PATH:/usr/local/bin:/opt/homebrew/bin; c=omninode-mini-runner-1; docker exec $c test ! -e /run/omnibase-operator.env && docker exec -u runner $c sh -c \"test ! -e \\$HOME/.runner-creds/operator.env\"'"
         cwd: .
-    binds_ac:
-      - AC2
   - id: dod-omn22622-integration-proof
     description: Run this pull request's own check on a lab host at the pushed head. Hosted CI cannot reach the lab, so only the local Done gate runs this unbound check.
     source: manual
