@@ -165,8 +165,10 @@ _IN_REPO_PROVENANCE: dict[str, str] = {
     # OMN-20999 shifted it twenty-seven more with the Infisical SMTP settings
     # (940 -> 967). OMN-19513 shifted it eight more with the runtime nofile
     # ulimit on the x-runtime-base anchor (967 -> 975). OMN-20266 shifted it
-    # seven more with the dev broker memory-floor note (975 -> 982).
-    "omnibase_infra:docker/docker-compose.infra.yml:982": "KC_DB_USERNAME: postgres",
+    # seven more with the dev broker memory-floor note (975 -> 982). OMN-21591
+    # shifted it one more with the kernel plugins overlay key on the
+    # x-runtime-env anchor (982 -> 983).
+    "omnibase_infra:docker/docker-compose.infra.yml:983": "KC_DB_USERNAME: postgres",
     "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
         "CREATE DATABASE keycloak"
     ),
@@ -198,7 +200,7 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "four-column checksum ledger"
         ),
         provenance=(
-            "omnibase_infra:docker/docker-compose.infra.yml:982",
+            "omnibase_infra:docker/docker-compose.infra.yml:983",
             "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
             "omninode_infra:k8s/auth/keycloak-values.yaml:32",
             "omninode_infra:scripts/init-databases.sh:603",

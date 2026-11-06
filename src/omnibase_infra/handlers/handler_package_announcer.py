@@ -3,7 +3,8 @@
 """Boot step 0: announce the installed packages' contracts and build the node catalog (OMN-21590).
 
 The metadata reader in this module is the one place that names the ``onex.nodes``
-entry-point group. It reads each installed package's own metadata, resolves the
+and ``onex.domain_plugins`` entry-point groups (the second yields the kernel plugin
+announcements of OMN-21591). It reads each installed package's own metadata, resolves the
 contract file, hashes its bytes in the canonical form and returns records; nothing
 here imports a handler or constructs a node. The announcer turns the records into
 ``ModelNodeAnnouncement`` values and publishes them on a bus the lane overlay binds
@@ -77,6 +78,9 @@ from omnibase_infra.models.node_announce.model_package_contract_record import (
 from omnibase_infra.models.node_announce.model_package_inventory import (
     ModelPackageInventory,
 )
+from omnibase_infra.models.node_announce.model_package_plugin_record import (
+    ModelPackagePluginRecord,
+)
 from omnibase_infra.runtime.util_contract_content_hash import contract_content_hash
 from omnibase_infra.utils.util_runtime_packages import is_runtime_package_active
 
@@ -86,6 +90,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP: Final = "onex.nodes"
+PLUGIN_ENTRY_POINT_GROUP: Final = "onex.domain_plugins"
 
 # What importing an arbitrary installed node module can raise; the reader records it and
 # goes on, so one broken package never stops boot.
@@ -234,6 +239,8 @@ def _read_contract(
 
 def read_package_inventory(
     active_packages: frozenset[str] | None = None,
+    *,
+    include_plugins: bool = False,
 ) -> ModelPackageInventory:
     """Read the installed package set's own metadata, in the order it lists the entries.
 
@@ -301,8 +308,35 @@ def read_package_inventory(
             )
         )
     return ModelPackageInventory(
-        records=tuple(records), fingerprint=tuple(sorted(fingerprint))
+        records=tuple(records),
+        plugins=read_plugin_records(active_packages) if include_plugins else (),
+        fingerprint=tuple(sorted(fingerprint)),
     )
+
+
+def read_plugin_records(
+    active_packages: frozenset[str] | None = None,
+) -> tuple[ModelPackagePluginRecord, ...]:
+    """Read the kernel plugin entries of the active packages from installed metadata.
+
+    Nothing is imported: the record carries the entry point's own ``module:attribute``
+    value, which the kernel resolves only for a plugin the overlay enabled.
+    """
+    records: list[ModelPackagePluginRecord] = []
+    for ep in entry_points(group=PLUGIN_ENTRY_POINT_GROUP):
+        dist = ep.dist
+        dist_name = dist.name if dist is not None else "unknown"
+        if not is_runtime_package_active(dist_name, active_packages):
+            continue
+        records.append(
+            ModelPackagePluginRecord(
+                name=ep.name,
+                distribution=dist_name,
+                version=str(dist.version) if dist is not None else "0.0.0",
+                target=ep.value,
+            )
+        )
+    return tuple(records)
 
 
 def announcer_identity(namespace: str) -> UUID:
@@ -314,8 +348,23 @@ def announcer_identity(namespace: str) -> UUID:
 def build_announcements(
     inventory: ModelPackageInventory, request: ModelPackageAnnounceRequest
 ) -> tuple[ModelNodeAnnouncement, ...]:
-    """One ``announce`` per readable contract, in the inventory's order."""
-    return tuple(
+    """One ``announce`` per readable contract, then one per kernel plugin, in the inventory's order."""
+    plugin_announcements = tuple(
+        ModelNodeAnnouncement(
+            entity_id=plugin.name,
+            operation=EnumAnnouncementOperation.ANNOUNCE,
+            content_hash=plugin.content_hash,
+            package=ModelAnnouncedPackage(
+                distribution=plugin.distribution, version=plugin.version
+            ),
+            node_kind=EnumAnnouncedNodeKind.KERNEL_PLUGIN,
+            announcer_id=request.announcer_id,
+            generation=request.generation,
+            announced_at=request.announced_at,
+        )
+        for plugin in inventory.plugins
+    )
+    node_announcements = tuple(
         ModelNodeAnnouncement(
             entity_id=record.contract_name,
             operation=EnumAnnouncementOperation.ANNOUNCE,
@@ -334,6 +383,7 @@ def build_announcements(
         and record.contract_name is not None
         and record.content_hash is not None
     )
+    return node_announcements + plugin_announcements
 
 
 def tier0_policy(
@@ -350,7 +400,8 @@ def tier0_policy(
         trusted_handler_prefixes=("",),
         active_profiles=tuple(profiles),
         authoritative_announcers={
-            r.distribution: announcer_id for r in inventory.records
+            **{r.distribution: announcer_id for r in inventory.records},
+            **{p.distribution: announcer_id for p in inventory.plugins},
         },
     )
 
@@ -363,8 +414,13 @@ def installed_file_reader(inventory: ModelPackageInventory) -> _INSTALLED_FILE:
         if r.contract_path is not None and r.contract_name is not None
     }
 
+    descriptors = {(p.name, p.distribution): p.descriptor for p in inventory.plugins}
+
     def read(announcement: ModelNodeAnnouncement) -> tuple[bytes | None, Path | None]:
-        path = paths.get((announcement.entity_id, announcement.package.distribution))
+        key = (announcement.entity_id, announcement.package.distribution)
+        if announcement.node_kind is EnumAnnouncedNodeKind.KERNEL_PLUGIN:
+            return descriptors.get(key), None
+        path = paths.get(key)
         if path is None:
             return None, None
         try:
@@ -389,7 +445,10 @@ def apply_announcement(
 
 
 def local_announce_request(
-    active_packages: frozenset[str] | None, *, workload: str = "main"
+    active_packages: frozenset[str] | None,
+    *,
+    workload: str = "main",
+    announce_kernel_plugins: bool = False,
 ) -> ModelPackageAnnounceRequest:
     """The request of a caller that binds no overlay: Tier 0, this process, generation 1."""
     return ModelPackageAnnounceRequest(
@@ -398,6 +457,7 @@ def local_announce_request(
         generation=1,
         announced_at=datetime.now(UTC),
         active_packages=active_packages,
+        announce_kernel_plugins=announce_kernel_plugins,
     )
 
 
@@ -448,7 +508,9 @@ class HandlerPackageAnnouncer:
         settle_timeout_seconds: float,
     ) -> ModelPackageAnnounceResult:
         """Read the metadata, publish the announcements, return the catalog."""
-        inventory = read_package_inventory(request.active_packages)
+        inventory = read_package_inventory(
+            request.active_packages, include_plugins=request.announce_kernel_plugins
+        )
         announcements = build_announcements(inventory, request)
         policy = request.policy or tier0_policy(inventory, request.announcer_id)
         read_installed = installed_file_reader(inventory)
@@ -538,6 +600,7 @@ async def run_boot_step0(
     workload: str,
     active_packages: frozenset[str] | None = None,
     environment: str = "boot",
+    announce_kernel_plugins: bool = False,
 ) -> ModelPackageAnnounceResult:
     """Boot step 0: announce and catalog on a fresh in-memory bus, before any container.
 
@@ -558,7 +621,11 @@ async def run_boot_step0(
     )
     handler = HandlerPackageAnnouncer()
     return await handler.handle(
-        local_announce_request(packages, workload=workload),
+        local_announce_request(
+            packages,
+            workload=workload,
+            announce_kernel_plugins=announce_kernel_plugins,
+        ),
         bus=bus,
         settle_timeout_seconds=load_boot_runtime_config().catalog_settle_timeout_seconds,
     )
@@ -566,6 +633,7 @@ async def run_boot_step0(
 
 __all__ = [
     "ENTRY_POINT_GROUP",
+    "PLUGIN_ENTRY_POINT_GROUP",
     "HandlerPackageAnnouncer",
     "announcer_identity",
     "apply_announcement",
@@ -576,6 +644,7 @@ __all__ = [
     "local_announce_request",
     "read_contract_yaml",
     "read_package_inventory",
+    "read_plugin_records",
     "run_boot_step0",
     "resolve_contract_path",
     "tier0_policy",

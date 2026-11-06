@@ -32,6 +32,17 @@ handler_routing:
         module: omnibase_infra.models.node_announce.model_package_announce_request
         description: Typed step 0 request.
       output_fields: [inventory, announcements, catalog, outcomes]
+    - operation: kernel_plugin_selection.select
+      handler:
+        name: HandlerKernelPluginSelection
+        module: omnibase_infra.handlers.handler_kernel_plugin_selection
+      description: Select the kernel plugins the lane overlay enables from the announced kernel_plugin entries of the catalog; a name the catalog does not hold is a typed boot error.
+      supported_operations: [kernel_plugin_selection.select]
+      input_model:
+        name: ModelKernelPluginSelectionRequest
+        module: omnibase_infra.models.node_announce.model_kernel_plugin_selection_request
+        description: The step 0 result and the overlay's enabled plugin names.
+      output_fields: [selected]
     - operation: registration_from_announcement.adapt
       handler:
         name: HandlerRegistrationFromAnnouncement
@@ -59,7 +70,13 @@ io_operations:
     description: Run boot step 0.
     input_fields: [topic, announcer_id, generation, announced_at, active_packages, policy]
     output_fields: [inventory, announcements, catalog, outcomes]
+  - operation: kernel_plugin_selection.select
+    description: Select the lane's enabled kernel plugins from the catalog.
+    input_fields: [announced, enabled]
+    output_fields: [selected]
 capabilities:
+  - name: kernel_plugin_selection.select
+    description: Select the kernel plugins the lane overlay enables from the node catalog.
   - name: registration_from_announcement.adapt
     description: Adapt an announcement to the introspection event the registration orchestrator consumes.
   - name: runtime_introspection.startup

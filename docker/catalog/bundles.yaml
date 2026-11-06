@@ -107,6 +107,9 @@ local:
     # only omnibase_infra. The runtime policy's omnibase_infra,omnimarket is for
     # composed-image kernels; local-market restores it via env_default_overrides.
     ONEX_ACTIVE_RUNTIME_PACKAGES: "${ONEX_LOCAL_RUNTIME_PACKAGES:-omnibase_infra}"
+    # The infra-only image announces no external kernel plugins. Keep the
+    # laptop overlay independent of the composed-image runtime policy.
+    ONEX_RUNTIME_KERNEL_PLUGINS: "${ONEX_LOCAL_RUNTIME_KERNEL_PLUGINS:-}"
     # Non-secret lane identity; empty means this runtime has no lane tenant.
     ONEX_TENANT_ID: "${ONEX_TENANT_ID:-}"
     # OMN-19408: a lane-scoped node contract (omnimarket's lab projections and
@@ -199,6 +202,7 @@ local-market:
   # OMN-21279: these kernels run the omnimarket-runtime image.
   env_default_overrides:
     ONEX_LOCAL_RUNTIME_PACKAGES: "omnibase_infra,omnimarket"
+    ONEX_LOCAL_RUNTIME_KERNEL_PLUGINS: delegation
   # OMN-19972: 3002 is the lab lanes' projection API port. The laptop's own API
   # answers on 3102 (loopback, by publish_host inherited from local).
   port_overrides:

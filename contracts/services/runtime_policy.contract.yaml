@@ -3,6 +3,15 @@ version: 1
 active_runtime_packages:
   - omnibase_infra
   - omnimarket
+# OMN-21591: the lane overlay's runtime.kernel_plugins, rendered to
+# ONEX_RUNTIME_KERNEL_PLUGINS. The kernel registers the announced kernel_plugin
+# entries named here, in this order (a light plugin before a heavy one), and
+# refuses to boot if one is not announced. Only delegation is named: the intelligence
+# plugin is announced by omniintelligence, which is not in active_runtime_packages,
+# so naming it here would be a boot error. Add it in the same change that adds
+# omniintelligence to active_runtime_packages.
+kernel_plugins:
+  - delegation
 llm_cloud_endpoint_host_allowlist:
   - generativelanguage.googleapis.com
   - api.z.ai

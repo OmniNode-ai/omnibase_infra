@@ -113,6 +113,7 @@ from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
 )
+from omnibase_core.utils.util_run_coro_sync import run_coro_sync
 from omnibase_infra.enums import (
     EnumCircuitState,
     EnumConsumerGroupPurpose,
@@ -147,6 +148,10 @@ from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.handlers import boot_readiness_checks
+from omnibase_infra.handlers.handler_kernel_plugin_selection import (
+    HandlerKernelPluginSelection,
+    load_kernel_plugin,
+)
 from omnibase_infra.handlers.handler_package_announcer import (
     build_registered_events,
     run_boot_step0,
@@ -161,6 +166,9 @@ from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
 from omnibase_infra.models.network_binding import load_network_binding_settings
+from omnibase_infra.models.node_announce.model_kernel_plugin_selection_result import (
+    ModelKernelPluginSelectionResult,
+)
 from omnibase_infra.models.node_announce.model_node_announcement_topic import (
     ModelNodeAnnouncementTopic,
 )
@@ -1422,11 +1430,32 @@ class WorkspaceRuntimeConfigMissingError(ProtocolConfigurationError):
     """
 
 
+async def _create_embedded_config_container() -> ModelONEXContainer:
+    """Compose the filesystem handlers used before the embedded runtime boots."""
+    from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
+        HandlerWorkspaceRuntimeConfigMaterializer,
+    )
+
+    bootstrap = ModelONEXContainer()
+    registry = bootstrap.service_registry
+    if registry is None:
+        raise RuntimeError("Embedded configuration requires a service registry")
+    await registry.register_instance(
+        HandlerWorkspaceConfigRootResolve, HandlerWorkspaceConfigRootResolve()
+    )
+    await registry.register_instance(
+        HandlerWorkspaceRuntimeConfigMaterializer,
+        HandlerWorkspaceRuntimeConfigMaterializer(),
+    )
+    return bootstrap
+
+
 def resolve_embedded_runtime_config(
     correlation_id: UUID | None = None,
     *,
     workspace_root: Path | None = None,
     developer_lane_binding: str | None = None,
+    container: ModelONEXContainer | None = None,
 ) -> tuple[ModelRuntimeConfig, str]:
     """Resolve the per-runtime config for an EMBEDDED (CLI-hosted) runtime.
 
@@ -1434,7 +1463,8 @@ def resolve_embedded_runtime_config(
     runtime resolves its transport from its OWN configuration through the one
     shared authority — never from an env var and never from a broker probe.
     This function answers "which configuration is that?" for the embedded
-    case:
+    case. Workspace handlers resolve from the supplied container; standalone
+    callers compose a bootstrap container before resolving them.
 
     1. ``ONEX_CONTRACTS_DIR`` (a BOOTSTRAP pointer — it names where config
        lives, never what the transport is) selects the contracts directory,
@@ -1519,12 +1549,19 @@ def resolve_embedded_runtime_config(
             HandlerWorkspaceRuntimeConfigMaterializer,
         )
 
-        config_root = (
-            HandlerWorkspaceConfigRootResolve()
-            .handle(ModelWorkspaceConfigRootRequest(workspace_root=workspace_root))
-            .config_root
+        config_container = (
+            run_coro_sync(_create_embedded_config_container())
+            if container is None
+            else container
         )
-        copy = HandlerWorkspaceRuntimeConfigMaterializer().read(workspace_root)
+        root_resolver = config_container.get_service(HandlerWorkspaceConfigRootResolve)
+        materializer = config_container.get_service(
+            HandlerWorkspaceRuntimeConfigMaterializer
+        )
+        config_root = root_resolver.handle(
+            ModelWorkspaceConfigRootRequest(workspace_root=workspace_root)
+        ).config_root
+        copy = materializer.read(workspace_root)
         if copy is not None:
             config = load_runtime_config(
                 copy.contracts_dir, correlation_id=correlation_id
@@ -1689,6 +1726,76 @@ def _resolve_event_bus_transport(
         )
 
     return resolved_bus_type, reason
+
+
+# Registers the built-ins (PluginLlm, PluginDlq), then the kernel plugins the lane
+# overlay enabled (OMN-21591), in that order. A plugin that fails to load or register
+# is logged and skipped; the rest still register. bootstrap() calls it at step 4.5.
+def register_explicit_domain_plugins(
+    plugin_registry: RegistryDomainPlugin,
+    kernel_plugin_selection: ModelKernelPluginSelectionResult,
+    correlation_id: UUID,
+) -> None:
+    # Register lightweight plugins BEFORE heavy ones. Plugin registration
+    # order determines Pass 2 (start_consumers) order. PluginDelegation (3
+    # topics) subscribes in seconds, while PluginIntelligence (46 topics)
+    # takes ~12 minutes. If Intelligence goes first, later plugins never
+    # get their consumers started before the runtime is restarted or killed.
+
+    # Try to register PluginLlm (OMN-6600: LLM domain plugin).
+    try:
+        from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
+
+        plugin_registry.register(PluginLlm())
+        logger.info(
+            "PluginLlm registered (correlation_id=%s)",
+            correlation_id,
+        )
+    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+        logger.warning(
+            "PluginLlm failed to initialize, continuing without it (correlation_id=%s)",
+            correlation_id,
+            exc_info=True,
+        )
+
+    # Try to register PluginDlq (OMN-6601: DLQ + retry worker).
+    try:
+        from omnibase_infra.dlq.plugin_dlq import PluginDlq
+
+        plugin_registry.register(PluginDlq())
+        logger.info(
+            "PluginDlq registered (correlation_id=%s)",
+            correlation_id,
+        )
+    except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+        logger.warning(
+            "PluginDlq failed to initialize, continuing without it (correlation_id=%s)",
+            correlation_id,
+            exc_info=True,
+        )
+
+    # Register the kernel plugins the lane overlay enabled (OMN-21591). The
+    # selection was made before the container existed from the announced
+    # kernel_plugin entries; the kernel holds no plugin name. They register
+    # after the lightweight built-ins above and in the overlay's order, so a
+    # lane lists a light plugin before a heavy one (a 46-topic plugin that
+    # takes ~12 minutes to subscribe must not start its consumers first).
+    for selected_plugin in kernel_plugin_selection.selected:
+        try:
+            plugin_registry.register(load_kernel_plugin(selected_plugin))
+            logger.info(
+                "Kernel plugin %s registered (correlation_id=%s)",
+                selected_plugin.name,
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+            logger.warning(
+                "Kernel plugin %s failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                selected_plugin.name,
+                correlation_id,
+                exc_info=True,
+            )
 
 
 # ai-slop-ok: pre-existing === separators in example startup log in docstring
@@ -2803,7 +2910,8 @@ async def bootstrap() -> int:
         node_catalog_result: ModelPackageAnnounceResult | None = None
         try:
             node_catalog_result = await run_boot_step0(
-                workload=resolve_runtime_profile_name()
+                workload=resolve_runtime_profile_name(),
+                announce_kernel_plugins=True,
             )
             logger.info(
                 "Boot step 0: %d contracts announced, %d admitted (correlation_id=%s)",
@@ -2818,6 +2926,13 @@ async def bootstrap() -> int:
                 correlation_id,
                 exc_info=True,
             )
+
+        # 3.95. Select the kernel plugins the lane overlay enables from the catalog
+        # (OMN-21591). A name the catalog does not hold as an admitted kernel_plugin
+        # entry is a typed boot error raised here, before the container exists.
+        kernel_plugin_selection = HandlerKernelPluginSelection().select(
+            node_catalog_result
+        )
 
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
@@ -2963,125 +3078,9 @@ async def bootstrap() -> int:
         plugin_registry = RegistryDomainPlugin()
         registration_service = ServiceRegistration()
 
-        # Register lightweight plugins BEFORE heavy ones. Plugin registration
-        # order determines Pass 2 (start_consumers) order. PluginDelegation (3
-        # topics) subscribes in seconds, while PluginIntelligence (46 topics)
-        # takes ~12 minutes. If Intelligence goes first, later plugins never
-        # get their consumers started before the runtime is restarted or killed.
-
-        # Try to load and register PluginDelegation via entry-point discovery
-        # (graceful degradation - OMN-13690). omnimarket is optional and can be
-        # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
-        # Discovery via "onex.domain_plugins" avoids a direct infra-to-omnimarket
-        # import which violates the compat→core→spi→infra layering rule.
-        if is_runtime_package_active("omnimarket"):
-            try:
-                from importlib.metadata import entry_points
-
-                delegation_eps = [
-                    e
-                    for e in entry_points(group="onex.domain_plugins")
-                    if e.name == "delegation"
-                ]
-                if delegation_eps:
-                    PluginDelegation = delegation_eps[0].load()
-                    plugin_registry.register(PluginDelegation())
-                    logger.info(
-                        "PluginDelegation registered (correlation_id=%s)",
-                        correlation_id,
-                    )
-                else:
-                    logger.debug(
-                        "omnimarket not installed, delegation plugin not available "
-                        "(correlation_id=%s)",
-                        correlation_id,
-                    )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "PluginDelegation failed to initialize, continuing without it "
-                    "(correlation_id=%s)",
-                    correlation_id,
-                    exc_info=True,
-                )
-        else:
-            logger.info(
-                "PluginDelegation skipped by active runtime package filter "
-                "(correlation_id=%s)",
-                correlation_id,
-            )
-
-        # Try to register PluginLlm (OMN-6600: LLM domain plugin).
-        try:
-            from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
-
-            plugin_registry.register(PluginLlm())
-            logger.info(
-                "PluginLlm registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginLlm failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to register PluginDlq (OMN-6601: DLQ + retry worker).
-        try:
-            from omnibase_infra.dlq.plugin_dlq import PluginDlq
-
-            plugin_registry.register(PluginDlq())
-            logger.info(
-                "PluginDlq registered (correlation_id=%s)",
-                correlation_id,
-            )
-        except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "PluginDlq failed to initialize, continuing without it "
-                "(correlation_id=%s)",
-                correlation_id,
-                exc_info=True,
-            )
-
-        # Try to load and register PluginIntelligence via entry-point discovery
-        # (graceful degradation). omniintelligence is optional and can be
-        # removed from the active runtime surface with ONEX_ACTIVE_RUNTIME_PACKAGES.
-        if is_runtime_package_active("omniintelligence"):
-            try:
-                from importlib.metadata import entry_points
-
-                intel_eps = [
-                    e
-                    for e in entry_points(group="onex.domain_plugins")
-                    if e.name == "intelligence"
-                ]
-                if intel_eps:
-                    PluginIntelligence = intel_eps[0].load()
-                    plugin_registry.register(PluginIntelligence())
-                    logger.info(
-                        "PluginIntelligence registered (correlation_id=%s)",
-                        correlation_id,
-                    )
-                else:
-                    logger.debug(
-                        "omniintelligence not installed, intelligence plugin not available "
-                        "(correlation_id=%s)",
-                        correlation_id,
-                    )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "PluginIntelligence failed to initialize, continuing without it "
-                    "(correlation_id=%s)",
-                    correlation_id,
-                    exc_info=True,
-                )
-        else:
-            logger.info(
-                "PluginIntelligence skipped by active runtime package filter "
-                "(correlation_id=%s)",
-                correlation_id,
-            )
+        register_explicit_domain_plugins(
+            plugin_registry, kernel_plugin_selection, correlation_id
+        )
 
         # 4.6. Discover domain plugins from entry_points (OMN-2000)
         #
