@@ -196,6 +196,18 @@ profiles:
         source:
           source_type: env
           source_path: GITHUB_WEBHOOK_SECRET
+      # OMN-22685: the Linear key for node_create_ticket and node_linear_ticket_write_effect,
+      # which lab lanes reach over the bus (`onex ticket`). The handler resolves it through
+      # contract_secret_ref(_CONTRACT_PATH, "LINEAR_API_KEY"), the LITERAL name from the node's own
+      # contract.yaml secrets: block, the same shape as SLACK_BOT_TOKEN and ONEXBOT_OCC_* above.
+      # Unmapped, this lane's enable_convention_fallback: false made every lab ticket write
+      # terminate secret_unavailable (linear_api_key_unresolved) while the container env already
+      # held the key (docker-compose.infra.yml, x-runtime-env). Source of truth: secret store key
+      # dev:/shared/env/LINEAR_API_KEY. The value never appears here.
+      - logical_name: LINEAR_API_KEY
+        source:
+          source_type: env
+          source_path: LINEAR_API_KEY
     services:
       main:
         runtime_id: dev-main
