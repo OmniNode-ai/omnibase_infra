@@ -266,7 +266,16 @@ def dev_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         {executor_mod.active_dev_instance(): LANE},
     )
     monkeypatch.delenv(ENV_OVERLAY_HOME_CLONE, raising=False)
-    for key in (*MODE, *SOURCE):
+    # Nothing the host's own operator store or process environment holds may reach these tests.
+    monkeypatch.setattr(executor_mod, "operator_store_overlay", dict)
+    monkeypatch.setattr(executor_mod, "_load_runtime_policy_env", dict)
+    for key in (
+        *MODE,
+        *SOURCE,
+        "ESTIMATOR_GATE_PASSWORD",
+        "FEATURE_ESTIMATOR_GATE_ENABLED",
+        "COST_ESTIMATOR_WEB_IMAGE",
+    ):
         monkeypatch.delenv(key, raising=False)
     return fragment
 
