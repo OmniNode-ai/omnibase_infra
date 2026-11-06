@@ -480,6 +480,7 @@ asyncio_mode = "auto"
 # See: tests/conftest.py for detailed documentation on loop_scope configuration.
 asyncio_default_fixture_loop_scope = "function"
 markers = [
+    "cost_estimator_build: exercises the real estimator build settings and host effect",
     "live_contact(artifact): CI-tooling test consuming a recorded real API response or replay via recorded_response (OMN-18648)",
     "unit: Unit tests that test individual components in isolation",
     "integration: Integration tests that test multiple components together",
@@ -668,6 +669,7 @@ node_gateway_link_health_projection_compute = "omnibase_infra.nodes.node_gateway
 node_gateway_link_health_write_effect = "omnibase_infra.nodes.node_gateway_link_health_write_effect"
 node_gmail_archive_cleanup_effect = "omnibase_infra.nodes.node_gmail_archive_cleanup_effect"
 node_gmail_intent_poller_effect = "omnibase_infra.nodes.node_gmail_intent_poller_effect"
+node_hostile_review_fix_verifier_effect = "omnibase_infra.nodes.node_hostile_review_fix_verifier_effect"
 node_hotpatch_ledger_reconcile_effect = "omnibase_infra.nodes.node_hotpatch_ledger_reconcile_effect"
 node_impact_analyzer_compute = "omnibase_infra.nodes.node_impact_analyzer_compute"
 node_in_progress_probe_hygiene_effect = "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect"
@@ -699,6 +701,7 @@ node_registration_storage_effect = "omnibase_infra.nodes.node_registration_stora
 node_registry_api_effect = "omnibase_infra.nodes.node_registry_api_effect"
 node_registry_effect = "omnibase_infra.nodes.node_registry_effect"
 node_release_identity_compute = "omnibase_infra.nodes.node_release_identity_compute"
+node_release_notes_apply_effect = "omnibase_infra.nodes.node_release_notes_apply_effect"
 node_remote_agent_invoke_effect = "omnibase_infra.nodes.node_remote_agent_invoke_effect"
 node_reward_binder_effect = "omnibase_infra.nodes.node_reward_binder_effect"
 node_routing_orchestrator = "omnibase_infra.nodes.node_routing_orchestrator"

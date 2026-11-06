@@ -11,7 +11,7 @@ collecting -> adjudicating -> verdict_emitted -> collecting.
 The FSM state model (``ModelAdjudicatorState``) and verdict model
 (``ModelVerdict``) live in ``omnibase_infra.models.validation`` beside the
 events the pipeline's other nodes exchange; the dispatch handler is
-``omnibase_infra.handlers.handler_validation_adjudicate``.
+``omnibase_infra.handlers.handler_validation_adjudicate.handler``.
 
 Available Exports:
     - NodeValidationAdjudicator: The declarative reducer node

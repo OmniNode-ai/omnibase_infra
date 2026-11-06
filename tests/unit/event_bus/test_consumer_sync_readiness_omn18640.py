@@ -32,6 +32,9 @@ from omnibase_infra.event_bus.consumer_rejoin_policy import ModelConsumerRejoinP
 from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
     ConsumerRejoinSupervisor,
 )
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
+    HandlerConsumerCoordinatorRejoin,
+)
 from omnibase_infra.models.health.enum_consumer_stall_reason import (
     EnumConsumerStallReason,
 )
@@ -88,6 +91,7 @@ def _supervisor(
         )
 
     return ConsumerRejoinSupervisor(
+        coordinator_handler=HandlerConsumerCoordinatorRejoin(),
         topic=TOPIC,
         group_id=GROUP,
         policy=POLICY,

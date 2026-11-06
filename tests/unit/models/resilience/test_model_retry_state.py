@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from unittest.mock import patch
 
-from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
+from omnibase_infra.models.resilience.model_retry_state import ModelRetryState
 
 
 class TestModelRetryStateNextAttempt:
