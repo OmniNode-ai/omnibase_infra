@@ -359,6 +359,32 @@ class TestCiSummaryGate:
         assert code == EXIT_FAILURE
         assert STRICT_GATE_JOBS[1] in report
 
+    def test_lint_failure_alone_fails_ci_summary(self) -> None:
+        """OMN-22545: the test matrix no longer waits for Lint, so CI Summary is
+        the only thing that holds a merge when Lint is red.
+
+        Every strict and skippable gate is green, the test matrix is green, and
+        only Lint concludes ``failure``: the verdict must be FAILURE and the
+        report must name Lint. With Lint green again the same snapshot passes,
+        so the failure is Lint's and nothing else's.
+        """
+        # The snapshot below is the real outcome of a red Lint only if the test
+        # matrix does not wait for it: a matrix still behind Lint would be
+        # skipped, and a merge-base workflow shows exactly that.
+        jobs = _load_workflow(CI_WORKFLOW)["jobs"]
+        for name in ("detect-changes", "test-parallel"):
+            needs = jobs[name].get("needs", [])
+            needs = [needs] if isinstance(needs, str) else needs
+            assert "lint" not in needs, f"{name} still waits for lint: {needs!r}"
+        green = _all_gates("success") + [_job("Detect Changes", "success")]
+        code, _ = evaluate(green)
+        assert code == EXIT_SUCCESS
+        red = [_job("Lint", "failure") if j["name"] == "Lint" else j for j in green]
+        assert any(j["name"] == "Lint" and j["conclusion"] == "failure" for j in red)
+        code, report = evaluate(red)
+        assert code == EXIT_FAILURE
+        assert "Lint" in report
+
     def test_strict_gate_cancelled_is_failure(self) -> None:
         jobs = _all_gates("success")
         jobs[2] = _job(STRICT_GATE_JOBS[2], "cancelled")

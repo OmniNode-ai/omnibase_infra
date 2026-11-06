@@ -17,7 +17,7 @@ Tests validate:
 - Lazy DB connection guard (missing DSN raises RuntimeHostError)
 - Duplicate detection via RETURNING clause (rows vs empty rows)
 - Base64 decode errors raise RuntimeHostError with proper context
-- handle() auto-wiring adapter accepts both dict- and object-shaped envelopes
+- handle() receives a typed payload from the runtime adapter
 - Protocol/property compliance (handler_type, handler_category)
 """
 
@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.dispatch import ModelHandlerOutput
@@ -339,19 +340,12 @@ class TestHandlerValidationLedgerAppendProperties:
 
 
 class TestHandlerValidationLedgerAppendHandle:
-    """Tests for the handle() auto-wiring entry point.
-
-    node_validation_ledger_write_effect's contract declares operation_match
-    routing with no event_model, so handler_wiring._make_dispatch_callback
-    dispatches via handle(envelope) directly rather than execute(). This is
-    also the exact shape IntentEffectDispatchBridge.execute() constructs when
-    the kernel's intent-routing derivation invokes this handler.
-    """
+    """Tests for the typed handle() auto-wiring entry point."""
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     async def test_handle_routes_to_append_and_returns_handler_output(self) -> None:
-        """handle() extracts the payload, calls append(), and wraps the result."""
+        """handle() calls append() with the payload and wraps the result."""
         handler, db_handler = make_handler_with_mock_db()
         ledger_entry_id = uuid4()
         db_handler.execute = AsyncMock(
@@ -359,11 +353,7 @@ class TestHandlerValidationLedgerAppendHandle:
         )
 
         payload = make_minimal_payload()
-        envelope = MagicMock()
-        envelope.payload = payload
-        envelope.correlation_id = None
-
-        output = await handler.handle(envelope)
+        output = await handler.handle(payload)
 
         assert isinstance(output, ModelHandlerOutput)
         assert output.handler_id == "validation-ledger-append-handler"
@@ -374,15 +364,8 @@ class TestHandlerValidationLedgerAppendHandle:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_handle_accepts_dict_shaped_envelope(self) -> None:
-        """handle() extracts payload/correlation_id from a dict envelope.
-
-        This is the shape MessageDispatchEngine._materialize_envelope_with_bindings
-        delivers on the real dispatch path AND the exact shape
-        IntentEffectDispatchBridge.execute() constructs
-        (``{"payload": ..., "correlation_id": ...}``) -- not an
-        attribute-bearing object.
-        """
+    async def test_handle_preserves_payload_correlation_id(self) -> None:
+        """handle() preserves the correlation ID on the typed payload."""
         handler, db_handler = make_handler_with_mock_db()
         ledger_entry_id = uuid4()
         db_handler.execute = AsyncMock(
@@ -390,12 +373,9 @@ class TestHandlerValidationLedgerAppendHandle:
         )
 
         correlation_id = uuid4()
-        envelope = {
-            "payload": make_minimal_payload(),
-            "correlation_id": correlation_id,
-        }
+        payload = make_minimal_payload(correlation_id=correlation_id)
 
-        output = await handler.handle(envelope)
+        output = await handler.handle(payload)
 
         assert output.result is not None
         assert output.result.success is True
@@ -404,15 +384,15 @@ class TestHandlerValidationLedgerAppendHandle:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_handle_coerces_dict_payload(self) -> None:
-        """handle() validates a raw dict payload into ModelPayloadValidationLedgerAppend."""
+    async def test_handle_accepts_payload_validated_by_runtime(self) -> None:
+        """handle() receives the model validated from wire data by the runtime."""
         handler, db_handler = make_handler_with_mock_db()
         db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
         payload_dict = make_minimal_payload().model_dump(mode="json")
-        envelope = {"payload": payload_dict, "correlation_id": None}
+        request = ModelPayloadValidationLedgerAppend.model_validate(payload_dict)
 
-        output = await handler.handle(envelope)
+        output = await handler.handle(request)
 
         assert output.result is not None
         assert output.result.duplicate is True
@@ -426,31 +406,26 @@ class TestHandlerValidationLedgerAppendHandle:
         handler, db_handler = make_handler_with_mock_db()
         db_handler.execute = AsyncMock(return_value=make_db_result(rows=[]))
 
-        envelope = {
-            "payload": make_minimal_payload(correlation_id=None),
-            "correlation_id": None,
-        }
+        payload = make_minimal_payload(correlation_id=None)
 
-        output = await handler.handle(envelope)
+        output = await handler.handle(payload)
 
         assert output.correlation_id is not None
 
     @pytest.mark.unit
-    def test_safe_correlation_id_parses_string_uuid(self) -> None:
-        """_safe_correlation_id parses a string UUID into a UUID instance."""
+    def test_payload_correlation_id_parses_string_uuid(self) -> None:
+        """The payload boundary parses a string UUID into a UUID instance."""
         correlation_id = uuid4()
         assert (
-            HandlerValidationLedgerAppend._safe_correlation_id(str(correlation_id))
+            make_minimal_payload(correlation_id=str(correlation_id)).correlation_id
             == correlation_id
         )
 
     @pytest.mark.unit
-    def test_safe_correlation_id_falls_back_on_garbage(self) -> None:
-        """_safe_correlation_id never raises — bad input yields a fresh UUID."""
-        from uuid import UUID
-
-        result = HandlerValidationLedgerAppend._safe_correlation_id("not-a-uuid")
-        assert isinstance(result, UUID)
+    def test_payload_correlation_id_rejects_garbage(self) -> None:
+        """The typed payload rejects malformed IDs before handler dispatch."""
+        with pytest.raises(ValidationError, match="correlation_id"):
+            make_minimal_payload(correlation_id="not-a-uuid")
 
 
 # =============================================================================

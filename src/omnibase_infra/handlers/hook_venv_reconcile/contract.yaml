@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# This package owns the subprocess and installer-metadata effects bound by
+# node_reconcile_workspace_venvs. Its boundary covers only this package.
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
