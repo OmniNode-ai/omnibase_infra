@@ -105,6 +105,7 @@ databases:
               - log_entries
               - open_obligations
               - orchestration_style_outcomes
+              - overlay_store
               - pr_landing_state
               - pr_landing_transitions
               - pr_state
@@ -462,5 +463,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: a0abe40a87fd3ee27721199a26e5849e82ecc41947aa321e7a48a39427a4bc01
+  sha256: 101c6d4c652f3b3f12a63b19cd964a39404f60127463887bde7aa898ebafef41
 topology_instance: local

@@ -130,6 +130,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
         ),
         "omnimarket OMN-22320 writer half (node_projection_work_questions)",
     ),
+    "overlay_store": "omnimarket OMN-22478 writer half (node_projection_overlay_store)",
 }
 
 _SKIP_REASON = (
