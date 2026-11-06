@@ -41,6 +41,9 @@ topics:
   # OMN-22158: the generic node CLI publishes the fixture recording request on
   # its local runtime bus; the recorder's bus-profile test reads the terminal.
   - onex.cmd.platform.api-fixture-record.v1
+  # OMN-19998: scripts/deploy-runners.sh pipes the TMPDIR preparation request
+  # through the generic node CLI, which publishes it on the local runtime bus.
+  - onex.cmd.platform.runner-tmp-prepare.v1
   # OMN-22002: omnibase_core publishes the validator run and triggered events
   # (node_validation_report_write_effect); the validation ledger projection node
   # consumes them, so they are declared as published outside this corpus.

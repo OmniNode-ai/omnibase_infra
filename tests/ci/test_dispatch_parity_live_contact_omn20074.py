@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 
 import pytest
@@ -27,7 +25,4 @@ def test_live_dispatch_snapshot_matches_recorded_dependency_closure(
     committed = harness.strip_volatile_header_fields(harness.load_selection_oracle())
     assert live == committed
     assert live["header"]["corpus"] == recording["corpus"]
-    assert (
-        hashlib.sha256(json.dumps(live, sort_keys=True).encode()).hexdigest()
-        == recording["snapshot_sha256"]
-    )
+    assert harness.snapshot_digest(live) == recording["snapshot_sha256"]

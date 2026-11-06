@@ -429,6 +429,7 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
         "onex.evt.omnibase_internal.pr-watcher-tick-completed.v1",  # onex-topic-allow: OMN-20682
         "onex.evt.omnibase_internal.pr-watcher-tick-failed.v1",  # onex-topic-allow: OMN-20682
         "onex.evt.omnimarket.pr-state-observed.v1",  # onex-topic-allow: OMN-20682
+        "onex.evt.omnimarket.dev-merge-redeploy-receipt.v1",  # onex-topic-allow: OMN-22555
     }
 
     raw = CI_BUS_COMPOSE.read_text(encoding="utf-8")
@@ -486,6 +487,16 @@ def test_ci_bus_labwork_principal_is_scoped_not_superuser(
     assert lab_topics is not None, "the lab-work ACL grant set must be explicit"
     granted = lab_topics.group(1).split()
     assert len(granted) == 18
+    # OMN-22555: the redeploy node's receipt topic is granted by its own variable, same loop.
+    redeploy_granted = re.search(r'REDEPLOY_TOPICS="([^"]+)"', command)
+    assert redeploy_granted is not None
+    assert (
+        redeploy_granted.group(1).split()
+        == [
+            "onex.evt.omnimarket.dev-merge-redeploy-receipt.v1"  # onex-topic-allow: OMN-22555
+        ]
+    )
+    assert "for t in $$LAB_TOPICS $$REDEPLOY_TOPICS; do" in command
     assert '--resource-pattern-type literal --topic "$$t"' in command
     topics_command = "\n".join(services["ci-bus-topics"]["command"])
     declared = set(re.findall(r"onex\.[a-z]+\.[a-z0-9._-]+\.v\d+", topics_command))
@@ -509,19 +520,32 @@ def test_ci_bus_labwork_grants_the_pr_watcher_group_and_counts_match(
     prefixes = re.search(r'GROUP_PREFIXES="([^"]+)"', command)
     assert prefixes is not None
     assert "onex.omnibase_internal.node_pr_watcher_effect." in prefixes.group(1).split()
+    # OMN-22555: the dev-merge redeploy node's group is derive_service_group_id(node, service="omnimarket").
+    node_prefixes = re.search(r'NODE_GROUP_PREFIXES="([^"]+)"', command)
+    assert node_prefixes is not None
+    assert node_prefixes.group(1).split() == [
+        "local.omnimarket.node_dev_merge_redeploy_trigger_effect.consume.v1"
+    ]
+    assert "for g in $$GROUP_PREFIXES $$NODE_GROUP_PREFIXES; do" in command
 
-    words = {18: "eighteen", 23: "twenty-three"}
+    words = {18: "eighteen", 24: "twenty-four"}
     lab_topics = re.search(r'LAB_TOPICS="([^"]+)"', command)
     assert lab_topics is not None
     granted = lab_topics.group(1).split()
-    assert f"ACL readback confirms all {words[len(granted)]} lab topics" in command
+    assert f"ACL readback confirms all {words[len(granted)]} pool topics" in command
 
     ci_topics = re.search(r'CI_TOPICS="([^"]+)"', topics_command)
     lab = re.search(r'LAB_TOPICS="([^"]+)"', topics_command)
     assert ci_topics is not None
     assert lab is not None
-    total = len(ci_topics.group(1).split()) + len(lab.group(1).split())
-    assert total == 23
+    redeploy = re.search(r'REDEPLOY_TOPICS="([^"]+)"', topics_command)
+    assert redeploy is not None
+    total = (
+        len(ci_topics.group(1).split())
+        + len(lab.group(1).split())
+        + len(redeploy.group(1).split())
+    )
+    assert total == 24
     assert f"readback confirms all {words[total]} topics exist" in topics_command
 
 

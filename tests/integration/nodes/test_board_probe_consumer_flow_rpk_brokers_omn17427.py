@@ -17,12 +17,14 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collec
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_constants import (
     APPLIED_TOPIC,
-    BROKER_CONTAINER,
     BROKER_INTERNAL_ADDRESS,
     SEAM_DLQ,
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
     ConsumerFlowLane,
+)
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
 )
 
 pytestmark = pytest.mark.integration
@@ -104,6 +106,7 @@ class _RecordedLane:
 def test_c28_collection_pins_internal_broker_on_every_rpk_call() -> None:
     recorded = _RecordedLane(json.loads(FIXTURE.read_text()))
     lane = ConsumerFlowLane(
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
         docker="docker",
         base_url="http://projection.test",
         runner=recorded.run,
@@ -125,7 +128,14 @@ def test_c28_collection_pins_internal_broker_on_every_rpk_call() -> None:
         for argv in rpk_calls
     ), "C28 collection must exercise the offset-range DLQ consume"
     for argv in rpk_calls:
-        assert argv[:6] == ["docker", "exec", "-i", BROKER_CONTAINER, "sh", "-c"]
+        assert argv[:6] == [
+            "docker",
+            "exec",
+            "-i",
+            "omnibase-infra-redpanda",
+            "sh",
+            "-c",
+        ]
         assert argv[7] == "rpk"
         assert f'-X brokers="{BROKER_INTERNAL_ADDRESS}"' in argv[6], argv
         assert all("ts.net" not in arg for arg in argv), argv
