@@ -28,7 +28,6 @@ src/omnibase_infra/handlers/handler_topic_catalog_postgres.py
 src/omnibase_infra/handlers/handler_work_ledger_query.py
 src/omnibase_infra/handlers/handler_workspace_runtime_config_materializer.py
 src/omnibase_infra/handlers/placement/handler_placement_election.py
-src/omnibase_infra/handlers/placement/handler_placement_epoch_guard.py
 src/omnibase_infra/handlers/placement/handler_placement_etcd.py
 src/omnibase_infra/handlers/placement/handler_placement_rebuild.py
 src/omnibase_infra/handlers/placement/handler_placement_serving.py

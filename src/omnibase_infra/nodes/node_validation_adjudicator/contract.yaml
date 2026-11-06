@@ -28,6 +28,8 @@ node_version:
   patch: 0
 # Node type
 node_type: "REDUCER_GENERIC"
+descriptor:
+  node_archetype: reducer
 # Description
 description: >
   Pure reducer for validation verdict production. Aggregates check results from the validation executor, applies scoring policy (required/recommended/informational severity), and produces a PASS/FAIL/QUARANTINE verdict. Supports the collecting -> adjudicating -> verdict_emitted FSM lifecycle with reset capability.
@@ -137,7 +139,7 @@ handler_routing:
         module: "omnibase_infra.models.validation.model_validation_adjudication_requested"
       handler:
         name: "HandlerAdjudicate"
-        module: "omnibase_infra.handlers.handler_validation_adjudicate"
+        module: "omnibase_infra.handlers.handler_validation_adjudicate.handler"
       description: "Adjudicate a plan's check results into a PASS/FAIL/QUARANTINE verdict."
 # The key is the returned event class name with its `Model` prefix stripped.
 published_events:
