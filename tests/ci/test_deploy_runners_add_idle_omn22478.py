@@ -201,3 +201,14 @@ def test_a_supplied_token_file_reaches_the_host_and_is_never_printed(
     assert result.returncode == 0, result.stdout + result.stderr
     assert SUPPLIED not in result.stdout + result.stderr
     assert "--method POST" not in (root / "gh_calls").read_text()
+
+
+def test_a_dry_run_reads_the_idle_evidence_and_still_changes_nothing(
+    boundary: tuple[dict[str, str], Path],
+) -> None:
+    env, root = boundary
+    env.update(RUNNER_TEST_WORKERS="1")
+    result = run_add(env, "--dry-run")
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "left running and untouched" in result.stderr
+    assert not (root / "upped").exists()

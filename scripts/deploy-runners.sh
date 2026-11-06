@@ -1461,10 +1461,11 @@ add_services_deploy() {
     # rendered config changed, and a not-online one is forced to recreate, so
     # either could kill a running job. Each existing target must read idle on the
     # container's own evidence (relabel_container_idle, fail closed); one that
-    # stays busy or unreadable is left running and the run ends non-zero.
+    # stays busy or unreadable is left running and the run ends non-zero. The
+    # probe is read-only, so --dry-run runs it too, as --rolling's busy probes do.
     local name state flags rc=0
     for name in ${ADD_SERVICES}; do
-        if ! "${DRY_RUN}" && ! add_wait_target_idle "${name}"; then
+        if ! add_wait_target_idle "${name}"; then
             warn "  ${name} stayed busy or unreadable for ${RELABEL_DRAIN_TIMEOUT_SECONDS}s -- left running and untouched; rerun when it is idle."
             rc=1
             continue
