@@ -624,16 +624,15 @@ class TopicProvisioner:
         """
         # Runtime models load the gateway tree; defer them until provisioning
         # so importing the event bus does not load runtime handlers for the CLI.
+        from omnibase_infra.models.event_bus.model_contract_topic_scan import (
+            ModelContractTopicScan,
+        )
         from omnibase_infra.models.runtime.model_runtime_node_selection import (
             ENV_RUNTIME_NODE_SELECTION,
             ModelRuntimeNodeSelection,
         )
-        from omnibase_infra.tools.contract_topic_extractor import (
-            ContractTopicExtractor,
-        )
 
-        extractor = ContractTopicExtractor(include_installed_packages=True)
-        contract_entries = extractor.extract_all(
+        contract_entries = ModelContractTopicScan.read(
             contracts_root=self._contracts_root,
             skill_manifests_root=self._skill_manifests_root,
             skill_manifests_roots=self._skill_manifests_roots,
