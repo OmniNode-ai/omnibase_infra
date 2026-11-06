@@ -12,7 +12,7 @@ requirements:
       - id: AC1
         statement: "AC1: the resolver tests for home before workspace, first holding root wins, empty roots fall through and a broken overlay refuses without falling back pass -- falsifier: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov -k 'overlay_home_root or first_root or roots_without or broken_overlay_in_a_root'"
       - id: AC2
-        statement: "AC2: with the roots change reverted the home-before-workspace test fails -- falsifier: the same pytest selection run with src/omnibase_infra/handlers/handler_node_broker_resolve.py at the parent commit, expecting a failure"
+        statement: "AC2: with the roots change reverted the home-before-workspace test fails -- falsifier: the home-before-workspace test run with src/omnibase_infra/handlers/handler_node_broker_resolve.py at parent commit 4dbf14dd9, expecting a failure"
 evidence_requirements:
   - kind: tests
     description: The four roots falsifiers pass on the lab from the branch and the home-before-workspace one fails with the handler at the parent commit.
@@ -39,5 +39,5 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: |-
-          bash -o pipefail -c 'git show HEAD~1:src/omnibase_infra/handlers/handler_node_broker_resolve.py > /tmp/h_old.py && ! uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov --tb=line -k "overlay_home_root" -p no:cacheprovider --override-ini=pythonpath=/tmp > /dev/null 2>&1 || true'
+          bash -o pipefail -c 'f=src/omnibase_infra/handlers/handler_node_broker_resolve.py; cp $f /tmp/omn22620_new.py; git show 4dbf14dd9:$f > $f; r=0; uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov -k overlay_home_root > /dev/null 2>&1 || r=$?; cp /tmp/omn22620_new.py $f; test $r -ne 0'
         cwd: .
