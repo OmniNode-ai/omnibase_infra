@@ -28,7 +28,7 @@ _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 _DEV_UNIT = _DEPLOY_DIR / "deploy-agent-dev.service"
 _LAUNCHER = _DEPLOY_DIR / "deploy-agent-launch.sh"
 
-_OPERATOR_ENV_STORE = "/home/jonah/.omnibase/.env"
+_OPERATOR_ENV_STORE = "%h/.omnibase/.env"
 
 _ENVIRONMENT_RE = re.compile(r'^Environment="?([A-Za-z_][A-Za-z0-9_]*)=')
 
@@ -349,3 +349,69 @@ def test_launcher_selects_declared_clone_root_after_store_load(tmp_path: Path) -
     )
     env = _run_launcher(tmp_path, env_file, "OMNI_HOME")
     assert env["OMNI_HOME"] == str(canonical)
+
+
+# --------------------------------------------------------------------------
+# OMN-22792: declared house model keys go through the house-model-key CLI.
+# --------------------------------------------------------------------------
+
+
+def _run_with_house_keys(tmp_path: Path, keys: str | None) -> list[str]:
+    """Run the launcher with a stub house-key interpreter that records its argv."""
+    import json
+
+    record = tmp_path / "house.argv"
+    house = tmp_path / "registry" / ".onex-dispatch-venv" / "bin" / "python"
+    house.parent.mkdir(parents=True)
+    house.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        f"open({str(record)!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+    )
+    house.chmod(0o755)
+    agent = tmp_path / "python"
+    agent.write_text("#!/usr/bin/env python3\n")
+    agent.chmod(0o755)
+    env_file = tmp_path / "store.env"
+    env_file.write_text("STORE_ONLY_NAME=from-store\n")
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "DEPLOY_AGENT_ENV_FILE": str(env_file),
+        "DEPLOY_AGENT_PYTHON": str(agent),
+        "DEPLOY_AGENT_ENV_PROTECTED": "KAFKA_ENVIRONMENT",
+        "UNIT_DRIFT_REGISTRY_ROOT": str(tmp_path / "registry"),
+    }
+    if keys is not None:
+        env["DEPLOY_AGENT_HOUSE_KEYS"] = keys
+    result = subprocess.run(
+        [str(_LAUNCHER), "--flag"], capture_output=True, text=True, check=False, env=env
+    )
+    assert result.returncode == 0, (result.returncode, result.stderr)
+    return json.loads(record.read_text()) if record.exists() else []
+
+
+def test_declared_house_keys_exec_the_agent_through_the_house_key_cli(
+    tmp_path: Path,
+) -> None:
+    argv = _run_with_house_keys(tmp_path, "LLM_TYPESAFE_API_KEY")
+    assert argv == [
+        "-m",
+        "omnimarket.nodes.node_secret_store_effect.runtime_house_model_key_cli",
+        "--exec-names",
+        "LLM_TYPESAFE_API_KEY",
+        "--",
+        str(tmp_path / "python"),
+        "-m",
+        "deploy_agent",
+        "--flag",
+    ]
+
+
+def test_no_declared_house_keys_execs_the_agent_directly(tmp_path: Path) -> None:
+    assert _run_with_house_keys(tmp_path, None) == []
+
+
+def test_dev_unit_declares_the_typesafe_house_key() -> None:
+    assert _unit_value(_DEV_UNIT, "DEPLOY_AGENT_HOUSE_KEYS").split() == [
+        "LLM_TYPESAFE_API_KEY"
+    ]
