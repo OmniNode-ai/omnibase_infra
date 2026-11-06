@@ -14,7 +14,6 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers.handler_runner_hook_mount_drift import (
     DockerCli,
     HandlerRunnerHookMountDrift,
@@ -24,6 +23,16 @@ from omnibase_infra.handlers.handler_runner_hook_mount_drift import (
 from omnibase_infra.models.model_runner_hook_mount_drift_request import (
     ModelRunnerHookMountDriftRequest,
 )
+
+
+def _handler_with_docker(docker: DockerCli) -> HandlerRunnerHookMountDrift:
+    """The handler reading through a docker the caller supplies (tests)."""
+
+    class HandlerWithDocker(HandlerRunnerHookMountDrift):
+        def make_docker(self, request: ModelRunnerHookMountDriftRequest) -> DockerCli:
+            return docker
+
+    return HandlerWithDocker()
 
 
 def main(
@@ -43,21 +52,16 @@ def main(
     parser.add_argument("--alert-env-file", type=Path, required=True)
     parser.add_argument("--notify-timeout", type=int, required=True)
     args = parser.parse_args(argv)
-    container = ModelONEXContainer()
-    registry = container.service_registry
-    if registry is None:
-        raise RuntimeError("the container has no service registry")
-    asyncio.run(
-        registry.register_instance(DockerCli, docker or DockerCli(args.docker_timeout))
+    handler = (
+        HandlerRunnerHookMountDrift()
+        if docker is None
+        else _handler_with_docker(docker)
     )
-    asyncio.run(
-        registry.register_instance(
-            HandlerRunnerHookMountDrift, HandlerRunnerHookMountDrift(container)
-        )
-    )
-    result = container.get_service(HandlerRunnerHookMountDrift).handle(
+    result = handler.handle(
         ModelRunnerHookMountDriftRequest(
-            host_hook_dir=args.hook_dir, container_match=args.container_match
+            host_hook_dir=args.hook_dir,
+            container_match=args.container_match,
+            docker_timeout_seconds=args.docker_timeout,
         )
     )
     sys.stdout.write(f"[hook-mount-drift] {result.model_dump_json()}\n")

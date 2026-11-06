@@ -26,7 +26,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_runner_hook_mount_drift_request import (
@@ -39,9 +38,6 @@ from omnibase_infra.models.model_runner_hook_mount_finding import (
     ModelRunnerHookMountFinding,
 )
 
-if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
-
 _JOB_STARTED_ENV = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 _JOB_STARTED_SCRIPT = "runner-job-started.sh"
 
@@ -49,7 +45,7 @@ _JOB_STARTED_SCRIPT = "runner-job-started.sh"
 class DockerCli:
     """The docker reads the check needs, through the CLI without a shell.
 
-    Resolved from the container; tests register a recording in its place.
+    Built by the handler's ``make_docker``; tests replace it with a recording.
     """
 
     def __init__(self, timeout_seconds: int) -> None:
@@ -107,8 +103,13 @@ def executed_paths(
 class HandlerRunnerHookMountDrift:
     """Read-only: reports, never remounts and never restarts a container."""
 
-    def __init__(self, container: ModelONEXContainer) -> None:
-        self._container = container
+    # No constructor: the local node runtime builds every handler a contract binds
+    # from its class alone, and a deploy-runners run that routes another operation
+    # of this node builds this one too. The docker reads are therefore made per
+    # request through ``make_docker``, which a caller may replace in a subclass.
+
+    def make_docker(self, request: ModelRunnerHookMountDriftRequest) -> DockerCli:
+        return DockerCli(request.docker_timeout_seconds)
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -121,7 +122,7 @@ class HandlerRunnerHookMountDrift:
     def handle(
         self, request: ModelRunnerHookMountDriftRequest
     ) -> ModelRunnerHookMountDriftResult:
-        docker = self._container.get_service(DockerCli)
+        docker = self.make_docker(request)
         host: dict[str, str] = {}
         for script in request.scripts:
             file = Path(request.host_hook_dir) / script

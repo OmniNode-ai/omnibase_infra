@@ -19,13 +19,11 @@ report, and the check must still report the real runner-18 drift.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from pathlib import Path
 
 import pytest
 
-from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers.handler_runner_hook_mount_drift import (
     DockerCli,
     HandlerRunnerHookMountDrift,
@@ -90,12 +88,17 @@ RUNNER_18_INSPECT: dict[str, object] = {
 }
 
 
-def FakeContainer(docker: DockerCli) -> ModelONEXContainer:
-    """A real container with the recorded docker registered where the handler asks."""
-    container = ModelONEXContainer()
-    assert container.service_registry is not None
-    asyncio.run(container.service_registry.register_instance(DockerCli, docker))
-    return container
+DOCKER_TIMEOUT = 30
+
+
+def handler_with(docker: DockerCli) -> HandlerRunnerHookMountDrift:
+    """The handler with the recorded docker where it asks for its docker reads."""
+
+    class WithDocker(HandlerRunnerHookMountDrift):
+        def make_docker(self, request: ModelRunnerHookMountDriftRequest) -> DockerCli:
+            return docker
+
+    return WithDocker()
 
 
 class RecordedDocker(DockerCli):
@@ -152,7 +155,9 @@ def serve(docker: RecordedDocker, host_dir: Path) -> ModelRunnerHookMountDriftRe
         for path, digest in list(files.items()):
             files[path] = swap.get(digest, digest)
     return ModelRunnerHookMountDriftRequest(
-        host_hook_dir=str(host_dir), container_match=MATCH
+        host_hook_dir=str(host_dir),
+        container_match=MATCH,
+        docker_timeout_seconds=DOCKER_TIMEOUT,
     )
 
 
@@ -202,9 +207,7 @@ def test_the_model_review_healthcheck_is_not_read_as_the_healthcheck() -> None:
 
 def test_recorded_state_reports_only_the_real_runner_18_drift(tmp_path: Path) -> None:
     docker = recorded_host()
-    result = HandlerRunnerHookMountDrift(FakeContainer(docker)).handle(
-        serve(docker, tmp_path)
-    )
+    result = handler_with(docker).handle(serve(docker, tmp_path))
     assert result.outcome == "drift"
     assert {(f.container, f.script) for f in result.findings} == {
         ("omninode-runner-18", s) for s in SCRIPTS
@@ -217,9 +220,7 @@ def test_golden_a_fleet_whose_executed_hooks_equal_the_host_copies_is_ok(
     tmp_path: Path,
 ) -> None:
     docker = without_runner_18(recorded_host())
-    result = HandlerRunnerHookMountDrift(FakeContainer(docker)).handle(
-        serve(docker, tmp_path)
-    )
+    result = handler_with(docker).handle(serve(docker, tmp_path))
     assert (result.outcome, result.findings, result.checked) == ("ok", (), 12 * 3)
 
 
@@ -230,7 +231,7 @@ def test_injected_break_a_changed_host_hook_flags_every_container_on_the_old_cop
     docker = recorded_host()
     request = serve(docker, tmp_path)
     (tmp_path / "runner-job-started.sh").write_bytes(b"edited on the host only")
-    result = HandlerRunnerHookMountDrift(FakeContainer(docker)).handle(request)
+    result = handler_with(docker).handle(request)
     flagged = {
         f.container for f in result.findings if f.script == "runner-job-started.sh"
     }
@@ -239,9 +240,11 @@ def test_injected_break_a_changed_host_hook_flags_every_container_on_the_old_cop
 
 def test_error_missing_host_script_is_an_error_never_ok(tmp_path: Path) -> None:
     request = ModelRunnerHookMountDriftRequest(
-        host_hook_dir=str(tmp_path), container_match=MATCH
+        host_hook_dir=str(tmp_path),
+        container_match=MATCH,
+        docker_timeout_seconds=DOCKER_TIMEOUT,
     )
-    result = HandlerRunnerHookMountDrift(FakeContainer(recorded_host())).handle(request)
+    result = handler_with(recorded_host()).handle(request)
     assert result.outcome == "error"
     assert "host script missing" in (result.error_message or "")
 
@@ -250,12 +253,11 @@ def test_error_no_matching_container_is_an_error_never_ok(tmp_path: Path) -> Non
     docker = recorded_host()
     serve(docker, tmp_path)
     request = ModelRunnerHookMountDriftRequest(
-        host_hook_dir=str(tmp_path), container_match="^nothing$"
+        host_hook_dir=str(tmp_path),
+        container_match="^nothing$",
+        docker_timeout_seconds=DOCKER_TIMEOUT,
     )
-    assert (
-        HandlerRunnerHookMountDrift(FakeContainer(docker)).handle(request).outcome
-        == "error"
-    )
+    assert handler_with(docker).handle(request).outcome == "error"
 
 
 def test_error_unreadable_docker_is_an_error_never_ok(tmp_path: Path) -> None:
@@ -264,7 +266,7 @@ def test_error_unreadable_docker_is_an_error_never_ok(tmp_path: Path) -> None:
             raise OSError("docker ps exited 1")
 
     request = serve(recorded_host(), tmp_path)
-    result = HandlerRunnerHookMountDrift(FakeContainer(Broken({}, {}))).handle(request)
+    result = handler_with(Broken({}, {})).handle(request)
     assert result.outcome == "error"
     assert "docker ps" in (result.error_message or "")
 
@@ -272,9 +274,7 @@ def test_error_unreadable_docker_is_an_error_never_ok(tmp_path: Path) -> None:
 def test_an_unreadable_executed_file_is_a_finding(tmp_path: Path) -> None:
     docker = recorded_host()
     del docker.files["omninode-runner-3"][f"{HOOK_DIR}/healthcheck.sh"]
-    result = HandlerRunnerHookMountDrift(FakeContainer(docker)).handle(
-        serve(docker, tmp_path)
-    )
+    result = handler_with(docker).handle(serve(docker, tmp_path))
     unreadable = [f for f in result.findings if f.container == "omninode-runner-3"]
     assert [(f.script, f.reason) for f in unreadable] == [
         ("healthcheck.sh", "unreadable")
@@ -288,9 +288,7 @@ def test_a_container_declaring_no_hook_is_not_checked_rather_than_passed(
     docker.containers["omninode-runner-2"] = {
         "Config": {"Env": [], "Entrypoint": ["/bin/sh"]}
     }
-    result = HandlerRunnerHookMountDrift(FakeContainer(docker)).handle(
-        serve(docker, tmp_path)
-    )
+    result = handler_with(docker).handle(serve(docker, tmp_path))
     assert "omninode-runner-2 runner-job-started.sh" in result.not_checked
 
 
@@ -344,3 +342,29 @@ def test_cli_unreadable_host_exits_two(tmp_path: Path) -> None:
 
 def test_slack_notify_is_silent_without_the_env_file(tmp_path: Path) -> None:
     slack_notify("text", tmp_path / "absent.env", 5)
+
+
+def test_the_handler_builds_with_no_arguments_as_the_node_runtime_builds_it() -> None:
+    """RuntimeLocal builds every handler a contract binds from its class alone.
+
+    Binding this handler into node_deploy_runners while it required a container
+    made every deploy-runners run that routes runner.tmp.prepare fail with a
+    missing ``container`` argument (25 failures in the deploy-runners tests).
+    """
+    assert HandlerRunnerHookMountDrift().handler_type is not None
+
+
+def test_the_default_docker_read_of_an_absent_docker_is_an_error_never_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for script in SCRIPTS:
+        (tmp_path / script).write_text("x")
+    monkeypatch.setenv("PATH", str(tmp_path / "no-docker-here"))
+    result = HandlerRunnerHookMountDrift().handle(
+        ModelRunnerHookMountDriftRequest(
+            host_hook_dir=str(tmp_path),
+            container_match=MATCH,
+            docker_timeout_seconds=DOCKER_TIMEOUT,
+        )
+    )
+    assert result.outcome == "error"

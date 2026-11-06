@@ -12,6 +12,7 @@ class ModelRunnerHookMountDriftRequest(BaseModel):
 
     host_hook_dir: str
     container_match: str
+    docker_timeout_seconds: int
     scripts: tuple[str, ...] = (
         "runner-job-started.sh",
         "entrypoint.sh",
