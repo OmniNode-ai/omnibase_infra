@@ -49,6 +49,9 @@ from omnibase_infra.handlers.handler_work_ledger_query import (
 from omnibase_infra.models.model_work_ledger_query_cli_options import (
     ModelWorkLedgerQueryCliOptions,
 )
+from omnibase_infra.models.model_work_ledger_read_refusal import (
+    ModelWorkLedgerReadRefusal,
+)
 
 __all__ = ["ledger_group"]
 
@@ -105,7 +108,7 @@ def _read(request: dict[str, JsonValue], bus_lane: str, timeout_s: float) -> Non
         )
     except Exception as exc:  # boundary: broker and driver errors must never look empty
         raise click.ClickException(
-            f"Work-ledger read refused ({type(exc).__name__})"
+            f"Work-ledger read refused ({type(exc).__name__}){ModelWorkLedgerReadRefusal.of(exc)}"
         ) from exc
     click.echo(json.dumps(answer))
 
@@ -154,20 +157,9 @@ def ledger_query(context: click.Context, /, **options: object) -> None:
     if args.read_stdin:
         # The existing ledger-ask/catchup source adapter owns the request and
         # verifies its correlation and row count. Never rewrite its filters.
-        filter_options = (
-            "kind",
-            "since",
-            "until",
-            "lane",
-            "ticket",
-            "pr",
-            "term",
-            "kinds",
-            "limit",
-        )
         if any(
             context.get_parameter_source(name) is click.core.ParameterSource.COMMANDLINE
-            for name in filter_options
+            for name in ModelWorkLedgerQueryCliOptions.FILTER_FIELDS
         ):
             raise click.UsageError(
                 "--stdin cannot be combined with query filter options"

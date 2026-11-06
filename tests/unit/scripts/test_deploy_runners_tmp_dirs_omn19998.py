@@ -18,7 +18,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-import yaml
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -33,6 +32,7 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts/deploy-runners.sh"
 COMPOSE = ROOT / "docker/docker-compose.runners-hp053-ci-runner.yml"
+POOL_COUNT = 5
 
 HOST_TOOL = r"""#!/usr/bin/env python3
 import json, os, subprocess, sys
@@ -87,23 +87,17 @@ def host(tmp_path: Path) -> tuple[Path, Path, Path]:
         tool.write_text(HOST_TOOL)
         tool.chmod(0o755)
 
-    compose = yaml.safe_load(COMPOSE.read_text())
+    # The shipped h053 pool keeps its job directories in tmpfs (OMN-19998), so
+    # the bind-repair path is modeled with a synthetic pool of the same size.
     services = {}
     dirs = {}
-    for name, service in compose["services"].items():
-        volumes = []
-        image_home = service["environment"]["TMPDIR"].rsplit("/", 1)[0]
-        for volume in service["volumes"]:
-            if isinstance(volume, str):
-                resolved = volume.replace(image_home, "/runner")
-                source, target, *_ = resolved.split(":")
-                volumes.append({"type": "bind", "source": source, "target": target})
-                if target == "/runner/tmp":
-                    dirs[source] = {"uid": 0, "mode": "755"}
-        services[name] = {
+    for number in range(1, POOL_COUNT + 1):
+        source = "/".join(("/data/scratch/runners", str(number), "tmp"))
+        services[f"hp053-ci-runner-{number}"] = {
             "environment": {"TMPDIR": "/runner/tmp"},
-            "volumes": volumes,
+            "volumes": [{"type": "bind", "source": source, "target": "/runner/tmp"}],
         }
+        dirs[source] = {"uid": 0, "mode": "755"}
     # Other services must never have their directories prepared by this pool.
     services["other-pool-1"] = {
         "environment": {"TMPDIR": "/runner/tmp"},
@@ -165,7 +159,7 @@ main "$@"
 def test_deploy_repairs_recorded_root_owned_0755_tmp_binds(host) -> None:
     _, state, calls = host
     before = json.loads(state.read_text())["dirs"]
-    assert len(before) == 8
+    assert len(before) == POOL_COUNT
     assert all(entry == {"uid": 0, "mode": "755"} for entry in before.values())
     result = deploy(host)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -176,7 +170,7 @@ def test_deploy_repairs_recorded_root_owned_0755_tmp_binds(host) -> None:
             line.startswith("sudo -n install ")
             for line in calls.read_text().splitlines()
         )
-        == 8
+        == POOL_COUNT
     )
     assert "/other/tmp" not in calls.read_text()
     assert "RUNNER-TMP-READY" in result.stdout + result.stderr
@@ -221,7 +215,7 @@ def test_every_deploy_rechecks_existing_directories(host) -> None:
             line.startswith("sudo -n install ")
             for line in calls.read_text().splitlines()
         )
-        == 16
+        == 2 * POOL_COUNT
     )
 
 
@@ -242,7 +236,7 @@ def test_missing_directories_are_created(host) -> None:
     result = deploy(host)
     assert result.returncode == 0, result.stdout + result.stderr
     dirs = json.loads(state.read_text())["dirs"]
-    assert len(dirs) == 8
+    assert len(dirs) == POOL_COUNT
     assert all(entry == {"uid": 1001, "mode": "1777"} for entry in dirs.values())
 
 
@@ -311,7 +305,7 @@ async def test_command_and_terminal_event_chain(
             host_dir=str(state.parent),
             compose_file=str(COMPOSE),
             prefix="hp053-ci-runner",
-            count=8,
+            count=POOL_COUNT,
         )
         envelope = ModelEventEnvelope[dict[str, object]](
             correlation_id=correlation,
@@ -327,7 +321,7 @@ async def test_command_and_terminal_event_chain(
             assert "RUNNER-TMP-PREPARE" in result.error_message
             assert result.prepared == ()
         else:
-            assert len(result.prepared) == 8
+            assert len(result.prepared) == POOL_COUNT
             assert result.error_message is None
     finally:
         await bus.close()
