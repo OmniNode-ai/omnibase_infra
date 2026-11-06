@@ -34,24 +34,32 @@ _RETIRED_RELATIONS = (
 )
 
 
-@pytest.mark.parametrize(
-    ("relation", "package"), _RETIRED_RELATIONS, ids=[r[0] for r in _RETIRED_RELATIONS]
+_VENDORED_RELATIONS = tuple(
+    (relation, package)
+    for relation, package in _RETIRED_RELATIONS
+    if package is not None
 )
+
+
 class TestTheBridgeWasRetired:
-    def test_no_supplemental_bridge_remains(
-        self, relation: str, package: str | None
-    ) -> None:
+    @pytest.mark.parametrize(
+        "relation", [r[0] for r in _RETIRED_RELATIONS], ids=lambda r: r
+    )
+    def test_no_supplemental_bridge_remains(self, relation: str) -> None:
         carried = {
             declaration.table.name
             for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
         }
         assert relation not in carried
 
+    @pytest.mark.parametrize(
+        ("relation", "package"),
+        _VENDORED_RELATIONS,
+        ids=[r[0] for r in _VENDORED_RELATIONS],
+    )
     def test_the_migration_lineage_is_still_in_the_tree(
-        self, relation: str, package: str | None
+        self, relation: str, package: str
     ) -> None:
-        if package is None:
-            pytest.skip("no vendored node package named for this relation")
         directory = _MIGRATIONS_ROOT / package
         assert directory.is_dir()
         assert any(directory.glob("*.sql"))
