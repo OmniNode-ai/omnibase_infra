@@ -67,6 +67,15 @@ profiles:
         source:
           source_type: env
           source_path: GEMINI_API_KEY
+      # OMN-22650: the TypeSafe Jev typed-decision rung (cloud-typesafe-jev in
+      # omnimarket bifrost_delegation.yaml) declares secret_ref
+      # llm.typesafe.api_key. The value lives in the secret store at
+      # /shared/env/LLM_TYPESAFE_API_KEY (dev) and reaches the container through
+      # x-runtime-env; the value is never committed.
+      - logical_name: llm.typesafe.api_key
+        source:
+          source_type: env
+          source_path: LLM_TYPESAFE_API_KEY
       # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
       # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
       # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
