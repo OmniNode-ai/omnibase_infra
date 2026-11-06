@@ -1,0 +1,33 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22617
+title: "The validator-clean DoD check of OMN-21700 names the adjudicator handler file that exists"
+summary: >-
+  The validator-clean evidence item of contracts/OMN-21700.yaml passed a flat handler file that does not exist to core's handler-shape validator, which skips a path it cannot read and exits 0, so the check reported clean for a file it never read. The command now names the adjudicator's real handler file, and a test requires every src path the command names to exist.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22617-ac9-paths-exist
+    statement: Every src path the validator-clean check of OMN-21700 names exists in the tree.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every src path the AC9 command of contracts/OMN-21700.yaml names exists in the tree -- falsifier: uv run pytest tests/unit/contracts/test_omn21700_ac9_paths_exist.py -q --no-cov'
+      - id: AC2
+        statement: 'AC2: the same test fails on the contract as it is on dev, naming the missing handler file -- falsifier: git checkout origin/dev -- contracts/OMN-21700.yaml then uv run pytest tests/unit/contracts/test_omn21700_ac9_paths_exist.py -q --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: The validator-clean check of OMN-21700 names only files that exist.
+    command: uv run pytest tests/unit/contracts/test_omn21700_ac9_paths_exist.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22617-ac9-paths-exist
+    description: Every src path the validator-clean check of OMN-21700 names exists in the tree.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/contracts/test_omn21700_ac9_paths_exist.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
