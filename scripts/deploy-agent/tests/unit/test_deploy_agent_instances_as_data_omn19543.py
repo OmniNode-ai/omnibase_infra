@@ -1,16 +1,15 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19543 -- a deploy-agent instance is data, and dev-200 is one.
+"""OMN-19543 -- a deploy-agent instance is data.
 
 AC1 (executor half): each non-default instance's dev-lane composition is read
 from its ``lane:`` block in ``config/deploy_lane_routing.yaml``; a fixture table
 naming ``dev-999`` builds a composition with no Python edit, and dev-202's
 composition is exactly the one OMN-19522 wrote as a literal.
 
-AC3/AC4 (repo half): the dev-200 instance on the .200 host, routed nothing; its
-composition agrees with docker/docker-compose.dev-200.yml; its LaunchAgent,
-rendered from the one template, carries the dev-202 unit's environment name for
-name, a health port in its block bound to loopback, and its own clone.
+AC4 (repo half): a LaunchAgent, rendered from the one template, carries the
+systemd unit's environment name for name, a health port in its block bound to
+loopback, and its own clone.
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from deploy_agent.events import DEV_LANE_GATEWAY_SERVICES, EnumRuntimeLane
 from deploy_agent.executor import (
     _LANE_CONFIGS,
@@ -34,7 +32,6 @@ from deploy_agent.executor import (
     EnumInstancePhase,
     ModelLaneConfig,
     build_dev_instance_lane_configs,
-    lane_config_for,
     lane_with_phases_off,
     select_dev_instance,
 )
@@ -43,41 +40,24 @@ from deploy_agent.routing import (
     AGENT_CLONE_ROOT,
     RoutingTableError,
     lane_flags_for_instance,
-    load_routing_table,
     parse_routing_table,
-    resolve_instance,
 )
 
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_TABLE = _REPO_ROOT / "config" / "deploy_lane_routing.yaml"
-_DOCKER = _REPO_ROOT / "docker"
 _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 _LAUNCHD = _DEPLOY_DIR / "launchd"
 _RENDER = _LAUNCHD / "render-deploy-agent-plist.sh"
 _DEV_202_UNIT = _DEPLOY_DIR / "deploy-agent-dev-202.service"
-_DEV_200_OVERLAY = _DOCKER / "docker-compose.dev-200.yml"
 
-#: dev-200's port block (docker-compose.dev-200.yml header, OMN-19543 AC3).
-_DEV_200_BLOCK = range(42000, 43000)
-_DEV_200_AGENT_PORT = 42098
-
-
-class _ComposeLoader(yaml.SafeLoader):
-    """Reads the compose ``!override`` / ``!reset`` tags as plain values."""
-
-
-def _passthrough(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
-    if isinstance(node, yaml.SequenceNode):
-        return loader.construct_sequence(node)
-    if isinstance(node, yaml.MappingNode):
-        return loader.construct_mapping(node)
-    return loader.construct_scalar(node)  # type: ignore[arg-type]
-
-
-_ComposeLoader.add_constructor("!override", _passthrough)
-_ComposeLoader.add_constructor("!reset", _passthrough)
+#: The port block the LaunchAgent health port must sit in (OMN-19543 AC3).
+_LAUNCHD_BLOCK = range(42000, 43000)
+_LAUNCHD_AGENT_PORT = 42098
+_LAUNCHD_INSTANCE = "dev-999"
+_LAUNCHD_HOME = (
+    "/Users/labuser"  # local-path-ok: the fake user home the renderer is given
+)
 
 
 @pytest.fixture(autouse=True)
@@ -214,8 +194,9 @@ class TestInstanceCompositionIsData:
             )
 
     def test_two_instances_may_not_share_a_receipt_lane(self) -> None:
-        text = _TABLE.read_text().replace(
-            "receipt_lane: compose-dev-200", "receipt_lane: compose-dev-202"
+        block = _FIXTURE_TABLE.split("  dev-999:\n")[1].split("routes: []")[0]
+        text = _FIXTURE_TABLE.replace(
+            "routes: []", "  dev-998:\n" + block + "routes: []"
         )
         with pytest.raises(RoutingTableError, match="same receipt_lane"):
             parse_instance_lanes(text)
@@ -225,63 +206,6 @@ class TestInstanceCompositionIsData:
         its parser ignores the lane key, so routing is unchanged."""
         table = parse_routing_table(_FIXTURE_TABLE)
         assert set(table.instances) == {"dev-201", "dev-999"}
-
-
-# --------------------------------------------------------------------------- #
-# dev-200 -- declared, composed, routed nothing                                #
-# --------------------------------------------------------------------------- #
-class TestDev200Instance:
-    def test_dev_200_is_declared_with_its_own_group_and_host(self) -> None:
-        table = load_routing_table(_REPO_ROOT)
-        instance = table.instances["dev-200"]
-        assert instance.consumer_group == "onex-deploy-agent-dev-200"
-        # socket.gethostname() on .200 reads Stickybeatz-Studio.local
-        # (lane-manifest verified: line 2026-09-23); the router compares the
-        # lowercased first label.
-        assert (
-            resolve_instance(table, env={}, hostname="Stickybeatz-Studio.local")
-            is instance
-        )
-        assert resolve_instance(table, env={"DEPLOY_AGENT_INSTANCE": "dev-200"}) is (
-            instance
-        )
-
-    def test_dev_200_is_routed_nothing(self) -> None:
-        """No route names dev-200, so unmatched commands take the default, and
-        the dev-200 agent skips them (a route to a stopped instance would stall
-        every matching rebuild)."""
-        table = load_routing_table(_REPO_ROOT)
-        assert all(r.instance != "dev-200" for r in table.routes)
-        for requester in ("gha/omnibase_infra/9", "operator"):
-            assert table.route(EnumRuntimeLane.DEV, requester) == "dev-201"
-
-    def test_dev_200_proves_omnimarket_only(self) -> None:
-        spec = parse_instance_lanes(_TABLE.read_text())["dev-200"]
-        assert spec.receipt_lane == "compose-dev-200"
-        assert spec.proves == ("omnimarket",)
-
-    def test_dev_200_composition(self) -> None:
-        select_dev_instance("dev-200")
-        cfg = lane_config_for(EnumRuntimeLane.DEV)
-        assert cfg.compose_project == cfg.build_project == "omnibase-infra-dev-200"
-        assert Path(cfg.compose_files[-1]).name == "docker-compose.dev-200.yml"
-        assert [p for _, p in cfg.runtime_health_targets] == [42085, 42086]
-        assert cfg.disabled_phases == frozenset(EnumInstancePhase)
-
-    def test_dev_200_composition_agrees_with_its_overlay(self) -> None:
-        cfg = DEV_INSTANCE_LANE_CONFIGS["dev-200"]
-        overlay = yaml.load(_DEV_200_OVERLAY.read_text(), Loader=_ComposeLoader)  # noqa: S506
-        services: dict[str, Any] = overlay["services"]
-        assert overlay["name"] == cfg.compose_project
-        assert services["postgres"]["container_name"] == cfg.postgres_container
-        assert (
-            services["omninode-runtime"]["container_name"] == cfg.main_runtime_container
-        )
-        for service, port in cfg.runtime_health_targets:
-            published = [str(p).split(":")[-2] for p in services[service]["ports"]]
-            assert str(port) in published, (service, port, published)
-        for service in cfg.disabled_services - set(DEV_LANE_GATEWAY_SERVICES):
-            assert services[service]["profiles"] == ["dev-200-disabled"], service
 
 
 # --------------------------------------------------------------------------- #
@@ -310,9 +234,11 @@ def _render(
     )
 
 
-def _rendered_dev_200() -> dict[str, Any]:
+def _rendered_instance() -> dict[str, Any]:
     result = _render(
-        "dev-200", str(_DEV_200_AGENT_PORT), "/Users/labuser/onex-lanes/dev-200"
+        _LAUNCHD_INSTANCE,
+        str(_LAUNCHD_AGENT_PORT),
+        f"{_LAUNCHD_HOME}/onex-lanes/{_LAUNCHD_INSTANCE}",
     )
     assert result.returncode == 0, result.stderr
     assert "@" not in result.stdout.split("-->", 1)[1], "an unrendered @TOKEN@"
@@ -321,17 +247,20 @@ def _rendered_dev_200() -> dict[str, Any]:
 
 class TestLaunchAgent:
     def test_the_plist_names_its_instance_and_its_own_clone(self) -> None:
-        plist = _rendered_dev_200()
+        plist = _rendered_instance()
         env = plist["EnvironmentVariables"]
-        root = "/Users/labuser/onex-lanes/dev-200"
-        assert plist["Label"] == "ai.omninode.deploy-agent-dev-200"
-        assert env["DEPLOY_AGENT_INSTANCE"] == "dev-200"
+        root = f"{_LAUNCHD_HOME}/onex-lanes/{_LAUNCHD_INSTANCE}"
+        assert plist["Label"] == f"ai.omninode.deploy-agent-{_LAUNCHD_INSTANCE}"
+        assert env["DEPLOY_AGENT_INSTANCE"] == _LAUNCHD_INSTANCE
         assert env["DEPLOY_AGENT_DIR"] == f"{root}/omnibase_infra/scripts/deploy-agent"
         assert env["DEPLOY_AGENT_PYTHON"].startswith(f"{root}/omnibase_infra/")
         assert env["DEPLOY_AGENT_REPO_DIR"] == f"{root}/omni_home/omnibase_infra"
         assert env["OMNI_HOME"] == f"{root}/omni_home"
-        assert env["DEPLOY_AGENT_ENV_FILE"] == "/Users/labuser/.omnibase/dev-200.env"
-        assert env["DEPLOY_AGENT_STATE_DIR"].endswith("/jobs-dev-200")
+        assert (
+            env["DEPLOY_AGENT_ENV_FILE"]
+            == f"{_LAUNCHD_HOME}/.omnibase/{_LAUNCHD_INSTANCE}.env"
+        )
+        assert env["DEPLOY_AGENT_STATE_DIR"].endswith(f"/jobs-{_LAUNCHD_INSTANCE}")
         assert plist["ProgramArguments"][-1].endswith(
             "deploy/launchd/deploy-agent-launchd.sh"
         )
@@ -340,7 +269,7 @@ class TestLaunchAgent:
     def test_the_plist_carries_the_dev_202_unit_environment_name_for_name(
         self,
     ) -> None:
-        env = _rendered_dev_200()["EnvironmentVariables"]
+        env = _rendered_instance()["EnvironmentVariables"]
         unit = _unit_env_names(_DEV_202_UNIT)
         assert sorted(unit - set(env)) == []
         # What the plist adds, each for a stated reason in the template. PATH
@@ -370,25 +299,22 @@ class TestLaunchAgent:
             assert env[name] == dev_202, name
 
     def test_the_plist_protects_every_name_it_sets(self) -> None:
-        env = _rendered_dev_200()["EnvironmentVariables"]
+        env = _rendered_instance()["EnvironmentVariables"]
         assert sorted(set(env) - set(env["DEPLOY_AGENT_ENV_PROTECTED"].split())) == []
 
-    def test_the_health_port_is_in_the_block_on_loopback_and_unpublished(
-        self,
-    ) -> None:
-        env = _rendered_dev_200()["EnvironmentVariables"]
-        assert int(env["DEPLOY_AGENT_PORT"]) in _DEV_200_BLOCK
+    def test_the_health_port_is_in_the_block_on_loopback(self) -> None:
+        env = _rendered_instance()["EnvironmentVariables"]
+        assert int(env["DEPLOY_AGENT_PORT"]) in _LAUNCHD_BLOCK
         assert env["DEPLOY_AGENT_BIND_HOST"] == "127.0.0.1"
-        assert f":{_DEV_200_AGENT_PORT}:" not in _DEV_200_OVERLAY.read_text()
 
     @pytest.mark.parametrize(
         "args",
         [
-            ("dev-200", "42098"),
-            ("dev_200", "42098", "/x"),
-            ("dev-200", "61098", "/x"),
-            ("dev-200", "80", "/x"),
-            ("dev-200", "42098", "relative/root"),
+            (_LAUNCHD_INSTANCE, "42098"),
+            ("dev_999", "42098", "/x"),
+            (_LAUNCHD_INSTANCE, "61098", "/x"),
+            (_LAUNCHD_INSTANCE, "80", "/x"),
+            (_LAUNCHD_INSTANCE, "42098", "relative/root"),
         ],
     )
     def test_the_renderer_refuses_bad_arguments(self, args: tuple[str, ...]) -> None:

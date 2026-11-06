@@ -200,7 +200,7 @@ def test_load_gate_rechecks_no_more_often_than_declared() -> None:
 # --- the table ------------------------------------------------------------------
 
 
-def _table(extra_dev_200: str = "", excluded: str = "") -> str:
+def _table(extra_instance: str = "", excluded: str = "") -> str:
     return (
         "default_instance: dev-201\n"
         f"{excluded}"
@@ -208,10 +208,10 @@ def _table(extra_dev_200: str = "", excluded: str = "") -> str:
         "  dev-201:\n"
         "    hostnames: [omninode-pc]\n"
         "    consumer_group: onex-deploy-agent\n"
-        "  dev-200:\n"
+        "  dev-999:\n"
         "    hostnames: [stickybeatz-studio]\n"
-        "    consumer_group: onex-deploy-agent-dev-200\n"
-        f"{extra_dev_200}"
+        "    consumer_group: onex-deploy-agent-dev-999\n"
+        f"{extra_instance}"
         "routes: []\n"
     )
 
@@ -229,7 +229,7 @@ GATE_BLOCK = (
 def test_load_gate_is_declared_per_instance_in_the_routing_table() -> None:
     gates = parse_load_gates(_table(GATE_BLOCK))
 
-    assert gates == {"dev-200": THRESHOLDS}, "an instance without a block has no gate"
+    assert gates == {"dev-999": THRESHOLDS}, "an instance without a block has no gate"
 
 
 @pytest.mark.parametrize(
@@ -251,12 +251,11 @@ def test_load_gate_the_routing_parser_still_routes_a_table_with_a_gate() -> None
     assert table.default_instance == "dev-201"
 
 
-def test_load_gate_the_committed_table_gates_dev_200_and_nothing_else() -> None:
+def test_load_gate_the_committed_table_declares_no_gate() -> None:
     text = (REPO_ROOT / ROUTING_TABLE_RELPATH).read_text(encoding="utf-8")
     gates = parse_load_gates(text)
 
-    assert set(gates) == {"dev-200"}, "the .201 and .202 agents are unchanged"
-    assert load_gate_for_instance(REPO_ROOT, "dev-200") == gates["dev-200"]
+    assert gates == {}, "no instance in the committed table carries a load gate"
     assert load_gate_for_instance(REPO_ROOT, "dev-201") is None
 
 
@@ -284,12 +283,14 @@ def test_load_gate_an_agent_on_an_excluded_host_refuses_to_start() -> None:
         resolve_instance(table, env={}, hostname="Stickybeatz.local")
     with pytest.raises(RoutingTableError, match="excluded"):
         resolve_instance(
-            table, env={"DEPLOY_AGENT_INSTANCE": "dev-200"}, hostname="Stickybeatz"
+            table,
+            env={"DEPLOY_AGENT_INSTANCE": "dev-999"},
+            hostname=next(iter(table.excluded_hosts)),
         )
-    # The .200 host's first label differs and still resolves.
+    # A host whose first label differs still resolves.
     assert (
         resolve_instance(table, env={}, hostname="Stickybeatz-Studio.local").name
-        == "dev-200"
+        == "dev-999"
     )
 
 
@@ -394,7 +395,7 @@ def test_load_gate_consumer_still_skips_a_command_routed_elsewhere() -> None:
         False,
         SimpleNamespace(instance="dev-202", basis="t"),
     )
-    router.instance.name = "dev-200"
+    router.instance.name = "dev-999"
     consumer.router = router
 
     assert _process(consumer, _command()) == (None, None)

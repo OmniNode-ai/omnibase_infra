@@ -5,9 +5,9 @@
 The compose-dev lab-pass receipt carries a ``lane_sync`` check (OMN-19417): the
 census planner runs on the lane's host and any finding fails the receipt. The
 census reads the lane manifest (private config since OMN-20934), and
-the dev-202 and dev-200 entries declare ``omnibase-infra-dev-<n>-phoenix`` as a
-``service`` with one replica, because those entries are parity-checked against
-their compose overlays.
+the instance entry declares ``omnibase-infra-dev-<n>-phoenix`` as a
+``service`` with one replica, because that entry is parity-checked against
+its compose overlay.
 
 Nothing in the deploy agent ever started that container. A FULL deploy runs two
 legs: the deps leg is ``docker compose --profile core up -d`` with no service
@@ -43,7 +43,11 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
-from deploy_agent.executor import DEV_INSTANCE_LANE_CONFIGS, ModelLaneConfig
+from deploy_agent.executor import (
+    DEFAULT_DEV_INSTANCE,
+    DEV_INSTANCE_LANE_CONFIGS,
+    ModelLaneConfig,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -63,7 +67,9 @@ def _lab_manifest() -> Path:
 
 #: The instances whose manifest entry is parity-checked against its overlay and
 #: therefore declares every service the composition runs.
-_OVERLAY_INSTANCES = ("dev-202", "dev-200")
+_OVERLAY_INSTANCES = tuple(
+    name for name in DEV_INSTANCE_LANE_CONFIGS if name != DEFAULT_DEV_INSTANCE
+)
 
 
 def _merged_services(config: ModelLaneConfig) -> dict[str, dict[str, Any]]:

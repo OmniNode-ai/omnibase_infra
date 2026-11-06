@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19543: the instance receipt lanes are the routing table's, and dev-200 is one.
+"""OMN-19543: the instance receipt lanes are the routing table's.
 
 The operator's one-deploy-slot-per-lab-host ruling (omni_home ledger RULING
 2026-09-25T10:22:22Z) adds an instance per host. Each instance's row in
@@ -8,12 +8,12 @@ The operator's one-deploy-slot-per-lab-host ruling (omni_home ledger RULING
 that receipt may prove; the release train's premise and the staging sibling read
 take their instance lanes from there (``scripts/ci/instance_receipt_lanes.py``).
 
-* The committed table gives omnimarket ``compose-dev-202`` then
-  ``compose-dev-200``, and omnibase_infra nothing (it stays on ``.201``).
+* The committed table gives omnimarket its instance lanes, and omnibase_infra
+  nothing (it stays on the default instance).
 * Every table lane is a declared ``EnumLabLane`` outside the any-of default.
 * A fixture instance ``dev-999`` reaches the reader with no Python edit, and the
   release train refuses it until the receipt enum declares its lane.
-* A ``compose-dev-200`` PASS alone admits an omnimarket release cut, and is
+* A PASS on a table instance lane alone admits an omnimarket release cut, and is
   refused for a repo whose evidence is ``compose-dev``.
 """
 
@@ -36,6 +36,7 @@ _ROOT = Path(__file__).resolve().parents[3]
 _RT_PATH = _ROOT / "scripts" / "ci" / "release_train.py"
 
 SHA = "5be72e12f1e9cb8168271a2dd31f8f6c5656e896"
+_INSTANCE_LANE = EnumLabLane(irl.receipt_lanes_for("omnimarket")[0])
 
 _FIXTURE = """
 default_instance: dev-201
@@ -71,8 +72,8 @@ def _release_train() -> Any:
     return module
 
 
-def test_the_committed_table_gives_omnimarket_both_instance_lanes() -> None:
-    assert irl.receipt_lanes_for("omnimarket") == ("compose-dev-202", "compose-dev-200")
+def test_the_committed_table_gives_omnimarket_its_instance_lanes() -> None:
+    assert len(irl.receipt_lanes_for("omnimarket")) == 1
 
 
 def test_the_committed_table_gives_omnibase_infra_none() -> None:
@@ -113,7 +114,10 @@ def test_the_release_train_reads_compose_dev_then_the_table_lanes() -> None:
     lanes = rt.lab_pass_receipt.EnumLabLane
     assert rt.lab_evidence_lanes(
         rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE, "omnimarket"
-    ) == (lanes.COMPOSE_DEV, lanes.COMPOSE_DEV_202, lanes.COMPOSE_DEV_200)
+    ) == (
+        lanes.COMPOSE_DEV,
+        *(lanes(value) for value in irl.receipt_lanes_for("omnimarket")),
+    )
 
 
 def _classify(evidence: Any, present_value: str) -> tuple[Any, str]:
@@ -147,18 +151,18 @@ def _classify(evidence: Any, present_value: str) -> tuple[Any, str]:
     )
 
 
-def test_a_compose_dev_200_pass_alone_admits_omnimarket() -> None:
+def test_an_instance_lane_pass_alone_admits_omnimarket() -> None:
     rt = _release_train()
-    reason, detail = _classify(
-        rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE, "compose-dev-200"
-    )
+    lane = irl.receipt_lanes_for("omnimarket")[0]
+    reason, detail = _classify(rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE, lane)
     assert reason is None
-    assert "compose-dev-200" in detail
+    assert lane in detail
 
 
-def test_a_compose_dev_200_pass_is_refused_under_compose_dev_alone() -> None:
+def test_an_instance_lane_pass_is_refused_under_compose_dev_alone() -> None:
     rt = _release_train()
-    reason, _detail = _classify(rt.EnumLabEvidence.COMPOSE_DEV, "compose-dev-200")
+    lane = irl.receipt_lanes_for("omnimarket")[0]
+    reason, _detail = _classify(rt.EnumLabEvidence.COMPOSE_DEV, lane)
     assert reason is rt.EnumTrainReason.LAB_RECEIPT_ABSENT
 
 
@@ -166,8 +170,7 @@ def test_the_gate_reads_the_instance_lanes_that_prove_the_repo() -> None:
     from scripts.ci.lab_pass_receipt import instance_lanes_for
 
     assert instance_lanes_for("omnimarket") == [
-        EnumLabLane.COMPOSE_DEV_202,
-        EnumLabLane.COMPOSE_DEV_200,
+        EnumLabLane(value) for value in irl.receipt_lanes_for("omnimarket")
     ]
     assert instance_lanes_for("omnibase_infra") == []
 
@@ -194,28 +197,26 @@ def _gate_main(
     )
 
 
-def test_a_compose_dev_200_pass_admits_the_sibling_read(
+def test_an_instance_lane_pass_admits_the_sibling_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     args = ("--lane", "compose-dev", "--instance-lanes-for", "omnimarket")
-    assert _gate_main(monkeypatch, EnumLabLane.COMPOSE_DEV_200, *args) == 0
+    assert _gate_main(monkeypatch, _INSTANCE_LANE, *args) == 0
 
 
-def test_a_compose_dev_200_pass_is_refused_without_the_instance_lanes(
+def test_an_instance_lane_pass_is_refused_without_the_instance_lanes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Flipped sibling: the same PASS, read on compose-dev alone, refuses."""
-    assert (
-        _gate_main(monkeypatch, EnumLabLane.COMPOSE_DEV_200, "--lane", "compose-dev")
-        != 0
-    )
+    default_lane = EnumLabLane.COMPOSE_DEV.value
+    assert _gate_main(monkeypatch, _INSTANCE_LANE, "--lane", default_lane) != 0
 
 
 def test_a_repo_no_instance_proves_reads_compose_dev_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     args = ("--lane", "compose-dev", "--instance-lanes-for", "omnibase_infra")
-    assert _gate_main(monkeypatch, EnumLabLane.COMPOSE_DEV_200, *args) != 0
+    assert _gate_main(monkeypatch, _INSTANCE_LANE, *args) != 0
 
 
 def test_instance_lanes_without_an_explicit_lane_refuse(
@@ -241,16 +242,3 @@ def test_an_unreadable_table_refuses_the_gate(
     monkeypatch.setattr(module, "ROUTING_TABLE", tmp_path / "absent.yaml")
     args = ("--lane", "compose-dev", "--instance-lanes-for", "omnimarket")
     assert _gate_main(monkeypatch, EnumLabLane.COMPOSE_DEV, *args) == 1
-
-
-def test_compose_dev_200_is_a_receipt_lane_every_subcommand_accepts() -> None:
-    """The receipt CLI takes the new lane exactly as it takes compose-dev-202
-    (tests/scripts/ci/test_lab_pass_compose_dev_202_omn19507.py)."""
-    from scripts.ci.lab_pass_receipt import build_parser
-    from tests.scripts.ci.test_lab_pass_compose_dev_202_omn19507 import _REQUIRED_ARGS
-
-    for subcommand, required in _REQUIRED_ARGS.items():
-        args = build_parser().parse_args(
-            [subcommand, "--lane", "compose-dev-200", *required]
-        )
-        assert args.lane == "compose-dev-200", subcommand

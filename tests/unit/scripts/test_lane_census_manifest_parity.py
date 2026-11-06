@@ -56,7 +56,6 @@ _MANIFEST_PATH = LAB_MANIFEST
 # on the dev composition that re-declares every container_name it runs and the
 # network name. Keycloak and Infisical carry no container_name there (disabled,
 # never declared), so the scrape sees exactly the lane's set.
-# OMN-19543: `dev-200` joins on exactly dev-202's terms.
 # OMN-19544: `dev-105` joins on the same terms as dev-202, whose overlay it copies.
 # `judge` left on 2026-10-21 on prod's terms: its compose project was retired
 # and removed from the private lane census, so it has no manifest
@@ -67,7 +66,6 @@ _COMPOSE_LANES = (
     "dogfood",
     "sim-202",
     "dev-202",
-    "dev-200",
     "dev-105",
 )
 
