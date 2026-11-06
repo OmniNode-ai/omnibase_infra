@@ -29,7 +29,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov --tb=line
         cwd: .
-  - id: dod-deploy-omn22664-runtime-folds-delegation-writer
+  - id: dod-deploy-omn22664-folded-delegation
     description: The deployed main runtime carries projection-writer-delegation among its folded profiles, a probe against the live container that fails before this change deploys (dev on h201 at 2026-11-06T16:55Z folds six profiles without it).
     source: manual
     binds_ac:
