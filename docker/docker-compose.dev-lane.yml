@@ -1374,7 +1374,7 @@ services:
   projection-delegation-writer:
     build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-delegation-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${DEV_RUNTIME_MAIN_PROJECTION_DELEGATION_WRITER_RUNTIME_PROFILE:-runtime}", "${DEV_RUNTIME_MAIN_PROJECTION_DELEGATION_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped

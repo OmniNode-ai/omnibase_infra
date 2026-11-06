@@ -190,10 +190,11 @@ profiles:
     services:
       main:
         runtime_id: dev-main
-        # OMN-21288: tenant projection nodes and the five projection writers
+        # OMN-21288: tenant projection nodes and the six projection writers
         # that dispatch in-process (omnimarket handler_runtime_writer) share
-        # the main runtime. The delegation and hook-ledger writers still run a
-        # standalone consume loop and keep their containers.
+        # the main runtime. The delegation writer joined them in plan task T10
+        # (OMN-22664): its contract names the retired container's consumer
+        # group under consumer_group_handover, so main resumes its offsets.
         folded_profiles:
           - tenant-projection
           - projection-writer-live-events
@@ -201,6 +202,7 @@ profiles:
           - projection-writer-savings
           - projection-writer-tenant-credentials
           - projection-writer-tenant-registry
+          - projection-writer-delegation
         foldable_services:
           tenant-projection: tenant-projection-writer
           projection-writer-live-events: projection-live-events-writer
@@ -208,6 +210,7 @@ profiles:
           projection-writer-savings: projection-savings-writer
           projection-writer-tenant-credentials: projection-tenant-credentials-writer
           projection-writer-tenant-registry: projection-tenant-registry-writer
+          projection-writer-delegation: projection-delegation-writer
         # OMN-21288: the claude hook-events projection node runs in main with no
         # profile of its own; its writer container of the previous revision is
         # retired by name, from this list, by the deploy agent and handler.

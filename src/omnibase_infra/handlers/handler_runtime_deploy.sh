@@ -346,8 +346,7 @@ resolve_lane_folded_services() {
     # an unknown profile fails loud. The result is LANE_FOLDED_SERVICES; with a
     # second argument (an array name) the folded services are also removed
     # from that array in place.
-    local compose_project="$1"
-    local filter_name="${2:-}"
+    local compose_project="$1" filter_name="${2:-}"
     local -A folded_profile_services=(
         [effects]=runtime-effects
         [workers]=runtime-worker
@@ -357,6 +356,7 @@ resolve_lane_folded_services() {
         [projection-writer-savings]=projection-savings-writer
         [projection-writer-tenant-credentials]=projection-tenant-credentials-writer
         [projection-writer-tenant-registry]=projection-tenant-registry-writer
+        [projection-writer-delegation]=projection-delegation-writer
     )
     LANE_FOLDED_SERVICES=()
     # Each folding lane is selected by its declared project and policy.

@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-22664
+title: T10a The delegation projection writer names its retired consumer group, so its fold into the dev runtime resumes from the container's committed offsets (one-runtime plan)
+summary: The omnibase_infra half of the one-runtime plan's T10. The dev runtime policy folds the projection-writer-delegation profile into main, beside the five writers folded on 2026-11-03, so the deploy retires the omnimarket-projection-delegation-writer container and main runs node_projection_delegation in process. The omnimarket half (the contract's consumer_group_handover naming the retired group) must be in the dev image before this deploys, or the runtime's new groups have no committed offsets to resume from.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22664-dev-folds-delegation-writer
+    statement: The dev runtime policy folds the delegation writer's profile into main and the deploy retires its container, so the dev lane runs one fewer application container.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: after the omnibase_infra fold of the delegation writer deploys on dev, the runtime log shows the consumer group handover from local.omnimarket-projections.delegation-writer.consume.v1 for each delegation topic and delegation_events keeps advancing -- falsifier: docker logs omninode-runtime grep "Consumer group handover" plus a delegation_events max(created_at) read before and after'
+evidence_requirements:
+  - kind: tests
+    description: The committed dev policy folds the delegation writer, the compose definition gates it on the rendered folded profile, the deploy handler and the deploy agent retire its container.
+    command: uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22664-dev-policy-folds-delegation
+    description: The fold half of T10 in this repository. The fold tests list the delegation writer among the folded writers; at the merge base the committed policy keeps it standalone and the tests fail. The live handover and the delegation_events read are taken on dev after the deploy agent rolls this change.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov --tb=line
+        cwd: .
