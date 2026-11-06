@@ -121,7 +121,6 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.handlers.models import ModelRetryState
 from omnibase_infra.handlers.models.model_manifest_metadata import ModelManifestMetadata
 from omnibase_infra.handlers.models.model_manifest_query_result import (
     ModelManifestQueryResult,
@@ -137,6 +136,7 @@ from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.models.model_retry_error_classification import (
     ModelRetryErrorClassification,
 )
+from omnibase_infra.models.resilience import ModelRetryState
 from omnibase_infra.utils import parse_env_int, warn_if_naive_datetime
 
 logger = logging.getLogger(__name__)

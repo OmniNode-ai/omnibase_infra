@@ -23,7 +23,7 @@ from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
-from omnibase_infra.handlers.handler_validator_event_ledger_project import (
+from omnibase_infra.handlers.handler_validator_event_ledger_project.handler import (
     HandlerValidatorEventLedgerProject,
 )
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts

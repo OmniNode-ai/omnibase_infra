@@ -267,11 +267,11 @@ dod_evidence:
                   raise AssertionError('Indirect dependency group silently accepted')
               legacy = namespace['load_selection_oracle'](required + ('onex-change-control',))
               retired = namespace['load_selection_oracle'](required)
-              assert legacy['header']['corpus']['contracts_discovered'] == 154
-              assert retired['header']['corpus']['contracts_discovered'] == 167
+              assert legacy['header']['corpus']['contracts_discovered'] == 169
+              assert retired['header']['corpus']['contracts_discovered'] == 169
               assert retired['header']['required_onex_nodes_packages'] == list(required)
               assert retired['header']['required_missing_packages'] == []
-              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 146}
+              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 148}
               for section in ('dispatchers', 'routes', 'probes', 'discovery_errors'):
                   assert legacy[section] == retired[section], section
               assert len(retired['dispatchers']) == 135
