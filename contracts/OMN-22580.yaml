@@ -1,0 +1,48 @@
+schema_version: 1.0.0
+ticket_id: OMN-22580
+title: The dispatch-parity harness refreshes the oracle, the OCC-free header and the recorded readback together
+summary: A pull request that adds a node no longer edits corpus counts by hand; one harness option refreshes every fixture and the gate step checks them all.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22580-dispatch-parity-refresh
+    statement: The dispatch-parity fixtures are refreshed by one harness command and checked by another, and no test or probe pins a corpus count.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: --refresh-fixtures rewrites the oracle, the OCC-free header and the recorded readback from the live corpus and writes nothing when they match, and --check refuses a planted stale count, probe or digest -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py -q fails against a harness without the refresh'
+      - id: AC2
+        statement: 'AC2: the closure test and the AC11 probe in contracts/OMN-20074.yaml hold no corpus count literal and still pass -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q'
+      - id: AC3
+        statement: 'AC3: the gate step runs the check and the stale message names --refresh-fixtures -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py -q -k message'
+evidence_requirements:
+  - kind: tests
+    description: The refresh, check and message tests
+    command: uv run pytest tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22580-ac1-refresh-and-check
+    description: A scratch copy of the fixtures with a planted stale count, probe or digest is refused by the check and repaired by the refresh; a refresh on matching fixtures writes nothing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py -q
+        cwd: .
+    binds_ac:
+      - AC1
+      - AC3
+  - id: dod-omn22580-ac2-no-count-literal
+    description: The closure test and the AC11 probe check the header against its own sections, with no corpus count literal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q
+        cwd: .
+      - check_type: command
+        check_value: "! grep -nE \"== (170|136|119|1133)\\b|'omnibase_infra': 149\" contracts/OMN-20074.yaml"
+        cwd: .
+    binds_ac:
+      - AC2

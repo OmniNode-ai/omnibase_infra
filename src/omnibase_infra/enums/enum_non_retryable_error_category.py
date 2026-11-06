@@ -182,6 +182,24 @@ class EnumNonRetryableErrorCategory(str, Enum):
     UNICODE_DECODE_ERROR = "UnicodeDecodeError"
     """The body is not valid text; replaying the same bytes cannot decode it."""
 
+    EVENT_PAYLOAD_TOO_LARGE_ERROR = "EventPayloadTooLargeError"
+    """A publish refused because the record exceeds the producer's max_request_size.
+
+    The size is a deterministic function of the payload, so retrying the same
+    record cannot succeed. A command whose answer is too large would otherwise be
+    replayed from the dead-letter topic and answer the same size again: on
+    2026-11-06 one 73 MB work-ledger answer was redelivered that way until the
+    query consumer jammed for about an hour.
+
+    Why non-retryable:
+        The producer's limit is configuration, and the answer's size is the
+        request's. Only narrowing the request or the producer's limit changes it.
+    """
+
+    MESSAGE_SIZE_TOO_LARGE_ERROR = "MessageSizeTooLargeError"
+    """aiokafka's own name for the same refusal, raised by a producer that does
+    not go through the event bus's publish wrapper."""
+
     VALIDATION_ERROR = "ValidationError"
     """Input/schema validation errors from Pydantic or custom validators.
 
@@ -289,6 +307,16 @@ class EnumNonRetryableErrorCategory(str, Enum):
             cls.VALIDATION_ERROR: (
                 "Validation error - input data is malformed or violates schema. "
                 "Requires data correction at the source."
+            ),
+            cls.EVENT_PAYLOAD_TOO_LARGE_ERROR: (
+                "Oversize publish - the record exceeds the producer's "
+                "max_request_size and its size does not change on retry. "
+                "Requires a narrower request or a different limit."
+            ),
+            cls.MESSAGE_SIZE_TOO_LARGE_ERROR: (
+                "Oversize publish - the producer refused the record for its "
+                "size, which does not change on retry. Requires a narrower "
+                "request or a different limit."
             ),
             cls.JSON_DECODE_ERROR: (
                 "JSON decode failure - the message body is not JSON (an empty "
