@@ -112,7 +112,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC6]
   - id: dod-omn-17292-contract-only-retirement
-    description: "Retires the claims of the contract-only criteria OMN-17292 never carried on the live ticket (2 labels). The live ticket was read on 2026-11-05; each retired item still runs its tests here as a regression guard, tests/ci/test_contract_retired_labels_omn17292.py pins that no retired label returns as a criterion, and this item binds no criterion."
+    description: "Retires the claims of the contract-only criteria OMN-17292 never carried on the live ticket (2 labels). The live ticket was read on 2026-11-05; each retired item still runs its tests here as a regression guard, and this item binds no criterion."
     source: manual
     checks:
       - check_type: test_passes
@@ -120,9 +120,6 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: test_passes
-        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_contract_retired_labels_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: >-
@@ -147,3 +144,11 @@ dod_evidence:
         reason: "OMN-17292 carries none of this label on the live ticket (read 2026-11-05), so AC6 was never deleted from it: it is a criterion this repository's contract declared on its own for another change. Its statement stays in this file's history and the carrier item dod-omn-17292-contract-only-retirement still runs the tests of dod-omn-17292-ac6-deploy-runtime-image-cve-floors."
         retired_by: lane-drift-dirty-landing-2200
         retired_at: '2026-11-05T22:17:00Z'
+  - id: dod-omn-17292-retired-labels-stay-retired
+    description: The contract still declares AC1 to AC4, which the live ticket carries, and declares neither retired label (AC5, AC6) as a criterion. The merge base has no such test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_contract_retired_labels_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2, AC3, AC4]
