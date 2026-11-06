@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22668
+title: "The runner retire route reads a running container that GitHub reports offline, with no job worker in its process list, as idle, so a runner whose listener died can be retired"
+summary: "scripts/deploy-runners.sh --retire-surplus failed closed on a dead runner (a running container whose listener exits 'runner version is deprecated', offline on GitHub, running no job) because the idle check required GitHub online. The retire caller now accepts offline with busy false for a running container; the Runner.Worker probe stays mandatory, an unknown GitHub state never qualifies, and --rolling is unchanged."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22668-retire-dead-runner
+    statement: The retire-surplus route must read a running container that GitHub reports offline and not busy, with no Runner.Worker process, as idle, and must keep reading every other non-online state as busy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: replaying the recorded omninode-runner-18 state (running, unhealthy, offline, busy false, no Runner.Worker) through the real script functions reads idle for --retire-surplus -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py -q'
+      - id: AC2
+        statement: 'AC2: the same test fails on the base script without the change, an unknown GitHub state, a live Runner.Worker and --rolling still read busy -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py -q run at the head and with scripts/deploy-runners.sh restored to the base revision'
+evidence_requirements:
+  - kind: tests
+    description: The retire tests pass at the head and the recorded-state test fails on the base script.
+    command: uv run pytest tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22668-retire-tests
+    description: The retire-route tests and the related deploy-runners tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22668-runner-18-gone
+    description: After the retire the runner host has no omninode-runner-18 container. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: test -z "$(ssh "$DEPLOY_PROBE_HOST" docker ps -a --filter name=omninode-runner-18 --format '{{.Names}}')"
+        cwd: ${OMNI_HOME}/omnibase_infra

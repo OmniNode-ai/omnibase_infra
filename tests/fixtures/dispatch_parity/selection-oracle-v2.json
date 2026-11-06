@@ -630,6 +630,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2": {
+      "category": "command",
+      "contract_name": "node_deploy_runners",
+      "event_model_module": "omnibase_infra.models.model_runner_hook_mount_drift_request",
+      "event_model_name": "ModelRunnerHookMountDriftRequest",
+      "handler_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2",
+      "handler_module": "omnibase_infra.handlers.handler_runner_hook_mount_drift",
+      "handler_name": "HandlerRunnerHookMountDrift",
+      "message_types": [
+        "ModelRunnerHookMountDriftRequest",
+        "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
+        "platform.runner-tmp-prepare"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_4314b56c": {
       "category": "event",
       "contract_name": "node_dlq_replay_effect",
@@ -3800,10 +3816,10 @@
       "contracts_discovered": 170,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 102,
-      "probe_count": 1133,
-      "registered_dispatchers": 136,
-      "registered_routes": 119,
-      "type_scoped_dispatchers": 83
+      "probe_count": 1134,
+      "registered_dispatchers": 137,
+      "registered_routes": 120,
+      "type_scoped_dispatchers": 84
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3849,7 +3865,7 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-06T01:56:32.324537+00:00",
+    "generated_at_utc": "2026-11-06T15:57:33.651283+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.66",
       "omnibase-infra": "0.38.77",
@@ -7632,6 +7648,26 @@
       "selection": {
         "dispatcher_ids": [
           "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.runner-tmp-prepare",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}"
+    },
+    "P4::dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2",
+      "event_model": "omnibase_infra.models.model_runner_hook_mount_drift_request.ModelRunnerHookMountDriftRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runner-tmp-prepare",
+        "payload": "ModelRunnerHookMountDriftRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2"
         ],
         "dlq_topic": null,
         "message_category": "command",
@@ -25861,6 +25897,16 @@
       "handler_id": "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f",
       "message_category": "command",
       "route_id": "route.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f.onex_cmd_platform_runner_tmp_prepare_v1",
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
+      "topic_pattern": "*.cmd.platform.runner-tmp-prepare.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_deploy_runners",
+      "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2",
+      "handler_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2",
+      "message_category": "command",
+      "route_id": "route.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2.onex_cmd_platform_runner_tmp_prepare_v1",
       "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
       "topic_pattern": "*.cmd.platform.runner-tmp-prepare.*",
       "type_scoped": true
