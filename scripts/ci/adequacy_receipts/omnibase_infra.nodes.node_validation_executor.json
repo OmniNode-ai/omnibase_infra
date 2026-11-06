@@ -1,0 +1,21 @@
+{
+  "branch_coverage_pct": 100.0,
+  "candidate_count": 2,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks",
+  "handler_module_sha256": "sha256:ee4218669c721d595aff3ecafb2246ebe18f5aa02ac0136c9150b082c5793292",
+  "meets_target": true,
+  "node_id": "omnibase_infra.nodes.node_validation_executor",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-11-04T13:41:44.339374+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 1,
+  "selected_input_hashes": [
+    "sha256:d5512f007e5c88a64376a016bc82392e1e297cbd9634a2076700aa776323a8cc"
+  ],
+  "volatile_mask": [
+    "total_duration_ms",
+    "check_results.executed_at",
+    "check_results.duration_ms"
+  ]
+}

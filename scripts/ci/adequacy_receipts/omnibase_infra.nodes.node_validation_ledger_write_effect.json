@@ -1,0 +1,25 @@
+{
+  "branch_coverage_pct": 97.44,
+  "candidate_count": 8,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_validation_ledger_write_effect.handlers.handler_validation_ledger_append",
+  "handler_module_sha256": "sha256:660c4562d5e3650d6e25c3dee0f4dc930ff11b754077655d5c7fe0876bdc0b8d",
+  "meets_target": true,
+  "node_id": "omnibase_infra.nodes.node_validation_ledger_write_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-11-04T15:50:04.492168+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 6,
+  "selected_input_hashes": [
+    "sha256:2bce240781768869cee296747c1e6829f20bfdda285ea63c09afd20f90c3ee12",
+    "sha256:c0a7466dccfd7e1780509a1086775c83116f5ae09aa75268eb2cc1624910cf3c",
+    "sha256:c07139d60b357a1deeba1b8de4a2817d6b0ffd6598884ab6a59c064632b6e9c7",
+    "sha256:6e30e9972a602bebe18868bd18558facf4ba73ea057ee31fb9a3752926a81158",
+    "sha256:39bfefc8138c0dbc3dac395e238fb5456ecf4e57d3e446e2212e98c22bce6062",
+    "sha256:9c671230f81c24b225a7b4803128a4c19fb5e0212bad47a57d44314b05463ad2"
+  ],
+  "volatile_mask": [
+    "input_envelope_id",
+    "correlation_id"
+  ]
+}
