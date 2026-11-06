@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: OmniNode-ai/omnimarket
-          ref: a4798bc9d61820d58b0514415ff5ba34e9ceaa18 # .github/sibling-pins.yaml
+          ref: 94b0959ef485165237c725e17f8b54481368a79b # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.CROSS_REPO_PAT }}
       - uses: actions/checkout@v4
