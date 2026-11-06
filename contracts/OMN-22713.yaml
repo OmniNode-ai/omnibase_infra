@@ -5,6 +5,14 @@ summary: 'The container log watcher launchd plist is deleted and the unit drift 
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+requirements:
+  - id: req-22713-1
+    statement: No declared install puts a Docker-only unit on a Mac with no Docker engine.
+    acceptance:
+      - id: AC22713001
+        statement: The unit drift tests pass with the Docker-only Mac units removed from the manifest.
+      - id: AC22713002
+        statement: The Docker log watcher plist and the manifest plist unit are absent, and the regression fails where they exist.
 evidence_requirements:
   - kind: tests
     description: The unit drift tests of the deploy agent pass
@@ -17,12 +25,14 @@ dod_evidence:
   - id: dod-001
     description: The unit drift tests pass with the Docker-only Mac units removed from the manifest
     source: generated
+    binds_ac: [AC22713001]
     checks:
       - check_type: command
         check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q'
   - id: dod-002
     description: The Docker-free install regression passes, and fails at the merge base where the plist and manifest entry exist
     source: generated
+    binds_ac: [AC22713002]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_docker_free_install_units_omn22713.py -q
