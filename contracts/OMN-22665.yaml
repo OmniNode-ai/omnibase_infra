@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-22665
+title: The Application ACL proof job runs on a GitHub-hosted runner and no longer waits on a cloud runner label no runner carries
+summary: The proof job resolves through the public-PR, docker and trusted seams to a hosted runner, and the capacity request job for the cloud fleet is deleted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22665-acl-proof-hosted
+    statement: The rebuilt-postgres16-proof job never reads OMNI_CLOUD_CANARY_RUNS_ON_JSON, the workflow holds no cloud capacity request, and the routing policy holds no allowlist row for a bare hosted pin in that file.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the rebuilt-postgres16-proof job runs-on never reads OMNI_CLOUD_CANARY_RUNS_ON_JSON and no job in the workflow asks the cloud fleet for capacity -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov fails on the merge base workflow with the new tests in place'
+      - id: AC2
+        statement: 'AC2: a real Application ACL PostgreSQL 16 Proof run on the pull request head starts on a GitHub-hosted runner and reaches the compose step -- falsifier: onex scm run-view on that run shows the proof job started with a step beyond Set up job'
+      - id: AC3
+        statement: 'AC3: the runner routing audit tests still pass, because the declared variable and its live value are unchanged -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: The routing audit tests, including the three that pin the hosted routing of the ACL proof job
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22665-routing-tests
+    description: The routing audit tests pass on the branch; the same file fails on the merge base workflow.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+      - AC3
+  - id: dod-omn22665-hosted-run
+    description: The latest Application ACL PostgreSQL 16 Proof run on the pull request branch concluded success, which needs its proof job to have started on a hosted runner and passed the compose step. Fails while the job waits for a runner.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh run list --repo OmniNode-ai/omnibase_infra --workflow application-acl-postgres16-proof.yml --branch omn-22665-acl-proof-hosted --limit 1 --json conclusion --jq '.[0].conclusion' | grep -qx success"
+        cwd: .
+    binds_ac:
+      - AC2
