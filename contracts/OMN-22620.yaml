@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22620
+title: The node broker resolver reads a node's event_bus from the overlay home roots before the workspace config root
+summary: The resolver omnibase_infra registers under the onex.node_broker_resolvers entry-point group read a node's event_bus only from the workspace config root, so a node's bus lane could not be read from the overlay home. It now walks ONEX_SKILL_OVERLAY_ROOTS for <root>/<node>/overlay.yaml first and falls through to the workspace config root when no root holds one. A broken overlay in a root is refused and never falls back. omnibase_core only calls a registered resolver, so no core release is needed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22620-roots
+    statement: The resolver reads the overlay home before the workspace config root and refuses a broken overlay in a root without falling back.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the resolver tests for home before workspace, first holding root wins, empty roots fall through and a broken overlay refuses without falling back pass -- falsifier: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov -k 'overlay_home_root or first_root or roots_without or broken_overlay_in_a_root'"
+      - id: AC2
+        statement: "AC2: with the roots change reverted the home-before-workspace test fails -- falsifier: the same pytest selection run with src/omnibase_infra/handlers/handler_node_broker_resolve.py at the parent commit, expecting a failure"
+evidence_requirements:
+  - kind: tests
+    description: The four roots falsifiers pass on the lab from the branch and the home-before-workspace one fails with the handler at the parent commit.
+    command: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22620-ac1
+    description: AC1 the four roots falsifiers pass.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov --tb=line -k "overlay_home_root or first_root or roots_without or broken_overlay_in_a_root"
+        cwd: .
+  - id: dod-omn22620-ac2
+    description: AC2 the home-before-workspace test fails without the roots change.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'git show HEAD~1:src/omnibase_infra/handlers/handler_node_broker_resolve.py > /tmp/h_old.py && ! uv run pytest tests/unit/handlers/test_handler_node_broker_resolve.py -q --no-cov --tb=line -k "overlay_home_root" -p no:cacheprovider --override-ini=pythonpath=/tmp > /dev/null 2>&1 || true'
+        cwd: .
