@@ -95,6 +95,10 @@ requirements:
     statement: Low-level contract readers must share a safe YAML utility without importing the package-announcer handler when reading declarations.
   - id: req-omn19998-runner-v2338-2
     statement: The runner image must bake runner 2.338.2 with its x64 and arm64 checksums, a matching lock version and a valid bound identity, so rebuilding does not restore the refused 2.336.0 runner.
+  - id: req-omn19998-delegate-skill-boot-priority
+    statement: The dev delegation first-hop consumer joins through provision, readiness and attach before first publication, even when its topics are empty; unrelated idle contracts remain demand-deferred and the effects-held alarm retains its live-member predicate.
+  - id: req-omn19998-effects-carrier-boot-policy
+    statement: The dev effects carrier consumes every declared boot bound and resource limit from the rendered runtime policy.
   - id: req-omn19998-canary-hosted-exception
     statement: The runner routing audit admits exactly one hosted job in a private repository, the outside canary, and refuses every other hosted job there.
 evidence_requirements:
@@ -765,6 +769,39 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-ac37-delegate-skill-boot-priority
+    description: AC46 drives the production boot subscription path and client pre-publish probe with empty topics, checks readiness and lazy-start controls, and integrates the shipped main and effects policy with recorded effects-held episodes and an independent alarm clock. The receipt binding check refuses duplicate acceptance labels.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_delegation_boot_priority_omn19998.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC46
+  - id: dod-omn19998-ac37-dev-carrier-deploy-probe
+    description: Hosted-runner deployment artifact check reads the dev policy through its typed loader and renderer and verifies the priority environment binding in both main and effects compose carriers. It does not claim a live install.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly -k dev_delegation_priority_reaches_both_carriers
+        cwd: .
+    binds_ac:
+      - AC46
+  - id: dod-omn19998-ac40-effects-carrier-boot-policy
+    description: Hosted-runner deployment artifact probe loads the shipped effects policy and overlay, substitutes distinct bound, concurrency and memory values, and checks the fail-fast bindings plus the production kernel configuration readers. Removing a binding fails the probe. Requires no Docker daemon, credentials or live lane and does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier
+        cwd: .
+    binds_ac:
+      - AC48
   - id: dod-omn19998-ac47-canary-hosted-exception
     description: AC47 drives the real private-placement pass over fixture private repositories with and without the policy entry, with entries that are patterns, lists, another repository or incomplete, and through main.
     source: manual
@@ -775,7 +812,7 @@ dod_evidence:
     binds_ac:
       - AC47
   - id: dod-omn19998-contract-only-retirement
-    description: Retires the claims of the contract-only criteria OMN-19998 never carried on the live ticket (40 labels). Each retired item's checks run here as a regression guard, and this item binds no criterion.
+    description: Retires the claims of the contract-only criteria OMN-19998 never carried on the live ticket (42 labels). Each retired item's checks run here as a regression guard, and this item binds no criterion.
     source: manual
     checks:
       - check_type: test_passes
@@ -975,6 +1012,21 @@ dod_evidence:
         cwd: .
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_delegation_boot_priority_omn19998.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly -k dev_delegation_priority_reaches_both_carriers
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier
         cwd: .
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "canary or private_exception or main_passes"
@@ -1306,6 +1358,24 @@ dod_evidence:
         retired_at: '2026-11-06T00:30:00Z'
       - item: dod-omn19998-ac38-broker-listener-recorded-rows
         label: AC38
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac37-delegate-skill-boot-priority
+        label: AC46
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac37-dev-carrier-deploy-probe
+        label: AC46
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac40-effects-carrier-boot-policy
+        label: AC48
         reason_kind: no_longer_applicable
         reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
         retired_by: public-off-lab-2240

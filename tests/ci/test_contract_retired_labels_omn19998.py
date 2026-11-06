@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """OMN-19998: no acceptance criterion is declared under a label the contract retired.
 
-``contracts/OMN-19998.yaml`` declared AC4 to AC47 that the live ticket never carried, so
+``contracts/OMN-19998.yaml`` declared AC4 to AC48 that the live ticket never carried, so
 ``node_dod_criteria_check_effect`` held every pull request citing the ticket with
 CRITERIA_DRIFT. The contract retires those labels through typed ``supersedes_ac_binding``
 entries and keeps their checks running under one carrier item. This pins that state: a retired
@@ -62,7 +62,9 @@ RETIRED = {
     "AC42",
     "AC43",
     "AC45",
+    "AC46",
     "AC47",
+    "AC48",
 }
 
 
