@@ -37,6 +37,7 @@ dod_evidence:
   - id: dod-omn22478-infra-moved-model-paths-in-runtime
     description: In the deployed dev runtime the old Infisical path is the moved model, which reads false on any image built before this change.
     source: manual
+    execution_scope: local_done_gate
     binds_ac: [AC6]
     checks:
       - check_type: command
