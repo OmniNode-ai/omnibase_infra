@@ -26,7 +26,9 @@ replaces an earlier one. A marker thread blocks when:
     it was only reported, so every finding whose line moved under a later
     push escaped without a record;
   - its disposition is ``fixed-in <sha>`` and that commit is not in this PR
-    (an ancestor of the PR head and not of its base), or it did not touch the
+    (an ancestor of the PR head and not of its base; a sha a rebase rewrote
+    is matched by patch-id to the commit of the PR that carries the same
+    change), or it did not touch the
     cited lines. The cited lines are the thread's original range at the
     commit the review was posted on, carried forward through the PR's own
     history to the fix commit's parent; a file-level thread needs the fix
@@ -88,6 +90,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -139,7 +142,6 @@ _FP_RE = re.compile(rf"{MARKER} fp=([0-9a-f]{{12}})")
 _LABEL_RE = re.compile(
     r"\*\*\[(?P<severity>[A-Z]+)\] hostile-reviewer \((?P<model>[^)]+)\)\*\*"
 )
-_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 _QUERY = """
 query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
@@ -396,84 +398,6 @@ def latest_disposition(thread: dict[str, Any]) -> Disposition | None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Hunk:
-    old_start: int
-    old_count: int
-    new_start: int
-    new_count: int
-
-
-def parse_hunks(diff_text: str) -> list[Hunk]:
-    """Hunk headers of a ``git diff -U0`` for one file."""
-    hunks: list[Hunk] = []
-    for line in diff_text.splitlines():
-        match = _HUNK_RE.match(line)
-        if not match:
-            continue
-        old_start, old_count, new_start, new_count = match.groups()
-        hunks.append(
-            Hunk(
-                old_start=int(old_start),
-                old_count=1 if old_count is None else int(old_count),
-                new_start=int(new_start),
-                new_count=1 if new_count is None else int(new_count),
-            )
-        )
-    return hunks
-
-
-def _map_line(hunks: list[Hunk], line: int) -> tuple[int, int]:
-    """Where an old-side line lands on the new side, as a span.
-
-    A line inside a changed hunk maps to the whole span that replaced it.
-    """
-    offset = 0
-    for hunk in sorted(hunks, key=lambda h: h.old_start):
-        if hunk.old_count == 0:
-            # Pure insertion after old line ``old_start``.
-            if hunk.old_start < line:
-                offset += hunk.new_count
-            continue
-        old_end = hunk.old_start + hunk.old_count - 1
-        if line < hunk.old_start:
-            break
-        if line > old_end:
-            offset += hunk.new_count - hunk.old_count
-            continue
-        span_end = hunk.new_start + max(hunk.new_count, 1) - 1
-        return hunk.new_start, span_end
-    return line + offset, line + offset
-
-
-def map_range(hunks: list[Hunk], start: int, end: int) -> tuple[int, int]:
-    """Carry an old-side line range across a diff to the new side."""
-    low = _map_line(hunks, start)[0]
-    high = _map_line(hunks, end)[1]
-    return min(low, high), max(low, high)
-
-
-def range_touched(hunks: list[Hunk], start: int, end: int) -> bool:
-    """True when any hunk changes, deletes or inserts inside ``[start, end]``."""
-    for hunk in hunks:
-        if hunk.old_count == 0:
-            # Insertion after old line ``old_start``: inside or adjacent.
-            if start - 1 <= hunk.old_start <= end:
-                return True
-            continue
-        if hunk.old_start <= end and hunk.old_start + hunk.old_count - 1 >= start:
-            return True
-    return False
-
-
-@dataclass(frozen=True)
-class CitedLines:
-    path: str
-    original_commit: str
-    start: int | None  # None: a file-level thread
-    end: int | None
-
-
 def cited_lines(thread: dict[str, Any]) -> CitedLines:
     comments = _comments(thread)
     original_commit = ""
@@ -491,138 +415,34 @@ def cited_lines(thread: dict[str, Any]) -> CitedLines:
     return CitedLines(path, original_commit, int(start), int(end))
 
 
+def _load_fix_verifier() -> Any:
+    """The fix verifier lives in the infra handler package; this script runs bare."""
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "src/omnibase_infra/handlers/handler_git_fix_verifier.py"
+    )
+    spec = importlib.util.spec_from_file_location("handler_git_fix_verifier", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_fix_verifier = _load_fix_verifier()
+Hunk = _fix_verifier.Hunk
+parse_hunks = _fix_verifier.parse_hunks
+map_range = _fix_verifier.map_range
+range_touched = _fix_verifier.range_touched
+GitFixVerifier = _fix_verifier.GitFixVerifier
+# One owner for the cited-line record: the handler module defines it (frozen,
+# ``start``/``end`` None for a file-level thread) and this script binds the name
+# it has always used, so the gate and the handler cannot drift apart.
+CitedLines = _fix_verifier.CitedThreadLines
+
+
 Verifier = Callable[[str, CitedLines], tuple[bool, str]]
-
-_GIT_LOCATION_VARS = frozenset(
-    {
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_COMMON_DIR",
-        "GIT_OBJECT_DIRECTORY",
-    }
-)
-
-
-class GitFixVerifier:
-    """Checks ``fixed-in <sha>`` against the PR's own git history.
-
-    ``head`` is the PR head commit and ``base`` the base branch commit; both
-    must be present in the checkout (fetch-depth 0).
-    """
-
-    def __init__(self, repo_dir: Path, head: str, base: str) -> None:
-        self._repo_dir = repo_dir
-        self._head = head
-        self._base = base
-
-    def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        # A git hook exports GIT_DIR and friends, which override cwd; drop them
-        # so the verifier always reads the checkout it was given (OMN-18434).
-        env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_VARS}
-        return subprocess.run(
-            ["git", *args],
-            cwd=self._repo_dir,
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-        )
-
-    def _resolve(self, sha: str) -> str | None:
-        out = self._git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}")
-        if out.returncode == 0:
-            return out.stdout.strip()
-        if len(sha) == 40:
-            self._git("fetch", "--no-tags", "--quiet", "origin", sha)
-            out = self._git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}")
-            if out.returncode == 0:
-                return out.stdout.strip()
-        return None
-
-    def _is_ancestor(self, older: str, newer: str) -> bool:
-        return self._git("merge-base", "--is-ancestor", older, newer).returncode == 0
-
-    def _diff(self, old: str, new: str, path: str) -> str:
-        out = self._git(
-            "diff", "-U0", "--no-color", "--no-ext-diff", old, new, "--", path
-        )
-        if out.returncode != 0:
-            raise RuntimeError(
-                f"git diff {old[:12]} {new[:12]} -- {path}: {out.stderr.strip()}"
-            )
-        return out.stdout
-
-    def file_at(self, commit: str, path: str) -> str | None:
-        """The file's text at ``commit``, or None when it does not exist there."""
-        out = self._git("show", f"{commit}:{path}")
-        return out.stdout if out.returncode == 0 else None
-
-    def carry_forward(self, cited: CitedLines, commit: str) -> tuple[int, int] | None:
-        """The cited range as it lies at ``commit`` (OMN-17427, the judge's excerpt).
-
-        None for a file-level thread. A range whose reviewed commit is unknown
-        is returned as cited.
-        """
-        if cited.start is None or cited.end is None:
-            return None
-        original = (
-            self._resolve(cited.original_commit) if cited.original_commit else None
-        )
-        target = self._resolve(commit)
-        if original is None or target is None or original == target:
-            return cited.start, cited.end
-        return map_range(
-            parse_hunks(self._diff(original, target, cited.path)),
-            cited.start,
-            cited.end,
-        )
-
-    def __call__(self, sha: str, cited: CitedLines) -> tuple[bool, str]:
-        fix = self._resolve(sha)
-        if fix is None:
-            return False, f"commit {sha} is not in this repository's history"
-        if not self._is_ancestor(fix, self._head):
-            return (
-                False,
-                f"commit {fix[:12]} is not in this PR (not an ancestor of the head)",
-            )
-        if self._is_ancestor(fix, self._base):
-            return (
-                False,
-                f"commit {fix[:12]} is already on the base branch, not a commit of this PR",
-            )
-        parent_out = self._git("rev-parse", "--verify", "--quiet", f"{fix}^")
-        if parent_out.returncode != 0:
-            return False, f"commit {fix[:12]} has no parent to diff against"
-        parent = parent_out.stdout.strip()
-        try:
-            fix_hunks = parse_hunks(self._diff(parent, fix, cited.path))
-        except RuntimeError as exc:
-            return False, str(exc)
-        if cited.start is None or cited.end is None:
-            if fix_hunks:
-                return True, f"commit {fix[:12]} changes {cited.path}"
-            return False, f"commit {fix[:12]} does not change {cited.path}"
-        start, end = cited.start, cited.end
-        original = (
-            self._resolve(cited.original_commit) if cited.original_commit else None
-        )
-        if original is not None and original != parent:
-            try:
-                start, end = map_range(
-                    parse_hunks(self._diff(original, parent, cited.path)), start, end
-                )
-            except RuntimeError as exc:
-                return False, str(exc)
-        if range_touched(fix_hunks, start, end):
-            return True, f"commit {fix[:12]} changes {cited.path}:{start}-{end}"
-        return False, (
-            f"commit {fix[:12]} does not touch the cited lines {cited.path}:{start}-{end} "
-            f"(lines {cited.start}-{cited.end} at the reviewed commit "
-            f"{(cited.original_commit or 'unknown')[:12]})"
-        )
-
 
 # ---------------------------------------------------------------------------
 # Evaluation
