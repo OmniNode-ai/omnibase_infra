@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Infisical handler configuration model.
+"""Explicit Infisical connection and resilience configuration.
 
 .. versionadded:: 0.9.0
     Initial implementation for OMN-2286.
@@ -8,14 +8,16 @@
 
 from __future__ import annotations
 
-import os
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
-class ModelInfisicalHandlerConfig(BaseModel):
-    """Configuration for HandlerInfisical.
+class ModelInfisicalConfig(BaseModel):
+    """Configuration supplied to HandlerInfisical by its caller.
+
+    The host is required: the configuration boundary resolves the endpoint
+    before constructing this model; models never read the host environment.
 
     Attributes:
         host: Infisical server URL.
@@ -37,7 +39,6 @@ class ModelInfisicalHandlerConfig(BaseModel):
     )
 
     host: str = Field(
-        default_factory=lambda: os.environ["INFISICAL_ADDR"],
         description="Infisical server URL.",
     )
     client_id: SecretStr = Field(
@@ -83,4 +84,4 @@ class ModelInfisicalHandlerConfig(BaseModel):
     )
 
 
-__all__: list[str] = ["ModelInfisicalHandlerConfig"]
+__all__: list[str] = ["ModelInfisicalConfig"]

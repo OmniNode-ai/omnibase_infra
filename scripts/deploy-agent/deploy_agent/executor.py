@@ -49,7 +49,6 @@ from deploy_agent.events import (
     DEV_LANE_BUILD_SERVICES,
     DEV_LANE_CLOUD_DB_SERVICES,
     DEV_LANE_GATEWAY_SERVICES,
-    DEV_LANE_ONLY_BUILDABLE_SERVICES,
     DEV_LANE_ONLY_MIGRATION_SERVICES,
     GATEWAY_COMPOSE_PROJECT,
     BuildSource,
@@ -163,13 +162,10 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 """
 
 
-def load_dev_boot_guard() -> ModuleType:
-    """Load the repo's canonical host effect beside this standalone agent.
-
-    The agent has its own published-infra venv; its host effect must come from
-    the same checkout as the agent, without waiting for a package release.
-    """
-    name = "omnibase_infra.handlers.handler_dev_boot_guard"
+def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
+    """Load host-effect modules from the standalone agent's own checkout."""
+    prefix = "omnibase_infra." if "." in effect else "omnibase_infra.handlers."
+    name = prefix + effect
     if name in sys.modules:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
@@ -186,6 +182,12 @@ def load_dev_boot_guard() -> ModuleType:
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
+        "models/model_cost_estimator_build_config.py",
+        "models/model_cost_estimator_build_request.py",
+        "models/model_cost_estimator_build_result.py",
+        "protocols/protocol_cost_estimator_build_io.py",
+        "handlers/handler_cost_estimator_build.py",
+        "nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
@@ -4721,28 +4723,25 @@ class DeployExecutor:
             # staged provenance a reconcile checkout would reset to a placeholder.
             # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
             with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-                self._compose_build(
-                    Scope.CORE,
-                    git_sha,
-                    on_phase_update,
-                    build_source=build_source,
-                    runtime_lane=lane,
-                    git_ref=git_ref,
-                )
-                self._compose_build(
-                    Scope.RUNTIME,
-                    git_sha,
-                    on_phase_update,
-                    build_source=build_source,
-                    runtime_lane=lane,
-                    git_ref=git_ref,
-                )
-                self._build_dev_lane_only_services(
+                settings = load_dev_boot_guard(
+                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+                ).dev_lane_build_settings(sys.modules[__name__], lane)
+                for build_scope in (Scope.CORE, Scope.RUNTIME):
+                    self._compose_build(
+                        build_scope,
+                        git_sha,
+                        on_phase_update,
+                        build_source=build_source,
+                        runtime_lane=lane,
+                        git_ref=git_ref,
+                    )
+                estimator_env = self._build_dev_lane_only_services(
                     git_sha,
                     on_phase_update,
                     build_source=build_source,
                     lane=lane,
                     git_ref=git_ref,
+                    read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot([], on_phase_update, lane=lane)
             # OMN-18640: the deps leg of a FULL rebuild CONVERGES rather than
@@ -4770,6 +4769,7 @@ class DeployExecutor:
                 on_phase_update,
                 lane=lane,
                 compose_may_build=False,
+                extra_env=estimator_env,
             )
             self._deploy_gateway_lane(
                 on_phase_update,
@@ -4788,6 +4788,13 @@ class DeployExecutor:
         # cannot reset staged provenance before the dev-only build consumes it.
         # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
         with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
+            settings = (
+                load_dev_boot_guard(
+                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+                ).dev_lane_build_settings(sys.modules[__name__], lane)
+                if scope == Scope.RUNTIME
+                else None
+            )
             self._compose_build(
                 scope,
                 git_sha,
@@ -4796,17 +4803,25 @@ class DeployExecutor:
                 runtime_lane=lane,
                 git_ref=git_ref,
             )
+            estimator_env = {}
             if scope == Scope.RUNTIME:
-                self._build_dev_lane_only_services(
+                estimator_env = self._build_dev_lane_only_services(
                     git_sha,
                     on_phase_update,
                     build_source=build_source,
                     lane=lane,
                     git_ref=git_ref,
+                    read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
         self._compose_up(
-            phase, scope, services, on_phase_update, lane=lane, compose_may_build=False
+            phase,
+            scope,
+            services,
+            on_phase_update,
+            lane=lane,
+            compose_may_build=False,
+            extra_env=estimator_env,
         )
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
@@ -5118,43 +5133,21 @@ class DeployExecutor:
         build_source: BuildSource | str,
         lane: EnumRuntimeLane,
         git_ref: str,
-    ) -> None:
-        """Build the DEV lane's own runtime services (OMN-18108). No-op elsewhere.
-
-        The lane-only services are declared in ``docker/docker-compose.dev-lane.yml``,
-        which the lane-agnostic build above never passes, so without this command the
-        up phase recreates them from whatever image they already carry and
-        reports success. That is exactly what left eight services ~35 commits
-        behind on the .201 dev lane while the deploy agent's own terminal event
-        said the deploy succeeded.
-
-        OMN-21279 also rebuilds base-file services on the composed image via the overlay.
-
-        Additive and explicit: a SECOND build naming the services, rather than
-        widening the first one's compose files, so prod and stability-test issue
-        a byte-identical command to before. The tag-referenced services are
-        excluded by ``DEV_LANE_ONLY_BUILDABLE_SERVICES`` -- ``docker compose
-        build`` has nothing to do for a service that carries only an ``image:``.
-        """
-        if lane != EnumRuntimeLane.DEV or not DEV_LANE_BUILD_SERVICES:
-            return
-        logger.info(
-            "_build_dev_lane_only_services: building %d dev-lane services "
-            "with the lane overlay: %s",
-            len(DEV_LANE_BUILD_SERVICES),
-            ", ".join(DEV_LANE_BUILD_SERVICES),
-        )
-        self._compose_build(
-            Scope.RUNTIME,
+        read_settings: Callable[[], Any] | None = None,
+    ) -> dict[str, str]:
+        environment: dict[str, str] = load_dev_boot_guard(
+            "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+        ).build_dev_lane_services(
+            sys.modules[__name__],
+            self._compose_build,
             git_sha,
             on_phase_update,
             build_source=build_source,
-            runtime_lane=lane,
+            lane=lane,
             git_ref=git_ref,
-            compose_files=lane_config_for(lane).compose_files,
-            services=DEV_LANE_BUILD_SERVICES,
-            stage_workspace=False,
+            read_settings=read_settings,
         )
+        return environment
 
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
         """Resolve the exact stability-proven image digest for a prod deploy.

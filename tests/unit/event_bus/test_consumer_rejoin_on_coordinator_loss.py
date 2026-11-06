@@ -31,6 +31,9 @@ from omnibase_infra.event_bus.consumer_rejoin_policy import (
 from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
     ConsumerRejoinSupervisor,
 )
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
+    HandlerConsumerCoordinatorRejoin,
+)
 from omnibase_infra.models.health.enum_consumer_stall_reason import (
     EnumConsumerStallReason,
 )
@@ -344,6 +347,7 @@ async def test_supervisor_rejoins_the_wedged_consumer_and_offsets_advance() -> N
         events.append(event)
 
     supervisor = ConsumerRejoinSupervisor(
+        coordinator_handler=HandlerConsumerCoordinatorRejoin(),
         topic=TOPIC,
         group_id=GROUP,
         policy=POLICY,
@@ -401,6 +405,7 @@ async def test_supervisor_never_recreates_a_healthy_consumer() -> None:
         raise AssertionError("a healthy consumer must never be recreated")
 
     supervisor = ConsumerRejoinSupervisor(
+        coordinator_handler=HandlerConsumerCoordinatorRejoin(),
         topic=TOPIC,
         group_id=GROUP,
         policy=POLICY,
@@ -438,6 +443,7 @@ async def test_supervisor_leaves_the_consumer_alone_when_leaders_are_unreachable
         raise AssertionError("an unreachable broker must not trigger a recreate")
 
     supervisor = ConsumerRejoinSupervisor(
+        coordinator_handler=HandlerConsumerCoordinatorRejoin(),
         topic=TOPIC,
         group_id=GROUP,
         policy=POLICY,
@@ -470,6 +476,7 @@ async def test_a_failed_recreate_is_recorded_rather_than_swallowed() -> None:
         raise ConnectionError("bootstrap refused")
 
     supervisor = ConsumerRejoinSupervisor(
+        coordinator_handler=HandlerConsumerCoordinatorRejoin(),
         topic=TOPIC,
         group_id=GROUP,
         policy=POLICY,
@@ -513,6 +520,7 @@ async def test_the_cooldown_prevents_a_recreate_loop() -> None:
         return consumer
 
     supervisor = ConsumerRejoinSupervisor(
+        coordinator_handler=HandlerConsumerCoordinatorRejoin(),
         topic=TOPIC,
         group_id=GROUP,
         policy=POLICY,
