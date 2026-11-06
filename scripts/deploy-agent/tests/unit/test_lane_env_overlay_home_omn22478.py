@@ -363,6 +363,8 @@ def test_compose_env_of_a_stability_job_reads_no_overlay_home(
 
 
 # -- the settings check is not weakened --------------------------------------
+#
+# The suite's conftest stubs the check out of unrelated tests; the cost_estimator_build marker opts these in.
 
 
 @pytest.fixture
@@ -384,6 +386,7 @@ def _check(guard: Any) -> tuple[Any, dict[str, str]]:
 
 
 @pytest.mark.unit
+@pytest.mark.cost_estimator_build
 def test_the_settings_check_refuses_only_for_the_password_with_the_overlay_home(
     dev_agent: Path,
     tmp_path: Path,
@@ -404,6 +407,7 @@ def test_the_settings_check_refuses_only_for_the_password_with_the_overlay_home(
 
 
 @pytest.mark.unit
+@pytest.mark.cost_estimator_build
 def test_the_settings_check_passes_once_the_password_is_present(
     dev_agent: Path,
     tmp_path: Path,
@@ -418,6 +422,7 @@ def test_the_settings_check_passes_once_the_password_is_present(
 
 
 @pytest.mark.unit
+@pytest.mark.cost_estimator_build
 def test_the_settings_check_still_refuses_an_invalid_gate_switch(
     dev_agent: Path,
     tmp_path: Path,
