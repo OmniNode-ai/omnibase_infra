@@ -2203,20 +2203,15 @@ run_repair() {
       say "  Reconcile it as $hook_owner, or make the two surfaces share an owner."
       exit "$EXIT_INDETERMINATE"
     fi
-    trace "uv sync --frozen --check --project $project"
-    if lock_layer_ok "$project"; then
-      say "hook venv: already in sync ($project/.venv)"
-      continue
+    # The gate environment was reconciled above. Use that interpreter and the
+    # contract-bound handler from this checkout, before dispatch can start.
+    if ! (cd "$project" && as_owner env -u UV_PROJECT_ENVIRONMENT \
+        PYTHONPATH="$_VENV_SCRIPT_DIR/../src" "$INFRA_PYTHON" \
+        -m omnibase_infra.nodes.node_reconcile_workspace_venvs.runtime_reconcile_workspace_venvs \
+        --contract "$_VENV_SCRIPT_DIR/../src/omnibase_infra/nodes/node_reconcile_workspace_venvs/contract.yaml" \
+        --workspace "$OMNI_HOME" --project "$project" --uv "$UV_BIN"); then
+      fail "hook venv reconciliation refused for $project; read the error above."
     fi
-    say "hook venv: reconciling $project/.venv to $project/uv.lock"
-    trace "uv sync --frozen --project $project"
-    if ! (cd "$project" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT \
-        "$UV_BIN" sync --frozen --project "$project"); then
-      fail "hook venv lock sync did not complete for $project." \
-        "Run by hand and read the error:" \
-        "  cd $project && env -u PYTHONPATH uv sync --frozen"
-    fi
-    say "hook venv: reconciled ($project/.venv)"
   done < <(hook_venv_projects)
 
   if [[ "$any_hook" -eq 0 ]]; then
