@@ -13,9 +13,6 @@ requirements:
         statement: 'AC1: success, skipped and neutral runs cause no job-list reads, while failure, cancelled, timed_out and missing conclusions retain wedge detection; the recorded 100-run list reads only candidate runs -- falsifier: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"'
   - id: req-omn19998-contracts-strict-load-precommit
     statement: A commit that touches a ticket contract under contracts/ must run the strict contract load test, so a merge that keeps two description and command pairs under one evidence item is refused at commit instead of in CI.
-    acceptance:
-      - id: AC20
-        statement: 'AC20: the contracts-strict-load pre-commit hook runs tests/ci/test_contracts_strict_load_omn20945.py at the pre-commit stage and fires on contracts/*.yaml, and run against the OMN-19998 contract with an evidence item carrying two description and command pairs it fails -- falsifier: uv run pytest tests/ci/test_contracts_strict_load_precommit_omn19998.py -q -n 0 fails on the merge-base .pre-commit-config.yaml, which has no such hook'
   - id: req-omn19998-routing-audit-gateway-split
     statement: The runner routing audit's private-workflow batch read must read a batch again in halves when GitHub answers it with a gateway error (HTTP 502, 503 or 504), and must still raise when a single repository stays unread.
     acceptance:
@@ -28,188 +25,82 @@ requirements:
         statement: 'AC3: every test that takes the installed_node fixture carries a timeout marker above the install subprocess timeout, which is above the --timeout of the full-suite pytest step in ci.yml, and the fixture sets UV_HTTP_TIMEOUT below the install timeout -- falsifier: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 --timeout=60 fails test_install_budget_outlasts_the_ci_test_timeout on the merge-base test module'
   - id: req-omn19998-lab-follows-dev-tag
     statement: A workspace build that stages omnimarket from its dev branch must stage the newest dev-* tag on its origin instead, the deploy agent must follow that tag as omnimarket's head, and every deploy-agent instance must publish a heartbeat against it that raises an alarm once its runtime runs behind the tag for more than two hours.
-    acceptance:
-      - id: AC4
-        statement: 'AC4: RT-1 checkout with --follow-dev-tag builds the newest well-formed dev-* tag in place of origin/dev or its fallback, keeps explicit SHAs, builds the branch when origin has no dev tag, refuses a newest tag off the branch; the deploy agent follows the newest tag, beats on every instance and alarms past two hours behind -- falsifier: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0 fails against the merge-base deploy_source_ref.py'
   - id: req-omn19998-lab-alarm-dev-tag-heartbeat
     statement: 'Operator RULINGs 2026-10-16T07:34:18Z and 2026-10-16T09:35:49Z: the deploy agent publishes a dev-tag heartbeat on /dev-tag-heartbeat and nothing read it. The lab alarm must read it and raise when the beat of a followed repository has gone quiet, is missing, or reports the lane behind its newest dev tag, and must stay quiet on a fresh beat.'
-    acceptance:
-      - id: AC21
-        statement: 'AC21: against a fresh heartbeat fixture the dev_tag_heartbeat condition reads OK; against the stale fixture, the same document with observed_at 3h50m before the read, it raises one alarm naming omnimarket; a missing beat and a beat reporting the lane behind its newest tag each raise one; an unreachable or malformed answer reads INDETERMINATE; through run_once a stale beat raises once across two runs and clears -- falsifier: uv run pytest tests/ci/test_lab_alarm_dev_tag_heartbeat_omn19998.py tests/ci/test_lab_alarm_omn18867.py -q -n 0 -k "dev_tag or heartbeat"'
   - id: req-omn19998-prepr-isolated-docker-auths
     statement: The pre-PR pool prover's isolated docker config must hold no credential store, no credential helper and no credential, and must keep a non-empty auths map so the docker CLI stays on the plain file store instead of detecting the macOS keychain again.
-    acceptance:
-      - id: AC5
-        statement: 'AC5: the config snippet in prepr_pool_prove.sh, run against a keychain-backed config, writes one with no credsStore or credHelpers, a non-empty auths map and no auths entry holding a credential -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential fails on the merge-base prepr_pool_prove.sh'
   - id: req-omn19998-studio-multiarch-ci-pool
     statement: The runner fleet must declare an opt-in label omnibase-ci-multiarch carried by both amd64 action pools and by a capped, credential-free, socket-free arm64 pool on the Mac Studio host that never carries omnibase-ci, so arch-neutral private-repo jobs can run on that host and no existing omnibase-ci job can land on arm64.
-    acceptance:
-      - id: AC6
-        statement: 'AC6: the Mac Studio host declares pool omninode-studio-ci-runner (4 runners, class action-multiarch); its compose services carry omnibase-ci-multiarch and arch-arm64, never omnibase-ci, x64, arch-amd64 or a host label, mount no docker socket or credential, and are capped at 1.5 CPU and 3g; both amd64 action pools carry omnibase-ci-multiarch; declared_total(action) stays 26 -- falsifier: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0 fails on the merge-base tree'
   - id: req-omn19998-dev-maintenance-check-fences
     statement: Dev maintenance checks must assert that fences naming prod or excluding dev suppress migration convergence and lane mirroring, and that lane mirroring never targets a governed lane even on a mixed lab fence.
-    acceptance:
-      - id: AC7
-        statement: 'AC7: migration and mirror checks cover prod, dev plus prod, all lanes, and the stability lane alone as excluded fences; mirror checks reject every non-dev target with a dev or mixed lab fence.'
   - id: req-omn19998-memory-event-ci-runs-bound
     statement: The lane container memory event must stay publishable after a gap or a boot. An unfinished runner worker log that is not its runner's newest log must be bounded by that runner's next job start instead of overlapping every window, and a window longer than two hours must attribute only its last two hours of CI jobs and log a CI_RUNS_TRUNCATED notice, with the event schema unchanged.
-    acceptance:
-      - id: AC8
-        statement: 'AC8: an abandoned unfinished run is not listed in a later window, the newest unfinished run of a runner is still listed, a window longer than two hours lists only its last two hours and yields the CI_RUNS_TRUNCATED notice while a one-hour window yields none, and a clean census pass still exits 0 and logs the notice -- falsifier: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0 -k "abandoned or newest_unfinished or long_window or hourly_window or first_pass_after_a_boot or clean_pass" fails on the merge-base builder'
   - id: req-omn19998-stability-follows-dev-tag
     statement: A lab dev deploy agent whose fence admits the stability lane beside dev must keep the dev lane's own behaviour, and on its idle tick it must rebuild the stability lane, as its own job named agent/stability-follow-tag, onto the newest omnimarket dev tag once the dev lane runs that tag, so the stability lane never trails dev by more than one tag; the dev lane's env fragment must never reach a stability-lane job.
-    acceptance:
-      - id: AC9
-        statement: 'AC9: an agent whose fence names dev and the stability lane runs one stability-lane rebuild requested by agent/stability-follow-tag when dev runs the newest tag and the stability lane does not, none while dev runs an older tag, none when the stability lane already runs it, none on a fence of dev alone or one naming prod, one attempt per tag; a stability-lane job takes no dev env fragment -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly fails against the merge-base deploy_agent'
   - id: req-omn19998-infra-dev-merge-tag
     statement: 'Operator RULING 2026-10-16T09:35:49Z: in the lab, tags replace releases, made automatic. omnibase_infra, a sibling omnimarket pins, tags every push to dev with a lightweight dev-<UTC YYYYMMDDHHMMSS>-<sha12> tag on the pushed commit, idempotent per commit, with no tag on any other ref, so omnimarket can pin it.'
-    acceptance:
-      - id: AC10
-        statement: 'AC10: .github/workflows/dev-merge-tag.yml triggers only on push to dev, and its tag step, run against a throwaway repository with a +05:30 committer date, pushes one lightweight tag named dev-<committer time in UTC>-<sha12> at the commit, pushes nothing on a second run or when a dev tag for that sha already exists, pushes nothing in a dry run, and refuses a value that is not a full sha -- falsifier: uv run pytest tests/ci/test_dev_merge_tag_workflow_omn19998.py -q -n 0 fails at the merge base, where the workflow does not exist'
   - id: req-omn19998-pr-merged-unique-key-vendor
     statement: Node migration 0003 of node_pr_merged_projection, which collapses duplicate pr_merged_events rows and adds UNIQUE (repo, pr_number), is deployed with only its two PostgreSQL catalog reads qualified as pg_catalog, with pinned source and deployment digests, one checksum-bound ledger row and the forward-only class the migration class checker reads from its statements.
-    acceptance:
-      - id: AC11
-        statement: 'AC11: the deployment copy hashes to 2a1141966f9b9cdc83caf6e60d64cf866953312453d560f32efcd00a59651309, reversing only the two pg_catalog qualifications recovers source digest 68c4220235df46969883a9febc3887cc7b867a5d18b928aaeba6cc2c72be6634, its catalog reads pass application database domain enforcement, it deletes duplicates before adding UNIQUE (repo, pr_number), has exactly one ledger row carrying that checksum and is declared forward-only -- falsifier: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py fails at the dev base, where the file is absent'
   - id: req-omn19998-ci-runner-uv-cache-hardlink
     statement: The second lab host's CI runners must keep their uv cache inside the job-workspace mount, with uv's default link mode, so a warm uv sync hardlinks wheel contents instead of copying them across two bind mounts.
-    acceptance:
-      - id: AC13
-        statement: 'AC13: each of the sixteen services of the second-host CI runner pool sets UV_CACHE_DIR to a path under its _work mount, binds no separate uv cache mount and sets no UV_LINK_MODE -- falsifier: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0 -k uv_cache fails on the merge-base compose'
   - id: req-omn19998-runner-hook-dir-mount
     statement: A runner container must see a hook file that a deploy replaced, and a runner whose job-started hook is missing, empty or not a script must stop taking jobs instead of staying unhealthy while it runs them.
-    acceptance:
-      - id: AC12
-        statement: 'AC12: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
   - id: req-omn19998-drain-then-relabel-roll
     statement: deploy-runners.sh must carry a drain-then-relabel roll that re-registers an online runner pool under its rendered label set, one runner at a time and only once the runner is idle on the container's own evidence, on the primary host and on a secondary host pool, at an unchanged runner count.
-    acceptance:
-      - id: AC14
-        statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
   - id: req-omn19998-role-omnidash-projection-watermarks
     statement: The dev lane's live-events writer connects as role_omnidash and upserts omninode_internal.projection_watermarks after every batch; role_omnidash must hold schema USAGE and SELECT, INSERT and UPDATE on that one table and nothing else in the schema.
-    acceptance:
-      - id: AC22
-        statement: 'AC22: node_projection_registration migration 0008 grants USAGE ON SCHEMA omninode_internal and SELECT, INSERT, UPDATE ON omninode_internal.projection_watermarks to role_omnidash, nothing more, with a manifest row binding its bytes; applied to a Postgres where 0005 created the table, the watermark upsert as role_omnidash fails with permission denied for schema omninode_internal before it and succeeds after -- falsifier: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0 fails at the merge base, where the migration file does not exist'
   - id: req-omn19998-infra-no-omnimarket-dependency
     statement: omnibase_infra must not declare omnimarket in pyproject.toml, lock it in uv.lock, or import it at module import time under src/omnibase_infra, enforced by a pre-commit hook and a step of the required Lint job.
-    acceptance:
-      - id: AC15
-        statement: 'AC15: the guard passes on the tree and fails on a manifest, lock or module that names omnimarket, and fails the live tree with an omnimarket requirement in pyproject.toml or a module-scope import in src -- falsifier: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 fails with "import omnimarket" appended to src/omnibase_infra/runtime/entrypoint_preflight.py'
   - id: req-omn19998-broker-profile-checks
     statement: Broker profile regressions require the five original settings by name while permitting additional settings, and the control-plane fake broker accepts group_offset_retention_sec without dropping any topic assertions.
-    acceptance:
-      - id: AC27
-        statement: 'AC27: the disk profile positive control asserts all original keys by name, and the control-plane fake broker answers group_offset_retention_sec with 86400; the original topic creation, race and failure tests pass with the additional setting.'
   - id: req-omn19998-forwarder-inbound-survives-bad-record
     statement: The gateway forwarder inbound leg keeps delivering when one cloud record carries no event_type or a consumer start does not finish.
-    acceptance:
-      - id: AC17
-        statement: 'AC17: an inbound envelope with no event_type is refused as a GatewayRecordRefusedError (quarantined, never republished), and a KafkaTransport whose consumer start raised or was cancelled holds no never-started consumer and builds a fresh one on the next poll -- falsifier: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0 fails on the merge-base tree'
   - id: req-omn19998-dev-lane-group-offset-retention
     statement: The dev lane's shared broker-profile one-shot must set the Redpanda cluster property group_offset_retention_sec to 86400 and read it back, so per-run consumer groups with no member for a day expire instead of accumulating for seven; a lane that declares no value keeps the cluster default.
-    acceptance:
-      - id: AC16
-        statement: 'AC16: the dev lane renders REDPANDA_GROUP_OFFSET_RETENTION_SEC=86400 on redpanda-partition-cap and its script sets then reads back group_offset_retention_sec; the base infra file renders the value empty and its script never sets it -- falsifier: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0 fails at the merge base, where the variable is not rendered'
   - id: req-omn19998-bump-regenerates-runner-lock
     statement: The release workflow's post-release dev version bump must regenerate docker/runners/runner-image.lock.json after it re-locks uv.lock and stage it in the bump commit, because uv.lock bytes feed the runner image identity and a bump PR with a stale lock fails tests/ci/test_runner_image_identity.py and runner-image-build-smoke.
-    acceptance:
-      - id: AC23
-        statement: 'AC23: the post-release-dev-bump job runs scripts/ci/runner_image_identity.py --mode generate after uv lock and its git add names docker/runners/runner-image.lock.json -- falsifier: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock" fails against the merge-base release.yml'
   - id: req-omn19998-public-runner-placement
     statement: 'Operator RULING 2026-10-16T07:07:09Z: CI runners are for private repositories only. omnibase_infra is public, so no workflow routing fallback may name the self-hosted fleet except the two lab-broker carve-outs (runtime rebuild, hostile review), the nightly performance benchmarks and the dev merge tag run on a GitHub-hosted label, and omnibase_core''s check-public-runner-placement runs as a CI Summary registered job and as a pre-commit hook at one core pin.'
-    acceptance:
-      - id: AC28
-        statement: 'AC28: no workflow line outside the two carve-outs carries the self-hosted fleet fallback, performance-tests and dev-merge-tag run on ubuntu-latest, the Public Runner Placement job is unconditional, hosted, carries a positive control and the same core pin as the hook, and CI Summary registers it -- falsifier: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0 fails at the merge base, where 178 fallback lines name the fleet and neither the job nor the hook exists'
   - id: req-omn19998-routing-audit-quota-isolation
     statement: The routing audit must retain its live organization and private-repository assertions without GraphQL reads or a REST read per workflow file. Same-repository content uses the run token, while organization variable metadata and private sibling content retain the existing privileged reader. Unread state must fail separately from drift.
-    acceptance:
-      - id: AC24
-        statement: 'AC24: repository discovery paginates REST across every visibility class and excludes archived repositories; workflow content comes from the default branch through sparse Git reads, including an empty directory positive control, with no GraphQL or per-file REST requests.'
-      - id: AC25
-        statement: 'AC25: the workflow binds GH_TOKEN and checkout to github.token, binds RUNNER_AUDIT_ORG_TOKEN to the existing org reader, and selects the run token for same-repository content while variable metadata and sibling content use the privileged reader.'
-      - id: AC26
-        statement: 'AC26: quota, transport and malformed-response failures produce a named infrastructure refusal and nonzero audit result; CI Summary reports the failed infrastructure marker separately and still fails, while real drift findings remain visible.'
   - id: req-omn19998-hostile-line-one-anchor
     statement: A hostile-reviewer finding cited at line 1 alone is a whole-file finding, so the thread poster anchors it to the file and the Hostile Review Thread Gate verifies a fixed-in reply on such a thread as file-level (the fix commit changes the file) instead of requiring an edit to line 1, which in this repository is the SPDX header.
-    acceptance:
-      - id: AC29
-        statement: 'AC29: cited_lines reads a thread cited at line 1 alone as file-level while ranges 1-5 and 20 keep their lines, GitFixVerifier accepts a fix elsewhere in the cited file and refuses a fix to another file, and resolve_anchor posts a path:1 finding as a file anchor -- falsifier: uv run pytest tests/ci/test_hostile_review_line_one_anchor_omn19998.py -q -n 0 fails 4 of 7 cases against the merge-base scripts'
   - id: req-omn19998-candidate-composed-omnimarket
     statement: "The staging stability-candidate build composes omnimarket's Dockerfile.runtime on the infra candidate image before the scan and push, because the infra image carries no omnimarket since #5261 and delivery run 40272282023 failed with No module named 'omnimarket'."
-    acceptance:
-      - id: AC30
-        statement: 'AC30: build-workspace-candidate-runtime.yml builds omnimarket''s Dockerfile.runtime from the staged omnimarket tree on the infra candidate tag, with INFRA_RUNTIME_IMAGE and OMNIMARKET_VCS_REF build args and an import omnimarket probe, after the infra build and before the Trivy scan, config-path check and push -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k composes fails at the merge base, where the step does not exist'
   - id: req-omn19998-stage-host-pyyaml
     statement: "The workspace stability-candidate build installs PyYAML on the host interpreter that runs stage_workspace.sh, because the dev-merge-tag stamp #5472 added loads checker_first_party_sources.py there, which imports yaml, and job 124359950934 failed with No module named 'yaml'."
-    acceptance:
-      - id: AC31
-        statement: 'AC31: the build-workspace-candidate-runtime.yml install step before the Stage workspace sibling trees step installs every third-party package that check_sibling_lock_pins.py and checker_first_party_sources.py import, pyyaml included -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k third_party fails against the merge-base workflow, which installs pydantic only'
   - id: req-omn19998-verifier-override-pins
     statement: The repo-evidence caller must pin a verifier whose dependency-pin-only classifier admits tool.uv.override-dependencies, so the OCC writer app's core bump pull requests (omnibase_infra#5453, #5458) are exempt from dod-verify instead of failing it for binding no evidence of their own.
-    acceptance:
-      - id: AC32
-        statement: 'AC32: call-repo-evidence-gate.yml pins verifier-version 0.4.310 or newer, the first omnimarket release with omnimarket#3694, and pyproject.toml pins omnibase-core by its dev-merge tag alone in tool.uv.sources -- falsifier: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0 fails test_caller_verifier_admits_override_dependency_pins against the merge-base caller, which pins 0.4.305'
   - id: req-omn19998-candidate-build-dev-merge-tags
     statement: "The workspace stability-candidate build stages every unpinned sibling at its newest dev-merge tag and fetches the build context's own dev-merge tag before staging, because since #5472 the image's first-party source audit refused every push build: delivery run 41185042263 (dev a9ffea9a3) failed with omnibase-core and omnibase-spi staged at a commit with no dev-merge tag and omnibase-infra staged from branch dev."
-    acceptance:
-      - id: AC34
-        statement: 'AC34: build-workspace-candidate-runtime.yml arms RT-1 with origin/<sibling_ref> when no sibling is pinned, so deploy_source_ref.py follows each sibling''s newest dev-* tag, and a step before the staging step fetches the dev-* tag naming HEAD from origin into the checkout, which checker_first_party_sources reads as the build context''s dev-merge tag -- falsifier: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py -q -n 0 fails against the merge-base workflow, which arms RT-1 with the bare branch name and has no tag fetch step'
   - id: req-omn19998-node-refusal-reason
     statement: When a handler refuses with a typed result (success false) and the runtime records no error of its own, the SkillRoutingError envelope that onex node prints carries the handler's error_message or reason, so the ci-live-contact pre-commit hook names its fix on the console instead of printing only run did not complete (result=failed).
-    acceptance:
-      - id: AC33
-        statement: 'AC33: onex node node_ci_live_contact_effect on a repository with a staged scripts/ci change exits 1 with a SkillRoutingError envelope whose message names a live-contact test and .github/live-contact-exception.md, and a staged non-tooling change exits 0 with no envelope -- falsifier: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q fails test_refused_ci_tooling_change_names_its_fix_in_the_envelope against the merge-base cli_node.py'
   - id: req-omn19998-test-splits-warm-dod-verifier
     statement: The CI test splits must install the verifier the repo-evidence caller pins in a step of their own before pytest starts, so the tests that call install_verifier find a whole cache entry and no longer pay a cold install inside the splits' 60 second pytest timeout.
-    acceptance:
-      - id: AC35
-        statement: 'AC35: the test-parallel job runs one step, with a timeout-minutes ceiling and no pytest, before both of its pytest steps, that installs the verifier at the caller tag through install_verifier and fails when the install fails -- falsifier: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0 fails at the merge base, where the step does not exist'
   - id: req-omn19998-wrapper-venv-peer-floor
     statement: The onex wrapper must wait while either a host reconcile or a venv-only reconcile can prove the floor, including overlapping locks and a handoff between them, and must refuse a floor that remains stale without reclaiming either lock.
-    acceptance:
-      - id: AC36
-        statement: 'AC36: a venv-only pass and a host pass that stamp the floor permit dispatch; both-lock release orders and both handoff directions wait through the remaining peer; an unproved floor refuses at peer completion or the wait budget and preserves held locks. Poll-driven transitions run without wall-clock timers -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q fails against the merge-base scripts/onex, which waits only on the host lock.'
   - id: req-omn19998-refresh-recovery-census
     statement: The dev refresh completion must run the existing closing lane census after recovery as well as success, while preserving the failed refresh's result and exit code.
-    acceptance:
-      - id: AC37
-        statement: 'AC37: the refresh completion removes only declared same-lane recreate leftovers after recovery, preserves failure results and exit codes, records remaining drift or unreadable inventory, and retains success census exit codes -- falsifier: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q fails ten recovery cases against the merge-base refresh_dev_lane.sh.'
   - id: req-omn19998-broker-listener-recorded-rows
     statement: The broker_listener lab alarm must keep raising on the recorded friction rows, a refused connect and an unreachable network on every bootstrap address, and must not read either as INDETERMINATE; the same bootstrap with an answering listener reads OK.
-    acceptance:
-      - id: AC38
-        statement: 'AC38: a refused connect and an ENETUNREACH network on the recorded bootstrap each raise one broker_listener alarm with the recorded detail shape; a refusal beside an unreachable network still alarms; an answering listener on the same bootstrap reads OK -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network" selects no test on the merge-base test module'
   - id: req-omn19998-gapless-roll-failure
     statement: A rolling dev runtime update must wait for each service's declared health before updating its peer, and must fail at a non-running, unhealthy or timed-out step without reporting a partial roll successful.
-    acceptance:
-      - id: AC39
-        statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
   - id: req-omn19998-autowiring-timeout
     statement: Cold auto-wiring must avoid migration-service contract scans for optional runtime ports and use the shared safe contract reader for published-event routing.
-    acceptance:
-      - id: AC42
-        statement: 'AC42: optional publisher and consumer constructors perform zero migration-service builds, required migration services are still materialized, and published-event maps use the fast safe parser with a portable safe fallback and unchanged malformed-input behavior -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
   - id: req-omn19998-subscription-preflight-parsing
     statement: Subscription preflight must read consumer-group handover and consume-concurrency declarations through the shared safe contract reader rather than reparsing every subscribed contract with the Python YAML parser.
-    acceptance:
-      - id: AC45
-        statement: 'AC45: consumer-group handover and consume-concurrency readers use CSafeLoader when available and SafeLoader otherwise, retaining declared values, absent-file defaults and malformed-input refusals -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
   - id: req-omn19998-terminal-projection-parsing
     statement: Cold wiring must use the shared safe contract reader for terminal-event and projection-topic declarations while retaining their per-contract routing and error handling.
-    acceptance:
-      - id: AC41
-        statement: 'AC41: terminal-event and projection-topic readers use CSafeLoader when available and SafeLoader otherwise, preserve declared values, and retain empty results for missing or malformed contracts -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov'
   - id: req-omn19998-contract-reader-layering
     statement: Low-level contract readers must share a safe YAML utility without importing the package-announcer handler when reading declarations.
-    acceptance:
-      - id: AC43
-        statement: 'AC43: concurrency, published-event, terminal-event and projection-topic readers retain declared values when imports of handler_package_announcer are refused during reads, while terminal-event and projection-topic modules import without loading that handler -- falsifier: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov'
   - id: req-omn19998-runner-v2338-2
     statement: The runner image must bake runner 2.338.2 with its x64 and arm64 checksums, a matching lock version and a valid bound identity, so rebuilding does not restore the refused 2.336.0 runner.
-    acceptance:
-      - id: AC40
-        statement: 'AC40: docker/runners/Dockerfile pins runner 2.338.2 and both architecture checksums, docker/runners/runner-image.lock.json records 2.338.2 with a valid identity, and the existing fleet-floor and multiarch tests pass; the 2.336.0 merge-base Dockerfile fails the head fleet-floor test and the exact-pin deployment probe.'
+  - id: req-omn19998-delegate-skill-boot-priority
+    statement: The dev delegation first-hop consumer joins through provision, readiness and attach before first publication, even when its topics are empty; unrelated idle contracts remain demand-deferred and the effects-held alarm retains its live-member predicate.
+  - id: req-omn19998-effects-carrier-boot-policy
+    statement: The dev effects carrier consumes every declared boot bound and resource limit from the rendered runtime policy.
+  - id: req-omn19998-canary-hosted-exception
+    statement: The runner routing audit admits exactly one hosted job in a private repository, the outside canary, and refuses every other hosted job there.
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -878,3 +769,631 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-ac37-delegate-skill-boot-priority
+    description: AC46 drives the production boot subscription path and client pre-publish probe with empty topics, checks readiness and lazy-start controls, and integrates the shipped main and effects policy with recorded effects-held episodes and an independent alarm clock. The receipt binding check refuses duplicate acceptance labels.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_delegation_boot_priority_omn19998.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC46
+  - id: dod-omn19998-ac37-dev-carrier-deploy-probe
+    description: Hosted-runner deployment artifact check reads the dev policy through its typed loader and renderer and verifies the priority environment binding in both main and effects compose carriers. It does not claim a live install.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly -k dev_delegation_priority_reaches_both_carriers
+        cwd: .
+    binds_ac:
+      - AC46
+  - id: dod-omn19998-ac40-effects-carrier-boot-policy
+    description: Hosted-runner deployment artifact probe loads the shipped effects policy and overlay, substitutes distinct bound, concurrency and memory values, and checks the fail-fast bindings plus the production kernel configuration readers. Removing a binding fails the probe. Requires no Docker daemon, credentials or live lane and does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier
+        cwd: .
+    binds_ac:
+      - AC48
+  - id: dod-omn19998-ac47-canary-hosted-exception
+    description: AC47 drives the real private-placement pass over fixture private repositories with and without the policy entry, with entries that are patterns, lists, another repository or incomplete, and through main.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "canary or private_exception or main_passes"
+        cwd: .
+    binds_ac:
+      - AC47
+  - id: dod-omn19998-contract-only-retirement
+    description: Retires the claims of the contract-only criteria OMN-19998 never carried on the live ticket (42 labels). Each retired item's checks run here as a regression guard, and this item binds no criterion.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_contract_yaml_reader_import_omn19998.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_node24_floor.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_multiarch.py -q -n 0
+        cwd: .
+      - check_type: command
+        check_value: python3 -c "import json; from pathlib import Path; d=Path('docker/runners/Dockerfile').read_text().splitlines(); assert 'ARG RUNNER_VERSION=2.338.2' in d; assert 'ENV RUNNER_SHA256_AMD64=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40' in d; assert 'ENV RUNNER_SHA256_ARM64=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945' in d; assert json.loads(Path('docker/runners/runner-image.lock.json').read_text())['runner_version']=='2.338.2'; print('runner 2.338.2 and both architecture pins match')"
+        cwd: .
+      - check_type: command
+        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_compose_budget_omn18057.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_executor_runtime_timeout_recovery_omn18057.py scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_dependency_regression.py tests/unit/runtime/auto_wiring/test_handler_wiring_contract_loader_omn18843.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k 'repository_inventory or sparse_default_branch or every_private_repository'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k 'workflow_uses_run_token or variable_reads_use_org_token'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k 'rate_limit or transport or infrastructure or unread_repository'
+        cwd: .
+      - check_type: command
+        check_value: uv run python scripts/audit-runner-routing.py --local-workflows
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contracts_strict_load_precommit_omn19998.py tests/ci/test_contracts_strict_load_omn20945.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_dev_tag_heartbeat_omn19998.py tests/ci/test_lab_alarm_omn18867.py -q -n 0 -k "dev_tag or heartbeat"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_converge_when_checkout_moves.py::test_governed_or_non_dev_agents_never_converge_migrations scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py::test_executor_runs_the_step_only_on_a_dev_fenced_agent_with_a_clone scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py::test_lane_mirror_never_targets_a_governed_lane -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0 -k "abandoned or newest_unfinished or long_window or hourly_window or first_pass_after_a_boot or clean_pass"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_converge_when_checkout_moves.py scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_merge_tag_workflow_omn19998.py tests/ci/test_automated_pusher_identity_omn18273.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 -k "population or bind_mounts or mounts_the_hook_directory or point_inside_the_hook_directory"
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0 -k uv_cache
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "parses_and or combine_with or dry_run_changes or a_real_roll or compose_declarations or busy_runner_is_never"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "token_never_reaches_output_or_argv or minted_token or listener_log or missing_image_tag or may_not_drop"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "lands_between or does_not_return or compose_lacks"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "already_online or limit_counts or reads_are_capped or secondary_pool"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_entrypoint_preflight_no_omnimarket_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/entrypoint_preflight.py?ref=eeba91e21e702d29c420e5fe8ceaf4a43e334572 --jq .content | base64 -d | python3 -c "import sys; s = sys.stdin.read(); sys.exit(len(s) < 100 or 'omnimarket' in s)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py tests/unit/infra/test_lane_control_plane_topic_omn19543.py -q
+        cwd: .
+      - check_type: command
+        check_value: python3 -c "from pathlib import Path; d=Path('tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py').read_text(); t=Path('tests/unit/infra/test_lane_control_plane_topic_omn19543.py').read_text(); assert 'assert set(_BASE_KEYS + _DIALS) <=' in d; assert 'group_offset_retention_sec) echo 86400 ;;' in t"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run pytest tests/integration/gateway/test_forwarder_inbound_untyped_record_omn19998.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'REDPANDA_GROUP_OFFSET_RETENTION_SEC. "86400"' docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -k "runner_image_lock"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_line_one_anchor_omn19998.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k composes
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k third_party
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -k test_stage_step_host_python_has_every_third_party_import
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py -q -n 0
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_candidate_build_dev_merge_tags_omn19998.py::test_the_checker_reads_the_fetched_tag_as_a_dev_merge_tag tests/integration/runtime/test_first_party_tag_sources_omn17427.py::test_staged_wheels_have_tag_identity_and_content_parity -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest tests/integration/cli/test_cli_node_refusal_reason_omn19998.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q
+        cwd: .
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_venv_lock_omn19998.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "recorded or unreachable_network"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_delegation_boot_priority_omn19998.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly -k dev_delegation_priority_reaches_both_carriers
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "canary or private_exception or main_passes"
+        cwd: .
+    supersedes_ac_binding:
+      - item: dod-omn19998-ac43-reader-layering
+        label: AC43
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac43-reader-layering-deploy-probe
+        label: AC43
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac40-runner-pin
+        label: AC40
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac40-runner-pin-deploy-probe
+        label: AC40
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac39-runtime-roll
+        label: AC39
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac39-runtime-roll-deploy-source
+        label: AC39
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-cold-wiring-deploy-probe
+        label: AC42
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-cold-wiring-deploy-probe
+        label: AC45
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-cold-wiring-deploy-probe
+        label: AC41
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac38-terminal-projection-parsing
+        label: AC41
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac37-subscription-preflight-parsing
+        label: AC45
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac36-autowiring-timeout
+        label: AC42
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac24-routing-audit-git-rest
+        label: AC24
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac25-routing-audit-token-scope
+        label: AC25
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac26-routing-audit-infrastructure
+        label: AC26
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac20-contracts-strict-load-precommit
+        label: AC20
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac4-lab-follows-dev-tag
+        label: AC4
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac4-prepr-isolated-docker-auths
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac21-lab-alarm-dev-tag-heartbeat
+        label: AC21
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac5-studio-multiarch-ci-pool
+        label: AC6
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac6-dev-maintenance-check-fences
+        label: AC7
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac7-memory-event-ci-runs-bound
+        label: AC8
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac5-stability-follows-dev-tag
+        label: AC9
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-infra-dev-merge-tag
+        label: AC10
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac8-pr-merged-unique-key-vendor
+        label: AC11
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-pr-merged-deploy-artifact-probe
+        label: AC11
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac12-ci-runner-uv-cache-hardlink
+        label: AC13
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac10-runner-hook-dir-mount
+        label: AC12
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-runner-hook-deploy-artifact-probe
+        label: AC12
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-uv-cache-deploy-artifact-probe
+        label: AC13
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac11-drain-then-relabel-roll
+        label: AC14
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-omnidash-watermarks
+        label: AC22
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac6-infra-no-omnimarket-dependency
+        label: AC15
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-broker-profile-checks
+        label: AC27
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac17-forwarder-inbound-recovery
+        label: AC17
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-forwarder-inbound-deploy-probe
+        label: AC17
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-dev-lane-group-offset-retention
+        label: AC16
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-group-offset-retention-deploy-probe
+        label: AC16
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac23-bump-regenerates-runner-lock
+        label: AC23
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-bump-runner-lock-deploy-probe
+        label: AC23
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac22-public-runner-placement
+        label: AC28
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac29-hostile-line-one-anchor
+        label: AC29
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac30-candidate-composed
+        label: AC30
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac31-stage-host-pyyaml
+        label: AC31
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac31-stage-host-deploy-probe
+        label: AC31
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac32-verifier-override-pins
+        label: AC32
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac34-candidate-dev-merge-tags
+        label: AC34
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac34-dev-tags-deploy-probe
+        label: AC34
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac33-node-refusal-reason
+        label: AC33
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac33-node-refusal-deploy-probe
+        label: AC33
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac35-test-splits-warm-dod-verifier
+        label: AC35
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac36-wrapper-venv-peer-floor
+        label: AC36
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac36-wrapper-deploy-probe
+        label: AC36
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-refresh-recovery-census
+        label: AC37
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac38-broker-listener-recorded-rows
+        label: AC38
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac37-delegate-skill-boot-priority
+        label: AC46
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac37-dev-carrier-deploy-probe
+        label: AC46
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac40-effects-carrier-boot-policy
+        label: AC48
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+      - item: dod-omn19998-ac47-canary-hosted-exception
+        label: AC47
+        reason_kind: no_longer_applicable
+        reason: 'OMN-19998 carries only AC1 to AC3 on the live ticket (read 2026-11-05), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its tests keep running under the carrier item.'
+        retired_by: public-off-lab-2240
+        retired_at: '2026-11-06T00:30:00Z'
+  - id: dod-omn19998-retired-labels-stay-retired
+    description: The contract still declares AC1 to AC3, which the live ticket carries, and declares none of the retired labels as a criterion. The merge base has no such test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_contract_retired_labels_omn19998.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3

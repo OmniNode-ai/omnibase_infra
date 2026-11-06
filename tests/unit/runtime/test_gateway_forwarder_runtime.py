@@ -64,9 +64,7 @@ async def test_https_resolver_uses_only_explicit_strict_infisical_artifacts(
             return None
 
         async def initialize(self, config: dict[str, object]) -> None:
-            typed_config = gateway_forwarder.ModelInfisicalHandlerConfig.model_validate(
-                config
-            )
+            typed_config = gateway_forwarder.ModelInfisicalConfig.model_validate(config)
             initialized.append(
                 {
                     "host": typed_config.host,
