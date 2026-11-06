@@ -16,6 +16,7 @@ would pass at the merge base, where ``onex run-node`` read ``$KAFKA_BOOTSTRAP_SE
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from importlib.metadata import EntryPoint
 from pathlib import Path
@@ -51,6 +52,7 @@ _ENV_NAMES = (
     "KAFKA_SASL_PASSWORD",
     "OMNIBASE_PATH",
     "OMNI_HOME",
+    "ONEX_SKILL_OVERLAY_ROOTS",
 )
 
 
@@ -106,6 +108,78 @@ def test_redpanda_overlay_resolves_to_the_lane_broker_and_ignores_the_environmen
     assert binding.bootstrap_servers == _LANE_BROKER
     assert binding.overlay_path == overlay
     assert binding.client_security() == {"security.protocol": "PLAINTEXT"}
+
+
+def _declare_in_root(root: Path, body: object) -> Path:
+    path = root / _NODE / "overlay.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(body), encoding="utf-8")
+    return path
+
+
+def test_overlay_home_root_is_read_before_the_workspace_config_root(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The overlay home's copy decides the lane while the old copy still sits in the workspace."""
+    _declare(workspace, {"event_bus": {"type": "kafka", "lane": "plain"}})
+    home = tmp_path / "overlay-home" / "overlays"
+    in_home = _declare_in_root(home, {"event_bus": {"type": "kafka", "lane": "scram"}})
+    monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(home))
+    monkeypatch.setenv("KAFKA_SASL_USERNAME", "dev-principal")
+    monkeypatch.setenv("KAFKA_SASL_PASSWORD", _MARKER)
+
+    binding = HandlerNodeBrokerResolve().resolve_node_broker(_NODE)
+
+    assert binding.lane == "scram"
+    assert binding.overlay_path == in_home
+
+
+def test_first_root_that_holds_the_overlay_wins_and_a_root_without_it_is_skipped(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    empty = tmp_path / "empty-root"
+    empty.mkdir()
+    first = tmp_path / "first" / "overlays"
+    second = tmp_path / "second" / "overlays"
+    in_first = _declare_in_root(first, {"event_bus": {"type": "inmemory"}})
+    _declare_in_root(second, {"event_bus": {"type": "kafka", "lane": "plain"}})
+    monkeypatch.setenv(
+        "ONEX_SKILL_OVERLAY_ROOTS",
+        os.pathsep.join([str(empty), str(first), str(second)]),
+    )
+
+    binding = HandlerNodeBrokerResolve().resolve_node_broker(_NODE)
+
+    assert binding.bus_type == EnumEventBusType.INMEMORY
+    assert binding.overlay_path == in_first
+
+
+def test_roots_without_the_overlay_fall_through_to_the_workspace_config_root(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    overlay = _declare(workspace, {"event_bus": {"type": "kafka", "lane": "plain"}})
+    empty = tmp_path / "empty-root"
+    empty.mkdir()
+    monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(empty))
+
+    binding = HandlerNodeBrokerResolve().resolve_node_broker(_NODE)
+
+    assert binding.lane == "plain"
+    assert binding.overlay_path == overlay
+
+
+def test_a_broken_overlay_in_a_root_refuses_and_does_not_fall_back_to_the_workspace_copy(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _declare(workspace, {"event_bus": {"type": "kafka", "lane": "plain"}})
+    home = tmp_path / "overlay-home" / "overlays"
+    broken = _declare_in_root(home, {"not_event_bus": {}})
+    monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(home))
+
+    with pytest.raises(ModelNodeBrokerResolutionError) as refusal:
+        HandlerNodeBrokerResolve().resolve_node_broker(_NODE)
+
+    assert str(broken) in str(refusal.value)
 
 
 def test_inmemory_overlay_resolves_to_an_inmemory_binding_with_no_transport(
