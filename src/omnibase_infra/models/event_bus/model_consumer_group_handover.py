@@ -43,6 +43,27 @@ what the retired consumer did on a partition it never committed (the
 omnimarket projection runner uses ``earliest``); the handover applies the same
 rule there so the runtime continues where the container would have.
 
+``handover_rule`` says which offsets win when both groups hold a commit
+(one-runtime plan T8, the TLA+ model ``formal/consumer_group_handover``):
+
+* ``copy_if_uncommitted`` (the default, the writers' rule): a partition the
+  runtime group already committed keeps its commit. A projection writer UPSERTs
+  on a deterministic key, so the replay a rollback or a second fold causes is
+  absorbed.
+* ``last_ran`` (effects and the worker, whose handlers cannot take a repeat):
+  the destination takes the commit of the side that last ran, over whatever it
+  holds. Every cutover copies that commit onto the destination and only the
+  running side then advances, so on each partition the side that last ran holds
+  the later of the two commits; the planner reads it that way and needs no
+  record of which side was deployed. A second fold therefore never trusts the
+  runtime group's commit from before a rollback (the model's SecondFoldFresh),
+  and a retry after a crash copies from the side that ran last, not from the
+  side the fold started on (its mut_recopy_fixed). The rollback half, the
+  retired side taking the runtime group's commit before it starts, applies the
+  same rule from that side and is not wired by this key alone.
+
+It is declared beside the other keys, as ``handover_rule: last_ran``.
+
 The key is read by ``handler_consumer_group_offset_handover`` and not by
 ``ModelEventBusSubcontract`` in ``omnibase_core``, for the reason
 ``model_consume_concurrency`` gives: it is a runtime-local concern, and
@@ -83,6 +104,16 @@ class ModelConsumerGroupHandover(BaseModel):
             "Where the retired consumer started on a partition it never "
             "committed; applied to such partitions so the runtime group "
             "continues exactly where the retired one would have."
+        ),
+    )
+
+    handover_rule: Literal["copy_if_uncommitted", "last_ran"] = Field(
+        default="copy_if_uncommitted",
+        description=(
+            "Which commit wins on a partition both groups committed: the "
+            "runtime group's own (copy_if_uncommitted, projection writers) or "
+            "the later of the two, the side that last ran (last_ran, consumers "
+            "whose handler cannot take a repeat)."
         ),
     )
 

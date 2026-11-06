@@ -40,6 +40,14 @@ Which offset each partition of the successor group gets is one pure rule,
    during the window on a partition the retired consumer never saw is at or
    after the first retained offset, and the bus default would skip it.
 
+That is the ``copy_if_uncommitted`` rule of the projection writers. A
+declaration with ``handover_rule: last_ran`` (effects and the worker, one-runtime
+plan T8) replaces rule 1: of the two commits still inside retention, the later
+wins, because it belongs to the side that last ran. The successor's own commit
+is kept only when it is that later one; otherwise the retired group's commit is
+copied over it. Rule 3 applies when neither side holds a commit inside
+retention.
+
 Substrates:
 
 * ``EventBusKafka``: two short-lived consumers, one per group, each manually
@@ -155,6 +163,7 @@ def plan_offset_handover(
     first_offsets: Mapping[int, int],
     end_offsets: Mapping[int, int],
     retired_auto_offset_reset: Literal["earliest", "latest"],
+    handover_rule: Literal["copy_if_uncommitted", "last_ran"] = "copy_if_uncommitted",
 ) -> dict[int, int]:
     """Partition to offset for every partition the successor must be given.
 
@@ -162,13 +171,23 @@ def plan_offset_handover(
     """
     plan: dict[int, int] = {}
     for partition in sorted(partitions):
-        if successor_committed.get(partition) is not None:
-            continue
+        first = first_offsets[partition]
+        successor = successor_committed.get(partition)
         retired = retired_committed.get(partition)
-        if retired is not None and retired >= first_offsets[partition]:
+        if handover_rule == "last_ran":
+            retained = [c for c in (successor, retired) if c is not None and c >= first]
+            if retained:
+                later = max(retained)
+                if successor != later:
+                    plan[partition] = later
+                continue
+        elif successor is not None:
+            continue
+        elif retired is not None and retired >= first:
             plan[partition] = retired
-        elif retired_auto_offset_reset == "earliest":
-            plan[partition] = first_offsets[partition]
+            continue
+        if retired_auto_offset_reset == "earliest":
+            plan[partition] = first
         else:
             plan[partition] = end_offsets[partition]
     return plan
@@ -199,6 +218,7 @@ async def _hand_over_on_kafka(
     from_group: str,
     to_group: str,
     from_auto_offset_reset: Literal["earliest", "latest"],
+    handover_rule: Literal["copy_if_uncommitted", "last_ran"],
 ) -> ModelOffsetHandoverResult:
     effective = bus._resolve_effective_group_id(
         to_group, topic, uuid4(), (topic, to_group)
@@ -240,6 +260,7 @@ async def _hand_over_on_kafka(
                 first_offsets={tp.partition: off for tp, off in first.items()},
                 end_offsets={tp.partition: off for tp, off in end.items()},
                 retired_auto_offset_reset=from_auto_offset_reset,
+                handover_rule=handover_rule,
             )
             if plan:
                 await successor.commit(
@@ -254,7 +275,11 @@ async def _hand_over_on_kafka(
         from_group=from_group,
         to_group=successor_group,
         committed=plan,
-        kept=tuple(p for p in partition_ids if successor_committed[p] is not None),
+        kept=tuple(
+            p
+            for p in partition_ids
+            if p not in plan and successor_committed[p] is not None
+        ),
     )
 
 
@@ -265,6 +290,7 @@ async def hand_over_committed_offsets(
     from_group: str,
     to_group: str,
     from_auto_offset_reset: Literal["earliest", "latest"],
+    handover_rule: Literal["copy_if_uncommitted", "last_ran"] = "copy_if_uncommitted",
 ) -> ModelOffsetHandoverResult:
     """Seed ``to_group`` (the id passed to ``subscribe``) from ``from_group``.
 
@@ -278,6 +304,7 @@ async def hand_over_committed_offsets(
             from_group=from_group,
             to_group=to_group,
             from_auto_offset_reset=from_auto_offset_reset,
+            handover_rule=handover_rule,
         )
     if isinstance(event_bus, EventBusKafka):
         return await _hand_over_on_kafka(
@@ -286,6 +313,7 @@ async def hand_over_committed_offsets(
             from_group=from_group,
             to_group=to_group,
             from_auto_offset_reset=from_auto_offset_reset,
+            handover_rule=handover_rule,
         )
     if isinstance(event_bus, EventBusInmemory):
         return ModelOffsetHandoverResult(
@@ -400,6 +428,7 @@ class HandlerContractSubscribePreflight:
                 from_group=self._retired_group,
                 to_group=self._consumer_group,
                 from_auto_offset_reset=self._handover.from_auto_offset_reset,
+                handover_rule=self._handover.handover_rule,
             )
             logger.info(
                 "Consumer group handover: topic=%s from=%s to=%s committed=%s "
