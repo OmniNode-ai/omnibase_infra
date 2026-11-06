@@ -22,7 +22,9 @@ def test_workflow_measurement_is_only_a_node_invocation() -> None:
     assert "push" not in wf.get("on", wf.get(True))
     steps = wf["jobs"]["c28-consumer-flow"]["steps"]
     measure = next(
-        s for s in steps if s["name"] == "Re-measure C28 on the dev lane and grade it"
+        s
+        for s in steps
+        if s["name"] == "Re-measure C28 on the stability lane and grade it"
     )
     command = measure["run"].replace("\\\n", " ")
     assert command.strip().startswith(
@@ -99,7 +101,15 @@ def test_real_node_cli_writes_record_and_propagates_status(
     monkeypatch.setattr(cli_node, "check_omnimarket_drift", lambda **kwargs: None)
     record = tmp_path / "c28-consumer-flow.json"
     request = tmp_path / "request.json"
-    request.write_text(json.dumps({"subject_lane": "dev", "record": str(record)}))
+    request.write_text(
+        json.dumps(
+            {
+                "subject_lane": "dev",
+                "compose_project": "omnibase-infra",
+                "record": str(record),
+            }
+        )
+    )
     result = CliRunner().invoke(
         cli_node.run_node_by_name,
         [
@@ -151,12 +161,12 @@ def test_workflow_compares_both_graders_on_one_observation(
         step
         for step in steps
         if step["name"]
-        == "Compare the script and node on the measured dev-lane observation"
+        == "Compare the script and node on the measured stability-lane observation"
     )
     measure = next(
         step
         for step in steps
-        if step["name"] == "Re-measure C28 on the dev lane and grade it"
+        if step["name"] == "Re-measure C28 on the stability lane and grade it"
     )
     assert steps.index(parity) > steps.index(measure)
     assert "if" not in parity  # Failed/unreadable measurements cannot prove parity.
@@ -174,7 +184,9 @@ def test_workflow_compares_both_graders_on_one_observation(
     path = tmp_path / "c28-consumer-flow.json"
     asyncio.run(
         HandlerConsumerFlow(target=RecordedTarget()).handle(
-            ModelConsumerFlowRequest(subject_lane="dev", record=path)
+            ModelConsumerFlowRequest(
+                subject_lane="dev", compose_project="omnibase-infra", record=path
+            )
         )
     )
     record = json.loads(path.read_text())

@@ -20,8 +20,10 @@
 #   The second one is a CALLER mistake the gateway accepts by design (its
 #   task_type is a bare string; the class universe is registry-owned) and the
 #   consumer refuses one hop later. It is not a fault injected into the lane:
-#   nothing is reconfigured, nothing is stopped, and the lane is the dev lane,
-#   which the lane map declares fully mutable. Everything else is a read.
+#   nothing is reconfigured, nothing is stopped. Everything else is a read.
+#   Since OMN-21485 the lane is the stability lane (operator ruling
+#   2026-10-27: the proofs connect to the lane the team works in, so a dev
+#   redeploy or outage no longer turns C16 red).
 #
 # WHY A SEPARATE WORKFLOW RATHER THAN A JOB IN chain-canary.yml
 #   One job's exit code must answer for exactly ONE criterion, or a red does
@@ -32,18 +34,20 @@
 #
 # WHERE IT RUNS, AND WHICH LANE IT GRADES (OMN-19894)
 #   On any runner of the overlay's pool (vars.LAB_PROBE_RUNS_ON_JSON), against
-#   the first lane of the overlay's ordered list (vars.LAB_LANES_JSON) whose
-#   onex-api answers, at the address the overlay declares. No host label or
+#   the first lane of the stability overlay's ordered list
+#   (vars.LAB_PROOF_LANES_JSON, OMN-21485) carrying lane_role=stability
+#   whose onex-api answers, at the address the overlay declares. No host label or
 #   address is written here (operator rulings 2026-09-28T01:58:06Z and
 #   01:58:17Z). No lane answering is RED naming each lane tried, never a skip.
 #   A lane listed for this probe must honour the credentials below.
 #
-# THE CREDENTIALS: EXISTING, LANE-LOCAL, REUSED IN THEIR OWN REPOSITORY
-#   `CHAIN_CANARY_GATEWAY_API_KEY`, `KAFKA_SASL_USERNAME` and
-#   `KAFKA_SASL_PASSWORD` are already repository secrets HERE, and
-#   chain-canary.yml already injects all three the same way; the broker and
-#   its transport come from the declared CI bus lane exactly as they do there.
-#   No credential is created, rotated, re-issued or revoked. The API key is
+# THE CREDENTIALS: LANE-LOCAL, THE STABILITY LANE'S OWN (OMN-21485)
+#   `CHAIN_CANARY_GATEWAY_API_KEY` and `KAFKA_SASL_*` are
+#   the stability environment's secrets, injected under the names the
+#   probe reads, exactly as chain-canary.yml injects them; the broker and its
+#   transport come from the bus_lane the resolved lane declares. Configure all
+#   three names in that environment before enabling the proof; GitHub otherwise
+#   falls back to a same-named repository secret. The API key is
 #   given to the probe by NAME, never by value.
 #
 # WHY THE BUS AND NOT THE DATABASE, FOR THE ROUTE
@@ -82,7 +86,7 @@ on:
   workflow_dispatch:
     inputs:
       gateway_url:
-        description: 'Tenant-bearing API base URL. Empty grades the first lane of vars.LAB_LANES_JSON whose gateway answers.'
+        description: 'Tenant-bearing API base URL. Empty grades the first stability lane of vars.LAB_PROOF_LANES_JSON whose gateway answers.'
         required: false
         default: ''
       budget_seconds:
@@ -90,7 +94,7 @@ on:
         required: false
         default: '240'
       deploy_wait_seconds:
-        description: 'Total seconds the lane resolution may wait for a dev-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
+        description: 'Total seconds the lane resolution may wait for a stability-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
         required: false
         default: '2400'
 
@@ -106,7 +110,8 @@ env:
 
 jobs:
   c16-receipt-identity:
-    name: C16 receipt identity (dev lane)
+    name: C16 receipt identity (stability lane)
+    environment: stability
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     # OMN-19811: 15 -> 55. The added 40 minutes is the deploy_wait_seconds
     # default of 2400 s (the chain canary's budget), spent only while the deploy
@@ -149,30 +154,16 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
           dest: .lane-table/config/ci_bus_lanes.yaml
 
-      - name: Resolve the declared lane transport
-        run: |
-          set -euo pipefail
-          uv run --frozen python -c "
-          import os, pathlib
-          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
-              lane_transport_env, load_lane_transport,
-          )
-          transport = load_lane_transport(
-              pathlib.Path('.lane-table/config/ci_bus_lanes.yaml'), 'dev'
-          )
-          print(f'lane dev declares {transport.bootstrap_servers} '
-                f'({transport.security_protocol}/{transport.sasl_mechanism})')
-          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
-              for key, value in lane_transport_env(transport).items():
-                  handle.write(f'{key}={value}\n')
-          "
-
-      - name: Resolve the lab lane through the overlay's chain of responders
-        if: ${{ !github.event.inputs.gateway_url }}
+      # OMN-21485 (operator ruling 2026-10-27): C16 grades the STABILITY lane,
+      # never the dev lane. The lane is resolved even when a dispatch
+      # overrides the gateway, because the broker the probe reads its terminal
+      # from is the one this lane declares (bus_lane).
+      - name: Resolve the stability lane through the overlay's chain of responders
         uses: ./.github/actions/resolve-lab-lane
         with:
-          lanes-json: ${{ vars.LAB_LANES_JSON }}
-          require: gateway_url
+          lanes-json: ${{ vars.LAB_PROOF_LANES_JSON }}
+          require: gateway_url bus_lane
+          match: lane_role=stability
           # OMN-19811: a lane that does not answer while its deploy agent reports
           # a deploy in progress is waited for, not graded. Idle, unreadable or
           # undeclared agents and an exhausted budget are still RED. The
@@ -181,6 +172,29 @@ jobs:
           # so also wait when the lane answers but its agent reads busy.
           deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
           wait-while-busy: 'true'
+
+      - name: Resolve the declared lane transport
+        # OMN-21485: the broker is the one the resolved stability lane declares
+        # (its bus_lane), never a fixed lane of the table.
+        env:
+          BUS_LANE: ${{ env.LANE_BUS_LANE }}
+        run: |
+          set -euo pipefail
+          uv run --frozen python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              lane_transport_env, load_lane_transport,
+          )
+          lane = os.environ['BUS_LANE']
+          transport = load_lane_transport(
+              pathlib.Path('.lane-table/config/ci_bus_lanes.yaml'), lane
+          )
+          print(f'lane {lane!r} declares {transport.bootstrap_servers} '
+                f'({transport.security_protocol}/{transport.sasl_mechanism})')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in lane_transport_env(transport).items():
+                  handle.write(f'{key}={value}\n')
+          "
 
       - name: Drive the healthy and the dying delegation and grade C16
         env:

@@ -6,6 +6,8 @@
 #
 name: "node_rsd_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
+descriptor:
+  node_archetype: orchestrator
 runtime_profiles: [main]
 contract_version:
   major: 1
@@ -21,7 +23,7 @@ event_bus:
     minor: 0
     patch: 0
   subscribe_topics:
-    - "onex.cmd.rsd.score.v1"
+    - onex.cmd.rsd.score.v1
     # OMN-17427: `onex.evt.rsd.data-fetched.v1` DELETED from subscribe_topics. No contract and no
     # runtime path anywhere in the fleet publishes it (grep of every omni_home
     # clone, 2026-10-01), so the subscription only minted a permanently empty
@@ -69,6 +71,9 @@ handler_routing:
       handler:
         name: "HandlerRsdInitiate"
         module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_initiate"
+      input_model:
+        name: "ModelRsdCommand"
+        module: "omnibase_infra.nodes.node_rsd_orchestrator.models.model_rsd_command"
       output_events:
         - "ModelRsdDataFetchRequest"
 workflow_coordination:

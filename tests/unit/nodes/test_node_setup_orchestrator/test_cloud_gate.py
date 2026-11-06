@@ -25,6 +25,9 @@ from omnibase_core.models.core.model_deployment_topology_service import (
 from omnibase_infra.nodes.node_setup_orchestrator.handlers.handler_setup_orchestrator import (
     HandlerSetupOrchestrator,
 )
+from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_request import (
+    ModelSetupOrchestratorRequest,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,7 +102,13 @@ class TestCloudGate:
         corr_id = uuid4()
         topology = _topology_with_cloud("postgres")
 
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         assert "setup.cloud.unavailable" in event_types
@@ -122,7 +131,13 @@ class TestCloudGate:
             },
         )
 
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         cloud_event = next(
             e for e in result.result.events if e.event_type == "setup.cloud.unavailable"
@@ -204,7 +219,13 @@ class TestCloudGate:
         )
 
         topology = _topology_all_local()
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         assert "setup.cloud.unavailable" not in event_types
@@ -271,7 +292,13 @@ class TestCloudGate:
         )
 
         topology = _topology_with_disabled("infisical")
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         # DISABLED service must NOT trigger cloud gate
