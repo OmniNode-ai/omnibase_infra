@@ -16,10 +16,11 @@
 # answers a different question -- whether a job is on a hosted runner it should
 # not be on. This one asks whether the label a job names exists at all.
 #
-# Pinned to the omniclaude commit that introduced it rather than @main: that
-# reusable is on omniclaude `dev` and has not been promoted, which is this
-# repository's existing convention for every omniclaude-hosted reusable it
-# calls.
+# Pinned to an omniclaude commit rather than @main: that reusable is on omniclaude
+# `dev` and has not been promoted, which is this repository's existing convention for
+# every omniclaude-hosted reusable it calls. The pin is the commit that runs the job on a
+# GitHub-hosted runner (omniclaude#3171, OMN-22574); the earlier pin selected a self-hosted
+# label, so a public pull request here ran the gate on a lab runner.
 
 name: Runner Label Exists
 
@@ -39,7 +40,7 @@ concurrency:
 
 jobs:
   runner-label-exists:
-    uses: OmniNode-ai/omniclaude/.github/workflows/runner-label-exists-reusable.yml@ed4300f8a427ead7f099daf69cedc012907cdbd3
+    uses: OmniNode-ai/omniclaude/.github/workflows/runner-label-exists-reusable.yml@9a56b9fcee48e5221bfc2ae71b5a82bb9e11a751
     secrets:
       # The Actions job token cannot read the ORGANISATION runner listing --
       # that read needs organisation administration scope, which a workflow
