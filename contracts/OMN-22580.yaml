@@ -41,5 +41,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q
         cwd: .
+      - check_type: command
+        check_value: "! grep -nE \"== (169|135|118|1130)\\b|'omnibase_infra': 148\" contracts/OMN-20074.yaml"
+        cwd: .
     binds_ac:
       - AC2
