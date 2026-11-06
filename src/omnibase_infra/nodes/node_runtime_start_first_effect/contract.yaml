@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_runtime_start_first_effect
+contract_name: node_runtime_start_first_effect
+node_name: node_runtime_start_first_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: Dev-only start-first replacement of one runtime container; invoked locally by the deploy agent outside the runtime it replaces.
+input_model:
+  name: ModelRuntimeStartFirstRequest
+  module: omnibase_infra.models.model_runtime_start_first_request
+  description: The service, its running container, the replacement's in-container /ready URL and the declared readiness bound.
+output_model:
+  name: ModelRuntimeStartFirstResult
+  module: omnibase_infra.models.model_runtime_start_first_result
+  description: Pass when the replacement read /ready 200 and the old container was stopped after it; fail with a named reason otherwise.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: replace
+      handler: {name: HandlerRuntimeStartFirst, module: omnibase_infra.handlers.handler_runtime_start_first}
+capabilities:
+  - name: runtime.start_first_replace
+    description: Start the replacement beside the running runtime and stop the old one only after the replacement reads /ready 200.
+metadata:
+  ticket: OMN-22151
+  author: OmniNode Team
+  description: Host-local effect. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment, dev]

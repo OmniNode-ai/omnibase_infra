@@ -144,7 +144,7 @@ class TestASingleScopeRebuildBringsServicesUpWithoutBuilding:
         executor = DeployExecutor()
         with (
             patch.object(executor, "_compose_build") as compose_build,
-            patch.object(executor, "_build_dev_lane_only_services"),
+            patch.object(executor, "_build_dev_lane_only_services", return_value={}),
             patch.object(executor, "_preflight_runtime_boot"),
             patch.object(executor, "_deploy_gateway_lane"),
             patch.object(executor, "_compose_up") as compose_up,
@@ -165,4 +165,5 @@ class TestASingleScopeRebuildBringsServicesUpWithoutBuilding:
             _noop,
             lane=EnumRuntimeLane.DEV,
             compose_may_build=False,
+            extra_env={},
         )
