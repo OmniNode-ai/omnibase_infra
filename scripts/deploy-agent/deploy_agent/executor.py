@@ -3938,10 +3938,13 @@ class DeployExecutor:
                 return
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "self_update[boundary=%s]: unit sync/restart failed: %s",
-                boundary.value,
-                exc,
+                "self_update[boundary=%s]: unit restart failed: %s", boundary.value, exc
             )
+            # systemd stops this unit for its own restart with SIGTERM (-15) to every process of the cgroup,
+            # the restart command included. Re-execing here keeps the pid the stop job waits for, so it times
+            # out and SIGKILLs the cgroup with the next job in it (OMN-22478): return, SIGTERM ends the process.
+            if getattr(exc, "returncode", None) == -15:
+                return
 
         # STEP 2 -- decide whether to RE-EXEC, and decide it against the code
         # this process actually loaded. The clone being current with the remote
