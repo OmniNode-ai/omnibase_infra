@@ -46,7 +46,7 @@ handler_routing:
     - operation: registration_from_announcement.adapt
       handler:
         name: HandlerRegistrationFromAnnouncement
-        module: omnibase_infra.handlers.handler_registration_from_announcement
+        module: omnibase_infra.handlers.handler_registration_from_announcement.handler
       description: Build the introspection event the registration orchestrator reads from an announcement and the runtime's own identity.
       supported_operations: [registration_from_announcement.adapt]
       input_model:

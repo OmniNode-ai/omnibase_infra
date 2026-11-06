@@ -247,6 +247,7 @@ profiles:
           # Delegation and hook-event consumers subscribe before every other
           # contract's, in this order.
           priority_contracts:
+            - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
             - node_delegation_chain_ledger_effect
             - projection_claude_hook_events
@@ -263,6 +264,14 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
+        # The client checks first-hop membership before publishing, including
+        # when this separate effects carrier has never received a request.
+        boot:
+          ready_bound_seconds: 600
+          max_concurrent_contract_attach: 4
+          priority_contracts:
+            - node_delegate_skill_orchestrator
+          memory_limit: 1536M
         # OMN-20533: the READ half of BYOK on the .201 dev lane. onex-api writes
         # a tenant's provider key to Infisical env dev, folder
         # /tenant-inference-credentials, under a ref minted per request
