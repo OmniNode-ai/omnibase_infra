@@ -64,6 +64,11 @@ rule there so the runtime continues where the container would have.
 
 It is declared beside the other keys, as ``handover_rule: last_ran``.
 
+Under either rule the handover first fences the retired group: it proceeds only
+when that group has no members, waiting up to ``fence.wait_seconds``
+(``ModelConsumerGroupFence``), so no fold takes over a position its old
+consumer is still moving.
+
 The key is read by ``handler_consumer_group_offset_handover`` and not by
 ``ModelEventBusSubcontract`` in ``omnibase_core``, for the reason
 ``model_consume_concurrency`` gives: it is a runtime-local concern, and
@@ -79,6 +84,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.event_bus.model_consumer_group_fence import (
+    ModelConsumerGroupFence,
+)
 from omnibase_infra.utils import compute_consumer_group_id
 
 __all__ = ["ModelConsumerGroupHandover"]
@@ -114,6 +122,14 @@ class ModelConsumerGroupHandover(BaseModel):
             "runtime group's own (copy_if_uncommitted, projection writers) or "
             "the later of the two, the side that last ran (last_ran, consumers "
             "whose handler cannot take a repeat)."
+        ),
+    )
+
+    fence: ModelConsumerGroupFence = Field(
+        default_factory=ModelConsumerGroupFence,
+        description=(
+            "The wait for the retired group to have no members before its "
+            "commit is read; a group still consumed is refused (OMN-22714)."
         ),
     )
 

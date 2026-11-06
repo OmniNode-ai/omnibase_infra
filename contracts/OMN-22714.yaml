@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-22714
 title: T8a The effects consumer-group handover fences the side that last ran and copies its commit to the destination, so a rollback and a second fold run no effect twice
-summary: First pull request of the one-runtime plan's T8 (fold effects on dev). The consumer-group handover declaration gains handover_rule, and under last_ran the planner copies the commit of the side that last ran (the later of the two commits inside retention) over the destination, the rule of the TLA+ model formal/consumer_group_handover (verdict SAFE). No contract declares last_ran yet and no container changes.
+summary: First pull request of the one-runtime plan's T8 (fold effects on dev). Every handover first fences its source, refusing while the retired group has a member, so no fold copies a position its old consumer is still moving. The consumer-group handover declaration gains handover_rule, and under last_ran the planner copies the commit of the side that last ran (the later of the two commits inside retention) over the destination, the rule of the TLA+ model formal/consumer_group_handover (verdict SAFE). No contract declares last_ran yet and no container changes.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -17,8 +17,8 @@ requirements:
         statement: 'AC3: a source whose committed offset cannot be read yields a refusal and never a copy from guessed offsets -- falsifier: uv run pytest -q on the planner''s error test with an unreadable source group'
 evidence_requirements:
   - kind: tests
-    description: The planner's last_ran rule, the fold, rollback and second fold simulation with its two controls, the tenant-registry rollback-then-refold case, the unreadable-source refusal and the Kafka path.
-    command: uv run pytest tests/unit/handlers/test_consumer_group_handover_last_ran_omn21288.py -q --no-cov
+    description: The planner's last_ran rule, the fold, rollback and second fold simulation with its two controls, the tenant-registry rollback-then-refold case, the unreadable-source refusal, the Kafka path and the source fence.
+    command: uv run pytest tests/unit/handlers/test_consumer_group_handover_last_ran_omn21288.py tests/unit/handlers/test_consumer_group_handover_fence_omn22714.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -32,6 +32,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/handlers/test_consumer_group_handover_last_ran_omn21288.py -q --no-cov --tb=line -k "copies or keeps or retention or declaration or kafka_path"
+        cwd: .
+  - id: dod-omn22714-fence-refuses-a-consumed-source
+    description: Before any offset is read, the handover describes the retired group and refuses while it has a member (under either rule, after the declared fence wait) or when its membership cannot be read; a member that leaves inside the wait lets it run. With the handler from before the fence, a running retired consumer's position is copied.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_consumer_group_handover_fence_omn22714.py -q --no-cov --tb=line
         cwd: .
   - id: dod-omn22714-rollback-then-refold
     description: Fold, rollback and second fold with crashed and retried cutovers run each event's effect once, and the tenant-registry case (runtime group at 46 of 46) carries 46 back and 50 forward without a second run; the writers' rule and a rollback with no reverse copy each run an effect twice.

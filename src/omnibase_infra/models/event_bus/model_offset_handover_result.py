@@ -23,6 +23,9 @@ class ModelOffsetHandoverResult(BaseModel):
             instance or namespace scoping the transport applies).
         committed: Partition to the offset committed into ``to_group``.
         kept: Partitions ``to_group`` had already committed, left untouched.
+        fenced_group: The retired group confirmed to have no members before
+            any offset was read (OMN-22714); ``None`` where the substrate keeps
+            no group membership.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -32,3 +35,4 @@ class ModelOffsetHandoverResult(BaseModel):
     to_group: str = Field(..., min_length=1)
     committed: dict[int, int] = Field(default_factory=dict)
     kept: tuple[int, ...] = Field(default=())
+    fenced_group: str | None = Field(default=None, min_length=1)

@@ -42,7 +42,9 @@ class ProtocolConsumerGroupOffsetHandover(Protocol):
         """Seed ``to_group`` on ``topic`` from ``from_group``.
 
         Must be called before the ``subscribe`` that joins ``to_group``,
-        while the retired consumer is stopped. Applies
+        while the retired consumer is stopped; an implementation whose groups
+        have members refuses while ``from_group`` has any, as the Kafka path's
+        fence does (OMN-22714). Applies
         ``plan_offset_handover`` with ``handover_rule``: under
         ``copy_if_uncommitted`` a partition ``to_group`` already committed is
         kept, and under ``last_ran`` the later of the two commits wins; either
