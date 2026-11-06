@@ -115,6 +115,7 @@ databases:
               - log_entries
               - open_obligations
               - orchestration_style_outcomes
+              - overlay_store
               - pr_landing_state
               - pr_landing_transitions
               - pr_state

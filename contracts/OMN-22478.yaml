@@ -6,6 +6,12 @@ summary: >-
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+requirements:
+  - id: req-omn22478-overlay-store-migrations
+    statement: The overlay store's table is vendored byte for byte from the omnimarket node, ledgered and granted to the runtime.
+    acceptance:
+      - id: AC12
+        statement: 'AC12: the vendored bytes, ledger binding and classes are exact -- falsifier: a changed byte or a missing ledger row fails'
 evidence_requirements:
   - kind: tests
     description: CI Summary passes with the reviewer's rows red or absent, and the reviewer starts no run.
@@ -41,4 +47,22 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/models/infisical/__init__.py?ref=$(git rev-parse HEAD)\" --jq '.content' | base64 -d | python3 -c 'import sys; assert \"ModelInfisicalHandlerConfig = ModelInfisicalConfig\" in sys.stdin.read()'"
+        cwd: .
+  - id: dod-omn22478-overlay-store-vendor
+    description: The vendored overlay store migrations match their pinned bytes and ledger binding, and the column keeps key order.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC12]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn22478_overlay_store_vendor.py -q --no-cov
+        cwd: .
+  - id: dod-omn22478-overlay-integration-proof
+    description: >-
+      The pushed head ran the vendor test and the topology tests on a lab host through the lab work runner. Hosted CI cannot reach the lab, so only the local Done gate runs this check.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: 'uv run onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-22478 -- uv run --frozen pytest tests/unit/migrations/test_omn22478_overlay_store_vendor.py tests/ci/test_supplemental_declaration_expiry_omn18863.py -q --no-cov'
         cwd: .

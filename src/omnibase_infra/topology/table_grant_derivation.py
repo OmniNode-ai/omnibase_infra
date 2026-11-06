@@ -378,7 +378,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_add_context_audit_event_key.sql",
         schema="public",
     ),
-    # The four bridges below share one shape: 0000_create_<table>.sql under the
+    # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
         _vendored_read_write(t, d)
@@ -387,6 +387,10 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
             # when node_context_install_confirm_trigger_effect reaches the pin.
             ("compaction_activations", "node_context_install_confirm_trigger_effect"),
+            # OMN-22478: node_projection_overlay_store/0000 creates the overlay store
+            # ahead of the omnimarket writer's contract and 0001 grants omninode_runtime
+            # SELECT, INSERT, UPDATE; expire this bridge when that contract reaches the pin.
+            ("overlay_store", None),
             # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
             # omnimarket node contract. 0001 grants
             # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
