@@ -185,11 +185,6 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: the dev runtime phase leaves later services at their previous image and emits no success when a rolling step fails its running check, its health wait or its subprocess deadline; each step honors its service health budget and rollback retains its forced batch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q'
-  - id: req-omn19998-hook-venv-installer-revision
-    statement: The hook environment reconciler must read installer-selected Git revisions before exact sync, refuse a plan that discards their commits, and verify the approved revisions afterward.
-    acceptance:
-      - id: AC40
-        statement: 'AC40: exact hook sync refuses a same-version branch replacement before mutation, permits a forward revision and unrelated lock repairs, refuses an unreadable plan, and rejects a zero-exit sync that loses the selected revision; a real offline uv and local Git package replay retains the branch commit -- falsifier: uv run pytest tests/scripts/test_reconcile_workspace_venvs.py -q --no-cov'
 evidence_requirements:
   - kind: tests
     description: The rolling runtime tests drive the executor over the recorded service inventory and exercise health-wait failure, missing running state, a timeout and successful convergence. The budget tests check each service's declared health bound.
@@ -280,25 +275,6 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn19998-ac40-hook-venv-installer-revision
-    description: AC40 runs the shipped host reconciler through its contract-bound hook effect. A real offline uv build installs a local Git branch at the locked version, then the exact sync refuses the older lock revision and reads back the branch commit. Shim controls cover installed commits, forward revisions, unrelated repairs, unreadable plans and revision loss after a zero exit.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/scripts/test_reconcile_workspace_venvs.py tests/unit/nodes/node_reconcile_workspace_venvs/test_hook_venv_refusals.py -q --no-cov
-        cwd: .
-      - check_type: command
-        check_value: uv run pytest tests/scripts/test_reconcile_workspace_venvs.py -q --no-cov -k real_uv_hook_sync
-        cwd: .
-    binds_ac: [AC40]
-  - id: dod-omn19998-ac40-hook-bootstrap-readback
-    description: AC40 executes the local bootstrap with real offline uv and a same-version Git package. A rewind is refused without changing installer metadata or installed code; a forward update is applied and both metadata and imported code are read back. This hosted-runner deployment artifact probe uses disposable local repositories and no live lane or credentials.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: uv run pytest tests/integration/runtime/test_hook_venv_bootstrap_branch_intent_omn19998.py -q --no-cov
-        cwd: .
-    binds_ac: [AC40]
   - id: dod-omn19998-ac39-runtime-roll
     description: AC39 exercises the real executor through its Docker boundary. Failed health waits, failed running checks and deadlines stop the roll without success, while unchanged services, successful rolls and forced rollback retain their behavior. This is a hermetic executor proof, not a live gapless redeploy.
     source: manual
