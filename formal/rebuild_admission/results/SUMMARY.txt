@@ -1,0 +1,168 @@
+module RebuildAdmission.tla sha 19e494056d4e989d, RebuildAdmissionExt.tla sha 787de362b96664e2, at 7e46baab7.
+Each row: its cfg sha at that commit; ran= the commit the result ran at, whose module and cfg bytes equal these;
+host, TLC workers, heap, distinct states. Base_* and live_* must hold; mut_*, wit_* and ctl_* must report their named property.
+
+Base_emergency                           cfg=39d703a84da7 ran=011826fba host=h051 workers= 8 heapMB=14564 states=     3055744 holds
+Base_ext_above_seven                     cfg=0533ec32f3d7 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=      198032 holds
+Base_ext_second_lanes                    cfg=3be8d06a720f ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=      409892 holds
+Base_ext_table                           cfg=0325df2499e4 ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=    17207112 holds
+Base_fence_cause                         cfg=2962954a8f6f ran=f9fb70513 host=h053 workers=16 heapMB=21845 states=     6477364 holds
+Base_fence_cont                          cfg=3fcb977c2418 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=     7745856 holds
+Base_fence_join                          cfg=0732e53f6e83 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=     6094804 holds
+Base_fence_kept                          cfg=d1f4714d3d8c ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=     7745856 holds
+Base_fence_ord                           cfg=51e01f7794fc ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=           - NOT PROVEN: unfinished
+Base_fence_repair                        cfg=7c3c5c579806 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=     7400580 holds
+Base_fence_scause                        cfg=b5da5f50dae6 ran=7e46baab7 host=h053 workers= 4 heapMB=12743 states=     4276520 holds
+Base_holder                              cfg=ec7ccc446fbc ran=011826fba host=h051 workers= 8 heapMB=14564 states=      448512 holds
+Base_mini                                cfg=58d796f25d7c ran=011826fba host=h053 workers= 8 heapMB=14564 states=     6832608 holds
+Base_stop                                cfg=f34366c930eb ran=f9fb70513 host=h053 workers=16 heapMB=21845 states=     8943450 holds
+Base_table                               cfg=ecd62cefec61 ran=f9fb70513 host=h053 workers=16 heapMB=21845 states=           - NOT PROVEN: unfinished
+Base_union                               cfg=1c060420b329 ran=011826fba host=h051 workers=16 heapMB=21845 states=           - NOT PROVEN: unfinished
+Base_union_core                          cfg=46c4c34841a6 ran=7e46baab7 host=h053 workers=16 heapMB=21845 states=   153944409 holds (last of parts 1, 2, 4 at the same bytes; parts 1 and 2 ran at 011826fba and 7e46baab7 on h051; README)
+Base_wip2                                cfg=983750480e41 ran=011826fba host=h051 workers= 8 heapMB=14564 states=      650088 holds
+Base_wip8                                cfg=623ef63029d0 ran=011826fba host=h051 workers= 8 heapMB=14564 states=     2705413 holds
+ctl_close_on_table                       cfg=696f47394282 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 fails as required: FixedSafetyCloses
+ctl_drop_buildesc                        cfg=b5d501d81de2 ran=011826fba host=h051 workers= 8 heapMB=14564 states=         176 fails as required: BuildingEscalates
+ctl_drop_emstart                         cfg=176e9116a892 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        7392 fails as required: EmergencyStarts
+ctl_drop_engrace                         cfg=7b1102006ca8 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        1184 fails as required: ReadyStepAdvances
+ctl_drop_esc                             cfg=460e14a226f8 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=      284936 fails as required: StopClearsOrEscalates
+ctl_drop_escback                         cfg=883afb6eb8cc ran=011826fba host=h051 workers= 8 heapMB=14564 states=         656 fails as required: StopClearsOrEscalates
+ctl_drop_probe                           cfg=70f358f54914 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        7392 fails as required: EmergencyStarts
+ctl_drop_probesource                     cfg=e26ea48cb720 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 fails as required: FixedSafetyCloses
+ctl_drop_readgone                        cfg=dfa7a4093ed7 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 fails as required: SafetyCauseStarts
+ctl_drop_recover                         cfg=23fefed22a01 ran=011826fba host=h051 workers= 8 heapMB=14564 states=         148 fails as required: ReadyStepAdvances
+ctl_drop_safetyclose                     cfg=a78717fda761 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 fails as required: FixedSafetyCloses
+ctl_drop_safetyopen                      cfg=70187e425ab4 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 fails as required: BadSourceRecorded
+ctl_drop_stale                           cfg=75082777a280 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 fails as required: WriterRepairStarts
+ctl_drop_step                            cfg=2ca36f7ebed6 ran=011826fba host=h051 workers= 8 heapMB=14564 states=         148 fails as required: ReadyStepAdvances
+ctl_drop_storeback                       cfg=cc034704b4ae ran=011826fba host=h051 workers= 8 heapMB=14564 states=        7392 fails as required: BadSourceRecorded
+ctl_drop_sweep                           cfg=439df7510559 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        6118 fails as required: ParkedLaneComesBack
+ctl_escalate_on_reader                   cfg=32036a427e5f ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=      854808 fails as required: StopClearsOrEscalates
+ctl_holder_in_engine                     cfg=a9ee4d3630ec ran=011826fba host=h051 workers= 8 heapMB=14564 states=       34944 fails as required: SafetyCauseStarts
+ctl_no_escalation                        cfg=8c93adb903f3 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       81352 fails as required: StopClearsOrEscalates
+ctl_no_restart                           cfg=5d9ef07e82ee ran=011826fba host=h051 workers= 8 heapMB=14564 states=         148 fails as required: ReadyStepAdvances
+ctl_safety_no_escalation                 cfg=faa3d9ed4e6d ran=011826fba host=h051 workers= 8 heapMB=14564 states=        5408 fails as required: SafetyStopClearsOrEscalates
+ctl_weak_retry_admit                     cfg=c66ea3b7f38b ran=011826fba host=h051 workers= 8 heapMB=14564 states=          85 fails as required: AdmissibleStarts
+ctl_weak_retry_cause                     cfg=9324291569c8 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=      284936 fails as required: StopCauseStarts
+ctl_weak_retry_repair                    cfg=529976b836df ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 fails as required: WriterRepairStarts
+ctl_weak_retry_safety                    cfg=f5e5da16f5b1 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 fails as required: SafetyCauseStarts
+live_building                            cfg=a6178fdc23cd ran=011826fba host=h051 workers= 8 heapMB=14564 states=         176 holds
+live_emergency                           cfg=7ae1ea1b0eb7 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        7392 holds
+live_emergency_outage                    cfg=96b4bfa4098c ran=011826fba host=h051 workers= 8 heapMB=14564 states=        7392 holds
+live_engine                              cfg=317a396ae4d2 ran=011826fba host=h051 workers= 8 heapMB=14564 states=         148 holds
+live_engine_race                         cfg=5a382a9181ba ran=011826fba host=h051 workers= 8 heapMB=14564 states=        1184 holds
+live_esc_timer                           cfg=5bf29e737a76 ran=011826fba host=h051 workers= 8 heapMB=14564 states=         656 holds
+live_holder_dead                         cfg=c5921d8f529b ran=011826fba host=h051 workers= 8 heapMB=14564 states=       34944 holds
+live_park                                cfg=34a2eedc5e42 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        6118 holds
+live_safety                              cfg=e164a288f6c0 ran=011826fba host=h051 workers= 8 heapMB=14564 states=        8736 holds
+live_stop                                cfg=86a81df8b239 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=      284936 holds
+live_union_admit_c3                      cfg=1169c499b62d ran=011826fba host=h051 workers= 8 heapMB=21845 states=     2573280 holds
+live_union_admit_g                       cfg=e83fcc906af5 ran=011826fba host=h051 workers= 8 heapMB=21845 states=     2573280 holds
+live_union_admit_j                       cfg=71bfa4010289 ran=011826fba host=h051 workers= 8 heapMB=21845 states=     2573280 holds
+live_union_admit_kf                      cfg=80b709f4d1ed ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=     2573280 holds
+live_union_admit_o1                      cfg=996396129d42 ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=     2573280 holds
+live_union_admit_r1                      cfg=9b723755a9a0 ran=7e46baab7 host=h053 workers= 8 heapMB=16384 states=     2573280 holds
+live_union_admit_s1                      cfg=3658ecd522d7 ran=011826fba host=h051 workers= 4 heapMB=16384 states=     2573280 holds
+live_union_admit_u                       cfg=1ebbfda27843 ran=011826fba host=h051 workers= 4 heapMB=16384 states=     2573280 holds
+live_union_crash                         cfg=f0edfec9d45b ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=           - NOT PROVEN: unfinished
+live_union_esc                           cfg=0c351438f6b9 ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=           - NOT PROVEN: unfinished
+live_union_low                           cfg=0494397f5c47 ran=7e46baab7 host=h053 workers= 8 heapMB=16384 states=       94728 holds
+live_union_repair                        cfg=e0778158b75f ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=   3,450,072 NOT PROVEN: unfinished
+live_union_safety                        cfg=dca0bd55639f ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=   3,431,040 NOT PROVEN: unfinished
+live_union_stop                          cfg=bd40d3f91178 ran=7e46baab7 host=h053 workers= 8 heapMB=16384 states=     3556680 holds
+live_union_store                         cfg=72e3cb66cac3 ran=7e46baab7 host=h053 workers= 8 heapMB=16384 states=      239568 holds
+mut_ext_b0_exempt                        cfg=2b99633701f2 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=          36 fails as required: B0DrawsCredit
+mut_ext_cont_refused                     cfg=a8f427ca3a3e ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=         121 fails as required: ContinuationPasses
+mut_ext_kept_all_stale                   cfg=0f7e45cc14f5 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=         187 fails as required: KeptAtActiveOnStale
+mut_ext_kept_stale_above                 cfg=e49042a74167 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=         184 fails as required: KeptAboveSevenRefusedOnStale
+mut_ext_place_frees_at_exit              cfg=cd2abe2434a4 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=         102 fails as required: PlacesHeldUntilGone
+mut_ext_repair_frees_at_exit             cfg=65a67ac9c376 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=          45 fails as required: SlotsHeldUntilGone
+mut_ext_slot_frees_at_exit               cfg=4192c3a7643d ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=          72 fails as required: SlotsHeldUntilGone
+mut_p1_cause_only_low                    cfg=d17ce0a475f1 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         497 fails as required: CauseOfKeptRuns
+mut_p1_cont_in_safety                    cfg=15271775314b ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         106 fails as required: DecideFollowsOrder
+mut_p1_credit_refuses_repair             cfg=28a8830fc816 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         172 fails as required: RepairNeverRefusedForCredit
+mut_p1_credit_refuses_safety             cfg=28cbc61aabd6 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         138 fails as required: SafetyCauseAdmitted
+mut_p1_fence_cont_only                   cfg=14f83e64c640 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         539 fails as required: NoStepBeginsWhileParked
+mut_p1_fence_off                         cfg=5e9d07e11c6c ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         526 fails as required: NoStepBeginsWhileParked
+mut_p1_fence_once                        cfg=6b45692751a0 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        1135 fails as required: AtMostOneStepAfterPark
+mut_p1_fence_split                       cfg=1728f7cb68c1 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         773 fails as required: NoStepBeginsWhileParked
+mut_p1_gate_lag                          cfg=927dc2f74b16 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          86 fails as required: NoStartAgainstOrder
+mut_p1_init_all_working                  cfg=ab724e1f9a07 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        1492 fails as required: OrderOnlyOverWorkingPiece
+mut_p1_join_no_slot                      cfg=f577dfac6bdc ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         283 fails as required: OneJoinLane
+mut_p1_kept_refused_under_stop           cfg=a714370cfad2 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          77 fails as required: KeptPassesStop
+mut_p1_late_bind                         cfg=ad170521a329 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        1436 fails as required: NoStartAgainstOrder
+mut_p1_no_epoch                          cfg=ad1c579386a3 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         421 fails as required: NoStartAgainstOrder
+mut_p1_no_join_target                    cfg=5d284f991df0 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=           - fails as required: DecideFollowsOrder
+mut_p1_no_pred                           cfg=0d7ad81b68fd ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=           - fails as required: DecideFollowsOrder
+mut_p1_no_recheck                        cfg=b22791549f42 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         596 fails as required: NoStartAgainstOrder
+mut_p1_no_slot                           cfg=92bd8013928e ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          41 fails as required: OneCauseLane
+mut_p1_no_stop_park                      cfg=af512180bb1a ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=      130267 fails as required: NoStepBeginsWhileParked
+mut_p1_plan_cause_needs_credit           cfg=bd6126678eaf ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          65 fails as required: EveryStopHasAWayIn
+mut_p1_plan_cloud_lane                   cfg=2fee530c37b3 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        1737 fails as required: NoStepBeginsWhileParked
+mut_p1_repair_unbounded                  cfg=bf806d8d0fae ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          28 fails as required: OneRepairLane
+mut_p1_ro_after_safety                   cfg=a7b4bf74010d ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         122 fails as required: ReadOnlyAdmitted
+mut_p1_scause_filtered                   cfg=9b373bf2a279 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         124 fails as required: SafetyCauseAdmitted
+mut_p1_stale_before_safety               cfg=7a0ab1b904a4 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         515 fails as required: SafetyCauseAdmitted
+mut_p1_stop_before_stale                 cfg=8ab974a06089 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         282 fails as required: DecideFollowsOrder
+mut_p1_store_down_lets_cause_act         cfg=6b28df8f1314 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         295 fails as required: OutageHoldsSteps
+mut_p2_credit_no_compare                 cfg=392d294c869c ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          66 fails as required: CreditNotOverdrawn
+mut_p2_expired_token                     cfg=6ace9ddc50c4 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         469 fails as required: AliveWithinLimit
+mut_p2_join_split                        cfg=6d0d26c99142 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         230 fails as required: AliveWithinLimit
+mut_p2_late_bind                         cfg=b7c4f80b472e ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         832 fails as required: AliveWithinLimit
+mut_p2_parked_frees_place                cfg=b216605c864a ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       11998 fails as required: AliveWithinLimit
+mut_p2_row_gap                           cfg=722b27e25081 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         252 fails as required: AliveWithinLimit
+mut_p2_rows_only                         cfg=9298ab51147c ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         241 fails as required: AliveWithinLimit
+mut_p2_rows_only_limit8                  cfg=533d44d5c5d3 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=     1648480 fails as required: AliveWithinLimit
+mut_p2_third_close                       cfg=b3896437f57c ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         314 fails as required: AliveWithinLimit
+mut_p3_clear_no_reading                  cfg=f4c6a8878d66 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         348 fails as required: StopClearsOnlyWithEvidence
+mut_p3_clear_no_rows                     cfg=021db4720c80 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         975 fails as required: StopClearsOnlyWithEvidence
+mut_p3_close_no_probe                    cfg=4eed832b896f ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         278 fails as required: SafetyClosesOnCleanProbe
+mut_p3_lease_keeps_reading               cfg=722968058183 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       26267 fails as required: StopClearsOnlyWithEvidence
+mut_p3_old_probe                         cfg=8df4e86f3a64 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       24816 fails as required: SafetyClosesOnCleanProbe
+mut_p3_old_reading                       cfg=aee826352e14 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         788 fails as required: StopClearsOnlyWithEvidence
+mut_p3_rows_survive                      cfg=c751c315b217 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       22798 fails as required: StopClearsOnlyWithEvidence
+mut_p3_see_before_lease                  cfg=c5befc933038 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        4334 fails as required: StopClearsOnlyWithEvidence
+mut_p3_stop_while_building               cfg=84836f015c61 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          24 fails as required: StopsOnlyPastBuilding
+mut_p4_consume_after_epoch               cfg=a5d73d192777 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         280 fails as required: NeverConsumedAfterEpoch
+mut_p4_effect_then_key                   cfg=d91572005a07 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       12461 fails as required: RestartRepeatsNoStep
+mut_p4_em_caller_word                    cfg=508724772ec8 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          22 fails as required: NoStartAgainstOrder
+mut_p4_em_per_host                       cfg=981becf0f7bf ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         634 fails as required: OneEmergencyPerOutage
+mut_p4_fail_open_on_down                 cfg=310a7b440531 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         203 fails as required: NoStartWhileStoreDown
+mut_p4_fence_read                        cfg=0c4a658157bf ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       21543 fails as required: NoWriteByLostOwner
+mut_p4_key_read                          cfg=28d47a272f95 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       24674 fails as required: RestartRepeatsNoStep
+mut_p4_keys_per_engine                   cfg=faf5c7b562d9 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       24207 fails as required: RestartRepeatsNoStep
+mut_p4_no_fence                          cfg=c628424ef598 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        7739 fails as required: NoWriteByLostOwner
+mut_p4_no_kill_advance                   cfg=34a150f0e50a ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       24702 fails as required: NeverConsumedAfterEpoch
+mut_p4_no_kill_breaks                    cfg=6e62243db82b ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         231 fails as required: NeverConsumedAfterEpoch
+mut_p4_no_kill_clears                    cfg=4447bca903b5 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       15272 fails as required: NeverConsumedAfterEpoch
+mut_p4_no_kill_handover                  cfg=16dd086af43f ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         330 fails as required: NeverConsumedAfterEpoch
+mut_p4_no_kill_join                      cfg=b2cfa5b9056c ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       12482 fails as required: NeverConsumedAfterEpoch
+mut_p4_no_kill_publish                   cfg=81fd823ae650 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         211 fails as required: NeverConsumedAfterEpoch
+mut_p4_no_kill_safety_closes             cfg=36aa220e614c ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       24309 fails as required: NeverConsumedAfterEpoch
+mut_p4_no_kill_safety_opens              cfg=875687fe9198 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         282 fails as required: NeverConsumedAfterEpoch
+mut_p4_record_per_engine                 cfg=523ca422d98d ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       13578 fails as required: NoWriteByLostOwner
+mut_p4_redelivery_no_identity            cfg=ed765a498b83 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         284 fails as required: ConsumedAtMostOnce
+mut_p4_redelivery_no_used_check          cfg=9de7017d4825 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         149 fails as required: ConsumedAtMostOnce
+mut_p4_unkeyed                           cfg=ac15eeab671b ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       13405 fails as required: RestartRepeatsNoStep
+wit_WitActAfterFailureOpens              cfg=6c8e1d916ef0 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         228 fails as required: WitActAfterFailureOpens
+wit_WitClosedWhileSourceBad              cfg=332222aaf406 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        9088 fails as required: WitClosedWhileSourceBad
+wit_WitCreditZeroCauseRuns               cfg=ccc536a9dff1 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         673 fails as required: WitCreditZeroCauseRuns
+wit_WitDeadCauseHoldsSlot                cfg=790ba8e45da7 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         239 fails as required: WitDeadCauseHoldsSlot
+wit_WitEmergencyAfterReturn              cfg=7f9a1b070b96 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         727 fails as required: WitEmergencyAfterReturn
+wit_WitEmergencyInOutage                 cfg=5320be488c57 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         352 fails as required: WitEmergencyInOutage
+wit_WitFallbackAdvances                  cfg=a13dcc62de04 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=       13221 fails as required: WitFallbackAdvances
+wit_WitKeptRunsUnderStop                 cfg=8c5cd19ce3e4 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         160 fails as required: WitKeptRunsUnderStop
+wit_WitLimitReached                      cfg=6b5e2dd9652a ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          94 fails as required: WitLimitReached
+wit_WitLowerPieceRunsUnderStop           cfg=f07e48a0a30c ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=          81 fails as required: WitLowerPieceRunsUnderStop
+wit_WitOldEngineStillActing              cfg=3f85dc9e4dc3 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         231 fails as required: WitOldEngineStillActing
+wit_WitOrderAdvances                     cfg=2c07704265df ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        8617 fails as required: WitOrderAdvances
+wit_WitParkedByStop                      cfg=f09124ec7b82 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=      122057 fails as required: WitParkedByStop
+wit_WitParkedHoldsPlace                  cfg=b956f26d3a62 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         494 fails as required: WitParkedHoldsPlace
+wit_WitPieceReadsBuilding                cfg=ff3b5f64efc1 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         122 fails as required: WitPieceReadsBuilding
+wit_WitRepairDuringSafety                cfg=81aef7c29734 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        2700 fails as required: WitRepairDuringSafety
+wit_WitSafetyCauseStartsOnStaleTable     cfg=0aca488fc869 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        2475 fails as required: WitSafetyCauseStartsOnStaleTable
+wit_WitStaleReservationHeld              cfg=18810cf0bda4 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         270 fails as required: WitStaleReservationHeld
+wit_WitStartDuringSourceLag              cfg=68b541263d4f ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         262 fails as required: WitStartDuringSourceLag
+wit_WitStartWithBothEnginesDown          cfg=65ade8ffff33 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=         305 fails as required: WitStartWithBothEnginesDown
+wit_WitStopCleared                       cfg=fe083bdcbcc3 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=        3174 fails as required: WitStopCleared
+wit_WitTwoStopsCauseOfKept               cfg=5d47076a4353 ran=f9fb70513 host=h051 workers= 8 heapMB=14564 states=      271486 fails as required: WitTwoStopsCauseOfKept

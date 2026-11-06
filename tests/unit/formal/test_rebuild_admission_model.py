@@ -32,7 +32,10 @@ def _out(name: str) -> str:
 @pytest.mark.unit
 def test_results_match_the_model() -> None:
     digest = hashlib.sha256()
-    for path in [MODEL / "RebuildAdmission.tla", *sorted(MODEL.glob("*.cfg"))]:
+    for path in [
+        *sorted(MODEL.glob("RebuildAdmission*.tla")),
+        *sorted(MODEL.glob("*.cfg")),
+    ]:
         digest.update(path.read_bytes())
     assert (RESULTS / "model.sha256").read_text().strip() == digest.hexdigest()
 

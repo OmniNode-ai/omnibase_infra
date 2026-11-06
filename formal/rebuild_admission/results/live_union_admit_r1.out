@@ -1,0 +1,46 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 65 and seed -8530273856630705329 with 8 workers on 8 cores with 16384MB heap and 2048MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/RebuildAdmission.tla
+Parsing file /tmp/tlc-4595309805106249446/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-4595309805106249446/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-4595309805106249446/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-4595309805106249446/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-4595309805106249446/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-4595309805106249446/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-4595309805106249446/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-06 06:41:19)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-06 06:41:20.
+Progress(11) at 2026-11-06 06:41:23: 16,410 states generated (16,410 s/min), 4,580 distinct states found (4,580 ds/min), 2,250 states left on queue.
+Progress(22) at 2026-11-06 06:42:23: 2,530,103 states generated (2,513,693 s/min), 390,367 distinct states found (385,787 ds/min), 84,007 states left on queue.
+Progress(25) at 2026-11-06 06:43:23: 5,258,360 states generated (2,728,257 s/min), 740,504 distinct states found (350,137 ds/min), 124,688 states left on queue.
+Progress(28) at 2026-11-06 06:44:23: 8,044,430 states generated (2,786,070 s/min), 1,072,211 distinct states found (331,707 ds/min), 150,286 states left on queue.
+Progress(30) at 2026-11-06 06:45:23: 10,894,043 states generated (2,849,613 s/min), 1,385,481 distinct states found (313,270 ds/min), 157,576 states left on queue.
+Progress(32) at 2026-11-06 06:46:23: 13,748,684 states generated (2,854,641 s/min), 1,679,286 distinct states found (293,805 ds/min), 149,977 states left on queue.
+Progress(34) at 2026-11-06 06:47:23: 16,544,083 states generated (2,795,399 s/min), 1,950,873 distinct states found (271,587 ds/min), 131,175 states left on queue.
+Progress(36) at 2026-11-06 06:48:23: 19,444,245 states generated (2,900,162 s/min), 2,215,571 distinct states found (264,698 ds/min), 98,511 states left on queue.
+Progress(40) at 2026-11-06 06:49:23: 22,260,100 states generated (2,815,855 s/min), 2,451,388 distinct states found (235,817 ds/min), 50,306 states left on queue.
+Progress(51) at 2026-11-06 06:50:00: 24,005,153 states generated, 2,573,280 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 2573280 total distinct states at (2026-11-06 06:50:00)
+Finished checking temporal properties in 18min 56s at 2026-11-06 07:08:56
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 3.0E-6
+  based on the actual fingerprints:  val = 3.5E-6
+24005153 states generated, 2573280 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 51.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 7 and the 95th percentile is 3).
+Finished in 27min 39s at (2026-11-06 07:08:57)

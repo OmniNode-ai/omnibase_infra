@@ -1,0 +1,42 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 119 and seed 5278887720582386868 with 8 workers on 8 cores with 14564MB heap and 4096MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/RebuildAdmission.tla
+Parsing file /tmp/tlc-10111273943940227028/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-10111273943940227028/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-10111273943940227028/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-10111273943940227028/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-10111273943940227028/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-10111273943940227028/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-10111273943940227028/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-06 03:23:54)
+Implied-temporal checking--satisfiability problem has 4 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-06 03:23:55.
+Progress(11) at 2026-11-06 03:23:58: 5,313 states generated (5,313 s/min), 1,568 distinct states found (1,568 ds/min), 664 states left on queue.
+Progress(25) at 2026-11-06 03:24:58: 427,749 states generated (422,436 s/min), 78,041 distinct states found (76,473 ds/min), 19,415 states left on queue.
+Progress(28) at 2026-11-06 03:25:58: 904,056 states generated (476,307 s/min), 152,249 distinct states found (74,208 ds/min), 30,669 states left on queue.
+Progress(30) at 2026-11-06 03:26:58: 1,386,054 states generated (481,998 s/min), 216,167 distinct states found (63,918 ds/min), 29,356 states left on queue.
+Progress(33) at 2026-11-06 03:27:58: 1,826,300 states generated (440,246 s/min), 265,006 distinct states found (48,839 ds/min), 16,588 states left on queue.
+Progress(39) at 2026-11-06 03:28:39: 2,082,083 states generated, 284,936 distinct states found, 0 states left on queue.
+Checking 4 branches of temporal properties for the complete state space with 1139744 total distinct states at (2026-11-06 03:28:39)
+Finished checking temporal properties in 05min 50s at 2026-11-06 03:34:29
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 2.8E-8
+  based on the actual fingerprints:  val = 2.9E-9
+2082083 states generated, 284936 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 39.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 8 and the 95th percentile is 4).
+Finished in 10min 35s at (2026-11-06 03:34:29)

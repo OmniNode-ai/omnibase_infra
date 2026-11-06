@@ -1,0 +1,199 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 52 and seed 5506239110968714355 with 8 workers on 8 cores with 14564MB heap and 4096MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/RebuildAdmission.tla
+Parsing file /tmp/tlc-5905262161927646476/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-5905262161927646476/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-5905262161927646476/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-5905262161927646476/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-5905262161927646476/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-5905262161927646476/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-5905262161927646476/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-06 03:36:01)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-06 03:36:01.
+Error: Invariant ReadOnlyAdmitted is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {}
+/\ pc = ( o1 :> "idle" @@
+  o2 :> "idle" @@
+  "j" :> "idle" @@
+  "u" :> "idle" @@
+  "c2" :> "idle" @@
+  "c3" :> "idle" @@
+  "kf" :> "idle" @@
+  "g" :> "idle" @@
+  "r1" :> "idle" @@
+  "s1" :> "idle" )
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 2: <SrcBad("s1") line 449, col 3 to line 451, col 42 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {}
+/\ pc = ( o1 :> "idle" @@
+  o2 :> "idle" @@
+  "j" :> "idle" @@
+  "u" :> "idle" @@
+  "c2" :> "idle" @@
+  "c3" :> "idle" @@
+  "kf" :> "idle" @@
+  "g" :> "idle" @@
+  "r1" :> "idle" @@
+  "s1" :> "idle" )
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 3: <SafetyOpens("s1") line 453, col 3 to line 458, col 106 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {}
+/\ pc = ( o1 :> "idle" @@
+  o2 :> "idle" @@
+  "j" :> "idle" @@
+  "u" :> "idle" @@
+  "c2" :> "idle" @@
+  "c3" :> "idle" @@
+  "kf" :> "idle" @@
+  "g" :> "idle" @@
+  "r1" :> "idle" @@
+  "s1" :> "idle" )
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {}
+/\ storeUp = TRUE
+/\ tok = {}
+
+Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
+Attempted to apply the operator overridden by the Java method
+public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
+but it produced the following error:
+./RebuildAdmission_TTrace_1793936160.bin (Read-only file system)
+206 states generated, 122 distinct states found, 85 states left on queue.
+The depth of the complete state graph search is 7.
+Checkpointing of run /m/mut_p1_ro_after_safety/26-11-06-03-36-00.491
+Checkpointing completed at (2026-11-06 03:36:02)
+Finished in 01s at (2026-11-06 03:36:02)
+Failed to generate trace exploration spec; error message: ./RebuildAdmission_TTrace_1793936160.tla (Read-only file system)

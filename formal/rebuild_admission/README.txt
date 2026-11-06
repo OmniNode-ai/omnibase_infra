@@ -53,6 +53,10 @@ P1 DecideFollowsOrder            table    includes predecessor, join and next-pi
    KeptPassesStop                table
    CauseOfKeptRuns               table
    EveryStopHasAWayIn            table    no wedge, in every reachable state
+   ContinuationPasses, B0Passes, table    (extension) the other way: DecideFollowsOrder alone lets a table
+   B0DrawsCredit,                         refuse too much
+   KeptAtActiveOnStale,
+   KeptAboveSevenRefusedOnStale
    NoStartAgainstOrder           carried  by the epoch and the re-read, from the reservation to the start
    OneRepairLane, OneCauseLane,  carried  slots held through a dead process
    OneJoinLane
@@ -60,6 +64,8 @@ P1 DecideFollowsOrder            table    includes predecessor, join and next-pi
    OutageHoldsSteps              atomic   no store, no step, the emergency lane's excepted
    AtMostOneStepAfterPark        carried  the in-flight bound
 P2 AliveWithinLimit              carried  counts processes, never rows
+   PlacesHeldUntilGone,          carried  (extension) a dead process keeps its place and slot
+   SlotsHeldUntilGone
    CreditNotOverdrawn            atomic   one compare in the consume
 P3 StopClearsOnlyWithEvidence    carried  ghosts dated apart from the rows the guard reads
    StopsOnlyPastBuilding         atomic
@@ -67,7 +73,10 @@ P3 StopClearsOnlyWithEvidence    carried  ghosts dated apart from the rows the g
    SafetyClosesOnCleanProbe      carried  a ghost dated apart from the read the guard takes
 P4 RestartRepeatsNoStep          carried  stale reads and replays reach the put, and the compare refuses them
    NoWriteByLostOwner            atomic   the fence in the put, with a stale engine racing it
-   ConsumedAtMostOnce            atomic   redelivery goes through the compare on identity and use
+   ConsumedAtMostOnce            atomic   Redeliver goes through a compare on identity and use, changes no
+                                          lane, and its flag cannot rise under Mut = {} by logic; each
+                                          removed compare reports. At most once rests on 7.5's contract
+                                          suite ("a duplicate delivery"), and not on this model
    NeverConsumedAfterEpoch       carried  a ghost per write site no guard reads, so a missing Kill shows
    NoStartWhileStoreDown         atomic
    OneEmergencyPerOutage         atomic   one credential on one host: across hosts there is no store to
@@ -125,26 +134,53 @@ broken a cause lane. Round 2 makes no such argument. Base_union and Base_union_c
 of request together, and the parts exist for two other reasons: a larger bound on one mechanism than
 the union can afford, and every kind in the table.
 
+Base_union has no result, and nothing here rests on it. Its run was stopped at 19,578,120 distinct
+states after 48 minutes on 16 workers, at BFS depth 24 with 5.8 million states on the queue and the
+queue growing, to keep its host under its core count. Base_union_core, which drops five things from
+it, needed about 150 million distinct states and depth 57, so Base_union does not fit a lab unit's
+three-hour bound or the hosts' memory. Every class at once is therefore Base_union_core plus the
+reading under its scope below, which is an argument and not a run.
+
 Scopes, every one in its cfg; results/SUMMARY.txt gives workers, memory and state counts per run.
 
   Base_union       every class at once: ordinary, join, next-piece, 2 cause, kept, continuation,
                    repair, safety cause, emergency; crash, handover, store down, writer death, source
                    lag, credit, sweep, the continuation lane's step in two actions, dead processes.
                    One ordinary of piece 1, WIP limit 1, 1 safety failure, stops on 2 pieces.
+                   No result: see above.
   Base_union_core  the same requests and environment, without sweep, crash, handover, dead processes
                    and the split step. Why that loses no safety property of Mut = {}, by reading and
                    not by a run: parked and a dead lane's place only disable actions, up only disables
                    the engine, and a handover's Kill sends each reservation where Expire can; no
                    invariant reads parked, up or handed, and inflight is read by Begin and Act alone.
+                   It ran in parts, each resuming TLC's own checkpoint of the one before with -recover,
+                   at the same module and cfg bytes. The chain is part 1, then part 2 from part 1's
+                   checkpoint of 04:40:29Z, then part 4 from part 2's checkpoint of 07:34:41Z;
+                   results/Base_union_core.part<n>.out holds each, and Base_union_core.out is the last.
+                   TLC does not keep the fingerprint polynomial across -recover unless -fp is given:
+                   part 1 ran with fp 60 and part 2 with fp 74 (each file's header), so the
+                   fingerprints part 2 inherited matched nothing it computed and it explored again
+                   everything reachable from the queue it inherited. Part 2 ran 2 h 52 min without
+                   finishing, and the distinct counts from part 2 on are not this scope's size. No
+                   state is lost: every reachable state was either generated and checked by an
+                   earlier part or is reachable from the queue the next part starts with, since a
+                   checkpoint is the seen set and its unexpanded queue together. That is an argument about TLC, for the reader to check.
+                   Part 3 resumed part 2's checkpoint with fp 0, repeated the same waste, and was
+                   stopped by its writer; it is not in the chain. Part 4 passes -fp 74, and its queue
+                   then shrank from the first minute as part 2's had, where part 3's grew.
   Base_mini        two ordinaries, the same classes, no outage, crash or sweep
-  Base_table       every kind against 2 safety failures, stops on 3 pieces
+  Base_table       every kind against 2 safety failures, stops on 3 pieces (u builds piece 2)
   Base_wip2        3 ordinaries + join + next-piece, limit 2, with outage, parking, dead processes
   Base_wip8        9 ordinaries + join, limit 8. AliveWithinLimit is inductive under one guard, so nine
                    racers add no behaviour two would not; kept because the plan's writers are nine
   Base_holder      2 steps, EngRace on, crash, restart, handover, outage, redelivery
-  Base_stop        typed rows, stops on 3 pieces, cause lanes and kept
+  Base_stop        typed rows, stops on 3 pieces (u builds piece 2), cause lanes and kept
   Base_fence_*     one per class, that class's step as two actions; two lanes' steps do not interact
   Base_emergency   outage, emergency lane on two hosts, sweep, steps of the emergency lane too
+  Base_ext_table   Base_mini's scope plus the table the other way: over-refusal fails (reader's N3)
+  Base_ext_second_lanes  second join, cause and repair lanes present, dead processes (N2, N5)
+  Base_ext_above_seven   four pieces: a join and a stop above the line; no ordinary lane on a non-kept
+                   piece above 7 (N6)
 
 Liveness scopes. No liveness run has every class and every environment: TLC's liveness check is the
 bound, and live_union at about 10 million states did not finish in 80 minutes on the earlier model.
@@ -183,11 +219,22 @@ violated. Two mutations are the plan's text as read, not breaks of a design:
   mut_p1_plan_cloud_lane           7.5 says a cloud lane never reaches the store; 7.1 says every
                                    running mutating lane checks before each outward action.
 
+results/SUMMARY.txt binds each result to the sha of the module and of its own cfg. A TLC run reads only
+those, so a run started before a later cfg-only or extension commit stands at its own bytes. The
+*_ext_* configs run on RebuildAdmissionExt.tla, which extends the module and adds properties and the
+overrides that break them; it exists so the module stayed byte identical under the long runs.
+
 Rerun, for each cfg:
   java -XX:+UseParallelGC -Xmx24g -cp tla2tools.jar tlc2.TLC -config <cfg> -workers 16 \
-    -lncheck final -checkpoint 30 -gzip -metadir <fresh dir> RebuildAdmission.tla
+    -lncheck final -checkpoint 30 -gzip -metadir <fresh dir> <module>
+where <module> is RebuildAdmissionExt.tla for the *_ext_* configs and RebuildAdmission.tla for every
+other. To resume a run its time bound killed, replace -metadir with -recover <its checkpoint dir>
+and add -fp <n>, n the polynomial in the killed run's header line "with fp n".
 Exit 0 is required of Base_* and live_*, 12 of mut_* and wit_*, 13 of ctl_*.
 
-results/model.sha256 is the sha256 of RebuildAdmission.tla followed by every *.cfg in sorted name
-order, as bytes with nothing between them; test_rebuild_admission_model.py recomputes it. Each lab
-unit printed it from its own checkout at one commit.
+results/model.sha256 is the sha256 of RebuildAdmission.tla, then RebuildAdmissionExt.tla, then every
+*.cfg in sorted name order, as bytes with nothing between them; test_rebuild_admission_model.py
+recomputes it. It is the digest of these files now. The results were not all made at this commit:
+each lab unit printed the digest of its own checkout, and results ran at three commits whose digests
+differ. A result stands here because the bytes it read, its module and its own cfg, are equal to these;
+results/SUMMARY.txt names, for each, the commit it ran at, the host, workers, heap and states.

@@ -1,0 +1,719 @@
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running breadth-first search Model-Checking with fp 128 and seed -1567893512659574508 with 8 workers on 8 cores with 14564MB heap and 4096MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/RebuildAdmission.tla
+Parsing file /tmp/tlc-11080829372576226386/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-11080829372576226386/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-11080829372576226386/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-11080829372576226386/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-11080829372576226386/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-11080829372576226386/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-11080829372576226386/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RebuildAdmission
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RebuildAdmission
+Starting... (2026-11-06 02:31:57)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-06 02:31:57.
+Progress(15) at 2026-11-06 02:32:00: 14,579 states generated (14,579 s/min), 3,290 distinct states found (3,290 ds/min), 735 states left on queue.
+Progress(27) at 2026-11-06 02:32:03: 57,377 states generated, 8,736 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 8736 total distinct states at (2026-11-06 02:32:03)
+Error: Temporal property FixedSafetyCloses was violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {}
+/\ pc = [s1 |-> "idle", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 2: <BuildEscalates(1) line 486, col 3 to line 489, col 42 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "idle", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 3: <SrcBad("s1") line 449, col 3 to line 451, col 42 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "idle", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {}
+/\ cur = 1
+/\ sEsc = {}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 4: <SafetyOpens("s1") line 453, col 3 to line 458, col 106 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "idle", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 5: <Publish line 504, col 3 to line 511, col 107 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "idle", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 6: <SafetyEscalates("s1") line 474, col 3 to line 477, col 42 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "idle", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 7: <Reserve("s1") line 309, col 3 to line 315, col 119 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "resv", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 8: <PubDies line 493, col 3 to line 495, col 42 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = FALSE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "resv", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 9: <Consume("s1") line 327, col 3 to line 350, col 69 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = FALSE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "run", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> TRUE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 10: <SafetyFix("s1") line 438, col 3 to line 441, col 42 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = FALSE
+/\ sRead = [s1 |-> FALSE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> FALSE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "run", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 11: <ProbeSource("s1") line 460, col 3 to line 463, col 76 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = TRUE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = FALSE
+/\ sRead = [s1 |-> TRUE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> TRUE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "run", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 12: <GoesStale line 497, col 3 to line 499, col 42 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = FALSE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = FALSE
+/\ sRead = [s1 |-> TRUE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> TRUE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "run", r1 |-> "idle", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 13: <Reserve("r1") line 309, col 3 to line 315, col 119 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = FALSE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = FALSE
+/\ sRead = [s1 |-> TRUE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> TRUE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "run", r1 |-> "resv", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 14: <Consume("r1") line 327, col 3 to line 350, col 69 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = FALSE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = FALSE
+/\ sRead = [s1 |-> TRUE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> TRUE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "run", r1 |-> "run", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+State 15: <RepairWorks("r1") line 429, col 3 to line 431, col 42 of module RebuildAdmission>
+/\ inflight = {}
+/\ ghRead = <<FALSE, FALSE, TRUE>>
+/\ overrun = <<>>
+/\ broken = {}
+/\ dup = {}
+/\ handed = FALSE
+/\ rid = <<>>
+/\ built = {3}
+/\ fresh = FALSE
+/\ credit = 1
+/\ effects = <<0>>
+/\ pend = {}
+/\ escUp = TRUE
+/\ started = {}
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ parked = {}
+/\ everW = {3}
+/\ pubUp = TRUE
+/\ sRead = [s1 |-> TRUE]
+/\ phase = [F |-> 0, H |-> 0]
+/\ keys = [F |-> {}, H |-> {}]
+/\ snap = [F |-> <<TRUE, FALSE>>, H |-> <<TRUE, FALSE>>]
+/\ ghClean = [s1 |-> TRUE]
+/\ emCount = 0
+/\ probeDown = FALSE
+/\ bEsc = {1}
+/\ pc = [s1 |-> "run", r1 |-> "run", g |-> "idle"]
+/\ stop = <<"none", "none", "none">>
+/\ dupId = <<>>
+/\ checked = {}
+/\ joined = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ src = [s1 |-> FALSE]
+/\ bad = {}
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ dirty = {}
+/\ working = {3}
+/\ rows = <<{}, {}, {}>>
+/\ safety = {"s1"}
+/\ cur = 1
+/\ sEsc = {"s1"}
+/\ storeUp = TRUE
+/\ tok = {}
+
+Back to state 14: <PubDies line 493, col 3 to line 495, col 42 of module RebuildAdmission>
+
+Error: Evaluating postcondition _TLCTraceSilent at line 28, col 5 to line 28, col 21 of module _TLCTrace failed.
+Attempted to apply the operator overridden by the Java method
+public static final tlc2.value.IValue tlc2.module._TLCTrace.ioSerialize(tlc2.value.IValue,tlc2.value.impl.StringValue) throws java.io.IOException,
+but it produced the following error:
+./RebuildAdmission_TTrace_1793932316.bin (Read-only file system)
+Finished checking temporal properties in 00s at 2026-11-06 02:32:03
+57377 states generated, 8736 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 27.
+Finished in 07s at (2026-11-06 02:32:03)
+Failed to generate trace exploration spec; error message: ./RebuildAdmission_TTrace_1793932316.tla (Read-only file system)
