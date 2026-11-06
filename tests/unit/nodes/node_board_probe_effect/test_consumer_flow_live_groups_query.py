@@ -29,6 +29,9 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers import (
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
     ConsumerFlowLane,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 from scripts.ci import c28_consumer_flow_probe as script
 
 pytestmark = pytest.mark.unit
@@ -72,7 +75,10 @@ def test_live_groups_runs_the_index_backed_sql_in_the_postgres_container() -> No
         return subprocess.CompletedProcess(argv, 0, "group-b\ngroup-a\n\ngroup-b\n", "")
 
     lane = ConsumerFlowLane(
-        docker="fake-docker", base_url="http://projection.test", runner=runner
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        docker="fake-docker",
+        base_url="http://projection.test",
+        runner=runner,
     )
 
     assert lane.live_groups() == ["group-a", "group-b"]

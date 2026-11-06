@@ -30,8 +30,9 @@
 #   The lane's ingress, gateway, broker and deploy agent are lab-network ports,
 #   unreachable from GitHub-hosted compute, so the job is self-hosted. It runs
 #   on any runner of the pool the deployment overlay names
-#   (vars.LAB_PROBE_RUNS_ON_JSON) and grades the first lane of the overlay's
-#   ordered list (vars.LAB_LANES_JSON) whose ingress and gateway both answer,
+#   (vars.LAB_PROBE_RUNS_ON_JSON) and grades the first lane of the stability
+#   overlay's ordered list (vars.LAB_PROOF_LANES_JSON, OMN-21485) whose
+#   ingress and gateway both answer,
 #   at the addresses the overlay declares; the deploy agent it reads is that
 #   lane's own declared one. No host label or address is written here
 #   (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check must not
@@ -51,11 +52,19 @@
 #   the proof the canary works, not a defect in it. It flips green when the
 #   fix lands and the lane is refreshed.
 #
-# LANE SCOPE
-#   Dev lane ONLY (`omnibase-infra`, the pre-authorized fully-mutable test
-#   platform). This workflow makes NO claim about stability-test, judge, or
-#   prod and must not be pointed at them without its own ticket: the probe
-#   PUBLISHES a real delegation command, which is a lane mutation.
+# LANE SCOPE (OMN-21485)
+#   The STABILITY lane only (an overlay entry carrying lane_role=stability).
+#   Until OMN-21485 this graded the dev lane, and on 2026-10-27 a dev
+#   broker that crashed on every deploy turned C15, C16 and C28 red with no
+#   defect in what they measure. Operator ruling that day: the proofs connect
+#   to the stability lane, the lane the team works in, not to dev. The probe
+#   PUBLISHES a real delegation command, which is a lane mutation; this
+#   ticket is the one that authorises it on the stability lane. The lane's
+#   addresses and its bus_lane come from vars.LAB_PROOF_LANES_JSON, and its
+#   credentials from the stability environment's secrets.
+#   Configure all four credential names there before enabling the proof;
+#   GitHub otherwise falls back to a same-named repository secret.
+#   It makes no claim about the dev lane, judge or prod.
 #
 # WHAT OMN-16931 CHANGED
 #   The first cut of this job took the terminal verdict from the /skill HTTP
@@ -142,9 +151,9 @@ on:
         required: false
         default: '120000'
       bus_lane:
-        description: 'CI bus lane whose DECLARED broker + transport both readback legs use (the CI overlay lane table config/lab/ci_bus_lanes.yaml).'
+        description: 'CI bus lane whose DECLARED broker + transport both readback legs use (the CI overlay lane table config/lab/ci_bus_lanes.yaml). Empty uses the bus_lane the resolved stability lane declares.'
         required: false
-        default: 'dev'
+        default: ''
       quarantine_bootstrap_servers:
         description: 'Override the declared broker for the quarantine check. Leave empty to use the lane declaration; a Docker-Desktop host alias is refused (OMN-17926).'
         required: false
@@ -154,7 +163,7 @@ on:
         required: false
         default: ''
       deploy_wait_seconds:
-        description: 'Total seconds the run may wait for a dev-lane deploy to converge, shared by the pre-fire wait and the wait before the single retry (OMN-19811).'
+        description: 'Total seconds the run may wait for a stability-lane deploy to converge, shared by the pre-fire wait and the wait before the single retry (OMN-19811).'
         required: false
         default: '2400'
 
@@ -173,7 +182,8 @@ env:
 
 jobs:
   chain-canary:
-    name: Chain Canary (dev lane)
+    name: Chain Canary (stability lane)
+    environment: stability
     # See "WHERE IT RUNS" above before changing this. OMN-18408 moved the job
     # off the single deploy runner; OMN-19894 moved it off the one host.
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
@@ -217,6 +227,24 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # OMN-21485 (operator ruling 2026-10-27): this run grades the STABILITY
+      # lane, the lane the team works in, never the dev lane, so a dev-lane
+      # redeploy or outage cannot turn the proof red. The lane is the first
+      # lane of the stability overlay's ordered list (vars.LAB_PROOF_LANES_JSON)
+      # that carries lane_role=stability and whose ingress AND gateway both answer
+      # (OMN-19894's chain of responders). It is resolved FIRST, because the
+      # broker every readback leg uses is the one that lane declares (its
+      # bus_lane in the CI bus lane table), never a fixed lane. Every lane
+      # address below is that lane's own declaration.
+      - name: Resolve the stability lane through the overlay's chain of responders
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_PROOF_LANES_JSON }}
+          require: ingress_url gateway_url bus_lane
+          match: lane_role=stability
+          # OMN-19811: run 37125721313 resolved the lane mid-deploy.
+          deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
+
       # The lane declaration is the SAME file runtime-rebuild-trigger.yml
       # sparse-checks out in this repo. One declaration, read by every CI
       # client of this bus, is the whole point: an address that lives in two
@@ -232,7 +260,7 @@ jobs:
       - name: Resolve the declared lane transport
         id: transport
         env:
-          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+          BUS_LANE: ${{ github.event.inputs.bus_lane || env.LANE_BUS_LANE }}
         run: |
           set -euo pipefail
           # Fail-closed by construction: load_lane_transport RAISES on a
@@ -276,7 +304,7 @@ jobs:
       - name: Resolve the declared projection-readback DSN reference
         id: projection
         env:
-          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+          BUS_LANE: ${{ github.event.inputs.bus_lane || env.LANE_BUS_LANE }}
         run: |
           set -euo pipefail
           uv run python -c "
@@ -317,7 +345,7 @@ jobs:
       - name: Resolve the declared ledger-readback DSN reference
         id: ledger
         env:
-          BUS_LANE: ${{ github.event.inputs.bus_lane || 'dev' }}
+          BUS_LANE: ${{ github.event.inputs.bus_lane || env.LANE_BUS_LANE }}
         run: |
           set -euo pipefail
           uv run python -c "
@@ -340,17 +368,6 @@ jobs:
               for key, value in ledger_readback_env(declaration).items():
                   handle.write(f'{key}={value}\n')
           "
-
-      # OMN-19894: the lane this run grades is the first lane of the
-      # overlay's ordered list (vars.LAB_LANES_JSON) whose ingress AND gateway
-      # both answer. Every lane address below is that lane's own declaration.
-      - name: Resolve the lab lane through the overlay's chain of responders
-        uses: ./.github/actions/resolve-lab-lane
-        with:
-          lanes-json: ${{ vars.LAB_LANES_JSON }}
-          require: ingress_url gateway_url
-          # OMN-19811: run 37125721313 resolved the lane mid-deploy.
-          deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
 
       # OMN-19811. Run 36202173467 (2026-09-25T23:44Z) went RED with
       # terminal_missing because deploy-agent job 193cfeda recreated
@@ -384,7 +401,7 @@ jobs:
       - name: Mark when the delegation began
         run: echo "CHAIN_RECEIPT_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_ENV}"
 
-      - name: Fire one live delegation through the dev-lane ingress
+      - name: Fire one live delegation through the stability-lane ingress
         env:
           # The resolved lane's declared addresses (LANE_INGRESS_URL and
           # LANE_GATEWAY_URL, exported by the resolve step) unless a dispatch
@@ -428,9 +445,10 @@ jobs:
           # TERMINAL_READBACK_NOT_CONFIGURED, because a run with no broker
           # has no evidence about the terminal.
           TERMINAL_BOOTSTRAP_OVERRIDE: ${{ github.event.inputs.terminal_bootstrap_servers }}
-          # OMN-17926: the lane declares SASL_PLAINTEXT / SCRAM-SHA-256 since
-          # OMN-18012 Phase B. These are the org-wide dev-lane SCRAM secrets
-          # runtime-rebuild-trigger.yml already uses, injected as ENVIRONMENT
+          # OMN-17926: the lane declares its transport in the CI bus lane
+          # table. OMN-21485: the credentials are the STABILITY lane's own
+          # SCRAM login (stability environment secrets KAFKA_SASL_*), injected
+          # as ENVIRONMENT
           # so that no credential reaches argv, the process list, or this log.
           # build_aiokafka_auth_kwargs_from_env reads them together with the
           # KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_MECHANISM the resolve step
@@ -438,7 +456,7 @@ jobs:
           KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
           # OMN-18060: link 2's Postgres DSN, injected as ENVIRONMENT under the
-          # literal name the dev lane declares in omnimarket
+          # literal name the lane declares in the CI overlay's
           # config/ci_bus_lanes.yaml (`projection_readback.dsn_env`). GitHub
           # requires a literal key here, so the declaration and this line are
           # two halves that must agree; if they ever diverge the node reports
@@ -451,6 +469,8 @@ jobs:
           # a role carrying either attribute. It is never passed as a flag:
           # argv is world-readable through /proc, and the dispatch step echoes
           # its own broker values into this log.
+          # OMN-21485: the value is the stability lane's reader, never the dev
+          # lane's (stability environment secret CHAIN_CANARY_PROJECTION_DSN).
           CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
           # OMN-18421: the gateway API key, injected as ENVIRONMENT under the
           # literal name the probe is told to read, exactly like the two DSNs
@@ -459,7 +479,7 @@ jobs:
           # The flag below passes the NAME; the request model refuses a value
           # that is not a valid environment variable name.
           #
-          # The key is LANE-LOCAL. It belongs to the tenant the dev lane's own
+          # The key is LANE-LOCAL. It belongs to the tenant the graded lane's own
           # onex-api issues for itself in-process, through the same
           # `auth_api_keys.create_api_key` call the /api-keys route uses, and it
           # authorises nothing outside this compose project. The per-seam
@@ -701,7 +721,7 @@ jobs:
               "not at the chain); `terminal_readback_failed` /",
               "`terminal_readback_not_configured` mean the bus could not be read, so",
               "no claim is made either way; `ingress_unreachable` points at the lane",
-              "rather than the chain (see dev-lane-liveness).",
+              "rather than the chain (see the lane's own liveness).",
           ]
           summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -782,15 +802,15 @@ jobs:
           # runs only once emit has written the file.
           if-no-files-found: warn
 
-      # OMN-20594. The h201 dev lane is the protected delegation lane (see the
-      # dev entry of deploy/lane-census/lane-manifest.yaml): the Tech Week demo
-      # runs on it. OMN-16773 deferred alerting, so until this step a red here
+      # OMN-20594. The operator is told when the proof turns. Since OMN-21485
+      # the proof grades the stability lane, so the alert names the lane the
+      # resolve step chose (LANE_NAME). OMN-16773 deferred alerting, so until this step a red here
       # was a failed run nobody watched. A scheduled run now tells the operator
       # when the verdict CHANGES: a red after a non-red posts once, a green
       # after a red posts the recovery, and a lane that stays red posts nothing
       # more (the lab alarm's delegation_chain_canary condition and the board
       # carry it from there). The channel and token are the ones the fleet
-      # canary and dev-lane-liveness already alert through; absent secrets are
+      # canary and the lane liveness probe already alert through; absent secrets are
       # a warning on the run, never a silent pass. A manual dispatch may carry
       # overrides aimed at another lane, so only scheduled runs alert.
       - name: Tell the operator when the delegation verdict changes (OMN-20594)
@@ -857,15 +877,15 @@ jobs:
               return str(result.get("verdict", "unknown")), str(result.get("detail", ""))[:400]
 
 
-          def compose(kind, verdict, detail, run_url):
+          def compose(kind, verdict, detail, run_url, lane="the stability lane"):
               if kind == "RED":
                   return (
-                      "*[DELEGATION CANARY RED]* h201 dev lane (protected delegation lane): "
+                      f"*[DELEGATION CANARY RED]* {lane}: "
                       f"a live delegation through the deployed lane did not prove out, verdict `{verdict}`. "
                       f"{detail} Run: {run_url}"
                   )
               return (
-                  "*[DELEGATION CANARY RECOVERED]* h201 dev lane (protected delegation lane): "
+                  f"*[DELEGATION CANARY RECOVERED]* {lane}: "
                   f"the chain canary is green again, verdict `{verdict}`. Run: {run_url}"
               )
 
@@ -892,7 +912,7 @@ jobs:
               if kind is None:
                   return 0
               verdict, detail = read_receipt(env.get("RECEIPT_PATH", "chain-canary-receipt.json"))
-              text = compose(kind, verdict, detail, env["RUN_URL"])
+              text = compose(kind, verdict, detail, env["RUN_URL"], env.get("LANE_NAME") or "the stability lane")
               token = env.get("SLACK_BOT_TOKEN", "")
               channel = env.get("SLACK_CHANNEL_ID", "")
               if not token or not channel:
