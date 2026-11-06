@@ -10,6 +10,9 @@ evidence_requirements:
   - kind: tests
     description: CI Summary passes with the reviewer's rows red or absent, and the reviewer starts no run.
     command: uv run --frozen pytest tests/ci/test_review_gate_removed_omn22478.py -q --no-cov
+  - kind: tests
+    description: The two import paths omnibase_infra#5683 removed and installed consumers still load resolve to the moved models.
+    command: uv run --frozen pytest tests/unit/handlers/test_moved_model_import_paths_omn22478.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ""
@@ -22,4 +25,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_review_gate_removed_omn22478.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22478-infra-moved-model-import-paths
+    description: The old Infisical config and retry state import paths resolve to the models at their new home, so a venv taking omnibase_infra from a moving clone imports the ledger append.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_moved_model_import_paths_omn22478.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
