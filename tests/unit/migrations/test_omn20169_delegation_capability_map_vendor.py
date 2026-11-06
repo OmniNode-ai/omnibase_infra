@@ -121,7 +121,7 @@ def test_only_the_force_rls_step_is_fenced() -> None:
 def test_the_shipped_instance_carries_the_contract_derived_table_grant(
     profile: str,
 ) -> None:
-    # The supplemental bridge was retired by the pin advance to 16c45fb32691;
+    # The supplemental bridge was retired by the pin advance to 3aa4e8b26af6;
     # the pinned omnimarket contract derives this grant now, so the shipped
     # instance is what is left to pin.
     principal = "tenant_projection_writer"

@@ -24,7 +24,7 @@ _NODE = "node_projection_delegation_budget_readings"
 _TABLE = "delegation_budget_readings"
 # The pinned omnimarket contract (node_projection_delegation_budget_readings)
 # declares this relation; the supplemental bridge that used to stand in for it
-# was retired by the pin advance to 16c45fb32691.
+# was retired by the pin advance to 3aa4e8b26af6.
 _CREATE = f"docker/migrations/forward/nodes/{_NODE}/0000_create_{_TABLE}.sql"
 _DECLARED_TABLE = ModelDbTableDeclaration(
     name=_TABLE,

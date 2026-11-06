@@ -9,7 +9,7 @@ writer node does, these files are held here and the digests pin the reviewed
 bytes: any edit to a vendored file fails the pin, and the ledger checksum is
 checked against the file's live hash, not only the constant. These checks also
 cover the ledger's shape, migration classes and the absence of a FORCE fence.
-The interim grant declaration was retired by the pin advance to 16c45fb32691,
+The interim grant declaration was retired by the pin advance to 3aa4e8b26af6,
 which carries the omnimarket contract the grant now derives from.
 """
 

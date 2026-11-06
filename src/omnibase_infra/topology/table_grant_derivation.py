@@ -350,11 +350,12 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # same proof: the expiry module went red on the bot's pin-advance pull
     # request naming all six, and the deletion rode that pull request.
     #
-    # OMN-17427: delegation_lab_jobs and delegation_lab_job_outbox, vendored
-    # infra-first ahead of omnimarket#4277, were DELETED here by the pin advance
-    # to 16c45fb32691, which carries that pull request. Same mechanism and same
-    # proof: the expiry module went red on the bot's pin-advance pull request
-    # naming both, and the deletion rode that pull request.
+    # OMN-21970: the pin advance to 3aa4e8b26af6 retired six more the same way
+    # (delegation_lab_jobs and delegation_lab_job_outbox, omnimarket#4277;
+    # delegation_budget_readings, OMN-17427; compaction_receipts, OMN-21336;
+    # delegation_capability_cells, omnimarket#4380; local_environment,
+    # OMN-19988): the expiry module named all six on omnibase_infra#5679 and
+    # the regenerated instances came back byte-identical.
     #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
@@ -377,7 +378,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_add_context_audit_event_key.sql",
         schema="public",
     ),
-    # The bridges below share one shape: 0000_create_<table>.sql under the
+    # The four bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
         _vendored_read_write(t, d)
@@ -420,16 +421,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             "agent_status_events",
         )
     ),
-    # OMN-20169, OMN-17427, OMN-21336: the delegation_capability_cells,
-    # delegation_budget_readings, delegation_lab_jobs, delegation_lab_job_outbox
-    # and compaction_receipts bridges were DELETED by the pin advance to
-    # 16c45fb32691, which carries the retiring omnimarket pull requests each
-    # entry named. The expiry module went red naming them; the regeneration
-    # wrote nothing.
-    # OMN-19988: the local_environment bridge was DELETED by the pin advance to
-    # 16c45fb32691, which carries omnimarket's node_projection_local_environment
-    # contract.
-    # OMN-19991: the same infra-first window as local_environment was; this repo
+    # OMN-19991: an infra-first window; this repo
     # vendors node_projection_local_alerts/0000-0002 ahead of the omnimarket node
     # contract that declares the relation. 0001 grants tenant_projection_writer
     # SELECT, INSERT, UPDATE. Retired when omnimarket's node_projection_local_alerts

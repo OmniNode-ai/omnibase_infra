@@ -3371,7 +3371,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topology/test_delegation_budget_readings_grant_omn17427.py -q -p no:randomly --no-cov
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topology/test_delegation_budget_readings_grant_omn17427.py tests/integration/topology/test_delegation_budget_readings_binding_omn17427.py -q -p no:randomly --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427640003]
   - id: dod-omn17427-budget-readings-live-constraints
