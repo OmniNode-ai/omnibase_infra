@@ -36,3 +36,4 @@ capabilities:
     description: Prepare normalized Compose TMPDIR bind sources and refuse failed readback.
 metadata:
   ticket: OMN-19998
+  description: "Prepare and verify declared runner TMPDIR binds before registration or recreation."
