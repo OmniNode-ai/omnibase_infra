@@ -166,7 +166,7 @@ _IN_REPO_PROVENANCE: dict[str, str] = {
     # (940 -> 967). OMN-19513 shifted it eight more with the runtime nofile
     # ulimit on the x-runtime-base anchor (967 -> 975). OMN-20266 shifted it
     # seven more with the dev broker memory-floor note (975 -> 982).
-    "omnibase_infra:docker/docker-compose.infra.yml:982": "KC_DB_USERNAME: postgres",
+    "omnibase_infra:docker/docker-compose.infra.yml:990": "KC_DB_USERNAME: postgres",
     "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
         "CREATE DATABASE keycloak"
     ),
@@ -198,7 +198,7 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "four-column checksum ledger"
         ),
         provenance=(
-            "omnibase_infra:docker/docker-compose.infra.yml:982",
+            "omnibase_infra:docker/docker-compose.infra.yml:990",
             "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
             "omninode_infra:k8s/auth/keycloak-values.yaml:32",
             "omninode_infra:scripts/init-databases.sh:603",
