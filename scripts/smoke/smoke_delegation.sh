@@ -197,7 +197,7 @@ if [[ "$TENANT_LIFECYCLE" == revoke ]]; then
   export SMOKE_TENANT_STATE_FILE="$TENANT_STATE_FILE"
   export SMOKE_TENANT_SLUG="$LAB_TENANT_SLUG"
   api_python_env SMOKE_TENANT_STATE_FILE SMOKE_TENANT_SLUG <<'PYREVOKE'
-import hashlib, json, os, pathlib, sys, urllib.error, urllib.request, uuid
+import hashlib, hmac, json, os, pathlib, sys, urllib.error, urllib.request, uuid
 
 state = dict(line.split("=", 1) for line in open(os.environ["SMOKE_TENANT_STATE_FILE"]).read().splitlines() if "=" in line)
 tenant_id = str(uuid.UUID(state["TENANT_ID"]))
@@ -220,10 +220,10 @@ def call(path, *, method="GET", headers=None):
 
 before = call(probe, headers={"X-API-Key": key})
 proof_path = pathlib.Path(os.environ["SMOKE_TENANT_STATE_FILE"] + ".revoked.json")
-key_digest = hashlib.sha256(key.encode()).hexdigest()
+key_digest = hmac.new(key.encode(), b"slot-offboard-proof:" + tenant_id.encode(), hashlib.sha256).hexdigest()
 if proof_path.exists():
     proof = json.loads(proof_path.read_text())
-    if (proof.get("tenant_id") == tenant_id and proof.get("key_sha256") == key_digest
+    if (proof.get("tenant_id") == tenant_id and hmac.compare_digest(str(proof.get("key_hmac_sha256")), key_digest)
             and proof.get("auth_before") == 200 and proof.get("auth_after") in (401, 403)
             and before in (401, 403)):
         print(json.dumps({"tenant_id": tenant_id, "revoked": True, "auth_before": 200, "auth_after": before}))
@@ -238,7 +238,7 @@ after = call(probe, headers={"X-API-Key": key})
 if after not in (401, 403):
     sys.exit("FATAL: revoked slot credential did not receive an authentication refusal")
 with os.fdopen(os.open(proof_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
-    json.dump({"tenant_id": tenant_id, "key_sha256": key_digest, "auth_before": before, "auth_after": after}, stream)
+    json.dump({"tenant_id": tenant_id, "key_hmac_sha256": key_digest, "auth_before": before, "auth_after": after}, stream)
 print(json.dumps({"tenant_id": tenant_id, "revoked": True, "auth_before": before, "auth_after": after}))
 PYREVOKE
   check_dev_tenants_control

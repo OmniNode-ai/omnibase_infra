@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import uuid
 from collections.abc import Mapping
@@ -50,6 +51,18 @@ CONTROL_AXES = frozenset(
         "databases",
     }
 )
+
+
+def offboard_proof_digest(key: str, tenant_id: str) -> str:
+    """Bind a saved offboard proof to the credential it revoked.
+
+    The credential is the HMAC key and the tenant the message, so the proof
+    never holds a hash of the credential itself and cannot be replayed for
+    another tenant.
+    """
+    return hmac.new(
+        key.encode(), b"slot-offboard-proof:" + tenant_id.encode(), hashlib.sha256
+    ).hexdigest()
 
 
 class HandlerPreprTeardownSlot:
@@ -239,8 +252,10 @@ class HandlerPreprTeardownSlot:
                 and state.get("TENANT_SLUG") == f"onex-{request.slot_token}"
                 and bool(key)
                 and proof.get("tenant_id") == tenant_id
-                and proof.get("key_sha256")
-                == hashlib.sha256(key.encode(), usedforsecurity=False).hexdigest()
+                and isinstance(proof.get("key_hmac_sha256"), str)
+                and hmac.compare_digest(
+                    proof["key_hmac_sha256"], offboard_proof_digest(key, tenant_id)
+                )
                 and proof.get("auth_before") == 200
                 and proof.get("auth_after") in (401, 403)
             )

@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import io
 import json
@@ -21,6 +20,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from omnibase_infra.handlers.handler_prepr_teardown_slot import offboard_proof_digest
 
 ROOT = Path(__file__).resolve().parents[3]
 SMOKE = ROOT / "scripts/smoke/smoke_delegation.sh"
@@ -165,7 +166,9 @@ def test_revoke_retry_uses_bound_proof_and_still_requires_live_refusal(
         run_revoke(monkeypatch, tmp_path, after=401, before=401)
     assert stopped.value.code == 0
     proof = json.loads((tmp_path / "credential.env.revoked.json").read_text())
-    assert proof["key_sha256"] == hashlib.sha256(b"test-key").hexdigest()
+    assert proof["key_hmac_sha256"] == offboard_proof_digest(
+        "test-key", "00000000-0000-4000-8000-000000000001"
+    )
     with pytest.raises(SystemExit) as refused:
         run_revoke(monkeypatch, tmp_path, after=401, before=200)
     assert refused.value.code != 0
@@ -392,7 +395,9 @@ def saved_offboard(staging: Path) -> Path:
         json.dumps(
             {
                 "tenant_id": "00000000-0000-4000-8000-000000000001",
-                "key_sha256": hashlib.sha256(b"test-key").hexdigest(),
+                "key_hmac_sha256": offboard_proof_digest(
+                    "test-key", "00000000-0000-4000-8000-000000000001"
+                ),
                 "auth_before": 200,
                 "auth_after": 401,
             }
@@ -504,7 +509,7 @@ def test_removed_gateway_without_bound_offboard_evidence_retains_resources(
     else:
         data = json.loads(proof.read_text())
         field, value = {
-            "key": ("key_sha256", "other-key"),
+            "key": ("key_hmac_sha256", "other-key"),
             "tenant": ("tenant_id", "another-tenant"),
             "before": ("auth_before", 401),
             "after": ("auth_after", 200),
