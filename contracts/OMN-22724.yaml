@@ -40,5 +40,5 @@ dod_evidence:
     binds_ac: []
     checks:
       - check_type: command
-        check_value: ssh "$DEPLOY_PROBE_HOST" grep -c _retain_recovered_ids /data/omninode/omnibase_infra/src/omnibase_infra/handlers/handler_dev_boot_guard.py
+        check_value: ssh "$DEPLOY_PROBE_HOST" grep -c 'Cannot record recovered dev container ids' /data/omninode/omnibase_infra/src/omnibase_infra/handlers/handler_dev_boot_guard.py
         cwd: ${OMNI_HOME}/omnibase_infra
