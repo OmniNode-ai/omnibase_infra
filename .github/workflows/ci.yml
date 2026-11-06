@@ -1094,7 +1094,8 @@ jobs:
 
       - name: Census health and shared restart bounds (OMN-19416)
         run: |
-          uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop or oneshot" -q
+          uv run --frozen pytest tests/ci/test_census_oneshot_recorded_omn19998.py -q
           uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
           uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
 

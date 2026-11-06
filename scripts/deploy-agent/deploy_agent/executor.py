@@ -21,11 +21,13 @@ import tomllib
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
+from importlib.resources import files
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
+import yaml
 from pydantic import BaseModel, ConfigDict
 
 from deploy_agent import recreate_supervisor
@@ -385,25 +387,12 @@ def _hold_build_context(purpose: str) -> Iterator[None]:
             _restore_build_byproducts(REPO_DIR)
 
 
-PHASE_TIMEOUTS = {
-    Phase.PREFLIGHT: 30,
-    Phase.GIT: 60,
-    Phase.COMPOSE_GEN: 120,
-    # OMN-18692: this entry no longer bounds the deps compose-up either. That
-    # command is SUPERVISED (deploy_agent.recreate_supervisor) under a ceiling
-    # derived from the compose model and the machine, because a flat 300 here
-    # killed a healthy recreate mid-removal on 2026-09-18 and took the lane's
-    # broker -- and this agent's own control bus -- with it. The entry remains
-    # for the non-compose-up work the phase still bounds.
-    Phase.CORE: 300,
-    # OMN-18057: this entry no longer bounds the runtime compose-up. It bounds
-    # the runtime IMAGE operations (build, pinned-digest pull) and the migration
-    # preflight, which are not gated on any healthcheck. The compose-up ceiling
-    # is derived from the compose model -- see runtime_compose_up_budget below,
-    # and deploy_agent.compose_budget for why a constant cannot express it.
-    Phase.RUNTIME: 300,
-    Phase.VERIFICATION: 120,
-}
+_phase_root = AGENT_CLONE_ROOT / "src/omnibase_infra"
+PHASE_TIMEOUTS: dict[str, int] = yaml.safe_load(
+    (_phase_root if _phase_root.is_dir() else files("omnibase_infra"))
+    .joinpath("nodes/node_census_oneshot_effect/contract.yaml")
+    .read_text(encoding="utf-8")
+)["phase_timeouts"]
 
 # OMN-18057: the two windows _compose_up gives the lane to settle after the
 # compose command returns -- named rather than inline so the recovery path reads

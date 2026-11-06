@@ -22,6 +22,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     """
     CMD_BASELINES_BATCH_COMPUTE_V1 = contract_topic_value('nodes/node_baselines_batch_compute/contract.yaml', 'omnibase-infra', 'CMD_BASELINES_BATCH_COMPUTE_V1')  # onex.cmd.omnibase-infra.baselines-batch-compute.v1
     CMD_BUILD_LOOP_APPEND_V1 = contract_topic_value('nodes/node_build_loop_write_effect/contract.yaml', 'omnibase-infra', 'CMD_BUILD_LOOP_APPEND_V1')  # onex.cmd.omnibase-infra.build-loop-append.v1
+    CMD_CENSUS_ONESHOT_SAMPLE_V1 = contract_topic_value('nodes/node_census_oneshot_effect/contract.yaml', 'omnibase-infra', 'CMD_CENSUS_ONESHOT_SAMPLE_V1')  # onex.cmd.omnibase-infra.census-oneshot-sample.v1
     CMD_CHAIN_LEARN_V1 = contract_topic_value('nodes/node_chain_orchestrator/contract.yaml', 'omnibase-infra', 'CMD_CHAIN_LEARN_V1')  # onex.cmd.omnibase-infra.chain-learn.v1
     CMD_CODING_AGENT_EFFECT_INVOKE_V1 = contract_topic_value('nodes/node_coding_agent_invoke_effect/contract.yaml', 'omnibase-infra', 'CMD_CODING_AGENT_EFFECT_INVOKE_V1')  # onex.cmd.omnibase-infra.coding-agent-effect-invoke.v1
     CMD_CODING_AGENT_INVOKE_V1 = contract_topic_value('nodes/node_coding_agent_orchestrator/contract.yaml', 'omnibase-infra', 'CMD_CODING_AGENT_INVOKE_V1')  # onex.cmd.omnibase-infra.coding-agent-invoke.v1
@@ -64,6 +65,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_BASELINES_COMPUTED_V1 = contract_topic_value('nodes/node_baseline_capture/contract.yaml', 'omnibase-infra', 'EVT_BASELINES_COMPUTED_V1')  # onex.evt.omnibase-infra.baselines-computed.v1
     EVT_BOARD_PROBE_RESULT_V1 = contract_topic_value('nodes/node_board_probe_effect/contract.yaml', 'omnibase-infra', 'EVT_BOARD_PROBE_RESULT_V1')  # onex.evt.omnibase-infra.board-probe-result.v1
     EVT_BUILD_LOOP_APPENDED_V1 = contract_topic_value('nodes/node_build_loop_write_effect/contract.yaml', 'omnibase-infra', 'EVT_BUILD_LOOP_APPENDED_V1')  # onex.evt.omnibase-infra.build-loop-appended.v1
+    EVT_CENSUS_ONESHOT_SAMPLED_V1 = contract_topic_value('nodes/node_census_oneshot_effect/contract.yaml', 'omnibase-infra', 'EVT_CENSUS_ONESHOT_SAMPLED_V1')  # onex.evt.omnibase-infra.census-oneshot-sampled.v1
     EVT_CHAIN_LEARN_COMPLETE_V1 = contract_topic_value('nodes/node_chain_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_CHAIN_LEARN_COMPLETE_V1')  # onex.evt.omnibase-infra.chain-learn-complete.v1
     EVT_CHAIN_LEARN_FAILED_V1 = contract_topic_value('nodes/node_chain_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_CHAIN_LEARN_FAILED_V1')  # onex.evt.omnibase-infra.chain-learn-failed.v1
     EVT_CHAIN_RETRIEVAL_RESULT_V1 = contract_topic_value('nodes/node_chain_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_CHAIN_RETRIEVAL_RESULT_V1')  # onex.evt.omnibase-infra.chain-retrieval-result.v1

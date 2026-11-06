@@ -415,7 +415,9 @@ def test_oneshot_stuck_running_is_warning_drift() -> None:
         if c["Names"] == "omnibase-infra-prod-forward-migration":
             c["State"] = "running"
             c["Status"] = "Up 6 hours"
+            c["StartedAt"] = "2026-11-01T08:23:00+00:00"
     envelope = {
+        "observed_at": "2026-11-01T14:23:00+00:00",
         "lane": "prod",
         "host": _LAB_HOST,
         "containers": containers,
@@ -425,6 +427,122 @@ def test_oneshot_stuck_running_is_warning_drift() -> None:
     plan = PLAN.build_plan(envelope, MANIFEST, REGISTRY)
     stuck = [f for f in plan["findings"] if f["kind"] == "oneshot_stuck"]
     assert stuck and stuck[0]["severity"] == "warning"
+
+
+# Recorded alarms: cloud-migration "Up Less than a second" and
+# forward-migration "Up 15 seconds". Only the names/statuses are recorded;
+# exact timestamps below are a deterministic replay of those ages.
+ONESHOT_REGISTRY = ModelLaneCensusRegistry.from_rows(
+    [{"name": "host-a", "aliases": ["box-a"], "lanes": ["dev"]}]
+)
+
+
+def _oneshot_replay(
+    *, age: float = 0.25, status: str = "Up Less than a second"
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from datetime import UTC, datetime, timedelta
+
+    observed = datetime(2026, 11, 1, 14, 23, tzinfo=UTC)
+    started = observed - timedelta(seconds=age)
+    manifest = {
+        "lanes": {
+            "dev": {
+                "services": [
+                    {"name": "omnibase-infra-cloud-migration", "kind": "oneshot"},
+                ],
+            }
+        },
+    }
+    envelope = {
+        "host": "box-a",
+        "observed_at": observed.isoformat(),
+        "containers": [
+            {
+                "Names": "omnibase-infra-cloud-migration",
+                "State": "running",
+                "Status": status,
+                "StartedAt": started.isoformat(),
+                "Image": "postgres:16",
+                "Labels": {},
+            }
+        ],
+    }
+    return envelope, manifest
+
+
+@pytest.mark.parametrize(
+    ("age", "status"), [(0.25, "Up Less than a second"), (15, "Up 15 seconds")]
+)
+def test_oneshot_recorded_fresh_rows_request_followup(age: float, status: str) -> None:
+    envelope, manifest = _oneshot_replay(age=age, status=status)
+    if age == 15:
+        manifest["lanes"]["dev"]["services"][0]["name"] = (
+            "omnibase-infra-forward-migration"
+        )
+        envelope["containers"][0]["Names"] = "omnibase-infra-forward-migration"
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
+    assert plan["findings"] == []
+    pending = plan["pending_oneshots"]
+    assert len(pending) == 1
+    assert pending[0]["remaining_seconds"] == 300 - age
+    assert pending[0]["started_at"] == envelope["containers"][0]["StartedAt"]
+    assert pending[0]["container"] == envelope["containers"][0]["Names"]
+
+
+@pytest.mark.parametrize("age", [300, 300.01, 21600])
+def test_oneshot_completion_bound_remains_an_alarm(age: float) -> None:
+    envelope, manifest = _oneshot_replay(age=age, status="Up 6 hours")
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
+    assert [f["kind"] for f in plan["findings"]] == ["oneshot_stuck"]
+    assert plan["findings"][0]["severity"] == "warning"
+    assert plan["pending_oneshots"] == []
+
+
+@pytest.mark.parametrize(
+    "missing", ["StartedAt", "observed_at", "future", "naive", "invalid"]
+)
+def test_oneshot_unknown_timing_is_observable(missing: str) -> None:
+    envelope, manifest = _oneshot_replay()
+    if missing == "observed_at":
+        envelope.pop("observed_at")
+    elif missing == "future":
+        envelope["containers"][0]["StartedAt"] = "2026-11-01T14:23:01+00:00"
+    elif missing == "naive":
+        envelope["containers"][0]["StartedAt"] = "2026-11-01T14:23:00"
+    elif missing == "invalid":
+        envelope["containers"][0]["StartedAt"] = "not-a-time"
+    else:
+        envelope["containers"][0].pop(missing)
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
+    assert [f["kind"] for f in plan["findings"]] == ["oneshot_unobservable"]
+    assert plan["pending_oneshots"] == []
+
+
+@pytest.mark.parametrize("code", [0, 1, 137])
+def test_oneshot_followup_exit_retains_failure(code: int) -> None:
+    envelope, manifest = _oneshot_replay()
+    assert PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)["pending_oneshots"]
+    row = envelope["containers"][0]
+    row.update(State="exited", Status=f"Exited ({code}) Less than a second ago")
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
+    assert plan["pending_oneshots"] == []
+    assert [f["kind"] for f in plan["findings"]] == (["oneshot_failed"] if code else [])
+
+
+def test_oneshot_fresh_does_not_hide_health_or_restart_alarm() -> None:
+    envelope, manifest = _oneshot_replay()
+    manifest["lanes"]["dev"]["services"][0]["restart_bound"] = 5
+    envelope["containers"][0].update(
+        Health={"Status": "unhealthy", "FailingStreak": 100},
+        HealthcheckIntervalSeconds=30,
+        RestartCount=6,
+    )
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
+    assert {f["kind"] for f in plan["findings"]} == {
+        "container_unhealthy",
+        "container_restart_loop",
+    }
+    assert plan["pending_oneshots"]
 
 
 def test_keepalive_migration_gate_running_is_not_drift() -> None:
@@ -1640,3 +1758,190 @@ def test_unreadable_run_reads_a_directory_of_documents(tmp_path: Path) -> None:
     # The fleet document declares runners the clean inventory does not run.
     assert "runner_count_mismatch" in kinds
     assert "desired_state_unreadable" not in kinds
+
+
+@pytest.mark.parametrize(
+    ("followup", "expected_rc", "expected_kind"),
+    [
+        ("success", 0, None),
+        ("failed", 30, "oneshot_failed"),
+        ("stuck", 30, "oneshot_stuck"),
+        ("unobservable", 4, None),
+        ("health", 30, None),
+    ],
+)
+def test_oneshot_driver_automatically_samples_recorded_start(
+    tmp_path: Path,
+    followup: str,
+    expected_rc: int,
+    expected_kind: str | None,
+) -> None:
+    """Drive the production shell -> collector -> planner seam, no manual wait."""
+    from datetime import UTC, datetime, timedelta
+
+    import yaml
+
+    _, manifest = _oneshot_replay()
+    replay_start = (datetime.now(UTC) - timedelta(seconds=0.25)).isoformat()
+    manifest["lanes"]["dev"]["services"][0]["restart_bound"] = 5
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    registry_path = tmp_path / "overlay.yaml"
+    registry_path.write_text(
+        yaml.safe_dump(
+            {"registry": [{"name": "host-a", "aliases": ["box-a"], "lanes": ["dev"]}]}
+        )
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls"
+    reads = tmp_path / "reads"
+    fake = bin_dir / "docker"
+    fake.write_text(f"""#!{sys.executable}
+import json, sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+calls = Path({str(calls)!r})
+with calls.open("a") as out:
+    out.write(" ".join(sys.argv[1:]) + "\\n")
+reads = Path({str(reads)!r})
+count = int(reads.read_text()) if reads.exists() else 0
+if sys.argv[1:3] == ["ps", "-a"]:
+    count += 1
+    reads.write_text(str(count))
+    if count > 1 and {followup!r} == "unobservable":
+        sys.exit(1)
+    state, status = "running", "Up Less than a second"
+    if count > 1 and {followup!r} in ("success", "failed", "health"):
+        state = "exited"
+        status = "Exited (%d) Less than a second ago" % (1 if {followup!r} == "failed" else 0)
+    print("omnibase-infra-cloud-migration\\t%s\\t%s\\tpostgres:16\\t" % (state, status))
+elif sys.argv[1:3] == ["network", "ls"]:
+    print("bridge")
+elif sys.argv[1] == "inspect":
+    started = (datetime.now(UTC) - timedelta(seconds=301)).isoformat() if count > 1 and {followup!r} == "stuck" else {replay_start!r}
+    print(json.dumps({{"Names": "/omnibase-infra-cloud-migration", "State": {{"Health": None,
+        "StartedAt": started}},
+        "Config": {{"Healthcheck": None}}, "RestartCount": 6 if count == 1 and {followup!r} == "health" else 0}}))
+elif sys.argv[1] == "exec":
+    sys.stdin.read()
+""")
+    fake.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "LANE_MANIFEST": str(manifest_path),
+        "LANE_CENSUS_REGISTRY": str(registry_path),
+        "LANE_CENSUS_HOST": "box-a",
+        "LANE_CENSUS_LOG_FILE": str(tmp_path / "census.log"),
+        "LANE_CENSUS_DOCKER_SOCKET": "/nonexistent/oneshot-replay.sock",
+        "LANE_CENSUS_PYTHON": sys.executable,
+        "LANE_MEMORY_BROKER_CONTAINER": "test-broker",
+    }
+    env.pop("LANE_CENSUS_DESIRED_STATE", None)
+    proc = subprocess.run(
+        [
+            "bash",
+            str(_REPO / "scripts/lane-census-check.sh"),
+            "--lane",
+            "dev",
+            "--json",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert proc.returncode == expected_rc, proc.stderr
+    assert reads.read_text() == "2", proc.stderr
+    assert "automatically sampling again" in proc.stderr
+    if followup != "unobservable":
+        plan = json.loads(proc.stdout)  # exactly one stdout document across samples
+        assert plan["pending_oneshots"] == []
+        assert [f["kind"] for f in plan["findings"]] == (
+            [expected_kind] if expected_kind else []
+        )
+        if expected_kind:
+            assert "exec -i test-broker" in calls.read_text()
+    else:
+        assert "could not be observed" in proc.stderr
+    if followup == "health":
+        log = calls.read_text()
+        assert log.index("exec -i test-broker") < log.rindex("ps -a")
+        assert "container_restart_loop" in proc.stderr
+
+
+def test_oneshot_completion_bound_is_the_deploy_agents_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import inspect
+
+    monkeypatch.syspath_prepend(str(_REPO / "scripts/deploy-agent"))
+    from deploy_agent import executor
+
+    assert (
+        executor.PHASE_TIMEOUTS[executor.Phase.RUNTIME]
+        == PLAN.ONESHOT_POLICY.phase_timeouts["runtime"]
+        == 300
+    )
+    assert (
+        inspect.signature(executor.verify_oneshots_completed)
+        .parameters["timeout_s"]
+        .default
+        == 300
+    )
+    assert (
+        inspect.signature(executor.DeployExecutor._ensure_runtime_migrations_ready)
+        .parameters["timeout"]
+        .default
+        == 300
+    )
+
+
+def test_oneshot_same_execution_crosses_its_deadline() -> None:
+    envelope, manifest = _oneshot_replay()
+    pending = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)["pending_oneshots"][
+        0
+    ]
+    envelope["observed_at"] = pending["deadline"]
+    plan = PLAN.build_plan(envelope, manifest, ONESHOT_REGISTRY)
+    assert plan["pending_oneshots"] == []
+    assert [f["kind"] for f in plan["findings"]] == ["oneshot_stuck"]
+    assert envelope["containers"][0]["StartedAt"] == pending["started_at"]
+
+
+def test_oneshot_sampling_budget_does_not_reset_for_new_executions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from omnibase_infra.handlers import handler_census_oneshot as handler
+    from omnibase_infra.models.model_census_oneshot_request import (
+        ModelCensusOneshotRequest,
+    )
+
+    ticks = iter((0.0, 0.0, 1.0, 3.0, 301.0))
+    samples = []
+    sleeps = []
+
+    def run_sample(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        samples.append(argv)
+        Path(kwargs["env"]["ONEX_CENSUS_PLAN_OUT"]).write_text(
+            json.dumps(
+                {
+                    "pending_oneshots": [
+                        {"started_at": str(len(samples)), "remaining_seconds": 299}
+                    ]
+                }
+            )
+        )
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(handler.collector.subprocess, "run", run_sample)
+    monkeypatch.setitem(handler.collector._BOUND, "directory", tmp_path)
+    result = handler.HandlerCensusOneshot(
+        clock=lambda: next(ticks), sleep=sleeps.append
+    ).handle(ModelCensusOneshotRequest(policy=PLAN.ONESHOT_POLICY))
+    assert result.exit_code == 4
+    assert "new execution pending" in result.stderr
+    assert len(samples) == 2
+    assert sleeps == [2]

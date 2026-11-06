@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: census_oneshot_collector
+contract_name: census_oneshot_collector
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+description: >-
+  I/O ownership for the shared collector adapter used by HandlerCensusOneshot. This package reads the node policy and completion plans, owns temporary sample workspaces, invokes the existing collector, and provides the clock. Grading and bounded follow-up decisions remain in HandlerCensusOneshot, dispatched by node_census_oneshot_effect.

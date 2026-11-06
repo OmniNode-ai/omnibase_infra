@@ -79,6 +79,11 @@ requirements:
     statement: The CI test splits must install the verifier the repo-evidence caller pins in a step of their own before pytest starts, so the tests that call install_verifier find a whole cache entry and no longer pay a cold install inside the splits' 60 second pytest timeout.
   - id: req-omn19998-wrapper-venv-peer-floor
     statement: The onex wrapper must wait while either a host reconcile or a venv-only reconcile can prove the floor, including overlapping locks and a handoff between them, and must refuse a floor that remains stale without reclaiming either lock.
+  - id: req-omn19998-oneshot-completion-bound
+    statement: The lane census grades a running oneshot against the deploy agent's declared completion bound and automatically samples pending executions without suppressing exit, health or restart alarms.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: recorded Up Less than a second and Up 15 seconds rows request follow-up; the same execution at 300 seconds alarms; the production collector driver samples until completion, failed exit or overrun, retains earlier health alarms and reports unavailable timing or inventory -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k oneshot'
   - id: req-omn19998-refresh-recovery-census
     statement: The dev refresh completion must run the existing closing lane census after recovery as well as success, while preserving the failed refresh's result and exit code.
   - id: req-omn19998-broker-listener-recorded-rows
@@ -751,6 +756,24 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC36
+  - id: dod-omn19998-ac40-oneshot-completion-bound
+    description: AC40 replays the recorded fresh-start rows and the declared deadline, unknown timing, nonzero exit and concurrent health/restart controls. The node contract retains the deploy agent's 300-second bound.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k oneshot
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac40-oneshot-driver-deploy-probe
+    description: Hosted-runner deployment probe invokes the production census shell, CLI inventory adapter and planner with recorded-shape container rows. It checks automatic follow-up, clean completion, failed exit, deadline alarm, inventory failure and immediate publication of an earlier health alarm. It requires no external service or credential.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k oneshot_driver
+        cwd: .
+    binds_ac:
+      - AC40
   - id: dod-omn19998-refresh-recovery-census
     description: Replay the recorded dev recreate leftover through the refresh completion block, real census reader and Docker shim. Recovery removes only declared same-lane leftovers, preserves failure results and exit codes, and records remaining drift or unreadable inventory. Success controls retain the census exit code.
     source: manual
@@ -769,6 +792,24 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-ac40-sampling-budget-regressions
+    description: AC40 checks order-independent failure precedence, missing-plan refusal, a shared subprocess and sleep budget, retention of completed output and earlier failures on timeout, and phase-policy loading by a relocated deploy agent from its installed infra package.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_census_oneshot_sampling.py -q
+        cwd: .
+    binds_ac:
+      - AC40
+  - id: dod-omn19998-ac40-bus-runtime-deploy-probe
+    description: Hosted runtime probe dispatches the census through RuntimeLocal and its in-memory bus using a temporary collector, requiring two samples, removal of the memory argument on follow-up and retention of earlier alarm or publication-failure status. A relocated agent with its existing routing config must load the unchanged phase limits from the installed infra package without a source checkout beside it. No live lane, Docker or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_census_oneshot_driver.py tests/unit/handlers/test_census_oneshot_sampling.py -q
+        cwd: .
+    binds_ac:
+      - AC40
   - id: dod-omn19998-ac37-delegate-skill-boot-priority
     description: AC46 drives the production boot subscription path and client pre-publish probe with empty topics, checks readiness and lazy-start controls, and integrates the shipped main and effects policy with recorded effects-held episodes and an independent alarm clock. The receipt binding check refuses duplicate acceptance labels.
     source: manual

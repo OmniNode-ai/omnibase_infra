@@ -150,7 +150,7 @@ EXIT_MEMORY_ALERT=31
 MEMORY_RC=0
 # OMN-20798: drift was found and its event did not reach the bus. Distinct from
 # 30 (drift, delivered) and from every memory code.
-EXIT_DRIFT_UNPUBLISHED=8
+EXIT_DRIFT_UNPUBLISHED=8; CENSUS_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -218,12 +218,15 @@ command -v "$LANE_CENSUS_PYTHON" >/dev/null 2>&1 || {
 # census needs. Without this the failure surfaces as a traceback from
 # lane_census_plan.py with the offending interpreter never named, which is what
 # made the CI failure above take a live dispatch to diagnose.
-if ! "$LANE_CENSUS_PYTHON" -c 'import yaml' >/dev/null 2>&1; then
+"$LANE_CENSUS_PYTHON" -c 'import yaml' >/dev/null 2>&1 || {
   echo "ERROR: interpreter '$LANE_CENSUS_PYTHON' cannot import PyYAML, which lane_census_plan.py needs to read the lane manifest." >&2
   echo "       In CI, set LANE_CENSUS_PYTHON to the project venv interpreter," >&2
-  echo "       e.g. LANE_CENSUS_PYTHON=\"\$(uv run python -c 'import sys; print(sys.executable)')\"" >&2
-  exit 3
-fi
+  echo "       e.g. LANE_CENSUS_PYTHON=\"\$(uv run python -c 'import sys; print(sys.executable)')\"" >&2; exit 3; }
+
+# The node adapter loads the installed runtime dependencies and dispatches the
+# bounded sampling command over its contract-declared event bus. Child samples
+# keep the existing collection and publication path below.
+[[ "${ONEX_CENSUS_SINGLE_SAMPLE:-}" == 1 ]] || PYTHONPATH="${SCRIPT_DIR}/../src${PYTHONPATH:+:$PYTHONPATH}" exec "$LANE_CENSUS_PYTHON" -m omnibase_infra.nodes.node_census_oneshot_effect "$SCRIPT_DIR" "${SCRIPT_DIR}/../src/omnibase_infra/nodes/node_census_oneshot_effect/contract.yaml" "${CENSUS_ARGS[@]}"
 
 command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found" >&2; exit 3; }
 
@@ -394,6 +397,8 @@ Publishing NO census — declare the host and its lanes there first."
   fi
   exit "$PLAN_RC"
 fi
+
+[[ -z "${ONEX_CENSUS_PLAN_OUT:-}" ]] || printf '%s\n' "$PLAN_JSON" >"$ONEX_CENSUS_PLAN_OUT"
 
 # OMN-19959: the memory pass runs once the planner has accepted this host, so a
 # host the registry does not declare (exit 5) publishes nothing at all, as
