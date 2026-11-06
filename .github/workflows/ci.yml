@@ -2409,7 +2409,13 @@ jobs:
   detect-changes:
     timeout-minutes: 30
     name: Detect Changes
-    needs: [lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
+    # OMN-22545: `lint` is deliberately NOT in this list. Lint ended at a median
+    # 9.4 min over 68 completed runs while the 14 gates below ended at a median
+    # 3.0 min, so waiting for it started the tests a median 6.4 min late. Lint
+    # still gates the merge: it is in STRICT_GATE_JOBS of
+    # scripts/ci/ci_summary_gate.py, and the NO-`needs` CI Summary poller fails
+    # when it fails (tests/ci/test_ci_test_matrix_not_gated_on_lint.py).
+    needs: [onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
     # OMN-19927: on a push or a dispatch this job must run even when the
     # docs-only tier skipped its lint-class needs, because the provenance
     # step below decides whether that push may skip tests at all. On every
@@ -2554,7 +2560,8 @@ jobs:
   # -n 2 rather than -n auto, after repeated xdist OOM crashes on shard 3.
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
+    # OMN-22545: no `lint` here either, for the reason given on `detect-changes`.
+    needs: [zone-filter, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
     # OMN-16216: draft-state CI admission gate (mirrors onex_change_control
     # PR #6686 / OMN-15731). The heavy split-matrix test run only dispatches
     # once the PR is out of draft; `contains(...'ci:ready')` is retained as a
