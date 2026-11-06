@@ -291,7 +291,7 @@ def test_the_drift_check_names_a_missing_read_grant_of_a_read_only_principal(
     listing = "\n".join(
         line
         for line in _listing("dev-ro-lab-host", declaration, overlay).splitlines()
-        if not (dropped in line and " READ " in line)
+        if not (dropped in line and " read " in line)
     )
     broker = FakeBroker({"dev-ro-lab-host": listing + "\n"})
     assert _audit(tmp_path, broker, monkeypatch, "--principal", RO) == 1
