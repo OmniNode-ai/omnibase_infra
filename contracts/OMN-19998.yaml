@@ -188,8 +188,8 @@ requirements:
   - id: req-omn19998-dispatch-derived-machine-grants
     statement: The lab machine profile must derive the serialized lane dispatch node's caller and local runtime topic access from wire bindings, with canonical consumer groups, without granting dispatch to the shared developer profile.
     acceptance:
-      - id: AC46
-        statement: 'AC46: machine bindings derive literal READ, WRITE and DESCRIBE on lane-dispatch-requested and lane-dispatch-completed and READ on the canonical local handler and terminal groups; the committed JSON equals the compute handler output, trusted machine rows receive the grants and developer rows or an absent overlay do not -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov -k dispatch fails against the merge-base machine bindings.'
+      - id: AC49
+        statement: 'AC49: machine bindings derive literal READ, WRITE and DESCRIBE on lane-dispatch-requested and lane-dispatch-completed and READ on the canonical local handler and terminal groups; the committed JSON equals the compute handler output, trusted machine rows receive the grants and developer rows or an absent overlay do not -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov -k dispatch fails against the merge-base machine bindings.'
   - id: req-omn19998-autowiring-timeout
     statement: Cold auto-wiring must avoid migration-service contract scans for optional runtime ports and use the shared safe contract reader for published-event routing.
     acceptance:
@@ -394,14 +394,14 @@ dod_evidence:
     binds_ac:
       - AC39
   - id: dod-omn19998-ac40-dispatch-derived-machine-grants
-    description: AC46 drives HandlerBrokerGrantDerive with the shipped machine bindings, compares its serialized output byte for byte, resolves the issuer's real trusted overlay selection for machine and developer principals, and checks group names with RuntimeLocal's derivation. It exercises issuance, apply and audit with the focused module's fake broker and makes no live ACL or credential change.
+    description: AC49 drives HandlerBrokerGrantDerive with the shipped machine bindings, compares its serialized output byte for byte, resolves the issuer's real trusted overlay selection for machine and developer principals, and checks group names with RuntimeLocal's derivation. It exercises issuance, apply and audit with the focused module's fake broker and makes no live ACL or credential change.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov
         cwd: .
     binds_ac:
-      - AC46
+      - AC49
   - id: dod-omn19998-ac40-dispatch-grants-deploy-probe
     description: Hosted-runner artifact probe loads the shipped grant policy and derived machine JSON through the actual issuer, exercises apply-grants and audit-grants against a fake broker, and requires exact node output and denial for an ordinary developer row. This checks the deployable grant documents without asserting live broker convergence.
     source: manual
@@ -410,7 +410,7 @@ dod_evidence:
         check_value: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov
         cwd: .
     binds_ac:
-      - AC46
+      - AC49
   - id: dod-omn19998-cold-wiring-deploy-probe
     description: Hosted-runner runtime artifact probe for AC42, AC45 and AC41. Exercises optional-port dependency construction and safe contract parsing from this checkout, requiring zero optional migration-service builds, retained required service construction and unchanged declared values and malformed-input handling. Uses temporary contracts without a live broker, lane, credentials or Docker.
     source: manual
