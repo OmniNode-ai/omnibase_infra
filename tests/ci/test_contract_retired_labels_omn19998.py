@@ -21,7 +21,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 CONTRACT = Path(__file__).resolve().parents[2] / "contracts" / "OMN-19998.yaml"
-KEPT = {"AC1", "AC2", "AC3"}
+KEPT = {"AC1", "AC2", "AC3", "AC49"}
 RETIRED = {
     "AC4",
     "AC5",
@@ -85,7 +85,7 @@ def declared_labels(contract: dict[str, Any]) -> set[str]:
     }
 
 
-def test_the_contract_retires_the_contract_only_labels_and_still_declares_ac1_to_ac3() -> (
+def test_the_contract_retires_the_contract_only_labels_and_still_declares_ac1_to_ac3_and_ac49() -> (
     None
 ):
     contract = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))

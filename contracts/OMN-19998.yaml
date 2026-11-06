@@ -256,7 +256,7 @@ dod_evidence:
         check_value: uv run pytest scripts/deploy-agent/tests/unit/test_executor_runtime_timeout_recovery_omn18057.py scripts/deploy-agent/tests/unit/test_runtime_roll_recovery_omn19998.py -q
         cwd: .
     binds_ac:
-      - AC49
+      - AC39
   - id: dod-omn19998-ac39-runtime-roll-deploy-source
     description: Hosted behavioral probe for AC39 from this checkout. The real executor loads its boot-guard effect and replays failed running checks, health waits and deadlines through the Docker adapter, requiring a failed roll after recovery without advancing peer images or emitting success. The convergence replay also exercises successful and unchanged rolls and forced rollback. No network source read, live installation or uninterrupted readiness is claimed.
     source: manual
@@ -268,7 +268,7 @@ dod_evidence:
         check_value: uv run pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q
         cwd: .
     binds_ac:
-      - AC49
+      - AC39
   - id: dod-omn19998-cold-wiring-deploy-probe
     description: Hosted-runner runtime artifact probe for AC42, AC45 and AC41. Exercises optional-port dependency construction and safe contract parsing from this checkout, requiring zero optional migration-service builds, retained required service construction and unchanged declared values and malformed-input handling. Uses temporary contracts without a live broker, lane, credentials or Docker.
     source: manual
