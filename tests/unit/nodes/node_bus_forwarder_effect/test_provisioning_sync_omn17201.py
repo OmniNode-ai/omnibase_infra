@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.handlers.handler_broker_grant_derive import (
+from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
     HandlerBrokerGrantDerive,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (

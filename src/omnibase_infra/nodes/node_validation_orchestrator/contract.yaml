@@ -24,6 +24,8 @@ node_version:
   patch: 0
 # Node type
 node_type: "ORCHESTRATOR_GENERIC"
+descriptor:
+  node_archetype: orchestrator
 # Description
 description: >
   Orchestrator for the validation pipeline. Consumes pattern candidates, builds validation plans with the MVP check catalog, coordinates executor and adjudicator nodes, and publishes validation results. Drives the build_plan -> execute_checks -> adjudicate -> update_lifecycle workflow.
@@ -86,6 +88,9 @@ handler_routing:
       handler:
         name: "HandlerBuildPlan"
         module: "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan"
+      input_model:
+        name: "ModelPatternCandidate"
+        module: "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate"
       output_events:
         - "ModelValidationPlan"
       description: "Build validation plan from pattern candidate using MVP check catalog."

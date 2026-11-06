@@ -106,7 +106,7 @@ jobs:
     # (`shared-env-enabled: true`), whose directory is keyed by a digest that
     # includes the lockfile (`scripts/ci/ensure_ci_env.sh` -> `ci_env_digest.py`)
     # and which lives INSIDE each runner container at
-    # `/home/runner/.cache/omni/ci-envs`. So every change to `uv.lock` invalidates
+    # `$HOME/.cache/omni/ci-envs` (the runner user's home). So every change to `uv.lock` invalidates
     # it on all 88 containers at once, and the first job on each container then
     # pays the full build. A release version bump does exactly that -- #3449 bumped
     # `dev` to 0.38.24 -- which is why the two cold runs above are adjacent in
@@ -164,7 +164,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
+          ref: a4798bc9d61820d58b0514415ff5ba34e9ceaa18 # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |

@@ -243,7 +243,7 @@ repos:
   #     its hook repository exports.
   #   - detect-secrets has no hook id in the omnibase_core hook repository.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: canonical-file-shape
         args: [--rules, file-shape]
@@ -292,6 +292,15 @@ repos:
       # `uv run python <script>`. CI twin: .github/workflows/precommit-parity-gate.yml.
       - id: precommit-interpreter-resolution
         require_serial: true
+  # OMN-19998: a public workflow selects no lab runner. No baseline: a job still on the
+  # lab has a typed route packaged with this core, and the routes only shrink. CI twin:
+  # the last steps of job public-runner-placement in .github/workflows/ci.yml read this rev.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: dev-20261105190003-87a6f5ddcbcc
+    hooks:
+      - id: check-public-lab-selection
+        args: [--repo, omnibase_infra, --visibility, public]
+        require_serial: true
   # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
   # "Ci runners should be for private repos only"). Refuses a staged workflow job
   # whose runs-on is, or can resolve to, a self-hosted label unless omnibase_core's
@@ -317,7 +326,7 @@ repos:
   # no suppression marker. CI twin job node-boundary-imports in
   # .github/workflows/ci.yml reads this rev from here.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       # OMN-17427: a whole-repo import-graph scan (~12s) run on every commit is
       # the commit path's second-largest fixed cost, and ci.yml's
@@ -339,7 +348,7 @@ repos:
   # suppression marker. .github/workflows/direct-model-call.yml reads this rev
   # from here. Server-side backstop: OMN-20299.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       # OMN-17427: the gate always scans the whole repository (a new call site can
       # be a new caller of an old one), ~40s on every commit; direct-model-call.yml
@@ -356,7 +365,7 @@ repos:
   # sourced from omnibase_core. Rev bumped to OMN-13026 (transport-mock-lint
   # hook added); OMN-13281 wires receipt-honesty to this block.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: check-stub-implementations
         require_serial: true
@@ -382,7 +391,7 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/canonical_inference_baseline.json;
   # baseline is burn-down only. Suppression: # canonical-inference-ok: <reason>
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: check-canonical-inference
         require_serial: true
@@ -393,7 +402,7 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/url_authority_baseline.json.
   # Baseline is burn-down only. Suppress with: # url-authority-ok: <reason>
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: check-url-authority
         require_serial: true
@@ -409,7 +418,7 @@ repos:
   # job in .github/workflows/ci.yml (registered in scripts/ci/ci_summary_gate.py
   # STRICT_GATE_JOBS); this local hook is dev-ergonomics.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: no-noncanonical-lifecycle-classes
         require_serial: true
@@ -418,6 +427,15 @@ repos:
         stages: [manual]
   - repo: local
     hooks:
+      # Collected by CI's existing unit-test gate as well as this focused hook.
+      - id: delegation-boot-priority
+        name: Delegation boot priority and recorded effects holds (OMN-19998)
+        entry: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/(runtime/auto_wiring/handler_wiring|event_bus/model_topic_readiness_config|models/model_runtime_boot_policy)\.py|contracts/services/runtime_policy\.contract\.yaml|docker/(runtime-policy\.env|docker-compose\.(infra|dev-lane)\.yml)|tests/(unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority\.py|fixtures/delegate_skill_effects_held\.json)|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       # OMN-18713: CI's required Lint job runs the same discovery reconciliation gate.
       - id: contract-discovery-reconciliation
         name: Contract discovery reports every path outcome (OMN-18713)
@@ -530,7 +548,7 @@ repos:
   # last TOPIC_* literals. The file holds DLQ builders only and the gate now fails
   # closed on any reintroduced literal — A5-full is complete.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       # OMN-18691 adds ONE path to this exclude: docker/docker-compose.ci-bus.yml.
       # Read the reason before adding a second — an allowlist entry is never a way
@@ -567,7 +585,7 @@ repos:
   # no-bare-feature-flags comes from omnibase_core (omnibase_core#1936, OMN-20919,
   # OCC retirement S8). A separate block keeps no-hardcoded-topics on the rev above.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: no-bare-feature-flags
         require_serial: true
@@ -2449,7 +2467,7 @@ repos:
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
   # repo's own architecture-handshakes/validator-requirements-baseline.yaml.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261103173624-74e0b0f12767
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: validate-validator-requirements
         require_serial: true

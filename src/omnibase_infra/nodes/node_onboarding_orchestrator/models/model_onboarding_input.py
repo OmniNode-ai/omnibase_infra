@@ -11,13 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class ModelOnboardingInput(BaseModel):
     """Input for the onboarding orchestrator.
 
-    When ``policy_name`` is set and the resolved policy has
-    ``policy_type == "interactive"``, the handler dispatches to the
-    interactive executor.  Otherwise the existing DAG-based
-    ``resolve_policy`` + verification path is used.
+    ``policy_name=None`` selects the DAG-based ``resolve_policy`` and
+    verification path. Every non-None ``policy_name`` selects interactive
+    execution and requires an input adapter. The named policy must have
+    ``policy_type == "interactive"``; an unknown or non-interactive policy
+    raises ``OnboardingHandlerError`` without falling back to the DAG path.
 
-    The ``input_adapter`` is injected via handler function parameter,
-    NOT in this model (DI outside models — OMN-10784 GPT #1).
+    The ``input_adapter`` is resolved by the handler from the ONEX container or the
+    implementation function, outside this model (OMN-10784 GPT #1).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

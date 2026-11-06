@@ -28,11 +28,11 @@ from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract 
 from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
     ModelRuntimeLaneScope,
 )
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.handlers.handler_package_announcer import (
     build_catalog_direct,
     local_announce_request,
-    read_contract_yaml,
     read_package_inventory,
     resolve_contract_path,
 )

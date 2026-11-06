@@ -158,7 +158,7 @@ DAILY_VIEW_FILE = (
     / "forward"
     / "nodes"
     / "node_projection_delegation"
-    / "0066_delegation_daily_view.sql"
+    / "0067_delegation_daily_view.sql"
 )
 BOOTSTRAP_SCRIPT = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "000_create_multiple_databases.sh"

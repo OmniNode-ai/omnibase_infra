@@ -41,8 +41,8 @@ NODE = (
     Path(__file__).resolve().parents[3]
     / "docker/migrations/forward/nodes/node_projection_delegation"
 )
-CURSOR = NODE / "0065_delegation_events_projection_cursor.sql"
-DAILY = NODE / "0066_delegation_daily_view.sql"
+CURSOR = NODE / "0066_delegation_events_projection_cursor.sql"
+DAILY = NODE / "0067_delegation_daily_view.sql"
 TENANT = "00000000-0000-0000-0000-0000000021c0"
 OTHER = "00000000-0000-0000-0000-0000000021c1"
 START = datetime(2026, 10, 1, tzinfo=UTC)

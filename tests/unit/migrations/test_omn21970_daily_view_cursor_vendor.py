@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """OMN-21970 deployment identity for the per-day view and the walk cursor.
 
-Catch a missing or edited vendor of node_projection_delegation 0065 (the
-delegation_events walk cursor) or 0066 (the per-day view), an absent or wrong
+Catch a missing or edited vendor of node_projection_delegation 0066 (the
+delegation_events walk cursor) or 0067 (the per-day view), an absent or wrong
 tenant-ledger binding, a class other than forward-only, and a topology that
 does not let the delegation writer read the new view.
 """
@@ -22,11 +22,11 @@ ROOT = Path(__file__).resolve().parents[3]
 NODE = "node_projection_delegation"
 FORWARD = ROOT / "docker/migrations/forward"
 VENDORED = {
-    "0065_delegation_events_projection_cursor.sql": (
+    "0066_delegation_events_projection_cursor.sql": (
         "d32434e72e1ecd7125bbca6a2de08e1dece98a45ea997b92f1fda78ffe5dd970",
         "8c750ceba2a4738efc5c6c4611afa9c307161a79",
     ),
-    "0066_delegation_daily_view.sql": (
+    "0067_delegation_daily_view.sql": (
         "4f3cde16ead205e1ff46657baf43c1112cf8191ee88feb34bd577e7191d26dfb",
         "b9608a3b8de6f065446a3ef6ae2dba6b3a183c27",
     ),

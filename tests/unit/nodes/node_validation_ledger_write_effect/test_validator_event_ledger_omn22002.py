@@ -30,7 +30,7 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.handlers.handler_db import HandlerDb
-from omnibase_infra.handlers.handler_validator_event_ledger_project import (
+from omnibase_infra.handlers.handler_validator_event_ledger_project.handler import (
     HandlerValidatorEventLedgerProject,
 )
 from omnibase_infra.handlers.models import ModelDbQueryPayload, ModelDbQueryResponse
@@ -46,8 +46,12 @@ _SRC = Path(__file__).resolve().parents[4] / "src" / "omnibase_infra"
 _CONTRACT = (
     _SRC / "nodes" / "node_validation_ledger_projection_compute" / "contract.yaml"
 )
-_HANDLER_SOURCE = _SRC / "handlers" / "handler_validator_event_ledger_project.py"
-_HANDLER_MODULE = "omnibase_infra.handlers.handler_validator_event_ledger_project"
+_HANDLER_SOURCE = (
+    _SRC / "handlers" / "handler_validator_event_ledger_project" / "handler.py"
+)
+_HANDLER_MODULE = (
+    "omnibase_infra.handlers.handler_validator_event_ledger_project.handler"
+)
 _STAMP = datetime(2026, 11, 2, 12, 0, 0, tzinfo=UTC)
 _RUN_ID = UUID("5b7a1e0c-4c0e-4d6c-9f55-3c7d8f0a1b21")
 

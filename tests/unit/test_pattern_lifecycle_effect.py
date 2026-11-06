@@ -35,6 +35,9 @@ from omnibase_infra.nodes.node_pattern_lifecycle_effect.models.model_lifecycle_r
 from omnibase_infra.nodes.node_pattern_lifecycle_effect.models.model_lifecycle_state import (
     ModelLifecycleState,
 )
+from omnibase_infra.nodes.node_pattern_lifecycle_effect.models.model_lifecycle_update_request import (
+    ModelLifecycleUpdateRequest,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -345,10 +348,12 @@ class TestHandlerLifecycleUpdateHandle:
         state = _make_state(tier=EnumLifecycleTier.OBSERVED)
 
         result = await handler.handle(
-            pattern_id=uuid4(),
-            verdict=EnumValidationVerdict.PASS,
-            correlation_id=uuid4(),
-            current_state=state,
+            ModelLifecycleUpdateRequest(
+                pattern_id=uuid4(),
+                verdict=EnumValidationVerdict.PASS,
+                correlation_id=uuid4(),
+                current_state=state,
+            )
         )
 
         assert isinstance(result, ModelLifecycleResult)
@@ -365,10 +370,12 @@ class TestHandlerLifecycleUpdateHandle:
         state = _make_state(tier=EnumLifecycleTier.OBSERVED)
 
         result = await handler.handle(
-            pattern_id=uuid4(),
-            verdict=EnumValidationVerdict.FAIL,
-            correlation_id=uuid4(),
-            current_state=state,
+            ModelLifecycleUpdateRequest(
+                pattern_id=uuid4(),
+                verdict=EnumValidationVerdict.FAIL,
+                correlation_id=uuid4(),
+                current_state=state,
+            )
         )
 
         assert result.previous_tier == EnumLifecycleTier.OBSERVED
@@ -383,10 +390,12 @@ class TestHandlerLifecycleUpdateHandle:
         pid = uuid4()
 
         result = await handler.handle(
-            pattern_id=pid,
-            verdict=EnumValidationVerdict.PASS,
-            correlation_id=uuid4(),
-            current_state=None,
+            ModelLifecycleUpdateRequest(
+                pattern_id=pid,
+                verdict=EnumValidationVerdict.PASS,
+                correlation_id=uuid4(),
+                current_state=None,
+            )
         )
 
         assert result.previous_tier == EnumLifecycleTier.OBSERVED
@@ -404,10 +413,12 @@ class TestHandlerLifecycleUpdateHandle:
         )
 
         result = await handler.handle(
-            pattern_id=uuid4(),
-            verdict=EnumValidationVerdict.PASS,
-            correlation_id=uuid4(),
-            current_state=state,
+            ModelLifecycleUpdateRequest(
+                pattern_id=uuid4(),
+                verdict=EnumValidationVerdict.PASS,
+                correlation_id=uuid4(),
+                current_state=state,
+            )
         )
 
         assert result.previous_tier == EnumLifecycleTier.OBSERVED
@@ -421,10 +432,12 @@ class TestHandlerLifecycleUpdateHandle:
         cid = uuid4()
 
         result = await handler.handle(
-            pattern_id=uuid4(),
-            verdict=EnumValidationVerdict.PASS,
-            correlation_id=cid,
-            current_state=None,
+            ModelLifecycleUpdateRequest(
+                pattern_id=uuid4(),
+                verdict=EnumValidationVerdict.PASS,
+                correlation_id=cid,
+                current_state=None,
+            )
         )
 
         assert result.correlation_id == cid

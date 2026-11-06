@@ -63,8 +63,7 @@ def committed_fixture() -> dict[str, Any]:
     if not _FIXTURE_PATH.exists():
         pytest.fail(
             f"Committed parity fixture missing: {_FIXTURE_PATH}. "
-            "Regenerate with: uv run python -m tests.fixtures.dispatch_parity.harness "
-            f"--out {_FIXTURE_PATH}"
+            f"Refresh with: {harness.REFRESH_COMMAND}"
         )
     return harness.load_selection_oracle()
 
@@ -126,7 +125,7 @@ def test_corpus_slice_matches_committed_fixture(
     assert set(live_pkgs) == set(committed_pkgs), (
         "Corpus package set drifted from the committed fixture. "
         f"live={sorted(live_pkgs)} committed={sorted(committed_pkgs)}. "
-        "Regenerate selection-oracle-v2.json if the dependency closure changed."
+        f"Refresh the fixtures with: {harness.REFRESH_COMMAND}"
     )
 
 

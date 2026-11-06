@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to c7cd6a481acfe7e8c0821a5d5149d592efa556c0"
+title: "The omnimarket contract pin advances to a4798bc9d61820d58b0514415ff5ba34e9ceaa18"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,7 +10,7 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry a4798bc9d61820d58b0514415ff5ba34e9ceaa18 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
@@ -28,21 +28,18 @@ requirements:
         statement: "AC4: the Enable auto-merge step reads isDraft before gh pr merge and exits 0 for a draft without calling gh pr merge, while a ready PR still reaches the arming call -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
   - id: req-omn17292-hostile-reviewer-lan-label
     statement: The Hostile Reviewer job's trusted fallback runner set requires arch-amd64, a label the LAN amd64 action pools carry and the off-LAN h203-light runners do not, so the job cannot land where the review voters are unreachable.
-    acceptance:
-      - id: AC5
-        statement: "AC5: the hostile-review job's runs-on falls back to [self-hosted, omnibase-ci, arch-amd64], and that label set is not a subset of the h203-light runners' labels -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hostile_review_runner_and_degraded_omn17492.py -q -n 0"
   - id: req-omn17292-runtime-image-cve-floors
     statement: The runtime image upgrades filelock and npm's bundled undici past their HIGH CVEs, so the Trivy scan in Build runtime stability-candidate no longer fails on dev.
-    acceptance:
-      - id: AC6
-        statement: "AC6: the builder stage upgrades filelock to >=4.2.1 after the PyTorch-index torch install, and the npm bundle patch loop overwrites undici at a ^6 release >=6.29.1 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry a4798bc9d61820d58b0514415ff5ba34e9ceaa18.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+  - kind: tests
+    description: The pin refresh edits the omnimarket pin in this contract and nothing else, and the old whole-file template fails the same reading.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q"
   - kind: tests
     description: A first-publish stall lands in the sustained-load benchmark's discarded warm-up interval.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
@@ -61,11 +58,19 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry a4798bc9d61820d58b0514415ff5ba34e9ceaa18.
     source: manual
     checks:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn-17292-ac1-pin-advance-bridges-retired
+    description: The six supplemental table declarations the advanced omnimarket pin now carries stay deleted from this repository; the merge base has no such test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_pin_advance_bridges_retired_omn17292.py -q -n 0"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn-17292-ac2-dashboard-owner-lane
@@ -76,6 +81,14 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn-17292-ac1-refresh-edits-pin-only
+    description: The pin refresh edits the omnimarket pin in this contract and nothing else, so a refresh keeps every criterion, check and retirement dev holds; the whole-file template it replaced drops AC2 to AC4 and fails the same test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
   - id: dod-omn-17292-ac3-sustained-load-warmup
     description: A first-publish stall lands in the sustained-load benchmark's discarded warm-up interval; at the merge base it lands in measured interval 1 and the variance assertion fails.
     source: manual
@@ -117,3 +130,44 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC6]
+  - id: dod-omn-17292-contract-only-retirement
+    description: "Retires the claims of the contract-only criteria OMN-17292 never carried on the live ticket (2 labels). The live ticket was read on 2026-11-05; each retired item still runs its tests here as a regression guard, and this item binds no criterion."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hostile_review_runner_and_degraded_omn17492.py -q -n 0"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    supersedes_ac_binding:
+      - item: dod-omn-17292-ac5-hostile-reviewer-lan-label
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: "OMN-17292 carries none of this label on the live ticket (read 2026-11-05), so AC5 was never deleted from it: it is a criterion this repository's contract declared on its own for another change. Its statement stays in this file's history and the carrier item dod-omn-17292-contract-only-retirement still runs the tests of dod-omn-17292-ac5-hostile-reviewer-lan-label."
+        retired_by: lane-drift-dirty-landing-2200
+        retired_at: '2026-11-05T22:17:00Z'
+      - item: dod-omn-17292-ac6-runtime-image-cve-floors
+        label: AC6
+        reason_kind: no_longer_applicable
+        reason: "OMN-17292 carries none of this label on the live ticket (read 2026-11-05), so AC6 was never deleted from it: it is a criterion this repository's contract declared on its own for another change. Its statement stays in this file's history and the carrier item dod-omn-17292-contract-only-retirement still runs the tests of dod-omn-17292-ac6-runtime-image-cve-floors."
+        retired_by: lane-drift-dirty-landing-2200
+        retired_at: '2026-11-05T22:17:00Z'
+      - item: dod-omn-17292-ac6-deploy-runtime-image-cve-floors
+        label: AC6
+        reason_kind: no_longer_applicable
+        reason: "OMN-17292 carries none of this label on the live ticket (read 2026-11-05), so AC6 was never deleted from it: it is a criterion this repository's contract declared on its own for another change. Its statement stays in this file's history and the carrier item dod-omn-17292-contract-only-retirement still runs the tests of dod-omn-17292-ac6-deploy-runtime-image-cve-floors."
+        retired_by: lane-drift-dirty-landing-2200
+        retired_at: '2026-11-05T22:17:00Z'
+  - id: dod-omn-17292-retired-labels-stay-retired
+    description: The contract still declares AC1 to AC4, which the live ticket carries, and declares neither retired label (AC5, AC6) as a criterion. The merge base has no such test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_contract_retired_labels_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2, AC3, AC4]

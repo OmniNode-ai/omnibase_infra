@@ -144,6 +144,7 @@ def test_recorded_lane_runs_collection_grading_and_receipt(tmp_path: Path) -> No
     record = tmp_path / "c28.json"
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         base_url="http://projection.test",
         samples=2,
@@ -215,6 +216,7 @@ def test_mid_run_redeploy_is_remeasured_through_the_full_handler(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         base_url="http://projection.test",
         samples=2,
@@ -326,6 +328,7 @@ def test_booting_lane_past_two_settle_windows_grades_pass_omn19812(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         base_url="http://projection.test",
         samples=2,

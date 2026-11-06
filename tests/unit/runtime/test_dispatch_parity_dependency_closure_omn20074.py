@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -16,6 +17,23 @@ from tests.integration.runtime.test_dispatch_selection_parity import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _assert_inventory_is_arithmetically_consistent(snapshot: dict[str, Any]) -> None:
+    """The header counts agree with the sections beside them (OMN-22580).
+
+    No count is pinned here: the live engine pins the corpus through the gate's
+    staleness check and the recorded readback, and the harness refreshes both.
+    This test only refuses a header that contradicts its own sections.
+    """
+    corpus = snapshot["header"]["corpus"]
+    assert corpus["contracts_discovered"] == sum(
+        corpus["contracts_by_package"].values()
+    )
+    assert corpus["registered_dispatchers"] == len(snapshot["dispatchers"])
+    assert corpus["registered_routes"] == len(snapshot["routes"])
+    assert corpus["probe_count"] == len(snapshot["probes"])
+    assert corpus["discovery_errors"] == len(snapshot["discovery_errors"])
 
 
 @pytest.mark.parametrize(
@@ -59,11 +77,11 @@ def test_retired_occ_uses_captured_inventory_without_changing_selection(
         "omnibase-core",
         "omnibase-infra",
     ]
-    assert legacy["header"]["corpus"]["contracts_discovered"] == 154
-    assert retired["header"]["corpus"]["contracts_discovered"] == 167
-    assert retired["header"]["corpus"]["contracts_by_package"] == {
-        "omnibase_core": 21,
-        "omnibase_infra": 146,
+    for snapshot in (legacy, retired):
+        _assert_inventory_is_arithmetically_consistent(snapshot)
+    assert set(retired["header"]["corpus"]["contracts_by_package"]) == {
+        "omnibase_core",
+        "omnibase_infra",
     }
     assert (
         "onex-change-control"
@@ -71,7 +89,6 @@ def test_retired_occ_uses_captured_inventory_without_changing_selection(
     )
     for section in ("dispatchers", "routes", "probes", "discovery_errors"):
         assert retired[section] == legacy[section], section
-    assert len(retired["probes"]) == 1130
 
 
 @pytest.mark.parametrize("missing", ["omnibase-core", "omnibase-infra"])

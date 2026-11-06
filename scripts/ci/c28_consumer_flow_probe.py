@@ -117,16 +117,16 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
+
+import yaml
 
 RECORD_VERSION: Final[int] = 1
 
@@ -139,7 +139,6 @@ REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 # ---- the subject, as the readback named it ---------------------------------
 EXPOSURE_TOPIC: Final[str] = "onex.snapshot.projection.consumer-flow.v1"
 CURSOR_FIELD: Final[str] = "projection_cursor"
-DEFAULT_BASE_URL: Final[str] = "http://host.docker.internal:3002"
 LIVE_WINDOW_MINUTES: Final[int] = 10
 # consumer_flow_windows keeps every window (48M rows, 32 GB on dev-201) and no
 # index leads with window_start, so a plain distinct over it is a whole-table
@@ -163,17 +162,20 @@ LIVE_WINDOW_SQL: Final[str] = (
     "and w.window_start > now() - interval '10 minutes')"
 )
 
-#: (kind, consumer-group prefix, subscribed topic, the counter that must move)
+#: (kind, consumer-group prefix after the environment segment, subscribed
+#: topic, the counter that must move). A group is ``{env}.{service}.{node}.
+#: {purpose}.{version}`` and the environment is the graded lane's own, so the
+#: prefix is matched after it (OMN-21485).
 KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
     (
         "audit_projection_consumer",
-        "local.omnibase_infra.node_ledger_projection_compute.consume.",
+        "omnibase_infra.node_ledger_projection_compute.consume.",
         "onex.evt.platform.node-heartbeat.v1",
         "messages_in",
     ),
     (
         "publishing_reducer",
-        "local.omnimarket.projection_consumer_flow.consume.",
+        "omnimarket.projection_consumer_flow.consume.",
         "onex.evt.platform.node-heartbeat.v1",
         "messages_out",
     ),
@@ -181,18 +183,6 @@ KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
 
 APPLIED_TOPIC: Final[str] = "onex.evt.omnimarket.projection-consumer-flow-applied.v1"
 SEAM_DLQ: Final[str] = "onex.dlq.omnimarket.consumer-flow-stall-alert-malformed.v1"
-
-RUNTIME_CONTAINERS: Final[tuple[str, ...]] = (
-    "omninode-runtime",
-    "omninode-runtime-effects",
-)
-BOOT_CONTAINERS: Final[tuple[str, ...]] = (
-    *RUNTIME_CONTAINERS,
-    "omnimarket-projection-api",
-)
-BROKER_CONTAINER: Final[str] = "omnibase-infra-redpanda"
-PG_CONTAINER: Final[str] = "omnibase-infra-postgres"
-ANALYTICS_DB: Final[str] = "omnidash_analytics"
 
 #: Both names the stall-alert seam's input model has carried.
 VALIDATION_ERROR_RE: Final[re.Pattern[str]] = re.compile(
@@ -231,10 +221,6 @@ AST_GATE_TEST: Final[str] = (
 
 class ProbeInputError(RuntimeError):
     """The probe could not look. Exit 2, never exit 1."""
-
-
-class BootChangedError(ProbeInputError):
-    """A lane container was replaced while the run was measuring."""
 
 
 @dataclass(frozen=True)
@@ -303,7 +289,7 @@ def kind_rows(
         r
         for r in rows
         if isinstance(r, dict)
-        and str(r.get("consumer_group", "")).startswith(prefix)
+        and str(r.get("consumer_group", "")).partition(".")[2].startswith(prefix)
         and r.get("topic") == topic
     ]
 
@@ -323,7 +309,7 @@ def grade_kinds(rec: Record, samples: Sequence[Sequence[dict[str, Any]]]) -> Non
             "kinds",
             f"{kind}_present_in_every_sample",
             bool(per_sample) and all(present),
-            f"{prefix}* on {topic}: present per sample {present}",
+            f"<env>.{prefix}* on {topic}: present per sample {present}",
         )
         flat = [r for rows in per_sample for r in rows]
         bad = [
@@ -545,7 +531,8 @@ def grade_boot(rec: Record, boot: dict[str, Any]) -> None:
     rec.add(
         "boot",
         "runtime_logs_read",
-        set(logs) == set(RUNTIME_CONTAINERS)
+        # OMN-21485: by runtime role, so any lane's container names grade.
+        sorted(c.rsplit("-runtime", 1)[-1] for c in logs) == ["", "-effects"]
         and all(_is_int(v.get("lines")) and v["lines"] > 0 for v in logs.values()),
         "log lines read per container: "
         + ", ".join(f"{c}={v.get('lines')}" for c, v in sorted(logs.items())),
@@ -605,141 +592,6 @@ def grade(obs: dict[str, Any]) -> Record:
 # =============================================================================
 
 
-def _run(
-    args: Sequence[str], *, stdin: str | None = None, timeout: float = 120.0
-) -> str:
-    try:
-        proc = subprocess.run(
-            list(args),
-            input=stdin,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProbeInputError(
-            f"{args[0]} {args[1:3]} could not run: {type(exc).__name__}"
-        ) from exc
-    if proc.returncode != 0:
-        raise ProbeInputError(
-            f"{' '.join(args[:4])} exited {proc.returncode}: {proc.stderr.strip()[:400]}"
-        )
-    return proc.stdout
-
-
-@dataclass
-class Lane:
-    docker: str = "docker"
-    base_url: str = DEFAULT_BASE_URL
-    http_timeout: float = 30.0
-
-    # ---- containers -------------------------------------------------------
-    def identity(self) -> dict[str, dict[str, Any]]:
-        out: dict[str, dict[str, Any]] = {}
-        for name in BOOT_CONTAINERS:
-            raw = _run([self.docker, "inspect", name], timeout=30)
-            try:
-                info = json.loads(raw)[0]
-            except (ValueError, IndexError) as exc:
-                raise ProbeInputError(f"docker inspect {name}: unreadable") from exc
-            state = info.get("State") or {}
-            out[name] = {
-                "id": str(info.get("Id", ""))[:12],
-                "started_at": state.get("StartedAt"),
-                "status": state.get("Status"),
-                "health": (state.get("Health") or {}).get("Status"),
-                "image": (info.get("Config") or {}).get("Image"),
-            }
-        return out
-
-    def wait_settled(
-        self, settle_seconds: float, poll: float = 15.0
-    ) -> dict[str, dict[str, Any]]:
-        deadline = time.monotonic() + settle_seconds
-        while True:
-            ident = self.identity()
-            unsettled = {
-                n: (v["status"], v["health"])
-                for n, v in ident.items()
-                if v["status"] != "running" or v["health"] not in (None, "healthy")
-            }
-            if not unsettled:
-                return ident
-            if time.monotonic() >= deadline:
-                raise ProbeInputError(
-                    f"lane containers not running and healthy after {settle_seconds:.0f}s: {unsettled}"
-                )
-            time.sleep(poll)
-
-    def logs(self, container: str, since: str | None = None) -> list[str]:
-        args = [self.docker, "logs"]
-        if since:
-            args += ["--since", since]
-        args.append(container)
-        try:
-            proc = subprocess.run(
-                args, capture_output=True, text=True, timeout=180, check=False
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise ProbeInputError(
-                f"docker logs {container}: {type(exc).__name__}"
-            ) from exc
-        if proc.returncode != 0:
-            raise ProbeInputError(f"docker logs {container} exited {proc.returncode}")
-        # The runtime logs to stderr and stdout both.
-        return (proc.stdout + proc.stderr).splitlines()
-
-    # ---- broker (credential stays inside the broker container) -----------
-    def rpk(self, *args: str, stdin: str | None = None, timeout: float = 60.0) -> str:
-        # The credential reaches rpk through its environment, never as a -X flag:
-        # the expanded flag would sit in the in-container rpk argv, which every user
-        # on the host reads through `ps` (OMN-17427).
-        script = (
-            'RPK_USER="$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$DEV_KAFKA_SASL_PASSWORD" '
-            'RPK_SASL_MECHANISM=SCRAM-SHA-256 rpk "$@"'
-        )
-        return _run(
-            [
-                self.docker,
-                "exec",
-                "-i",
-                BROKER_CONTAINER,
-                "sh",
-                "-c",
-                script,
-                "rpk",
-                *args,
-            ],
-            stdin=stdin,
-            timeout=timeout,
-        )
-
-    def high_watermark(self, topic: str) -> int:
-        return parse_high_watermark(self.rpk("topic", "describe", "-p", topic))
-
-    # ---- database ---------------------------------------------------------
-    def live_groups(self) -> list[str]:
-        sql = LIVE_WINDOW_SQL
-        script = f'psql -U "$POSTGRES_USER" -d {ANALYTICS_DB} -AtX -v ON_ERROR_STOP=1 -c "{sql}"'
-        out = _run([self.docker, "exec", PG_CONTAINER, "sh", "-c", script], timeout=120)
-        return sorted({line.strip() for line in out.splitlines() if line.strip()})
-
-    # ---- exposure ---------------------------------------------------------
-    def page(self, query: dict[str, str]) -> dict[str, Any]:
-        url = f"{self.base_url.rstrip('/')}/projection/{EXPOSURE_TOPIC}"
-        if query:
-            url += "?" + urllib.parse.urlencode(query)
-        try:
-            with urllib.request.urlopen(url, timeout=self.http_timeout) as resp:  # noqa: S310
-                body = json.load(resp)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            raise ProbeInputError(f"GET {url}: {type(exc).__name__}: {exc}") from exc
-        if not isinstance(body, dict) or not isinstance(body.get("rows"), list):
-            raise ProbeInputError(f"GET {url}: no rows list in the response")
-        return body
-
-
 def parse_high_watermark(describe_out: str) -> int:
     """Sum of HIGH-WATERMARK over the partitions table of ``rpk topic describe -p``."""
     col: int | None = None
@@ -762,7 +614,7 @@ def parse_high_watermark(describe_out: str) -> int:
     return total
 
 
-def walk(lane: Lane, max_pages: int = 200) -> dict[str, Any]:
+def walk(lane: Any, max_pages: int = 200) -> dict[str, Any]:
     pages: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
     cursor: str | None = None
@@ -929,7 +781,7 @@ def probe_correlation_id() -> str:
     return str(uuid.UUID(hex="c28c28c2c28c" + uuid.uuid4().hex[12:]))
 
 
-def inject(lane: Lane) -> dict[str, Any]:
+def inject(lane: Any) -> dict[str, Any]:
     """Publish one malformed trigger, envelope copied from the newest real one."""
     newest = lane.rpk("topic", "consume", APPLIED_TOPIC, "-o", "-1", "-n", "1")
     try:
@@ -966,7 +818,7 @@ def inject(lane: Lane) -> dict[str, Any]:
 
 
 def observe_injection(
-    lane: Lane, inj: dict[str, Any], seam_dlq_before: int, wait_seconds: float
+    lane: Any, inj: dict[str, Any], seam_dlq_before: int, wait_seconds: float
 ) -> dict[str, Any]:
     deadline = time.monotonic() + wait_seconds
     since = inj["published_at"]
@@ -977,7 +829,7 @@ def observe_injection(
     since_arg = since_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     while True:
         errors = boundaries = 0
-        for c in RUNTIME_CONTAINERS:
+        for c in lane.containers.runtime_containers:
             lines = lane.logs(c, since=since_arg)
             errors += sum(1 for ln in lines if VALIDATION_ERROR_RE.search(ln))
             boundaries += sum(
@@ -1012,100 +864,84 @@ def observe_injection(
         time.sleep(10)
 
 
-def observe_lane(
-    lane: Lane,
-    *,
-    samples: int,
-    interval: float,
-    settle_seconds: float,
-    injection_wait: float,
+def _observe_node(
+    request: dict[str, Any], *, runner: Callable[..., subprocess.CompletedProcess[str]]
 ) -> dict[str, Any]:
-    ident_before = lane.wait_settled(settle_seconds)
-
-    natural: dict[str, dict[str, Any]] = {}
-    for c in RUNTIME_CONTAINERS:
-        lines = lane.logs(c)
-        total, probe, nat = natural_validation_errors(lines)
-        natural[c] = {
-            "lines": len(lines),
-            "total": total,
-            "probe": probe,
-            "natural": nat,
-            "first_line": lines[0][:120] if lines else None,
-        }
-
-    hwm_before = lane.high_watermark(APPLIED_TOPIC)
-    t0 = time.monotonic()
-    kind_samples: list[list[dict[str, Any]]] = []
-    kind_view: list[dict[str, Any]] = []
-    for i in range(samples):
-        if i:
-            time.sleep(interval)
-        rows = walk(lane)["rows"]
-        kind_samples.append(rows)
-        kind_view.append({k: kind_rows(rows, p, t) for k, p, t, _c in KINDS})
-    # At least a minute on the applied topic, as the readback took it.
-    remaining = 60.0 - (time.monotonic() - t0)
-    if remaining > 0:
-        time.sleep(remaining)
-    hwm_after = lane.high_watermark(APPLIED_TOPIC)
-    applied_window = round(time.monotonic() - t0)
-
-    live = lane.live_groups()
-    w = walk(lane)
-    control_page1 = lane.page({})
-    control_cursor = (
-        lane.page({"cursor": str(control_page1["next_cursor"])})
-        if control_page1.get("next_cursor")
-        else None
+    """Collect through the same contract-backed node entrypoint as the workflow."""
+    path = REPO_ROOT / "src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml"
+    contract = yaml.safe_load(path.read_text(encoding="utf-8"))
+    route = next(
+        r
+        for r in contract["handler_routing"]["handlers"]
+        if r["operation"] == "board_probe.consumer_flow"
     )
-
-    seam_dlq_before = lane.high_watermark(SEAM_DLQ)
-    inj = observe_injection(lane, inject(lane), seam_dlq_before, injection_wait)
-    seam_dlq_after = lane.high_watermark(SEAM_DLQ)
-
-    ident_after = lane.identity()
-    changed = {
-        n: (ident_before[n]["id"], ident_after.get(n, {}).get("id"))
-        for n in BOOT_CONTAINERS
-        if ident_before[n]["id"] != ident_after.get(n, {}).get("id")
-        or ident_before[n]["started_at"] != ident_after.get(n, {}).get("started_at")
+    model = route["input_model"]
+    contract["input_model"] = model
+    contract["handler"] = {
+        "module": route["handler"]["module"],
+        "class": route["handler"]["name"],
+        "input_model": model["module"] + "." + model["name"],
     }
-    if changed:
-        raise BootChangedError(f"lane containers replaced during the run: {changed}")
-
-    walked_rows = w["rows"]
-    return {
-        "boot_identity": ident_before,
-        "kinds": {"samples": kind_samples, "view": kind_view},
-        "cursor": {
-            "pages": w["pages"],
-            "terminated": w["terminated"],
-            "second_page_differs": w["second_page_differs"],
-            "rows": len(walked_rows),
-            "walked_groups": sorted(
-                {str(r.get("consumer_group")) for r in walked_rows}
-            ),
-            "walked_pairs": len(
-                {(r.get("consumer_group"), r.get("topic")) for r in walked_rows}
-            ),
-            "live_groups": live,
-            "undeclared_cursor_control": None
-            if control_cursor is None
-            else {
-                "returns_page_1_again": control_cursor["rows"][:3]
-                == control_page1["rows"][:3],
-            },
-        },
-        "boot": {
-            "applied_hwm_before": hwm_before,
-            "applied_hwm_after": hwm_after,
-            "applied_window_seconds": applied_window,
-            "natural": natural,
-            "injection": inj,
-            "seam_dlq_hwm": [seam_dlq_before, seam_dlq_after],
-        },
-    }
+    with tempfile.TemporaryDirectory(prefix="c28-") as temp:
+        root = Path(temp)
+        request_path, contract_path, record_path = (
+            root / "request.json",
+            root / "contract.yaml",
+            root / "observation.json",
+        )
+        request_path.write_text(
+            json.dumps({**request, "record": str(record_path)}), encoding="utf-8"
+        )
+        contract_path.write_text(
+            yaml.safe_dump(contract, sort_keys=False), encoding="utf-8"
+        )
+        try:
+            done = runner(
+                [
+                    "uv",
+                    "run",
+                    "--frozen",
+                    "onex",
+                    "node",
+                    "node_board_probe_effect",
+                    "--contract",
+                    str(contract_path),
+                    "--input",
+                    str(request_path),
+                    "--timeout",
+                    str(contract["consumer_flow_execution"]["node_timeout_seconds"]),
+                    "--output",
+                    "receipt",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=contract["consumer_flow_execution"]["process_timeout_seconds"],
+                check=False,
+            )
+        except subprocess.SubprocessError as exc:
+            raise ProbeInputError(
+                f"C28 node could not run: {type(exc).__name__}"
+            ) from exc
+        if done.returncode:
+            raise ProbeInputError(f"C28 node exited {done.returncode}")
+        try:
+            observation = json.loads(record_path.read_text(encoding="utf-8"))[
+                "observation"
+            ]
+            if (
+                not isinstance(observation, dict)
+                or observation.get("read_ok") is not True
+            ):
+                reason = (
+                    observation.get("read_error", "")
+                    if isinstance(observation, dict)
+                    else ""
+                )
+                raise ProbeInputError(f"C28 node could not read the lane: {reason}")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ProbeInputError("C28 node wrote an unreadable observation") from exc
+        return observation
 
 
 # =============================================================================
@@ -1143,7 +979,7 @@ def _observed_summary(obs: dict[str, Any]) -> dict[str, Any]:
 
 def _render_summary(rec: Record, *, as_of: str) -> str:
     lines = [
-        "## C28 -- consumer-flow observability on the dev lane (OMN-19812)",
+        "## C28 -- consumer-flow observability on the selected lane (OMN-19812)",
         "",
         f"**Verdict: `{rec.verdict}`** at `{as_of}`.",
         "",
@@ -1169,10 +1005,13 @@ def _write_record(path: str, payload: dict[str, Any]) -> None:
 
 
 def main(
-    argv: list[str] | None = None, *, lane_factory: Callable[..., Lane] = Lane
+    argv: list[str] | None = None,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument("--base-url", default="")
+    parser.add_argument("--compose-project", default="")
     parser.add_argument("--docker-bin", default="docker")
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--sample-interval", type=float, default=30.0)
@@ -1210,27 +1049,25 @@ def main(
             if not isinstance(obs, dict):
                 raise ProbeInputError("replay file is not a JSON object")
         else:
-            lane = lane_factory(docker=args.docker_bin, base_url=args.base_url)
-            last: ProbeInputError | None = None
-            obs = {}
-            for attempt in range(1, max(1, args.attempts) + 1):
-                try:
-                    obs = observe_lane(
-                        lane,
-                        samples=args.samples,
-                        interval=args.sample_interval,
-                        settle_seconds=args.settle_seconds,
-                        injection_wait=args.injection_wait,
-                    )
-                    last = None
-                    break
-                except BootChangedError as exc:
-                    print(f"::warning::attempt {attempt}: {exc}", file=sys.stderr)
-                    last = exc
-            if last is not None:
-                raise last
-            obs["negative"] = run_negative(
-                REPO_ROOT, shlex.split(args.pytest_cmd), Path(args.scratch)
+            if not args.compose_project or not args.base_url:
+                raise ProbeInputError(
+                    "live probes require --compose-project and --base-url"
+                )
+            obs = _observe_node(
+                {
+                    "subject_lane": args.compose_project,
+                    "compose_project": args.compose_project,
+                    "base_url": args.base_url,
+                    "docker_bin": args.docker_bin,
+                    "samples": args.samples,
+                    "sample_interval": args.sample_interval,
+                    "settle_seconds": args.settle_seconds,
+                    "injection_wait": args.injection_wait,
+                    "attempts": args.attempts,
+                    "pytest_cmd": args.pytest_cmd,
+                    "scratch": str(Path(args.scratch).resolve()),
+                },
+                runner=runner,
             )
     except (ProbeInputError, OSError) as exc:
         print(f"::error::C28 probe could not look: {exc}", file=sys.stderr)
