@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_prepr_teardown_slot
+contract_name: node_prepr_teardown_slot
+node_name: node_prepr_teardown_slot
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Tenant offboard and teardown-report evidence extracted from the existing host-local pre-PR slot CLI. The CLI retains policy validation, locking, resource removal and CLEAN-only lease release. No new cleanup operation or bus subscription.
+input_model:
+  name: ModelPreprTeardownRequest
+  module: omnibase_infra.models.model_prepr_teardown_request
+  description: Policy-derived selectors and paths collected by the teardown adapter.
+output_model:
+  name: ModelPreprTeardownResult
+  module: omnibase_infra.models.model_prepr_teardown_result
+  description: Offboard evidence or safe cleanup diagnostics.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: revoke_tenant
+      handler:
+        name: HandlerPreprTeardownSlot
+        module: omnibase_infra.handlers.handler_prepr_teardown_slot
+      supported_operations: [revoke_tenant]
+    - operation: inspect_report
+      handler:
+        name: HandlerPreprTeardownSlot
+        module: omnibase_infra.handlers.handler_prepr_teardown_slot
+      supported_operations: [inspect_report]
+    - operation: write_report
+      handler:
+        name: HandlerPreprTeardownSlot
+        module: omnibase_infra.handlers.handler_prepr_teardown_slot
+      supported_operations: [write_report]
+capabilities:
+  - name: prepr.teardown.evidence
+    description: Validate tenant offboard evidence and inspect the cleanup report.
+operational:
+  install_timeout_seconds: 600
+  import_timeout_seconds: 30
+metadata:
+  ticket: OMN-19998
+  description: Existing host-local teardown operation extracted to its canonical handler.

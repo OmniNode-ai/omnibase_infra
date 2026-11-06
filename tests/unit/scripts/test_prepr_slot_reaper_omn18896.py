@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -553,6 +554,15 @@ def test_installer_propagates_systemd_enable_failure(tmp_path: Path) -> None:
     systemctl = tools / "systemctl"
     systemctl.write_text("#!/bin/sh\nexit 17\n")
     systemctl.chmod(0o755)
+    uv = tools / "uv"
+    interpreter = "#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' "$@"\n'
+    uv.write_text(
+        f"#!{sys.executable}\nimport os\nfrom pathlib import Path\n"
+        "p = Path(os.environ['UV_PROJECT_ENVIRONMENT']) / 'bin/python'\n"
+        "p.parent.mkdir(parents=True)\n"
+        f"p.write_text({interpreter!r})\np.chmod(0o755)\n"
+    )
+    uv.chmod(0o755)
     proc = subprocess.run(
         [
             sys.executable,

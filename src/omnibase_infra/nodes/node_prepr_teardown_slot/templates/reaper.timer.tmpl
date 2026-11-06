@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+[Unit]
+Description=Inspect numbered pre-PR slot leases every minute
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit={unit}.service
+
+[Install]
+WantedBy=timers.target
