@@ -10,7 +10,7 @@ Base_fence_cause                         cfg=2962954a8f6f ran=f9fb70513 host=h05
 Base_fence_cont                          cfg=3fcb977c2418 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=     7745856 holds
 Base_fence_join                          cfg=0732e53f6e83 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=     6094804 holds
 Base_fence_kept                          cfg=d1f4714d3d8c ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=     7745856 holds
-Base_fence_ord                           cfg=51e01f7794fc ran=7e46baab7 host=h051 workers= 8 heapMB=16384 states=           - NOT PROVEN: unfinished
+Base_fence_ord                           cfg=51e01f7794fc ran=7e46baab7 host=h053 workers= 6 heapMB=16384 states=    18285696 holds
 Base_fence_repair                        cfg=7c3c5c579806 ran=7e46baab7 host=h051 workers= 8 heapMB=14564 states=     7400580 holds
 Base_fence_scause                        cfg=b5da5f50dae6 ran=7e46baab7 host=h053 workers= 4 heapMB=12743 states=     4276520 holds
 Base_holder                              cfg=ec7ccc446fbc ran=011826fba host=h051 workers= 8 heapMB=14564 states=      448512 holds
