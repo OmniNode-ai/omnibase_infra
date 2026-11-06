@@ -1,0 +1,40 @@
+schema_version: 1.0.0
+ticket_id: OMN-22533
+title: Restrict web trusted override to labeled runners
+summary: The criteria of omnibase_infra#5694, moved unchanged from the shared contract of OMN-19998.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19998-nuc-trusted-routing-policy
+    statement: The permanently unparked repository's trusted-CI policy must require arch-amd64 so its jobs cannot select NUC runners, with fresh activation evidence and the audit retaining its single-value comparison.
+    acceptance:
+      - id: AC41
+        statement: 'AC41: the declared NUC exclusion requires self-hosted,omnibase-ci,arch-amd64 and fresh ninety-minute activation evidence; the production audit accepts that shadow and rejects broad, arm64, nested dual-value and missing shadows -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy fails on the merge-base policy'
+evidence_requirements:
+  - kind: tests
+    description: Restrict web trusted override to labeled runners
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19998-ac41-nuc-trusted-routing-policy
+    description: AC41 exercises the shipped policy through the production variable comparator with an eligible shadow and broad, arm64, nested dual-value and missing-shadow controls. Activation assertions require fresh evidence for the eligible pool.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy
+        cwd: .
+    binds_ac:
+      - AC41
+  - id: dod-omn19998-ac41-routing-policy-artifact
+    description: Hosted-runner artifact check for AC41. Loads this checkout's routing YAML and drives the production audit comparator without a live API, broker or variable mutation. Live runner controls and ninety-minute samples remain pending after the separate repository-variable write.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k nuc_policy
+        cwd: .
+    binds_ac:
+      - AC41
