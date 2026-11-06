@@ -225,6 +225,11 @@ requirements:
     acceptance:
       - id: AC47
         statement: "AC47: the audit leaves the finding for floor-canary .github/workflows/canary.yml job canary out of the private-placement findings when the policy declares it with a ruling and a reason, and still reports every other job of that workflow, every other workflow of that repository and the same file and job in another private repository; an entry with a pattern, a list, another repository or a missing field admits nothing, and main fails on the other repository's job -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k \"canary or private_exception or main_passes\""
+  - id: req-omn19998-read-only-ledger-role
+    statement: The principal issuer issues a read_only row the shared grant set less the work-ledger append writer topic, so the broker refuses a ledger append from that principal, and the grant audit fails when such a principal holds a grant beyond its set.
+    acceptance:
+      - id: AC60
+        statement: "AC60: a developer row is issued WRITE on its work-ledger append topic and created with it, a read_only row is issued neither and still reads the append and query terminals, a withhold naming no shared topic grant is refused at load, and the audit of that principal by name, with no role filter, fails naming the EXTRA append WRITE it holds -- falsifier: uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -p no:cacheprovider"
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -935,3 +940,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC47
+  - id: dod-omn19998-ac60-read-only-ledger-role
+    description: The PR-added tests issue a developer row and a read_only row through a fake broker and read the grants each is given, then audit a read_only principal by name that still holds the append WRITE and read the EXTRA failure. An empty withhold list (the named break) turns the withholding test red. At the merge base the read_only role does not exist, so these tests fail there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -p no:cacheprovider
+        cwd: .
+    binds_ac:
+      - AC60
