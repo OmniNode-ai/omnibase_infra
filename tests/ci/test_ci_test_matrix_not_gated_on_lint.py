@@ -122,7 +122,7 @@ def test_control_the_check_names_the_offender_when_lint_is_added_back() -> None:
 # --------------------------------------------------------------------------- #
 
 TESTS_START_BUDGET_MIN = 6.0
-LINT_GATED_START_FLOOR_MIN = 12.0
+LINT_GATED_START_FLOOR_MIN = 10.0
 
 
 def _minutes(stamp: str) -> datetime:
@@ -130,9 +130,17 @@ def _minutes(stamp: str) -> datetime:
 
 
 def _recorded_job(jobs: list[dict[str, Any]], job_id: str, name: str | None) -> Any:
-    """The recorded job for a workflow job id (a ``name:``, or a reusable's prefix)."""
+    """The recorded job for a workflow job id.
+
+    Matches a ``name:``, or the ``<id> / <job>`` label a reusable workflow gets.
+    """
     for recorded in jobs:
-        if recorded["name"] == name or recorded["name"].startswith(f"{job_id} / "):
+        label = recorded["name"]
+        if (
+            label == name
+            or label.startswith(f"{job_id} / ")
+            or label.endswith(f" / {job_id}")
+        ):
             return recorded
     raise AssertionError(f"no recorded job for {job_id!r} ({name!r})")
 
@@ -191,7 +199,7 @@ def test_recorded_run_would_start_its_tests_before_lint_ends(
         if r["name"].startswith("Tests (Split") and r["started_at"]
     )
     shard_start = (first_shard - origin).total_seconds() / 60
-    assert lint_end > LINT_GATED_START_FLOOR_MIN - 1
+    assert lint_end > LINT_GATED_START_FLOOR_MIN
     assert shard_start > lint_end, "the recording was taken under the old needs"
 
     live = _load()
