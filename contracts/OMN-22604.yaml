@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-22604
+title: deploy-runners.sh --add waits for an idle runner and takes a supplied registration token
+summary: --add holds each existing target to the fail-closed idle check and mints no token through gh.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22604-add-idle-and-supplied-token
+    statement: deploy-runners.sh --add never hands a busy or unreadable running target to compose, and takes its registration token from DEPLOY_RUNNER_TOKEN or --token-file instead of minting one through gh.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a busy target, a target whose state cannot be read and a target with a job worker in its container are never handed to compose up -- falsifier: uv run pytest tests/ci/test_deploy_runners_add_idle_omn22478.py -q -n 0 --no-cov fails on the merge-base script, which runs compose up for each'
+      - id: AC2
+        statement: 'AC2: --add makes no gh api POST and refuses without a supplied token before any ssh or rsync -- falsifier: uv run pytest tests/ci/test_deploy_runners_add_idle_omn22478.py -q -n 0 --no-cov fails on the merge-base script, which calls gh api --method POST'
+      - id: AC3
+        statement: 'AC3: the existing rolling preflight tests still pass -- falsifier: uv run pytest tests/ci/test_deploy_runners_registration_preflight.py -q -n 0 --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: --add idle check and supplied token
+    command: uv run pytest tests/ci/test_deploy_runners_add_idle_omn22478.py tests/ci/test_deploy_runners_registration_preflight.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22604-add-tests
+    description: The --add tests run against recording ssh, gh and rsync boundaries; the same file fails on the merge-base script.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_deploy_runners_add_idle_omn22478.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-omn22604-rolling-unchanged
+    description: The rolling preflight tests are unchanged and pass.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_deploy_runners_registration_preflight.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC3
