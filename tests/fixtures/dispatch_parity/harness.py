@@ -45,8 +45,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
+import hashlib
 import importlib.metadata
 import json
+import subprocess
 import sys
 import tomllib
 from collections import defaultdict
@@ -873,6 +876,203 @@ def strip_volatile_header_fields(snapshot: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
+# ---------------------------------------------------------------------------
+# Committed-fixture maintenance (OMN-22580): one command refreshes every file
+# that records the corpus, so a pull request that adds a node edits no count.
+# ---------------------------------------------------------------------------
+
+FIXTURE_DIR = Path(__file__).resolve().parent
+ORACLE_PATH = FIXTURE_DIR / "selection-oracle-v2.json"
+NO_OCC_HEADER_PATH = FIXTURE_DIR / "selection-oracle-no-occ-v2.header.json"
+READBACK_PATH = (
+    FIXTURE_DIR.parents[1]
+    / "ci"
+    / "fixtures"
+    / "dispatch_parity_readback_omn20074.json"
+)
+
+#: The header keys that differ between the two dependency closures; the OCC-free
+#: header file carries exactly these, the oracle carries the whole header.
+NO_OCC_HEADER_KEYS: tuple[str, ...] = (
+    "corpus",
+    "exclusions",
+    "expected_excluded_onex_nodes_packages",
+    "generated_at_utc",
+    "installed_package_versions",
+    "required_onex_nodes_packages",
+)
+
+REFRESH_COMMAND = (
+    "uv run python -m tests.fixtures.dispatch_parity.harness --refresh-fixtures"
+)
+
+_OCC_PACKAGE = "onex-change-control"
+
+
+def snapshot_digest(snapshot: dict[str, Any]) -> str:
+    """SHA-256 of ``snapshot`` without its volatile header fields.
+
+    The recorded readback pins this digest; the live-contact test recomputes it.
+    """
+    stripped = strip_volatile_header_fields(copy.deepcopy(snapshot))
+    return hashlib.sha256(json.dumps(stripped, sort_keys=True).encode()).hexdigest()
+
+
+def _closure_name(required_packages: tuple[str, ...]) -> str:
+    return "legacy" if _OCC_PACKAGE in required_packages else "retired"
+
+
+def _load_committed(
+    required_packages: tuple[str, ...],
+    oracle_path: Path,
+    no_occ_header_path: Path,
+) -> dict[str, Any]:
+    snapshot = load_snapshot_file(oracle_path)
+    if _OCC_PACKAGE not in required_packages:
+        with no_occ_header_path.open() as stream:
+            snapshot["header"].update(json.load(stream))
+    return snapshot
+
+
+def fixture_problems(
+    live: dict[str, Any],
+    *,
+    required_packages: tuple[str, ...] = REQUIRED_ONEX_NODES_PACKAGES,
+    oracle_path: Path = ORACLE_PATH,
+    no_occ_header_path: Path = NO_OCC_HEADER_PATH,
+    readback_path: Path = READBACK_PATH,
+) -> dict[str, list[str]]:
+    """Compare the committed fixtures with the live snapshot, per file group.
+
+    Keys are ``oracle`` (the oracle and its OCC-free header) and ``readback``.
+    An empty dict means every committed fixture matches the live engine, ignoring
+    only the volatile header fields.
+    """
+    problems: dict[str, list[str]] = {}
+    committed = strip_volatile_header_fields(
+        _load_committed(required_packages, oracle_path, no_occ_header_path)
+    )
+    live_stripped = strip_volatile_header_fields(copy.deepcopy(live))
+    if json.dumps(committed, sort_keys=True) != json.dumps(
+        live_stripped, sort_keys=True
+    ):
+        differing = [
+            key
+            for key in sorted(set(committed) | set(live_stripped))
+            if key != "header"
+            and json.dumps(committed.get(key), sort_keys=True)
+            != json.dumps(live_stripped.get(key), sort_keys=True)
+        ]
+        committed_header = committed.get("header", {})
+        live_header = live_stripped.get("header", {})
+        differing += [
+            f"header.{key}"
+            for key in sorted(set(committed_header) | set(live_header))
+            if json.dumps(committed_header.get(key), sort_keys=True)
+            != json.dumps(live_header.get(key), sort_keys=True)
+        ]
+        problems["oracle"] = [
+            "the committed selection oracle differs from the live engine in: "
+            + ", ".join(differing)
+        ]
+    recording = json.loads(readback_path.read_text())[_closure_name(required_packages)]
+    readback_problems: list[str] = []
+    if recording["corpus"] != live["header"]["corpus"]:
+        readback_problems.append(
+            "the recorded readback corpus differs from the live corpus"
+        )
+    if recording["snapshot_sha256"] != snapshot_digest(live):
+        readback_problems.append(
+            "the recorded readback digest differs from the live digest"
+        )
+    if readback_problems:
+        problems["readback"] = readback_problems
+    return problems
+
+
+def format_stale_report(problems: dict[str, list[str]]) -> str:
+    """The failure text of the staleness check; it names the one refresh command."""
+    lines = [
+        f"::error::[{group}] {message}"
+        for group, messages in sorted(problems.items())
+        for message in messages
+    ]
+    lines.append(
+        "::error::The committed dispatch-parity fixtures are STALE vs the live "
+        f"engine. Refresh them all together with: {REFRESH_COMMAND} "
+        "(it rewrites the oracle, the OCC-free header and the recorded readback; "
+        "never edit a count by hand, and never regenerate the oracle alone with --out)."
+    )
+    return "\n".join(lines)
+
+
+def _head_sha() -> str | None:
+    try:
+        done = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=FIXTURE_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() or None
+
+
+def refresh_fixtures(
+    live: dict[str, Any],
+    *,
+    required_packages: tuple[str, ...] = REQUIRED_ONEX_NODES_PACKAGES,
+    oracle_path: Path = ORACLE_PATH,
+    no_occ_header_path: Path = NO_OCC_HEADER_PATH,
+    readback_path: Path = READBACK_PATH,
+) -> list[Path]:
+    """Rewrite the committed fixtures that no longer match ``live``; return them.
+
+    Writes nothing when everything matches, so a refresh on an unchanged corpus
+    leaves the tree clean. Refuses outside the OCC-free closure: the committed
+    header file and the ``retired`` readback describe that closure only.
+    """
+    if _OCC_PACKAGE in required_packages:
+        raise ValueError(
+            "refresh runs in the OCC-free closure only; "
+            f"{_OCC_PACKAGE} is still a declared dependency"
+        )
+    problems = fixture_problems(
+        live,
+        required_packages=required_packages,
+        oracle_path=oracle_path,
+        no_occ_header_path=no_occ_header_path,
+        readback_path=readback_path,
+    )
+    written: list[Path] = []
+    header = live["header"]
+    if "oracle" in problems:
+        write_snapshot(live, oracle_path)
+        no_occ = {key: header[key] for key in NO_OCC_HEADER_KEYS}
+        no_occ_header_path.write_text(
+            json.dumps(no_occ, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        written += [oracle_path, no_occ_header_path]
+    if "readback" in problems:
+        readback = json.loads(readback_path.read_text())
+        readback["retired"] = {
+            "captured_utc": datetime.now(UTC).isoformat(),
+            "corpus": dict(sorted(header["corpus"].items())),
+            "snapshot_sha256": snapshot_digest(live),
+        }
+        head = _head_sha()
+        if head is not None:
+            readback["_provenance"]["retired_product_sha"] = head
+        readback_path.write_text(
+            json.dumps(readback, indent=2) + "\n", encoding="utf-8"
+        )
+        written.append(readback_path)
+    return written
+
+
 def build_snapshot() -> dict[str, Any]:
     """Build the canonical Mode-A fixture (sorted registration order, design D3)."""
     contracts, discovery_errors, duplicate_winners = _corpus_from_discovery()
@@ -996,7 +1196,28 @@ def _write_json(obj: dict[str, Any], path: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", required=True, help="Fixture JSON output path")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--out",
+        help=(
+            "Write the raw live snapshot to this path. Does not touch the OCC-free "
+            "header or the recorded readback; use --refresh-fixtures to update the "
+            "committed fixtures."
+        ),
+    )
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit 1 when a committed fixture is stale against the live engine.",
+    )
+    mode.add_argument(
+        "--refresh-fixtures",
+        action="store_true",
+        help=(
+            "Rewrite the oracle, the OCC-free header and the recorded readback from "
+            "the live corpus; writes nothing when they already match."
+        ),
+    )
     parser.add_argument(
         "--audit-out",
         default=None,
@@ -1008,6 +1229,20 @@ def main() -> int:
     args = parser.parse_args()
 
     snapshot = build_snapshot()
+    if args.check:
+        problems = fixture_problems(snapshot)
+        if problems:
+            print(format_stale_report(problems), file=sys.stderr)
+            return 1
+        print("Committed fixtures match live engine (ex-volatile-header-fields).")
+        return 0
+    if args.refresh_fixtures:
+        written = refresh_fixtures(snapshot)
+        for path in written:
+            print(f"wrote {path}", file=sys.stderr)
+        if not written:
+            print("committed fixtures already match the live engine", file=sys.stderr)
+        return 0
     write_snapshot(snapshot, args.out)
     h = snapshot["header"]["corpus"]
     print(
