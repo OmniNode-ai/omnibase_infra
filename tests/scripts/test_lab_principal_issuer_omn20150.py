@@ -113,6 +113,7 @@ def _grant_file(tmp_path: Path, grants: list[dict[str, object]]) -> Path:
     )
     del doc["grants_from"]
     del doc["principal_grants_from"]
+    del doc["read_only_withholds"]
     doc["grants"] = grants
     path = tmp_path / "grants.yaml"
     path.write_text(yaml.safe_dump(doc))
