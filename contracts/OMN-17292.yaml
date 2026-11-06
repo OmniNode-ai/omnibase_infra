@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to c7cd6a481acfe7e8c0821a5d5149d592efa556c0"
+title: "The omnimarket contract pin advances to 93cb74e9f91bef2699f0f8bb8038922b0a895d8c"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,7 +10,7 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 93cb74e9f91bef2699f0f8bb8038922b0a895d8c -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
@@ -38,7 +38,7 @@ requirements:
         statement: "AC6: the builder stage upgrades filelock to >=4.2.1 after the PyTorch-index torch install, and the npm bundle patch loop overwrites undici at a ^6 release >=6.29.1 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 93cb74e9f91bef2699f0f8bb8038922b0a895d8c.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
@@ -61,7 +61,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 93cb74e9f91bef2699f0f8bb8038922b0a895d8c.
     source: manual
     checks:
       - check_type: test_passes
