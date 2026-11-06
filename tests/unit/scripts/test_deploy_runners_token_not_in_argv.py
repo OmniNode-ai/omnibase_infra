@@ -310,8 +310,9 @@ def test_the_rolling_recreate_keeps_the_token_out_of_argv(
 def test_the_additive_mode_keeps_the_token_out_of_argv(
     harness: dict[str, Path],
 ) -> None:
-    """The whole script, not a function: --add mints a token and runs compose."""
+    """The whole script, not a function: --add takes a supplied token and runs compose."""
     env = _env(harness)
+    env["DEPLOY_RUNNER_TOKEN"] = TOKEN
     result = subprocess.run(
         ["bash", str(SCRIPT), f"--add={SERVICE}", "--skip-build"],
         cwd=REPO_ROOT,
