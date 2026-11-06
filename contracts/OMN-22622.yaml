@@ -1,0 +1,41 @@
+schema_version: 1.0.0
+ticket_id: OMN-22622
+title: The mini host's verify runner is given no operator env file
+summary: The mini host's verify runner loses the operator env bind mount, the root-phase copy and the variable that points at it, and its root phase removes the copy an earlier revision left in its creds volume.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22622-mini-runner-no-operator-env
+    statement: The mini host's verify runner leaves no operator env file readable to its jobs, whether through a bind mount or through a copy an earlier revision left in its creds volume, because no job on the omnibase-verify label reads a key from it.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omninode-mini-runner-1 carries no bind mount of the operator env file, no OMNIBASE_OPERATOR_ENV_FILE and no root-phase install of it, and its root phase removes the creds-volume copy at every start, while omninode-deploy-runner keeps all three -- falsifier: uv run pytest tests/ci/test_mini_runner_no_operator_env_omn22478.py -q -n 0 --no-cov fails on the merge-base docker/docker-compose.runners-omninode-mini-runner.yml, which mounts and copies the file'
+      - id: AC2
+        statement: 'AC2: after the roll, neither the operator env mount path nor the creds-volume copy exists inside omninode-mini-runner-1 -- falsifier: docker exec test -e on each path exits non-zero on the mini host after the roll and exits zero before it, with no content printed'
+evidence_requirements:
+  - kind: tests
+    description: The mini runner is given no operator env file
+    command: uv run pytest tests/ci/test_mini_runner_no_operator_env_omn22478.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22622-mini-compose
+    description: The mini compose file read as YAML, the deploy runner as positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_mini_runner_no_operator_env_omn22478.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn22622-integration-proof
+    description: Run this pull request's own check on a lab host at the pushed head. Hosted CI cannot reach the lab, so only the local Done gate runs this unbound check.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-22622 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_mini_runner_no_operator_env_omn22478.py -q -n 0 --no-cov
+        cwd: .

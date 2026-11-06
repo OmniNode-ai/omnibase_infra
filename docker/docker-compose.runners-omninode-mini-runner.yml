@@ -58,8 +58,7 @@ services:
       # Points kubectl at the least-privilege lab-ci-reader ServiceAccount
       # token in the read-only credentials directory below, never at a node
       # admin kubeconfig (OMN-18188).
-      KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
-      OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
+      KUBECONFIG: ${RUNNER_USER_HOME:-/home/runner}/.lab-credentials/lab-ci-reader.kubeconfig
       UV_CONCURRENT_DOWNLOADS: "1"
       UV_CONCURRENT_BUILDS: "1"
       UV_CONCURRENT_INSTALLS: "1"
@@ -69,18 +68,19 @@ services:
       - -c
       - |
         set -eu
-        # Same least-privilege copy the primary host's deploy runner makes: the
-        # host operator env file is 0600 and owned by the HOST operator, which
-        # the `runner` job user (uid 1001) cannot read once the entrypoint
-        # drops privilege. This root phase can, so it copies the content into
-        # the already-runner-owned creds volume at 0400 and the scripts are
-        # pointed at that copy. It does not relax the host file's perms.
+        # THE OPERATOR ENV FILE IS NOT GIVEN TO THIS RUNNER (OMN-22478). It was
+        # mounted and copied into the creds volume for parity with the primary
+        # host's deploy runner while no job on this class consumed it; the
+        # measured readers of $OMNIBASE_OPERATOR_ENV_FILE are the deploy
+        # handlers, which only release-train-lab.yml on the deploy runner calls.
+        # The creds volume outlives a recreate and holds the 0400 copy an earlier
+        # revision of this file installed, so the root phase removes it at every
+        # start and never installs or copies one.
         runner_uid="$$(id -u runner)"
         runner_gid="$$(id -g runner)"
-        mkdir -p /home/runner/.runner-creds
-        chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
-        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
-          /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
+        mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+        rm -f ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -88,16 +88,15 @@ services:
       # fleet's (OMN-18188): a directory so the next credential is a file drop
       # rather than a compose change and a container recreate. `:ro` is
       # load-bearing -- no job may mutate a lab credential.
-      - ${MINI_RUNNER_LAB_CREDENTIALS_HOST_DIR:?MINI_RUNNER_LAB_CREDENTIALS_HOST_DIR must be set (host path of the read-only lab credentials directory)}:/home/runner/.lab-credentials:ro
-      - ${MINI_RUNNER_OPERATOR_ENV_FILE:?MINI_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file)}:/run/omnibase-operator.env:ro
+      - ${MINI_RUNNER_LAB_CREDENTIALS_HOST_DIR:?MINI_RUNNER_LAB_CREDENTIALS_HOST_DIR must be set (host path of the read-only lab credentials directory)}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
       - ./runners:/opt/onex-runner-hooks:ro
       # OMN-19070: the disk-admission self-pause marker directory, the same
       # mount every primary-host runner carries (OMN-16363). Without it the
       # job-started hook logs `self-pause skipped ... not mounted` and a runner
       # under its disk floor keeps taking and failing jobs instead of stopping.
       # Relative to this file on the host, like the ./runners scripts above.
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - omninode-mini-runner-1-creds:/home/runner/.runner-creds
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+      - omninode-mini-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
