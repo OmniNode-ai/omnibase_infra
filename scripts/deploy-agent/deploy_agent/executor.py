@@ -1828,7 +1828,7 @@ def _lane_env_overlay() -> dict[str, str]:
     lane_id = DEV_INSTANCE_RUNTIME_LANES[active_dev_instance()]
     # OMN-22634: the overlay home's runtime_lane_env overlay is a second source for
     # the same keys, through the same allowlist; a key the two set differently refuses.
-    return load_dev_boot_guard(
+    overlay: dict[str, str] = load_dev_boot_guard(
         "nodes.node_setup_local_provision_effect.runtime_lane_env_overlay"
     ).lane_env_with_overlay_home(
         sys.modules[__name__],
@@ -1838,6 +1838,7 @@ def _lane_env_overlay() -> dict[str, str]:
         fragment_clone=clone,
         parse_fragment=parse_lane_env_fragment,
     )
+    return overlay
 
 
 class _ActiveDeployLane:

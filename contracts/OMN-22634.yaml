@@ -36,3 +36,13 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_overlay_home_omn22478.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22634-deploy-probe
+    description: >-
+      Deploy probe: read the runtime module and the provisioning node contract from GitHub at the evaluated checkout's commit and require the overlay home reader and the declared unit variable. This does not deploy a service or claim a lab host reads the overlay; the install on the lab host and its dry run are separate obligations. The probe fails on the merge base, which has neither.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_lane_env_overlay.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'def lane_env_with_overlay_home' > /dev/null && gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'DEPLOY_AGENT_OVERLAY_HOME_CLONE' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
