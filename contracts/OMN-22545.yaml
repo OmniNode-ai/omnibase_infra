@@ -1,0 +1,38 @@
+schema_version: 1.0.0
+ticket_id: OMN-22545
+title: omnibase_infra tests start when the quick gates end, not when Lint ends
+summary: detect-changes and test-parallel stop listing lint in needs; Lint stays a strict gate of CI Summary.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22545-tests-not-behind-lint
+    statement: The test matrix does not wait for Lint, and a red Lint still fails CI Summary.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: neither detect-changes nor test-parallel lists lint in needs, and lint stays in STRICT_GATE_JOBS -- falsifier: uv run pytest tests/ci/test_ci_test_matrix_not_gated_on_lint.py -q --no-cov fails when lint is added back to either needs list'
+      - id: AC2
+        statement: 'AC2: CI Summary returns failure when Lint concludes failure and every other job succeeds -- falsifier: uv run pytest tests/ci/test_ci_summary_gate.py -q --no-cov -k lint_failure'
+evidence_requirements:
+  - kind: tests
+    description: The needs lists exclude lint, the control names the offender, and a red Lint fails the CI Summary verdict.
+    command: uv run pytest tests/ci/test_ci_test_matrix_not_gated_on_lint.py tests/ci/test_ci_summary_gate.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22545-needs
+    description: The needs check passes on the change and fails with lint added back (the control inside the test file).
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_test_matrix_not_gated_on_lint.py -q --no-cov
+  - id: dod-omn22545-summary
+    description: A snapshot with every job green except Lint yields the failure verdict.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_summary_gate.py -q --no-cov -k lint_failure
