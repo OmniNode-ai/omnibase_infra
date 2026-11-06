@@ -30,3 +30,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_dev_lane_ticket_guard_mount.py tests/ci/test_compose_no_nested_expansion.py tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22691-effects-container-holds-guard
+    description: After the next dev deploy the dev runtime-effects container holds the guard file its ONEX_TICKET_GUARD_PATH names. The probe prints no value.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" docker exec omninode-runtime-effects sh -c 'test -f "$ONEX_TICKET_GUARD_PATH"'
+        cwd: ${OMNI_HOME}/omnibase_infra
