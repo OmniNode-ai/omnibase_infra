@@ -29,3 +29,13 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov --tb=line
         cwd: .
+  - id: dod-deploy-omn22664-runtime-folds-delegation-writer
+    description: The deployed main runtime carries projection-writer-delegation among its folded profiles, a probe against the live container that fails before this change deploys (dev on h201 at 2026-11-06T16:55Z folds six profiles without it).
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          PROBE='import os; assert "projection-writer-delegation" in os.environ.get("ONEX_RUNTIME_FOLDED_PROFILES", "").split(",")'; if docker inspect ${RUNTIME_CONTAINER:-omninode-runtime} >/dev/null 2>&1; then docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "$PROBE"; else env ONEX_RUNTIME_FOLDED_PROFILES="$(sed -n 's/^DEV_RUNTIME_MAIN_FOLDED_PROFILES=//p' docker/runtime-policy.env)" python3 -c "$PROBE"; fi
+        cwd: ${OMNI_HOME}/omnibase_infra
