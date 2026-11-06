@@ -28,11 +28,11 @@ from omnibase_infra.models.model_runner_hook_mount_drift_request import (
 def _handler_with_docker(docker: DockerCli) -> HandlerRunnerHookMountDrift:
     """The handler reading through a docker the caller supplies (tests)."""
 
-    class HandlerWithDocker(HandlerRunnerHookMountDrift):
+    class InjectedDockerDriftCheck(HandlerRunnerHookMountDrift):
         def make_docker(self, request: ModelRunnerHookMountDriftRequest) -> DockerCli:
             return docker
 
-    return HandlerWithDocker()
+    return InjectedDockerDriftCheck()
 
 
 def main(
