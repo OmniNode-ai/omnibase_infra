@@ -1,6 +1,6 @@
 {
   "base_ref": "65e3994c3d870c6d24a9c233872b3498c3c9ec39",
-  "canonical_handler_module": "omnibase_infra.handlers.handler_validation_adjudicate",
+  "canonical_handler_module": "omnibase_infra.handlers.handler_validation_adjudicate.handler",
   "legacy_handler_module": "omnibase_infra.handlers.handler_validation_adjudicate",
   "node_id": "omnibase_infra.nodes.node_validation_adjudicator",
   "parity": {

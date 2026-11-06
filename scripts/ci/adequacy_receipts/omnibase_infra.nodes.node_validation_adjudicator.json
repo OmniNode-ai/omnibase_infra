@@ -2,7 +2,7 @@
   "branch_coverage_pct": 100.0,
   "candidate_count": 1,
   "coverage_target": 80.0,
-  "handler_module": "omnibase_infra.handlers.handler_validation_adjudicate",
+  "handler_module": "omnibase_infra.handlers.handler_validation_adjudicate.handler",
   "handler_module_sha256": "sha256:7f53e363a65cd42b1e4ee78b9bd9b89c7ee0835200c9980a7408cea0b6bb5926",
   "meets_target": true,
   "node_id": "omnibase_infra.nodes.node_validation_adjudicator",
