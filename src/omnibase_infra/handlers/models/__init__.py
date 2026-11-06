@@ -5,10 +5,6 @@
 This module exports Pydantic models for handler request/response structures.
 All models are strongly typed to eliminate Any usage.
 
-Common Models:
-    ModelRetryState: Encapsulates retry state for handler operations
-    ModelOperationContext: Encapsulates operation context for handler tracking
-
 Generic Response Model:
     ModelHandlerResponse: Generic handler response envelope (parameterized by payload type)
 
@@ -162,13 +158,9 @@ from omnibase_infra.handlers.models.model_manifest_store_payload import (
 from omnibase_infra.handlers.models.model_manifest_store_result import (
     ModelManifestStoreResult,
 )
-from omnibase_infra.handlers.models.model_operation_context import (
-    ModelOperationContext,
-)
 from omnibase_infra.handlers.models.model_qdrant_handler_response import (
     ModelQdrantHandlerResponse,
 )
-from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
 from omnibase_infra.handlers.models.model_slack_alert_payload import ModelSlackAlert
 from omnibase_infra.handlers.models.model_slack_alert_result import (
     ModelSlackAlertResult,
@@ -193,11 +185,8 @@ __all__: list[str] = [
     "ModelHttpHandlerPayload",
     "ModelHttpHandlerResponse",
     "ModelHttpPostPayload",
-    # Common models for retry and operation tracking
-    "ModelOperationContext",
     # Qdrant wrapper models
     "ModelQdrantHandlerResponse",
-    "ModelRetryState",
     # Filesystem models
     "ModelFileSystemConfig",
     "ModelReadFilePayload",

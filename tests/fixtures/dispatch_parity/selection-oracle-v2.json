@@ -3450,7 +3450,7 @@
       "event_model_module": "omnibase_infra.models.validation.model_validation_adjudication_requested",
       "event_model_name": "ModelValidationAdjudicationRequested",
       "handler_id": "dispatcher.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0",
-      "handler_module": "omnibase_infra.handlers.handler_validation_adjudicate",
+      "handler_module": "omnibase_infra.handlers.handler_validation_adjudicate.handler",
       "handler_name": "HandlerAdjudicate",
       "message_types": [
         "ModelValidationAdjudicationRequested",
@@ -3586,7 +3586,7 @@
       "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
       "event_model_name": "ModelEventMessage",
       "handler_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidatorEventLedgerProject.validation_ledger_project_132e5892",
-      "handler_module": "omnibase_infra.handlers.handler_validator_event_ledger_project",
+      "handler_module": "omnibase_infra.handlers.handler_validator_event_ledger_project.handler",
       "handler_name": "HandlerValidatorEventLedgerProject",
       "message_types": [
         "ModelEventMessage",
@@ -3612,7 +3612,7 @@
       "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
       "event_model_name": "ModelEventMessage",
       "handler_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidatorEventLedgerProject.validation_ledger_project_dc5067cf",
-      "handler_module": "omnibase_infra.handlers.handler_validator_event_ledger_project",
+      "handler_module": "omnibase_infra.handlers.handler_validator_event_ledger_project.handler",
       "handler_name": "HandlerValidatorEventLedgerProject",
       "message_types": [
         "ModelEventMessage",
