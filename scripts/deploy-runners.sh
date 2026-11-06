@@ -1414,7 +1414,9 @@ add_services_deploy() {
     # command: gh api --method POST /orgs/OmniNode-ai/actions/runners/registration-token --jq .token > <token-file>
     local reg_handle="dry-run-handle"
     if ! "${DRY_RUN}"; then
-        reg_handle="$(supplied_registration_token)" || err "Cannot read --token-file=${TOKEN_FILE}."
+        reg_handle="${DEPLOY_RUNNER_TOKEN:-}"
+        # supplied_registration_token: --token-file when given, else DEPLOY_RUNNER_TOKEN.
+        [[ -z "${TOKEN_FILE}" ]] || reg_handle=$(<"${TOKEN_FILE}") || err "Cannot read --token-file=${TOKEN_FILE}."
         [[ -n "${reg_handle//[[:space:]]/}" ]] || err "--add requires DEPLOY_RUNNER_TOKEN or --token-file with an org registration token (it mints none through gh). The operator mints one: gh api --method POST /orgs/${RUNNER_ORG}/actions/runners/registration-token --jq .token > <token-file>, then --token-file=<token-file>."
     fi
 
@@ -1467,12 +1469,10 @@ add_services_deploy() {
     for name in ${ADD_SERVICES}; do
         if ! add_wait_target_idle "${name}"; then
             warn "  ${name} stayed busy or unreadable for ${RELABEL_DRAIN_TIMEOUT_SECONDS}s -- left running and untouched; rerun when it is idle."
-            rc=1
-            continue
+            rc=1; continue
         fi
-        flags="--no-deps"
         state="$(github_runner_state "${name}")"
-        [[ "${state%% *}" == "online" ]] || flags="${flags} --force-recreate"
+        [[ "${state%% *}" == "online" ]] && flags="--no-deps" || flags="--no-deps --force-recreate"
         log "  ${name} reads ${state%% *} on GitHub -- compose up -d ${flags} (an online runner is converged without recreate; one not registered is recreated so it re-reads its env)."
 
         ssh_token_stdin "${reg_handle}" "
@@ -1678,19 +1678,13 @@ wait_for_no_dead_containers() {
     done
 }
 
-# The operator-supplied registration token: --token-file when given, else
-# DEPLOY_RUNNER_TOKEN. Prints it; never logs it. Callers refuse an empty one.
-supplied_registration_token() {
-    local supplied="${DEPLOY_RUNNER_TOKEN:-}"
-    [[ -z "${TOKEN_FILE}" ]] || supplied=$(<"${TOKEN_FILE}") || return 1
-    printf '%s' "${supplied}"
-}
-
 roll_one_runner() {
     local name="${1}"
     local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
-    local mig_token="${2:-}"
-    [[ -n "${mig_token}" ]] || mig_token="$(supplied_registration_token)" || return 3
+    local mig_token="${2:-${DEPLOY_RUNNER_TOKEN:-}}"
+    if [[ -z "${2:-}" && -n "${TOKEN_FILE}" ]]; then
+        mig_token=$(<"${TOKEN_FILE}") || return 3
+    fi
     if [[ -z "${mig_token//[[:space:]]/}" ]]; then
         warn "  ${name}: DEPLOY_RUNNER_TOKEN or --token-file is required -- refusing to recreate."
         return 3
@@ -1760,8 +1754,10 @@ roll_one_runner() {
 rolling_deploy() {
     # OMN-18877: reject the entire roll before syncing artifacts, installing
     # the slice, or recreating any runner. Dry runs obey the same precondition.
-    local registration_token
-    registration_token="$(supplied_registration_token)" || err "Cannot read --token-file=${TOKEN_FILE}; DEPLOY_RUNNER_TOKEN or --token-file is required."
+    local registration_token="${DEPLOY_RUNNER_TOKEN:-}"
+    if [[ -n "${TOKEN_FILE}" ]]; then
+        registration_token=$(<"${TOKEN_FILE}") || err "Cannot read --token-file=${TOKEN_FILE}; DEPLOY_RUNNER_TOKEN or --token-file is required."
+    fi
     [[ -n "${registration_token//[[:space:]]/}" ]] || err "--rolling requires DEPLOY_RUNNER_TOKEN or --token-file with a registration token before recreating any container (also in --dry-run)."
     log "=== Rolling deploy (one runner at a time, busy-checked, fail-closed) ==="
     rsync_artifacts
@@ -2475,8 +2471,10 @@ relabel_roll() {
     [[ "${ROLL_LIMIT}" =~ ^[0-9]+$ ]] || err "--limit must be a whole number."
     [[ -f "${REPO_ROOT}/${COMPOSE_FILE}" ]] || err "missing ${COMPOSE_FILE}"
 
-    local supplied_token
-    supplied_token="$(supplied_registration_token)" || err "Cannot read --token-file=${TOKEN_FILE}."
+    local supplied_token="${DEPLOY_RUNNER_TOKEN:-}"
+    if [[ -n "${TOKEN_FILE}" ]]; then
+        supplied_token=$(<"${TOKEN_FILE}") || err "Cannot read --token-file=${TOKEN_FILE}."
+    fi
     supplied_token="${supplied_token//[[:space:]]/}"
 
     local targets=() name listed

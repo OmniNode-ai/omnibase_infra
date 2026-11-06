@@ -3,7 +3,7 @@
     "source": "Unstubbed rolling CLI missing-token preflight, re-run with ssh, scp, rsync, docker, curl and gh shimmed to fail and record any call (none was made); no external API or credential-backed registration performed; re-captured 2026-11-06 after OMN-22604 changed the script: same refusal text, returncode 1 and no ssh, scp, rsync, docker, curl or gh call in either mode",
     "captured_utc": "2026-11-06T06:02:51.000000+00:00",
     "source_file": "scripts/deploy-runners.sh",
-    "source_sha256": "61a99e0eb1870346b43c1e4c06f5f9426bde38459356975742c7137ae45a6e2b"
+    "source_sha256": "7e9f7b94a11ac51fae46d530f3ee25afc6f5068b8acf256fd2b5284f68516dce"
   },
   "responses": {
     "normal": {
