@@ -306,16 +306,29 @@ class TestHandlerInteractivePath:
         local_no_llm_adapter: AdapterFakeInput,
     ) -> None:
         """HandlerOnboarding class wrapper correctly delegates interactive calls."""
+        from omnibase_core.enums import EnumInjectionScope
+        from omnibase_core.models.container.model_onex_container import (
+            ModelONEXContainer,
+        )
         from omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding import (
             HandlerOnboarding,
         )
+        from omnibase_infra.onboarding.protocol_input_adapter import (
+            ProtocolInputAdapter,
+        )
 
-        handler = HandlerOnboarding()
+        container = ModelONEXContainer()
+        await container.service_registry.register_instance(
+            interface=ProtocolInputAdapter,
+            instance=local_no_llm_adapter,
+            scope=EnumInjectionScope.GLOBAL,
+        )
+        handler = HandlerOnboarding(container)
         input_model = ModelOnboardingInput(
             policy_name="interactive_onboarding",
             dry_run=True,
         )
-        output = await handler.handle(input_model, input_adapter=local_no_llm_adapter)
+        output = await handler.handle(input_model)
 
         assert output.success is True
         assert output.policy_name == "interactive_onboarding"
