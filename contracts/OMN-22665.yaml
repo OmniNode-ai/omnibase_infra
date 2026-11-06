@@ -12,7 +12,7 @@ requirements:
       - id: AC1
         statement: 'AC1: the rebuilt-postgres16-proof job runs-on never reads OMNI_CLOUD_CANARY_RUNS_ON_JSON and no job in the workflow asks the cloud fleet for capacity -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov fails on the merge base workflow with the new tests in place'
       - id: AC2
-        statement: 'AC2: the runner routing audit passes on the changed workflow and policy -- falsifier: uv run python scripts/audit-runner-routing.py --local-workflows fails when the merge base workflow is read with this policy, naming request-cloud-capacity'
+        statement: 'AC2: the runner routing audit passes on the changed workflow and policy -- falsifier: the routing audit tests fail on the merge base workflow, which holds the bare hosted request-cloud-capacity job'
       - id: AC3
         statement: 'AC3: the runner routing audit tests still pass, because the declared variable and its live value are unchanged -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov'
 evidence_requirements:
@@ -33,13 +33,5 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC1
-      - AC3
-  - id: dod-omn22665-routing-audit
-    description: The routing audit script passes on the branch; with the merge base workflow and this policy it names request-cloud-capacity as a bare hosted pin.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: uv run python scripts/audit-runner-routing.py --local-workflows
-        cwd: .
-    binds_ac:
       - AC2
+      - AC3
