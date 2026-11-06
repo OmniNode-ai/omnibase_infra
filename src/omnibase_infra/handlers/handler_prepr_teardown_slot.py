@@ -239,7 +239,8 @@ class HandlerPreprTeardownSlot:
                 and state.get("TENANT_SLUG") == f"onex-{request.slot_token}"
                 and bool(key)
                 and proof.get("tenant_id") == tenant_id
-                and proof.get("key_sha256") == hashlib.sha256(key.encode()).hexdigest()
+                and proof.get("key_sha256")
+                == hashlib.sha256(key.encode(), usedforsecurity=False).hexdigest()
                 and proof.get("auth_before") == 200
                 and proof.get("auth_after") in (401, 403)
             )

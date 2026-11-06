@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
+event_bus:
+  subscribe_topics:
+    - onex.evt.fixture.input.v1
+    - onex.cmd.fixture.request.v1
+  publish_topics:
+    - onex.evt.fixture.output.v1
+    - onex.evt.fixture.additional.v1

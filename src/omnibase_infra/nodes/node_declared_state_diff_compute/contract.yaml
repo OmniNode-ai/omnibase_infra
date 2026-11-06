@@ -6,6 +6,8 @@ node_name: node_declared_state_diff_compute
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
 description: Plan the operations that move one surface's observed items to its declared items, without I/O.
 input_model:
   name: ModelDeclaredStateDiffRequest
@@ -24,7 +26,7 @@ handler_routing:
     - operation: declared_state.diff
       handler:
         name: HandlerDeclaredStateDiff
-        module: omnibase_infra.handlers.handler_declared_state_diff
+        module: omnibase_infra.handlers.handler_declared_state_diff.handler
       description: Pure diff; an unreadable or unreached item makes the surface unobservable.
       supported_operations: [declared_state.diff]
       input_model:
