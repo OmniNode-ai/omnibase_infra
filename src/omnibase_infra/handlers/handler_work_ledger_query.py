@@ -197,12 +197,9 @@ class HandlerWorkLedgerQuery:
                                 "Ledger node reported a database error",
                                 correlation_id=correlation_id,
                             )
-                        if not isinstance(
-                            answer.get("freshness"), dict
-                        ) or not isinstance(answer.get("parity"), dict):
+                        if problem := self._contract.answer_problem(kind, answer):
                             raise WorkLedgerQueryError(
-                                "Ledger reply lacks freshness or parity",
-                                correlation_id=correlation_id,
+                                problem, correlation_id=correlation_id
                             )
                         return answer
                 except BaseException:
