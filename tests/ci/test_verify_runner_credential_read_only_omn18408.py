@@ -227,7 +227,15 @@ def test_verify_runner_is_given_no_operator_env_file(verify_service: str) -> Non
     assert "OMNIBASE_OPERATOR_ENV_FILE" not in _environment(verify_service)
     entrypoint = " ".join(str(part) for part in _service(verify_service)["entrypoint"])
     assert OPERATOR_ENV_TARGET not in entrypoint
-    assert "operator.env" not in entrypoint
+    # The creds volume outlives a recreate and holds the copy the root phase used to install,
+    # so the root phase removes it; it never installs or copies one.
+    lines = [ln.strip() for ln in entrypoint.splitlines() if "operator.env" in ln]
+    assert len(lines) == 1, lines
+    assert lines[0].startswith("rm -f ") and lines[0].endswith(
+        "/.runner-creds/operator.env"
+    )
+    assert "install " not in entrypoint
+    assert " cp " not in entrypoint
 
 
 def test_the_deploy_runner_keeps_the_operator_env_file() -> None:
