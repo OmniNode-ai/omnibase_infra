@@ -245,31 +245,12 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         access="write",
         role="credentials",
     ),
-    # OMN-18159: the four delegation aggregate READ VIEWS, in this manifest for
-    # exactly the reason the docstring above gives -- the migration that
-    # creates them is vendored here, but the producing node's db_io
-    # declaration is not yet in the PINNED omnimarket contracts root this
-    # repo's CI derives from, and the pin advances only after the omnimarket
-    # source PR merges. The source PR in turn cannot merge until this grant
-    # exists, because the runtime validates the binding principal's declared
-    # read privilege before it will wire the handler. Declaring them here
-    # breaks that cycle without pointing the pin at an unmerged commit.
-    #
-    # These entries become redundant once the pin advances past the source
-    # PR and the contract declares the same four relations; removing them
-    # then is the follow-up, and leaving them is inert rather than wrong --
-    # the derivation is idempotent per relation.
-    *(
-        _vendored_read_write(
-            f"projection_delegation_{name}",
-            "node_projection_delegation",
-            "0039_delegation_aggregate_views_per_tenant.sql",
-            schema="public",
-            access="read",
-            role=f"aggregate_{name}",
-        )
-        for name in ("model_routing", "quality_gate", "summary", "token_usage")
-    ),
+    # OMN-18159: the four delegation aggregate read views (model_routing,
+    # quality_gate, summary, token_usage) that sat here were deleted once the
+    # omnimarket contract pin c7cd6a481 declared all four in
+    # node_projection_delegation's db_io, the follow-up their own comment
+    # named; the regeneration wrote nothing, which is the proof the contract
+    # derives what the entries used to.
     # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
     # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
     # request its own comment named. The expiry module went red on the bot pull
@@ -438,6 +419,21 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     *(
         _vendored_read_write(t, schema="public")
         for t in ("local_alerts", "local_identity")
+    ),
+    # OMN-21970: the same infra-first window. This repo vendors
+    # node_projection_delegation 0067's projection_delegation_daily view ahead of
+    # the omnimarket contract that declares it (access read, role aggregate_daily),
+    # which lands after this release: the node's wiring check refuses a contract
+    # whose relation no release grants. 0067 grants tenant_projection_writer
+    # SELECT. Retired when that contract merges and the pin advances past it; the
+    # expiry module names it.
+    _vendored_read_write(
+        "projection_delegation_daily",
+        "node_projection_delegation",
+        "0067_delegation_daily_view.sql",
+        schema="public",
+        access="read",
+        role="aggregate_daily",
     ),
     # OMN-22320: node_projection_work_questions/0000 creates five
     # omninode_internal tables ahead of the omnimarket writer's contract and

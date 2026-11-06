@@ -103,6 +103,14 @@
 #   3. docker compose up -d --no-deps <service>...  -- with NEITHER
 #      --force-recreate NOR --remove-orphans
 #   4. Wait for exactly those runners to come online
+#   IDLE FIRST, TOKEN SUPPLIED (OMN-22604). Every target that already exists
+#   must read idle on the container's own evidence (running, no Runner.Worker in
+#   `docker top`, no unfinished "Running job:" in its listener log) before
+#   compose touches it, waiting up to RELABEL_DRAIN_TIMEOUT_SECONDS (default
+#   1800); a target still busy or unreadable is left running and the run ends
+#   non-zero. The registration token is the supplied one (DEPLOY_RUNNER_TOKEN or
+#   --token-file); this mode does not mint one through gh and refuses, naming the
+#   operator's command, when none is given.
 #   Skips: the fleet-wide poll, every cron install, the stale report.
 #   Use when: standing up or converging ONE non-general-pool runner
 #   (omninode-deploy-runner, omninode-verify-runner-1, the customer-plane pair).
@@ -655,9 +663,7 @@ fetch_registration_token() {
     local token
     token=$(gh api --method POST "/orgs/${RUNNER_ORG}/actions/runners/registration-token" --jq .token) \
         || err "gh api failed. Check gh auth and org admin permissions (need admin:org scope)."
-    if [[ -z "${token}" ]]; then
-        err "Registration token is empty. Check gh auth and org admin permissions."
-    fi
+    [[ -n "${token}" ]] || err "Registration token is empty. Check gh auth and org admin permissions."
     echo "${token}"
 }
 
@@ -1389,17 +1395,29 @@ validate_add_services() {
     done
 }
 
+add_wait_target_idle() {
+    local name="${1}" waited=0
+    [[ "$(runner_container_state "${name}")" == "absent" ]] && return 0
+    until relabel_container_idle "${name}"; do
+        [[ "${waited}" -lt "${RELABEL_DRAIN_TIMEOUT_SECONDS}" ]] || return 1
+        sleep "${RELABEL_DRAIN_INTERVAL_SECONDS}"; waited=$((waited + RELABEL_DRAIN_INTERVAL_SECONDS))
+    done
+}
+
 add_services_deploy() {
     log "=== Additive deploy of: ${ADD_SERVICES} ==="
     validate_add_services
 
-    local reg_handle
-    if "${DRY_RUN}"; then
-        reg_handle="dry-run-handle"
-    else
-        # A brand-new container has NO cached registration to restore from, so
-        # unlike --rolling this path does need a real handle.
-        reg_handle="$(fetch_registration_token)"
+    # A brand-new container has NO cached registration to restore from, so
+    # unlike --rolling this path does need a real handle. It is the supplied one:
+    # this mode does not mint a token through gh (OMN-22604). The operator's
+    # command: gh api --method POST /orgs/OmniNode-ai/actions/runners/registration-token --jq .token > <token-file>
+    local reg_handle="dry-run-handle"
+    if ! "${DRY_RUN}"; then
+        reg_handle="${DEPLOY_RUNNER_TOKEN:-}"
+        # supplied_registration_token: --token-file when given, else DEPLOY_RUNNER_TOKEN.
+        [[ -z "${TOKEN_FILE}" ]] || reg_handle=$(<"${TOKEN_FILE}") || err "Cannot read --token-file=${TOKEN_FILE}."
+        [[ -n "${reg_handle//[[:space:]]/}" ]] || err "--add requires DEPLOY_RUNNER_TOKEN or --token-file with an org registration token (it mints none through gh). The operator mints one: gh api --method POST /orgs/${RUNNER_ORG}/actions/runners/registration-token --jq .token > <token-file>, then --token-file=<token-file>."
     fi
 
     rsync_artifacts
@@ -1441,20 +1459,21 @@ add_services_deploy() {
     # Both want the same treatment. This is the one place `--add` is allowed to
     # recreate, and it can never reach a general-pool runner -- those are
     # refused at flag-validation time, before this runs.
-    local name state flags
+    # IDLE FIRST (OMN-22604): `up -d` recreates a running container whose
+    # rendered config changed, and a not-online one is forced to recreate, so
+    # either could kill a running job. Each existing target must read idle on the
+    # container's own evidence (relabel_container_idle, fail closed); one that
+    # stays busy or unreadable is left running and the run ends non-zero. The
+    # probe is read-only, so --dry-run runs it too, as --rolling's busy probes do.
+    local name state flags rc=0
     for name in ${ADD_SERVICES}; do
-        flags="--no-deps"
-        if "${DRY_RUN}"; then
-            state="$(github_runner_state "${name}" 2>/dev/null || echo "unknown unknown")"
-        else
-            state="$(github_runner_state "${name}")"
+        if ! add_wait_target_idle "${name}"; then
+            warn "  ${name} stayed busy or unreadable for ${RELABEL_DRAIN_TIMEOUT_SECONDS}s -- left running and untouched; rerun when it is idle."
+            rc=1; continue
         fi
-        if [[ "${state%% *}" == "online" ]]; then
-            log "  ${name} is already registered and online -- converging without recreate."
-        else
-            log "  ${name} is not registered (state: ${state%% *}) -- recreating so it re-reads its env."
-            flags="${flags} --force-recreate"
-        fi
+        state="$(github_runner_state "${name}")"
+        [[ "${state%% *}" == "online" ]] && flags="--no-deps" || flags="--no-deps --force-recreate"
+        log "  ${name} reads ${state%% *} on GitHub -- compose up -d ${flags} (an online runner is converged without recreate; one not registered is recreated so it re-reads its env)."
 
         ssh_token_stdin "${reg_handle}" "
         set -euo pipefail
@@ -1470,7 +1489,6 @@ add_services_deploy() {
 
     # Service name == container_name == RUNNER_NAME for every non-pool runner
     # in the compose file, which is what makes this an identity, not a lookup.
-    local name rc=0
     for name in ${ADD_SERVICES}; do
         if "${DRY_RUN}"; then
             log "[DRY RUN] would wait for ${name} to come online."

@@ -1053,11 +1053,25 @@ services:
       # The same house tenant as omninode-runtime above, and for the same
       # reason: the mode-2 environment observer runs in this container.
       ONEX_TENANT_ID: ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}
+      #
+      # -- Ticket-creation guard (OMN-22691) -------------------------------------
+      # node_linear_ticket_write_effect runs in this container and judges every create
+      # with the omniclaude ticket-creation guard, which node_create_ticket locates through
+      # this variable and refuses to create without (no default). Unset, every lab lane's
+      # `onex ticket create` over the bus ended guard_unavailable. The guard loads its
+      # lane-intake handler by path from the clone root (parents[4]/src/omniclaude), so the
+      # mount below is the whole clone, read-only.
+      ONEX_TICKET_GUARD_PATH: /etc/onex/ticket-guard/plugins/onex/hooks/lib/ticket_creation_guard.py
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
       # Read-only: the container reads overlays and can never rewrite one.
       - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
+      # Read-only: the omniclaude clone the skills mount already comes from (OMN-22691): the
+      # skills directory is <clone>/plugins/onex/skills, so the clone root is three directories
+      # above it. Derived from that one variable, outside any nested default, so the lane host
+      # needs no new operator variable.
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro
     healthcheck:
       test:
         - CMD

@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22635
+title: "Live-contact exceptions are carried one file per pull request so two pull requests do not conflict"
+summary: "The local live-contact hook read its exception from one shared file that every change to CI tooling appended to, so any two conflicted. A staged file under .github/live-contact-exception/ now carries the exception, one file per change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22635-live-contact-carrier-directory
+    statement: A staged exception file under .github/live-contact-exception/ admits a change to CI tooling locally, a missing, unstaged, short or misplaced carrier is still refused, and two branches that add different carrier files merge without a conflict.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a staged exception file under .github/live-contact-exception/ with a stated reason of at least eight words admits a CI-tooling change locally -- falsifier: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py -q'
+      - id: AC2
+        statement: 'AC2: the same change with no carrier, or a carrier of fewer than eight words, is still refused -- falsifier: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py -q'
+      - id: AC3
+        statement: 'AC3: two branches that each add a different carrier file under the directory merge with no conflict, and two appends to the shared file conflict -- falsifier: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The directory carrier is admitted, the refusals still hold, and the two-branch merge is clean.
+    command: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py tests/integration/test_ci_live_contact_directory_carrier_omn22635.py tests/ci/test_ci_live_contact.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22635-live-contact-carrier-directory
+    description: The directory carrier is admitted, the refusals still hold, and the two-branch merge is clean while two appends to the shared file conflict.
+    source: manual
+    binds_ac: [AC1, AC2, AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py tests/integration/test_ci_live_contact_directory_carrier_omn22635.py tests/ci/test_ci_live_contact.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn22635-node-readback
+    description: The live-contact node, run through onex node over a scratch repository with a staged change to CI tooling and one staged carrier file under .github/live-contact-exception/, completes with success true; without the carrier the same run fails. It needs onex installed, which the hosted runner lacks, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "bash -c 'set -e; w=$(pwd); d=$(mktemp -d); cd \"$d\"; git init -q; git -c user.name=t -c user.email=t@e.invalid commit -q --allow-empty -m base; mkdir -p scripts/ci .github/live-contact-exception; echo \"print(1)\" > scripts/ci/c.py; git add scripts; PYTHONPATH=\"$w/src\" onex node node_ci_live_contact_effect --backend event_bus=inmemory --state-root .onex_state/none >/dev/null 2>&1 || true; grep -q failed .onex_state/none/workflow_result.json; printf \"Live-contact exception: This changes a gate display label; there is no API or runner behaviour to replay.\\n\" > .github/live-contact-exception/OMN-22635.md; git add .github; PYTHONPATH=\"$w/src\" onex node node_ci_live_contact_effect --backend event_bus=inmemory --state-root .onex_state/with >/dev/null 2>&1; grep -q completed .onex_state/with/workflow_result.json'"
+        cwd: .
