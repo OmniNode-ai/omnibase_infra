@@ -1,0 +1,29 @@
+schema_version: 1.0.0
+ticket_id: OMN-22536
+title: One id names two requirements in omnibase_infra's OMN-17427 contract
+summary: The second of two requirements with one id takes its own id, so the core model's duplicate refusal can reach this repository.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22536-unique-ids
+    statement: Every entry of the OMN-17427 contract has its own id.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every requirement and dod_evidence id in the contract is unique and both criteria keep their labels and statements -- falsifier: uv run pytest tests/unit/contracts/test_omn17427_contract_unique_ids.py -q --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: The contract's ids are unique and both criteria remain.
+    command: uv run pytest tests/unit/contracts/test_omn17427_contract_unique_ids.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22536-unique-ids
+    description: The test fails at the merge base, which holds the id twice, and passes with the second renamed.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/contracts/test_omn17427_contract_unique_ids.py -q --no-cov

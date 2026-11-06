@@ -3,12 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Issue a developer machine its lab bus principal, with no operator step (OMN-20150).
 
-THE DEFECT THIS CLOSES
-    A developer machine reaches the lab dev lane's broker as its own SCRAM
-    principal. Until now every one was created by the operator with hand-typed
-    ``rpk security user create`` and ``rpk security acl create`` calls: a new
-    developer waited on a person, an outside one could not start at all, and the
-    grants existed only on the broker (OMN-19799).
+A developer machine reaches the lab dev lane's broker as its own SCRAM principal.
 
 WHO MAY ASK
     The service has no TCP listener on any network. It serves only a Unix socket,
@@ -102,14 +97,6 @@ HOW IT TALKS TO THE BROKER
     call runs as ``docker exec NAME rpk ...`` and users are read with
     ``rpk security user list``. The caller's environment needs no ``RPK_USER``,
     ``RPK_PASS`` or ``RPK_ADMIN_HOSTS``, and this path never sets a password.
-
-Usage::
-
-    lab_principal_issuer.py check --grants FILE [--overlay FILE [--ledger FILE]]
-    lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N [--overlay FILE]
-    lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--scoped-only] [--rpk-container NAME]
-    lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--role ROLE] [--rpk-container NAME]
-    lab_principal_issuer.py health --socket PATH
 """
 
 from __future__ import annotations
@@ -188,6 +175,7 @@ class Declaration:
     digest: str
     principal_grants: tuple[tuple[str, tuple[Grant, ...]], ...] = ()
     machine_grants: tuple[Grant, ...] = ()
+    read_only_withheld: tuple[str, ...] = ()
 
     def scoped_grants_for(self, principal: str) -> tuple[Grant, ...]:
         """Only this exact principal's declared additions, none of the shared set."""
@@ -200,9 +188,11 @@ class Declaration:
         """Select machine additions only from a trusted overlay's declared role."""
         roles = {r.principal: r.role for r in overlay.rows} if overlay else {}
         machine = self.machine_grants if roles.get(principal) == "machine" else ()
-        return tuple(
-            dict.fromkeys((*self.grants, *machine, *self.scoped_grants_for(principal)))
+        out = roles.get(principal) == "read_only"
+        held = dict.fromkeys(
+            (*self.grants, *machine, *self.scoped_grants_for(principal))
         )
+        return tuple(g for g in held if not (out and g.name in self.read_only_withheld))
 
 
 def load_declaration(path: Path) -> Declaration:
@@ -257,6 +247,9 @@ def load_declaration(path: Path) -> Declaration:
         if not machine_grants:
             raise DeclarationError(f"{path}: machine grants must be non-empty")
         digest.update(derived)
+    withheld = tuple(map(str, doc.get("read_only_withholds") or ()))
+    if not set(withheld) <= {g.name for g in grants if g.resource == "topic"}:
+        raise DeclarationError(f"{path}: read_only_withholds must name shared topics")
     scoped = doc.get("principal_grants_from", {})
     if not isinstance(scoped, dict):
         raise DeclarationError(f"{path}: principal_grants_from must be a mapping")
@@ -293,6 +286,7 @@ def load_declaration(path: Path) -> Declaration:
         digest=digest.hexdigest(),
         principal_grants=tuple(principal_grants),
         machine_grants=machine_grants,
+        read_only_withheld=withheld,
     )
 
 
@@ -465,7 +459,7 @@ OVERLAY_SCHEMA_VERSION = "developer_principal.v1"
 OVERLAY_GRANTS_SOURCE = "omnibase_infra:deploy/lab/developer-principal-grants.yaml"
 _OVERLAY_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 # The roles the overlay admits; the omnibase_core enum is not yet in a pinned release (OMN-21622).
-OVERLAY_ROLES = frozenset({"developer", "machine"})
+OVERLAY_ROLES = frozenset({"developer", "machine", "read_only"})
 
 
 @dataclasses.dataclass(frozen=True)
