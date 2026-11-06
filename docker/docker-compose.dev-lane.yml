@@ -963,6 +963,9 @@ services:
     build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
+      ONEX_BOOT_READY_BOUND_SECONDS: ${DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS:?runtime policy contract must set DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS}
+      ONEX_MAX_CONCURRENT_CONTRACT_ATTACH: ${DEV_RUNTIME_EFFECTS_MAX_CONCURRENT_CONTRACT_ATTACH:?runtime policy contract must set DEV_RUNTIME_EFFECTS_MAX_CONCURRENT_CONTRACT_ATTACH}
+      ONEX_BOOT_PRIORITY_CONTRACTS: ${DEV_RUNTIME_EFFECTS_BOOT_PRIORITY_CONTRACTS:?runtime policy contract must set DEV_RUNTIME_EFFECTS_BOOT_PRIORITY_CONTRACTS}
       # OMN-19513: node_event_emit_effect spools owed events to
       # ONEX_EMIT_EFFECT_SPOOL_DIR, else $XDG_RUNTIME_DIR, else /tmp. Neither was
       # set, so the spool sat in the container's /tmp and a recreate dropped
@@ -1066,6 +1069,10 @@ services:
       timeout: 10s
       retries: 5
       start_period: 1800s
+    deploy:
+      resources:
+        limits:
+          memory: ${DEV_RUNTIME_EFFECTS_MEMORY:?runtime policy contract must set DEV_RUNTIME_EFFECTS_MEMORY}
     labels: !override
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"

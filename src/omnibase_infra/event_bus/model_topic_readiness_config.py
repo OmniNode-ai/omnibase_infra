@@ -39,7 +39,7 @@ class ModelTopicReadinessConfig(BaseModel):
         readiness_poll_interval_ms: Metadata poll cadence.
         max_attempts: Bounded retry count for the metadata poll.
         max_concurrent_contract_attach: Bounded parallelism across contracts.
-        priority_contracts: Contracts subscribed first, in order (OMN-18087).
+        priority_contracts: Contracts subscribed first, even on empty topics.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

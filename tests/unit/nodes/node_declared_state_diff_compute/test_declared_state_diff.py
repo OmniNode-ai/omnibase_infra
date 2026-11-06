@@ -10,7 +10,7 @@ from omnibase_core.enums.enum_declared_state_surface_kind import (
 from omnibase_core.models.config_overlay.model_declared_state_observation import (
     ModelDeclaredStateObservation,
 )
-from omnibase_infra.handlers.handler_declared_state_diff import (
+from omnibase_infra.handlers.handler_declared_state_diff.handler import (
     HandlerDeclaredStateDiff,
 )
 from omnibase_infra.models.declared_state.enum_declared_state_operation_kind import (
