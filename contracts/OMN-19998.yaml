@@ -229,7 +229,7 @@ requirements:
     statement: The principal issuer issues a read_only row the shared grant set less the work-ledger append writer topic, so the broker refuses a ledger append from that principal, and the grant audit fails when such a principal holds a grant beyond its set.
     acceptance:
       - id: AC60
-        statement: "AC60: a developer row is issued WRITE on its work-ledger append topic and created with it, a read_only row is issued neither and still reads the append and query terminals, a withhold naming no shared topic grant is refused at load, and the audit of that principal by name, with no role filter, fails naming the EXTRA append WRITE it holds -- falsifier: uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -p no:cacheprovider"
+        statement: "AC60: a developer row is issued WRITE on its work-ledger append topic and created with it, a read_only row is issued neither, nor a WRITE on the PR handoff or PR polish start command topics, holds no source-control write topic and still reads the append and query terminals, a withhold naming no shared topic grant is refused at load, and the audit of that principal by name, with no role filter, fails naming the EXTRA append WRITE it holds -- falsifier: uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -p no:cacheprovider"
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.

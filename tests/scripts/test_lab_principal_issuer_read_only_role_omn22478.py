@@ -29,6 +29,13 @@ GRANTS = REPO_ROOT / "deploy" / "lab" / "developer-principal-grants.yaml"
 DERIVED = REPO_ROOT / "deploy" / "lab" / "developer-principal-derived-grants.json"
 APPEND_TOPIC = "onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1"
 RO = "dev-ro-lab-host"
+GITHUB_WRITE_TOPIC = "onex.cmd.omnimarket.github-repo-write-requested.v1"
+# Command topics whose consumers append ledger rows or change a pull request on the
+# publisher's behalf: a write on them is a ledger or GitHub mutation by another route.
+CONSUMER_WRITES = (
+    "onex.cmd.omnimarket.pr-handoff-requested.v1",
+    "onex.cmd.omnimarket.pr-polish-start.v1",
+)
 READ_ONLY_ROW = {
     "principal": "dev-ro-lab-host",
     "login": "ro@example.invalid",
@@ -115,7 +122,8 @@ def declaration() -> lpi.Declaration:
 def test_the_declaration_withholds_the_ledger_append_writer_topic(
     declaration: lpi.Declaration,
 ) -> None:
-    assert declaration.read_only_withheld == (APPEND_TOPIC,)
+    assert declaration.read_only_withheld[0] == APPEND_TOPIC
+    assert set(declaration.read_only_withheld) == {APPEND_TOPIC, *CONSUMER_WRITES}
     shared = {g.name: g for g in declaration.grants if g.resource == "topic"}
     assert "write" in shared[APPEND_TOPIC].operations
 
@@ -166,6 +174,31 @@ def test_golden_a_read_only_principal_is_issued_no_ledger_append_write(
     assert not [g for g in broker.granted if "work-ledger-append-from" in g[0]]
 
 
+@pytest.mark.parametrize("topic", CONSUMER_WRITES)
+def test_a_developer_writes_and_a_read_only_principal_is_refused_the_consumer_commands(
+    declaration: lpi.Declaration, tmp_path: Path, topic: str
+) -> None:
+    assert (topic, "write") in _issue(declaration, tmp_path, DEVELOPER_ROW).granted
+    sub = tmp_path / "ro"
+    sub.mkdir()
+    assert not [
+        g for g in _issue(declaration, sub, READ_ONLY_ROW).granted if g[0] == topic
+    ]
+
+
+def test_a_read_only_principal_can_publish_no_github_write_command(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    """GitHub channel: the write node's command topic is in no shared grant, so a write verb
+    from a shared-set principal is refused by the broker, and read verbs are still served."""
+    granted = _issue(declaration, tmp_path, READ_ONLY_ROW).granted
+    assert not [g for g in granted if g[0] == GITHUB_WRITE_TOPIC]
+    assert (
+        "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
+        "write",
+    ) in granted
+
+
 def test_a_read_only_principal_still_reads_the_ledger(
     declaration: lpi.Declaration, tmp_path: Path
 ) -> None:
@@ -183,7 +216,7 @@ def test_a_read_only_principal_is_issued_the_shared_set_less_the_withheld_topic(
     overlay = lpi.load_overlay(_overlay(tmp_path, READ_ONLY_ROW), declaration)
     held = declaration.grants_for("dev-ro-lab-host", overlay)
     assert [g for g in declaration.grants if g not in held] == [
-        g for g in declaration.grants if g.name == APPEND_TOPIC
+        g for g in declaration.grants if g.name in declaration.read_only_withheld
     ]
     assert not [g for g in held if g in declaration.machine_grants]
 

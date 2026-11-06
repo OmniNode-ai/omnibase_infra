@@ -33,12 +33,18 @@ grants_from: developer-principal-derived-grants.json
 machine_grants_from: machine-principal-derived-grants.json
 # Only trusted overlay rows with role: read_only are issued the shared set less these
 # topics (OMN-22478, step 0's read-only principal): the work-ledger append writer topic,
-# so the broker refuses a ledger append from that principal. Each name must be a topic
+# so the broker refuses a ledger append from that principal, and the two command topics
+# whose consumers write on the principal's behalf, the PR handoff (it appends ledger
+# rows) and the PR polish start (it changes a pull request). The source-control write
+# topic is in no shared grant, so a shared-set principal's write verbs are refused by
+# the broker already. Each name must be a topic
 # the shared set grants; a stale name is refused at load. Audit such a principal with
 # `audit-grants --principal NAME` and no `--role`: an ACL it holds beyond its set (the
 # withheld WRITE among them) fails that audit, where `--role` only reports an extra.
 read_only_withholds:
   - onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1
+  - onex.cmd.omnimarket.pr-handoff-requested.v1
+  - onex.cmd.omnimarket.pr-polish-start.v1
 # OPERATOR-CONSENT 2026-10-25T02:09:09Z, rolling ledger line 3204:
 # h105 only; dev only; terminal reads, no command writes or credential changes.
 principal_grants_from:
