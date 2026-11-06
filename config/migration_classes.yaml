@@ -283,6 +283,8 @@ migrations:
   forward/nodes/node_projection_delegation/0063_generation_events_cost_inference_usd_nullable.sql: forward-only # ALTER COLUMN DROP NOT NULL, DROP DEFAULT
   forward/nodes/node_projection_delegation/0064_delegation_events_data_source_experiment.sql: forward-only # DROP; ALTER TABLE public.delegation_events DROP CONSTRAINT IF; ALTER TABLE public.delegation_events ADD CONSTRAINT DELEGATION_EVENTS_DATA_SOURCE_CHECK (ADD CONSTRAINT class)
   forward/nodes/node_projection_delegation/0065_quality_gate_failure_categories_bounded.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
+  forward/nodes/node_projection_delegation/0066_delegation_events_projection_cursor.sql: forward-only # ALTER TABLE ADD COLUMN (BIGSERIAL numbers existing rows); SET NOT NULL; CREATE UNIQUE INDEX; GRANT USAGE ON SEQUENCE
+  forward/nodes/node_projection_delegation/0067_delegation_daily_view.sql: forward-only # CREATE OR REPLACE VIEW (new); ALTER VIEW SET (security_invoker); GRANT SELECT
   forward/nodes/node_projection_delegation_capability_map/0000_create_delegation_capability_cells.sql: forward-only
   forward/nodes/node_projection_delegation_capability_map/0001_grant_tenant_projection_writer_delegation_capability_cells.sql: expand-only
   forward/nodes/node_projection_delegation_capability_map/0002_force_rls_delegation_capability_cells.sql: forward-only
@@ -476,6 +478,8 @@ migrations:
   forward/nodes/node_projection_work_ledger/0004_grant_work_ledger_ro_work_ledger_state.sql: expand-only # additive guarded GRANT SELECT to a read-only role
   forward/nodes/node_projection_work_ledger/0005_grant_role_omnidash_work_ledger_rows_select.sql: expand-only
   forward/nodes/node_projection_work_ledger/0006_work_ledger_ingested_at.sql: forward-only # ALTER TABLE ADD COLUMN IF NOT EXISTS nullable ingested_at (additive); ALTER COLUMN SET DEFAULT on the existing table (omninode_internal.work_ledger_rows), declared forward-only per the checker's rule
+  forward/nodes/node_projection_overlay_store/0000_create_overlay_store.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the overlay store table
+  forward/nodes/node_projection_overlay_store/0001_grant_omninode_runtime_overlay_store.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the overlay store table
   forward/nodes/node_projection_work_questions/0000_create_work_questions.sql: forward-only # CREATE TABLE IF NOT EXISTS and ADD COLUMN IF NOT EXISTS for the five work-question tables
   forward/nodes/node_projection_work_questions/0001_grant_omninode_runtime_work_questions.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the five work-question tables
   forward/nodes/node_projection_worktree_reconcile/0000_create_worktree_reconcile_hosts.sql: expand-only # additive
