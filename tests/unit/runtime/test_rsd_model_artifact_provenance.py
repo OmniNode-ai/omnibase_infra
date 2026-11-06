@@ -10,7 +10,7 @@ import io
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Self, cast
+from typing import Any, Self, cast
 
 import pytest
 import yaml
@@ -474,12 +474,25 @@ def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
             raise AssertionError("loader must not stat before opening the descriptor")
         return original_stat(path, follow_symlinks=follow_symlinks)
 
-    def open_once(_path: Path, mode: str) -> _TrackingReader:
-        assert mode == "rb"
+    other_path = tmp_path / "other.bin"
+    other_path.write_bytes(b"other")
+
+    original_open = Path.open
+
+    # Path.open is patched for the whole process, so any other caller of it while
+    # the test runs would be handed the tracking reader and advance its stream.
+    # Only the example path gets the reader; every other path reaches the real open.
+    def open_once(path: Path, *args: Any, **kwargs: Any) -> Any:
+        if path != example_path:
+            return original_open(path, *args, **kwargs)
+        assert (args or (kwargs.get("mode"),)) == ("rb",)
         return reader
 
     monkeypatch.setattr(Path, "stat", fail_stat)
     monkeypatch.setattr(Path, "open", open_once)
+
+    with other_path.open("rb") as other_stream:
+        assert other_stream.read() == b"other"
 
     assert load_rsd_model_artifact_provenance(example_path).execute_enabled is False
     assert reader.read_sizes == [64 * 1024 + 1]
