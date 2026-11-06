@@ -381,7 +381,7 @@ requirements:
     acceptance:
       - id: AC100
         statement: 'AC100: the probe kill timeout outlasts the CLI wall-time bound computed from the CLI''s own wait functions for the --timeout it passes, and a killed CLI''s partial stderr is kept in the record and its last line named -- falsifier: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q -k "outlasts or partial_output"'
-  - id: req-omn17427-prepr-pool-local-transport
+  - id: req-omn17427-prepr-pool-shell-when-host-is-self
     statement: The pre-PR pool driver reaches a pool member on the machine it runs on with a local shell instead of loopback ssh, so a lane on a lab host reads and leases that host's own pre-PR slots without its key being accepted by its own sshd (OMN-20085).
     acceptance:
       - id: AC109
