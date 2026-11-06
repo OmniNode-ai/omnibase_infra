@@ -155,7 +155,7 @@ async def test_error_a_non_point_answer_still_needs_freshness_and_parity(
 ) -> None:
     """The point rule must not loosen the other queries: a rows answer built like
     the recorded inbox answer (watermark and page size, no freshness) is refused."""
-    wire.reply_override = _recorded("inbox")
+    wire.reply_override = _recorded("inbox", query="rows")
     with pytest.raises(WorkLedgerQueryError, match="freshness or parity"):
         await _client().query({"query": "rows"})
 
