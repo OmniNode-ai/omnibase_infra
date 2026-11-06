@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 104 and seed 6091583368997040606 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 60 and seed 2628574000747317640 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 7] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-13664043448546593929/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-13664043448546593929/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-13664043448546593929/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-13664043448546593929/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-13664043448546593929/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-13664043448546593929/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-13664043448546593929/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-7091401727959450779/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-7091401727959450779/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-7091401727959450779/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-7091401727959450779/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-7091401727959450779/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-7091401727959450779/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-7091401727959450779/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,9 +19,9 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 18:19:44)
+Starting... (2026-11-06 21:53:16)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 18:19:44.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 21:53:17.
 Error: Invariant WitDuplicateDelivered is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -58,7 +58,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 2: <Reserve("g") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+State 2: <Reserve("g") line 220, col 3 to line 225, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -92,7 +92,7 @@ State 2: <Reserve("g") line 218, col 3 to line 223, col 73 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 3: <ConsumeD("g",1) line 256, col 3 to line 261, col 40 of module RebuildAdmission>
+State 3: <ConsumeD("g",1) line 258, col 3 to line 263, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -126,7 +126,7 @@ State 3: <ConsumeD("g",1) line 256, col 3 to line 261, col 40 of module RebuildA
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-39 states generated, 34 distinct states found, 27 states left on queue.
-The depth of the complete state graph search is 4.
-Finished in 01s at (2026-11-06 18:19:44)
-Trace exploration spec path: ./RebuildAdmission_TTrace_1793989183.tla
+93 states generated, 65 distinct states found, 49 states left on queue.
+The depth of the complete state graph search is 5.
+Finished in 01s at (2026-11-06 21:53:17)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1794001996.tla

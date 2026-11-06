@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 107 and seed 3624681009061844868 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 48 and seed 3761472696228369749 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 7] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-15850425874131915718/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-15850425874131915718/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-15850425874131915718/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-15850425874131915718/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-15850425874131915718/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-15850425874131915718/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-15850425874131915718/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-8104479891178225137/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-8104479891178225137/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-8104479891178225137/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-8104479891178225137/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-8104479891178225137/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-8104479891178225137/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-8104479891178225137/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,9 +19,9 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 18:20:33)
+Starting... (2026-11-06 21:48:48)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 18:20:33.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 21:48:48.
 Error: Invariant CreditNotOverdrawn is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -66,7 +66,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 2: <Reserve(o1) line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+State 2: <Reserve("j") line 220, col 3 to line 225, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -77,9 +77,9 @@ State 2: <Reserve(o1) line 218, col 3 to line 223, col 73 of module RebuildAdmis
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "resv" @@
+/\ pc = ( o1 :> "idle" @@
   o2 :> "idle" @@
-  "j" :> "idle" @@
+  "j" :> "resv" @@
   "u" :> "idle" @@
   "c1" :> "idle" @@
   "c1b" :> "idle" @@
@@ -108,7 +108,7 @@ State 2: <Reserve(o1) line 218, col 3 to line 223, col 73 of module RebuildAdmis
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 3: <Reserve("j") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+State 3: <Reserve(o1) line 220, col 3 to line 225, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -150,7 +150,7 @@ State 3: <Reserve("j") line 218, col 3 to line 223, col 73 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 4: <Consume(o1) line 251, col 3 to line 254, col 40 of module RebuildAdmission>
+State 4: <Consume(o1) line 253, col 3 to line 256, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -192,7 +192,7 @@ State 4: <Consume(o1) line 251, col 3 to line 254, col 40 of module RebuildAdmis
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 5: <Consume("j") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
+State 5: <Consume("j") line 253, col 3 to line 256, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {"credit", "start"}
 /\ src = [s1 |-> FALSE]
@@ -234,7 +234,7 @@ State 5: <Consume("j") line 251, col 3 to line 254, col 40 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-305 states generated, 173 distinct states found, 142 states left on queue.
-The depth of the complete state graph search is 5.
-Finished in 01s at (2026-11-06 18:20:33)
-Trace exploration spec path: ./RebuildAdmission_TTrace_1793989232.tla
+616 states generated, 337 distinct states found, 277 states left on queue.
+The depth of the complete state graph search is 6.
+Finished in 01s at (2026-11-06 21:48:48)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1794001727.tla

@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 57 and seed 8828027992861904955 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 65 and seed 1436368247980419520 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 7] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-11292066500236124137/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-11292066500236124137/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-11292066500236124137/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-11292066500236124137/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-11292066500236124137/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-11292066500236124137/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-11292066500236124137/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-8095479684417084177/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-8095479684417084177/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-8095479684417084177/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-8095479684417084177/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-8095479684417084177/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-8095479684417084177/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-8095479684417084177/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,9 +19,9 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 18:20:35)
+Starting... (2026-11-06 21:53:46)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 18:20:36.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 21:53:46.
 Error: Invariant WitOrdRunsDuringSafety is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -66,7 +66,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 2: <Reserve(o1) line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+State 2: <Reserve(o1) line 220, col 3 to line 225, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -108,7 +108,7 @@ State 2: <Reserve(o1) line 218, col 3 to line 223, col 73 of module RebuildAdmis
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 3: <Consume(o1) line 251, col 3 to line 254, col 40 of module RebuildAdmission>
+State 3: <Consume(o1) line 253, col 3 to line 256, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -150,7 +150,7 @@ State 3: <Consume(o1) line 251, col 3 to line 254, col 40 of module RebuildAdmis
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 4: <SrcBad("s1") line 346, col 3 to line 347, col 94 of module RebuildAdmission>
+State 4: <SrcBad("s1") line 352, col 3 to line 353, col 94 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> TRUE]
@@ -192,7 +192,7 @@ State 4: <SrcBad("s1") line 346, col 3 to line 347, col 94 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 5: <SafetyOpens("s1") line 349, col 3 to line 352, col 57 of module RebuildAdmission>
+State 5: <SafetyOpens("s1") line 355, col 3 to line 358, col 57 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> TRUE]
@@ -234,7 +234,7 @@ State 5: <SafetyOpens("s1") line 349, col 3 to line 352, col 57 of module Rebuil
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-230 states generated, 139 distinct states found, 115 states left on queue.
-The depth of the complete state graph search is 5.
-Finished in 01s at (2026-11-06 18:20:36)
-Trace exploration spec path: ./RebuildAdmission_TTrace_1793989234.tla
+303 states generated, 176 distinct states found, 144 states left on queue.
+The depth of the complete state graph search is 6.
+Finished in 01s at (2026-11-06 21:53:46)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1794002025.tla

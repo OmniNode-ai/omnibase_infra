@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 55 and seed 1606651892125312730 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 32 and seed 7616305342029180947 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 7] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-1090169011147604707/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-1090169011147604707/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-1090169011147604707/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-1090169011147604707/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-1090169011147604707/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-1090169011147604707/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-1090169011147604707/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-7740084493357571159/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-7740084493357571159/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-7740084493357571159/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-7740084493357571159/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-7740084493357571159/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-7740084493357571159/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-7740084493357571159/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,9 +19,9 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 18:19:52)
+Starting... (2026-11-06 21:54:06)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 18:19:53.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 21:54:07.
 Error: Invariant WitUnadmittedStart is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -66,7 +66,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 2: <StoreDown line 411, col 3 to line 412, col 90 of module RebuildAdmission>
+State 2: <Reserve(o1) line 220, col 3 to line 225, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -77,7 +77,49 @@ State 2: <StoreDown line 411, col 3 to line 412, col 90 of module RebuildAdmissi
 /\ ghSee = <<FALSE, FALSE, FALSE>>
 /\ snap = [F |-> FALSE, H |-> FALSE]
 /\ pubUp = TRUE
-/\ pc = ( o1 :> "idle" @@
+/\ pc = ( o1 :> "resv" @@
+  o2 :> "idle" @@
+  "j" :> "idle" @@
+  "u" :> "idle" @@
+  "c1" :> "idle" @@
+  "c1b" :> "idle" @@
+  "s1" :> "idle" @@
+  "r1" :> "idle" @@
+  "r2" :> "idle" )
+/\ keys = [F |-> {}, H |-> {}]
+/\ checked = {}
+/\ wread = <<FALSE, FALSE, FALSE>>
+/\ stop = <<"none", "none", "none">>
+/\ credit = 1
+/\ pendEff = [F |-> 0, H |-> 0]
+/\ rd = <<>>
+/\ pendKey = [F |-> 0, H |-> 0]
+/\ fl = <<>>
+/\ ghRead = <<FALSE, FALSE, FALSE>>
+/\ msgs = <<>>
+/\ overrun = <<>>
+/\ safety = {}
+/\ rows = <<{}, {}, {}>>
+/\ up = [F |-> TRUE, H |-> TRUE]
+/\ starts = <<>>
+/\ broken = {}
+/\ started = {1}
+/\ unadm = {}
+/\ storeUp = TRUE
+/\ effects = <<0>>
+
+State 3: <StoreDown line 417, col 3 to line 418, col 90 of module RebuildAdmission>
+/\ phase = [F |-> 0, H |-> 0]
+/\ bad = {}
+/\ src = [s1 |-> FALSE]
+/\ fresh = TRUE
+/\ handed = FALSE
+/\ cur = 1
+/\ dirty = {}
+/\ ghSee = <<FALSE, FALSE, FALSE>>
+/\ snap = [F |-> FALSE, H |-> FALSE]
+/\ pubUp = TRUE
+/\ pc = ( o1 :> "resv" @@
   o2 :> "idle" @@
   "j" :> "idle" @@
   "u" :> "idle" @@
@@ -108,7 +150,7 @@ State 2: <StoreDown line 411, col 3 to line 412, col 90 of module RebuildAdmissi
 /\ storeUp = FALSE
 /\ effects = <<0>>
 
-State 3: <NoAnswer(o1) line 281, col 3 to line 284, col 95 of module RebuildAdmission>
+State 4: <NoAnswer(o1) line 283, col 3 to line 286, col 95 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -150,7 +192,7 @@ State 3: <NoAnswer(o1) line 281, col 3 to line 284, col 95 of module RebuildAdmi
 /\ storeUp = FALSE
 /\ effects = <<0>>
 
-164 states generated, 91 distinct states found, 71 states left on queue.
-The depth of the complete state graph search is 5.
-Finished in 01s at (2026-11-06 18:19:53)
-Trace exploration spec path: ./RebuildAdmission_TTrace_1793989191.tla
+307 states generated, 176 distinct states found, 137 states left on queue.
+The depth of the complete state graph search is 6.
+Finished in 01s at (2026-11-06 21:54:07)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1794002046.tla

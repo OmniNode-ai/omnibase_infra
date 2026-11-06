@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 45 and seed -3559484988514568703 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 29 and seed 5814906345777860984 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 7] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-16064507083414150044/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-16064507083414150044/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-16064507083414150044/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-16064507083414150044/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-16064507083414150044/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-16064507083414150044/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-16064507083414150044/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-7045988518459740270/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-7045988518459740270/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-7045988518459740270/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-7045988518459740270/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-7045988518459740270/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-7045988518459740270/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-7045988518459740270/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,10 +19,10 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 18:19:14)
+Starting... (2026-11-06 21:53:21)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 18:19:14.
-Progress(8) at 2026-11-06 18:19:17: 18,623 states generated (18,623 s/min), 6,493 distinct states found (6,493 ds/min), 4,490 states left on queue.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 21:53:21.
+Progress(9) at 2026-11-06 21:53:24: 51,469 states generated (51,469 s/min), 16,397 distinct states found (16,397 ds/min), 10,932 states left on queue.
 Error: Invariant WitEveryCauseRuns is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -63,7 +63,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 2: <Breaks(1) line 374, col 3 to line 381, col 37 of module RebuildAdmission>
+State 2: <Breaks(1) line 380, col 3 to line 387, col 37 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -101,7 +101,7 @@ State 2: <Breaks(1) line 374, col 3 to line 381, col 37 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 3: <Reserve("c1") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+State 3: <Reserve("c1") line 220, col 3 to line 225, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -139,7 +139,7 @@ State 3: <Reserve("c1") line 218, col 3 to line 223, col 73 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 4: <Consume("c1") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
+State 4: <Consume("c1") line 253, col 3 to line 256, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -177,7 +177,7 @@ State 4: <Consume("c1") line 251, col 3 to line 254, col 40 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 5: <Breaks(3) line 374, col 3 to line 381, col 37 of module RebuildAdmission>
+State 5: <Breaks(3) line 380, col 3 to line 387, col 37 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -215,7 +215,7 @@ State 5: <Breaks(3) line 374, col 3 to line 381, col 37 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 6: <Reserve("c8") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+State 6: <Reserve("c8") line 220, col 3 to line 225, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -253,7 +253,7 @@ State 6: <Reserve("c8") line 218, col 3 to line 223, col 73 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 7: <Consume("c8") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
+State 7: <Consume("c8") line 253, col 3 to line 256, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -291,7 +291,7 @@ State 7: <Consume("c8") line 251, col 3 to line 254, col 40 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 8: <Breaks(4) line 374, col 3 to line 381, col 37 of module RebuildAdmission>
+State 8: <Breaks(4) line 380, col 3 to line 387, col 37 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -329,7 +329,7 @@ State 8: <Breaks(4) line 374, col 3 to line 381, col 37 of module RebuildAdmissi
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 9: <Reserve("c3") line 218, col 3 to line 223, col 73 of module RebuildAdmission>
+State 9: <Reserve("c3") line 220, col 3 to line 225, col 73 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -367,7 +367,7 @@ State 9: <Reserve("c3") line 218, col 3 to line 223, col 73 of module RebuildAdm
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-State 10: <Consume("c3") line 251, col 3 to line 254, col 40 of module RebuildAdmission>
+State 10: <Consume("c3") line 253, col 3 to line 256, col 40 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 0]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -405,7 +405,7 @@ State 10: <Consume("c3") line 251, col 3 to line 254, col 40 of module RebuildAd
 /\ storeUp = TRUE
 /\ effects = <<0>>
 
-482163 states generated, 121725 distinct states found, 71046 states left on queue.
-The depth of the complete state graph search is 11.
-Finished in 19s at (2026-11-06 18:19:32)
-Trace exploration spec path: ./RebuildAdmission_TTrace_1793989153.tla
+522220 states generated, 131081 distinct states found, 76280 states left on queue.
+The depth of the complete state graph search is 12.
+Finished in 09s at (2026-11-06 21:53:30)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1794002000.tla

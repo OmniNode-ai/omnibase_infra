@@ -1,76 +1,81 @@
-Round 4. Module RebuildAdmission.tla sha 378332c7be1b6c80, RebuildAdmissionExt.tla sha 612dcffbf3171d7c, at ae740dc42; model digest 32ba87b49ce24dd4 (section 12's recipe, full value in model.sha256).
+Round 5. Module RebuildAdmission.tla sha 1f9c5f92f2758bf3, RebuildAdmissionExt.tla sha 612dcffbf3171d7c, at 56746fd9c; model digest cc001b7fe4836640 (section 12's recipe, full value in model.sha256).
 Each row: its cfg sha; ran= the commit the result ran at, whose module and cfg bytes equal these;
-host, TLC workers, heap, distinct states (the last progress line for a run that did not finish).
-Base_* and live_* must hold; mut_*, wit_* and ctl_* must report their named property.
+host, TLC workers, heap, distinct states (the last progress line for a run that did not finish; - when
+the break is in an initial state). Base_* and live_* must hold; mut_*, wit_* and ctl_* must report
+their named property. Base_kept's row is round 4's, at ae740dc42, not rerun; round 5 changes Begin
+only for a flight task, and Base_kept flies none, but its run is bound to round 4's module bytes.
 
-Base_admit                         cfg=b51f9f6e6708 ran=ae740dc42 host=h053 workers= 8 heapMB=12288 states=    8512000 holds
-Base_fence                         cfg=a8e7ba0ccd33 ran=ae740dc42 host=h053 workers= 4 heapMB= 8192 states=     279744 holds
-Base_holder                        cfg=9471a47c31d5 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=      84672 holds
+Base_admit                         cfg=b51f9f6e6708 ran=56746fd9c host=h053 workers= 4 heapMB=12288 states=    8512000 holds
+Base_fence                         cfg=b80ddb1552a4 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     565504 holds
+Base_holder                        cfg=9471a47c31d5 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=      84672 holds
 Base_kept                          cfg=2c400d0f5db3 ran=ae740dc42 host=h053 workers= 8 heapMB=12288 states=   13000684 INFEASIBLE, stopped unfinished, not proven (README)
-Base_kept_core                     cfg=c07c504ca489 ran=a05026e8c host=h053 workers= 2 heapMB= 4096 states=    1635658 holds
-Base_outage                        cfg=9cc377a6c2e0 ran=ae740dc42 host=h053 workers= 4 heapMB= 8192 states=    1772160 holds
-Base_union                         cfg=84e55ce22c97 ran=-         host=-    workers= - heapMB=    - states=          - INFEASIBLE, not rerun at round 4 (README)
-Base_wip2                          cfg=7707bdfb8828 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=      28416 holds
-ctl_ext_drop_esc                   cfg=2fc82bb92fd2 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=     239512 fails as required: StopClearsOrEscalates
-ctl_ext_weak_retry                 cfg=75a1a47cdacc ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=     239512 fails as required: AdmissibleStarts
-live_ext_admit                     cfg=b9af35da948b ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=     239512 holds
-live_ext_outage                    cfg=9936ad50ea83 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=     239512 holds
-mut_ext_p1_down_refuses            cfg=feea590af288 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=      60600 fails as required: AdmissibleStarts
-mut_ext_p1_resv_waits              cfg=dc97131d534f ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=     239512 fails as required: ResvNotStuck
-mut_ext_p3_escalate_on_reader      cfg=d9622ac42fac ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=      51324 fails as required: StopClearsOrEscalates
-mut_p1_down_proceeds               cfg=8ac0a60c8987 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        353 fails as required: StepFence
-mut_p1_down_proceeds_ghost         cfg=dcfa072b5bee ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        302 fails as required: NoStepBeginsAfterStop
-mut_p1_fence_off                   cfg=633a4895fae6 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        118 fails as required: NoStepBeginsAfterStop
-mut_p1_fence_once                  cfg=478890935687 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        611 fails as required: AtMostOneStepAfterStop
-mut_p1_fence_split                 cfg=df114834d99c ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        281 fails as required: NoStepBeginsAfterStop
-mut_p1_holder_in_engine            cfg=8f79f92af342 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         13 fails as required: NoRefusalOutsideRules
-mut_p1_kept_refused_under_stop     cfg=6efc0c070324 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=          9 fails as required: NoRefusalOutsideRules
-mut_p1_late_bind                   cfg=743edf46c2fe ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        681 fails as required: NoStartAgainstRules
-mut_p1_no_advance_clear            cfg=e1f7b8add7a9 ran=ae740dc42 host=h053 workers= 4 heapMB= 8192 states=    1146118 fails as required: NoStartAgainstRules
-mut_p1_no_advance_publish          cfg=6e7f3a76f87c ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=     599029 fails as required: NoStartAgainstRules
-mut_p1_no_advance_safety           cfg=e136091abd84 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=     459115 fails as required: NoStartAgainstRules
-mut_p1_no_advance_stop             cfg=cb1ff33ec40f ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        194 fails as required: NoStartAgainstRules
-mut_p1_no_scope                    cfg=ac356466fa5d ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=          - fails as required: DecideFollowsRules
-mut_p1_private_open                cfg=451ede9c390d ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=          - fails as required: DecideFollowsRules
-mut_p1_ro_after_private            cfg=d747dd1af029 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=          - fails as required: NoRefusalOutsideRules
-mut_p1_safety_refuses              cfg=4b85127dad6f ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         33 fails as required: NoRefusalOutsideRules
-mut_p1_stale_refuses               cfg=3f7b4b86acc4 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         80 fails as required: NoRefusalOutsideRules
-mut_p1_stop_holds_above            cfg=4e7990823ffa ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         13 fails as required: NoRefusalOutsideRules
-mut_p1_stop_lets_own               cfg=5954f1d50005 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=          9 fails as required: DecideFollowsRules
-mut_p2_cause_no_slot               cfg=ac341f85351a ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        318 fails as required: OneCauseLane
-mut_p2_close_frees                 cfg=ccdc71a2e967 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=       2856 fails as required: AliveWithinLimit
-mut_p2_credit_no_compare           cfg=bf4ddac5e45c ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        173 fails as required: CreditNotOverdrawn
-mut_p2_join_own_piece              cfg=f1ab32a39d87 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=      31802 fails as required: AliveWithinLimit
-mut_p2_no_wip                      cfg=6bc61f8a8c04 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        961 fails as required: AliveWithinLimit
-mut_p2_rows_only                   cfg=1361e72e7b35 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        999 fails as required: AliveWithinLimit
-mut_p3_clear_no_reading            cfg=bf1914fcd6c5 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        329 fails as required: StopClearsOnlyWithEvidence
-mut_p3_clear_no_rows               cfg=5e45ac88ec1a ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=      18579 fails as required: StopClearsOnlyWithEvidence
-mut_p3_reading_survives            cfg=671bc76df655 ran=ae740dc42 host=h053 workers= 4 heapMB= 8192 states=    1154279 fails as required: StopClearsOnlyWithEvidence
-mut_p3_rows_survive                cfg=325dd6ebc3bb ran=ae740dc42 host=h053 workers= 4 heapMB= 8192 states=    3171184 fails as required: StopClearsOnlyWithEvidence
-mut_p3_see_before_lease            cfg=0ff3966065bc ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=      66938 fails as required: StopClearsOnlyWithEvidence
-mut_p4_consume_split               cfg=c543dc98a0e7 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=       1789 fails as required: ConsumedAtMostOnce
-mut_p4_effect_then_key             cfg=1e6d59242f0d ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=       1094 fails as required: RestartRepeatsNoStep
-mut_p4_fence_read                  cfg=361ca9cdb88c ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        244 fails as required: NoWriteByLostOwner
-mut_p4_key_then_effect             cfg=5763c060d9b0 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        245 fails as required: NoLostStep
-mut_p4_keys_per_engine             cfg=5bf37b257f2f ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=       1105 fails as required: RestartRepeatsNoStep
-mut_p4_no_epoch                    cfg=3692dbe307b9 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         54 fails as required: NeverConsumedAfterEpoch
-mut_p4_no_fence                    cfg=0a9db3930655 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         37 fails as required: NoWriteByLostOwner
-mut_p4_no_used_check               cfg=bf8cf71189f5 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        249 fails as required: ConsumedAtMostOnce
-mut_p4_unkeyed                     cfg=d605b828c52b ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        210 fails as required: RestartRepeatsNoStep
-wit_WitAboveStopRuns               cfg=58cd34810cae ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=       6555 fails as required: WitAboveStopRuns
-wit_WitCauseOfKeptRuns             cfg=146fb42b53d0 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        209 fails as required: WitCauseOfKeptRuns
-wit_WitDuplicateDelivered          cfg=8b9aaff53793 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         34 fails as required: WitDuplicateDelivered
-wit_WitEscalated                   cfg=ffa88a7c0b1a ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         55 fails as required: WitEscalated
-wit_WitEveryCauseRuns              cfg=57867d21d7f6 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=     121725 fails as required: WitEveryCauseRuns
-wit_WitFallbackAdvances            cfg=263af05cd4b4 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=       1165 fails as required: WitFallbackAdvances
-wit_WitInFlightLandsInOutage       cfg=03ecc90a482a ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        639 fails as required: WitInFlightLandsInOutage
-wit_WitKeptRunsUnderOwnStop        cfg=047541de78d8 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        195 fails as required: WitKeptRunsUnderOwnStop
-wit_WitLandsAfterStop              cfg=fe1606c73b59 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        259 fails as required: WitLandsAfterStop
-wit_WitLimitReached                cfg=a48a9c8b9c67 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         26 fails as required: WitLimitReached
-wit_WitOldEngineStillActing        cfg=74ed5395c25f ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         44 fails as required: WitOldEngineStillActing
-wit_WitOrdRunsDuringSafety         cfg=ebef5678a20e ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        139 fails as required: WitOrdRunsDuringSafety
-wit_WitOrdRunsOnStaleTable         cfg=ebf4ac052763 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        226 fails as required: WitOrdRunsOnStaleTable
-wit_WitOutageOverLimit             cfg=11cce544e89f ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        206 fails as required: WitOutageOverLimit
-wit_WitPieceStarted                cfg=3520e0f1e9bf ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=        121 fails as required: WitPieceStarted
-wit_WitStopCleared                 cfg=5121d6510a40 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=      63290 fails as required: WitStopCleared
-wit_WitUnadmittedStart             cfg=f4515f890b75 ran=ae740dc42 host=h053 workers= 2 heapMB= 4096 states=         91 fails as required: WitUnadmittedStart
+Base_kept_core                     cfg=c07c504ca489 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=    1635658 holds
+Base_kept_esc                      cfg=bb344c2cf4d7 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=    1754416 holds
+Base_outage                        cfg=9cc377a6c2e0 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=    1772160 holds
+Base_union                         cfg=84e55ce22c97 ran=-         host=-    workers= - heapMB=    - states=          - INFEASIBLE, not rerun at round 4 or 5 (README)
+Base_wip2                          cfg=7707bdfb8828 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=      28416 holds
+ctl_ext_drop_esc                   cfg=2fc82bb92fd2 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     239512 fails as required: StopClearsOrEscalates
+ctl_ext_weak_retry                 cfg=75a1a47cdacc ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     239512 fails as required: AdmissibleStarts
+live_ext_admit                     cfg=b9af35da948b ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     239512 holds
+live_ext_outage                    cfg=9936ad50ea83 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     239512 holds
+mut_ext_p1_down_refuses            cfg=feea590af288 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=      60600 fails as required: AdmissibleStarts
+mut_ext_p1_resv_waits              cfg=dc97131d534f ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     239512 fails as required: ResvNotStuck
+mut_ext_p3_escalate_on_reader      cfg=d9622ac42fac ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=      51324 fails as required: StopClearsOrEscalates
+mut_p1_down_proceeds               cfg=8ac0a60c8987 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        418 fails as required: StepFence
+mut_p1_down_proceeds_ghost         cfg=dcfa072b5bee ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        488 fails as required: NoStepBeginsAfterStop
+mut_p1_fence_off                   cfg=633a4895fae6 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        137 fails as required: NoStepBeginsAfterStop
+mut_p1_fence_once                  cfg=478890935687 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        358 fails as required: AtMostOneStepAfterStop
+mut_p1_fence_split                 cfg=df114834d99c ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        221 fails as required: NoStepBeginsAfterStop
+mut_p1_holder_in_engine            cfg=8f79f92af342 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         22 fails as required: NoRefusalOutsideRules
+mut_p1_kept_refused_under_stop     cfg=6efc0c070324 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         24 fails as required: NoRefusalOutsideRules
+mut_p1_late_bind                   cfg=743edf46c2fe ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        408 fails as required: NoStartAgainstRules
+mut_p1_no_advance_clear            cfg=e1f7b8add7a9 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=    1331437 fails as required: NoStartAgainstRules
+mut_p1_no_advance_publish          cfg=6e7f3a76f87c ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     865334 fails as required: NoStartAgainstRules
+mut_p1_no_advance_safety           cfg=e136091abd84 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     603132 fails as required: NoStartAgainstRules
+mut_p1_no_advance_stop             cfg=cb1ff33ec40f ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        185 fails as required: NoStartAgainstRules
+mut_p1_no_scope                    cfg=ac356466fa5d ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=          - fails as required: DecideFollowsRules
+mut_p1_private_open                cfg=451ede9c390d ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=          - fails as required: DecideFollowsRules
+mut_p1_ro_after_private            cfg=d747dd1af029 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=          - fails as required: NoRefusalOutsideRules
+mut_p1_safety_refuses              cfg=4b85127dad6f ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         53 fails as required: NoRefusalOutsideRules
+mut_p1_stale_refuses               cfg=3f7b4b86acc4 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        130 fails as required: NoRefusalOutsideRules
+mut_p1_stop_holds_above            cfg=4e7990823ffa ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         28 fails as required: NoRefusalOutsideRules
+mut_p1_stop_lets_own               cfg=5954f1d50005 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         31 fails as required: DecideFollowsRules
+mut_p1_unfenced_waits              cfg=0e40b9bf60b0 ran=56746fd9c host=h053 workers= 2 heapMB= 4096 states=         54 fails as required: UnfencedNotHeld
+mut_p2_cause_no_slot               cfg=ac341f85351a ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        384 fails as required: OneCauseLane
+mut_p2_close_frees                 cfg=ccdc71a2e967 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=       1361 fails as required: AliveWithinLimit
+mut_p2_credit_no_compare           cfg=bf4ddac5e45c ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        337 fails as required: CreditNotOverdrawn
+mut_p2_join_own_piece              cfg=f1ab32a39d87 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=      22986 fails as required: AliveWithinLimit
+mut_p2_no_wip                      cfg=6bc61f8a8c04 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=       1181 fails as required: AliveWithinLimit
+mut_p2_rows_only                   cfg=1361e72e7b35 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=       1089 fails as required: AliveWithinLimit
+mut_p3_clear_no_reading            cfg=bf1914fcd6c5 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        488 fails as required: StopClearsOnlyWithEvidence
+mut_p3_clear_no_rows               cfg=5e45ac88ec1a ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=      20471 fails as required: StopClearsOnlyWithEvidence
+mut_p3_reading_survives            cfg=671bc76df655 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=    1558992 fails as required: StopClearsOnlyWithEvidence
+mut_p3_rows_survive                cfg=325dd6ebc3bb ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=    2548388 fails as required: StopClearsOnlyWithEvidence
+mut_p3_see_before_lease            cfg=0ff3966065bc ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=      63174 fails as required: StopClearsOnlyWithEvidence
+mut_p4_consume_split               cfg=c543dc98a0e7 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=       1420 fails as required: ConsumedAtMostOnce
+mut_p4_effect_then_key             cfg=1e6d59242f0d ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=       1121 fails as required: RestartRepeatsNoStep
+mut_p4_fence_read                  cfg=361ca9cdb88c ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        253 fails as required: NoWriteByLostOwner
+mut_p4_key_then_effect             cfg=5763c060d9b0 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        283 fails as required: NoLostStep
+mut_p4_keys_per_engine             cfg=5bf37b257f2f ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=       1051 fails as required: RestartRepeatsNoStep
+mut_p4_no_epoch                    cfg=3692dbe307b9 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        231 fails as required: NeverConsumedAfterEpoch
+mut_p4_no_fence                    cfg=0a9db3930655 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         72 fails as required: NoWriteByLostOwner
+mut_p4_no_used_check               cfg=bf8cf71189f5 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        423 fails as required: ConsumedAtMostOnce
+mut_p4_unkeyed                     cfg=d605b828c52b ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        325 fails as required: RestartRepeatsNoStep
+wit_WitAboveStopRuns               cfg=58cd34810cae ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=       7667 fails as required: WitAboveStopRuns
+wit_WitCauseOfKeptRuns             cfg=146fb42b53d0 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        325 fails as required: WitCauseOfKeptRuns
+wit_WitCauseStepsInOutage          cfg=b874c28f88ce ran=56746fd9c host=h053 workers= 2 heapMB= 4096 states=        472 fails as required: WitCauseStepsInOutage
+wit_WitDuplicateDelivered          cfg=8b9aaff53793 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         65 fails as required: WitDuplicateDelivered
+wit_WitEscalated                   cfg=ffa88a7c0b1a ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        111 fails as required: WitEscalated
+wit_WitEveryCauseRuns              cfg=57867d21d7f6 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=     131081 fails as required: WitEveryCauseRuns
+wit_WitFallbackAdvances            cfg=263af05cd4b4 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=       1724 fails as required: WitFallbackAdvances
+wit_WitInFlightLandsInOutage       cfg=03ecc90a482a ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        456 fails as required: WitInFlightLandsInOutage
+wit_WitKeptRunsUnderOwnStop        cfg=047541de78d8 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        322 fails as required: WitKeptRunsUnderOwnStop
+wit_WitLandsAfterStop              cfg=fe1606c73b59 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        154 fails as required: WitLandsAfterStop
+wit_WitLimitReached                cfg=a48a9c8b9c67 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         27 fails as required: WitLimitReached
+wit_WitOldEngineStillActing        cfg=74ed5395c25f ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=         87 fails as required: WitOldEngineStillActing
+wit_WitOrdRunsDuringSafety         cfg=ebef5678a20e ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        176 fails as required: WitOrdRunsDuringSafety
+wit_WitOrdRunsOnStaleTable         cfg=ebf4ac052763 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        284 fails as required: WitOrdRunsOnStaleTable
+wit_WitOutageOverLimit             cfg=11cce544e89f ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        222 fails as required: WitOutageOverLimit
+wit_WitPieceStarted                cfg=3520e0f1e9bf ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        207 fails as required: WitPieceStarted
+wit_WitStopCleared                 cfg=5121d6510a40 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=      61095 fails as required: WitStopCleared
+wit_WitUnadmittedStart             cfg=f4515f890b75 ran=56746fd9c host=h053 workers= 4 heapMB= 8192 states=        176 fails as required: WitUnadmittedStart

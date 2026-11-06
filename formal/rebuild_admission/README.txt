@@ -1,11 +1,34 @@
-RebuildAdmission: M0 of the subsystem rebuild plan (OMN-22478), round 4
+RebuildAdmission: M0 of the subsystem rebuild plan (OMN-22478), round 5
 ======================================================================
 
 Admission, the stop and the holder as one state machine, written to the plan's text of 11-06
-(sections 6.2, 7.1 and 7.5 at plan head 10c08fa2, text hash 52faf70168ffd3f1 by section 12's
-recipe). It implements and wires nothing. Results are in results/SUMMARY.txt. A verdict from this
+(sections 6.2, 7.1 and 7.5; round 4 at plan head 10c08fa2, text hash 52faf70168ffd3f1 by section
+12's recipe; round 5 at the plan owner's patch of that text, whose hash section 12 states). It implements and wires nothing. Results are in results/SUMMARY.txt. A verdict from this
 directory is its author's; plan section 12 requires a separate reader. second_read/ is an earlier
 reader's evidence against round 1, left unchanged.
+
+Why round 5
+-----------
+
+Round 4 was read PASS by reader m0-reader-1755 at digest 32ba87b49ce24dd4. Round 5 folds what
+that reader left to the plan owner and to this model:
+
+- F9, the fence's exemption. 7.1 O3 fences every running mutating lane of a stopped piece except
+  its cause lane, and step 3 excepts kept fixes. Round 4's Begin made every flight lane wait for
+  the store in an outage, cause lanes and kept fixes included, which the text does not say and
+  which would block a stopped piece's fix for as long as the outage lasts. A lane knows its own
+  kind, so a lane the fence never holds now takes its outward step with no answer, logged (the
+  reader's variant RebuildAdmissionCX, folded). UnfencedNotHeld states it (a running unfenced
+  lane can always begin its step); unfenced_waits, round 4's Begin, breaks it.
+  wit_WitCauseStepsInOutage reaches a stopped piece's cause lane stepping while the store is
+  down. Base_fence now flies c1 as well, so StepFence and UnfencedNotHeld are both read with a
+  cause lane in flight; it holds at the reader's variant count.
+- Base_kept_esc is the reader's r_kept2 scope (o1, c1, c3 and kf; stops on 1 and the kept piece;
+  outage, credit, the holder's step and escalation), now in the digest: it covers escalation and
+  the holder beside a kept piece's stop, which Base_kept_core leaves out.
+- F10, the test's break check now matches TLC's "Action property X is violated" and no longer
+  falls back to any line with "violated" in it.
+- F6 is settled by the plan owner as "an open safety failure", which is PrivPass as it stands.
 
 Why round 4
 -----------
@@ -111,6 +134,9 @@ P1  DecideFollowsRules       table    nothing admitted against a reason
                                       mut: down_proceeds
     AtMostOneStepAfterStop   carried  the in-flight bound: one step begun before the stop may land
                                       mut: fence_once
+    UnfencedNotHeld          enabled  the fence's exemption: a running cause lane or kept fix can
+                                      always begin its outward step, store or no store (Base_fence)
+                                      mut: unfenced_waits
     AdmissibleStarts         liveness an admissible request starts, and with no answer it starts
                                       logged (Ext)
                                       mut: down_refuses; ctl: weak_retry
@@ -156,7 +182,8 @@ Witnesses (each must be violated, so what it names is reachable): an ordinary la
 safety failure and on a stale table, a lane of piece 2 runs under a stop on piece 1, a start with no
 answer, admitted plus logged starts above the limit in an outage, the limit reached, a stop cleared
 and escalated, the holder starting piece 2, a step landing after the stop and one landing during an
-outage, the old engine still acting after a handover, the fallback advancing, a duplicate delivery,
+outage, a stopped piece's cause lane beginning a step while the store is down, the old engine
+still acting after a handover, the fallback advancing, a duplicate delivery,
 a kept fix and a kept piece's cause lane each running under its own stop, and stops on 1, 8 and 9
 open at once with each cause lane running.
 
@@ -171,7 +198,8 @@ Choices the text leaves open, stated for the reader
 - The fence under an outage is no longer open: it fails closed (RULING 2026-11-06T17:52:26Z, D1
   above). A start with no answer still proceeds, logged; an outward step with no answer does not.
   Every fenced step waits during an outage, whether or not its piece is stopped, since the lane
-  cannot know. No liveness property says a waiting step is taken once the store is back.
+  cannot know. A cause lane or kept fix is never fenced and does not wait (round 5). No liveness
+  property says a waiting step is taken once the store is back.
 - An unanswered start is not counted by the gate, so AliveWithinLimit counts admitted processes;
   wit_WitOutageOverLimit shows admitted plus logged starts above the limit. 7.1 counts them on the
   floor and 7.5's hourly reconcile catches them; neither is modelled.
@@ -209,7 +237,8 @@ Scopes, every one in its cfg; results/SUMMARY.txt gives workers and states per r
                 repair lanes; stops on 1 and 2; safety, stale table, credit, escalation, the holder's
                 step; the store always answers
   Base_outage   o1, o2, join, piece-2 ordinary, two cause lanes; the store goes down and back
-  Base_fence    o1 and the join with their outward steps as two actions, outage on
+  Base_fence    o1, the join and c1 (the cause lane of piece 1) with their outward steps as two
+                actions, outage on
   Base_holder   a continuation lane delivered twice, piece-2 ordinary, two steps, crash, restart,
                 handover, outage
   Base_wip2     three ordinaries and the join, limit 2
@@ -218,14 +247,16 @@ Scopes, every one in its cfg; results/SUMMARY.txt gives workers and states per r
                 escalation; declared infeasible below
   Base_kept_core Base_kept without the escalation timer and the holder's step (both are in
                 Base_admit with the stops on 1 and 2)
+  Base_kept_esc o1, c1, c3 and kf, pieces 1..3 with 3 kept, stops on 1 and 3, outage, credit, the
+                holder's step and escalation (reader m0-reader-1755's r_kept2)
   Base_union    every class and environment at once; declared infeasible below, kept so the
                 digest names it
   live_ext_*    o1, a cause lane, a safety cause lane, a repair lane, a stop on 1, outage
 
 INFEASIBLE declarations, read by the test (one line each; such a config is not proven and has no
 result that says it holds):
-INFEASIBLE Base_kept: it does not fit a lab unit. At ae740dc42's bytes on h053 with 8 workers it ran 44 minutes and was stopped at BFS depth 20 with 13,000,684 distinct states, 4,073,970 still queued and the queue still growing by about 80,000 a minute, with no violation found up to there; a bus lab unit is capped at 2 hours. Base_kept_core, the same tasks, pieces and stops without the escalation timer and the holder's step, holds. What Base_kept adds over it, escalation and the holder's step beside stops on the kept pieces, is not covered by a run.
-INFEASIBLE Base_union: not rerun at round 4's bytes; what follows was measured at round 3's. It does not fit a lab unit. Every behaviour of Base_admit is one of its behaviours with the extra tasks idle, so it has at least Base_admit's 8,512,000 distinct states (38 min on 8 workers), and it adds three tasks (c3, kf, g), a third stoppable piece, two outward steps of two actions, a duplicate delivery, outages, crashes and the handover on top. At 6403d05a5's bytes on h053 it reached 720,548 distinct states with 574,187 still queued after 7 min on 4 workers (stopped to keep h053 under 85C), and 5,606,682 with 4,302,254 queued and growing after 22 min on 8 workers in an earlier run whose bytes are unconfirmed (its run directory is gone); its size is estimated, not measured. Each environment holds in its own config (Base_admit, Base_outage, Base_fence, Base_holder, Base_wip2); their interleaving all at once is what no run covers.
+INFEASIBLE Base_kept: it does not fit a lab unit. At ae740dc42's bytes on h053 with 8 workers it ran 44 minutes and was stopped at BFS depth 20 with 13,000,684 distinct states, 4,073,970 still queued and the queue still growing by about 80,000 a minute, with no violation found up to there; a bus lab unit is capped at 2 hours. Base_kept_core, the same tasks, pieces and stops without the escalation timer and the holder's step, holds. What Base_kept adds over it, escalation and the holder's step beside stops on the kept pieces, is covered by Base_kept_esc for one kept piece and by no run for two.
+INFEASIBLE Base_union: not rerun at round 4's or round 5's bytes; what follows was measured at round 3's. It does not fit a lab unit. Every behaviour of Base_admit is one of its behaviours with the extra tasks idle, so it has at least Base_admit's 8,512,000 distinct states (38 min on 8 workers), and it adds three tasks (c3, kf, g), a third stoppable piece, two outward steps of two actions, a duplicate delivery, outages, crashes and the handover on top. At 6403d05a5's bytes on h053 it reached 720,548 distinct states with 574,187 still queued after 7 min on 4 workers (stopped to keep h053 under 85C), and 5,606,682 with 4,302,254 queued and growing after 22 min on 8 workers in an earlier run whose bytes are unconfirmed (its run directory is gone); its size is estimated, not measured. Each environment holds in its own config (Base_admit, Base_outage, Base_fence, Base_holder, Base_wip2); their interleaving all at once is what no run covers.
 
 Rerun, for each cfg:
   java -XX:+UseParallelGC -Xmx24g -cp tla2tools.jar tlc2.TLC -config <cfg> -workers 16 \

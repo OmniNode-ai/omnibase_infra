@@ -1,13 +1,13 @@
 TLC2 Version 2026.10.30.154139 (rev: 090e85c)
-Running breadth-first search Model-Checking with fp 65 and seed -8166446711938615905 with 2 workers on 2 cores with 3641MB heap and 64MB offheap memory [pid: 8] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 34 and seed 3638641236476273646 with 4 workers on 4 cores with 7282MB heap and 64MB offheap memory [pid: 7] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /w/RebuildAdmission.tla
-Parsing file /tmp/tlc-6486105810065443810/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
-Parsing file /tmp/tlc-6486105810065443810/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-6486105810065443810/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-6486105810065443810/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-6486105810065443810/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-6486105810065443810/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-6486105810065443810/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-17817317210347046901/Integers.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-17817317210347046901/FiniteSets.tla (jar:file:/tla.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-17817317210347046901/Sequences.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-17817317210347046901/TLC.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-17817317210347046901/_TLCTrace.tla (jar:file:/tla.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-17817317210347046901/Naturals.tla (jar:file:/tla.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-17817317210347046901/TLCExt.tla (jar:file:/tla.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
@@ -19,9 +19,9 @@ Semantic processing of module RebuildAdmission
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module RebuildAdmission
-Starting... (2026-11-06 18:20:28)
+Starting... (2026-11-06 21:52:50)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-06 18:20:28.
+Finished computing initial states: 1 distinct state generated at 2026-11-06 21:52:51.
 Error: Invariant NoWriteByLostOwner is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -58,7 +58,7 @@ State 1: <Initial predicate>
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 2: <EngRead("H") line 424, col 3 to line 427, col 91 of module RebuildAdmission>
+State 2: <EngRead("H") line 430, col 3 to line 433, col 91 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 1]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -92,7 +92,7 @@ State 2: <EngRead("H") line 424, col 3 to line 427, col 91 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 3: <Handover line 468, col 3 to line 471, col 64 of module RebuildAdmission>
+State 3: <Handover line 474, col 3 to line 477, col 64 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 1]
 /\ bad = {}
 /\ src = [s1 |-> FALSE]
@@ -126,7 +126,7 @@ State 3: <Handover line 468, col 3 to line 471, col 64 of module RebuildAdmissio
 /\ storeUp = TRUE
 /\ effects = <<0, 0>>
 
-State 4: <StepPut("H") line 430, col 3 to line 443, col 71 of module RebuildAdmission>
+State 4: <StepPut("H") line 436, col 3 to line 449, col 71 of module RebuildAdmission>
 /\ phase = [F |-> 0, H |-> 1]
 /\ bad = {"owner"}
 /\ src = [s1 |-> FALSE]
@@ -160,7 +160,7 @@ State 4: <StepPut("H") line 430, col 3 to line 443, col 71 of module RebuildAdmi
 /\ storeUp = TRUE
 /\ effects = <<1, 0>>
 
-480 states generated, 244 distinct states found, 177 states left on queue.
+495 states generated, 253 distinct states found, 184 states left on queue.
 The depth of the complete state graph search is 6.
-Finished in 01s at (2026-11-06 18:20:29)
-Trace exploration spec path: ./RebuildAdmission_TTrace_1793989227.tla
+Finished in 01s at (2026-11-06 21:52:51)
+Trace exploration spec path: ./RebuildAdmission_TTrace_1794001970.tla
