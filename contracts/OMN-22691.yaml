@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22691
+title: "The dev runtime-effects container carries the omniclaude plugin guard files, so a lab lane's ticket create over the bus is judged by the create gate and not refused guard_unavailable"
+summary: "The dev lane compose mounts the omniclaude clone, read-only, into the runtime-effects service at a fixed path taken from the clone the skills mount already comes from, and sets ONEX_TICKET_GUARD_PATH to the guard inside it, so node_create_ticket finds the guard it refuses to create without."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22691-dev-effects-ticket-guard
+    statement: The dev runtime-effects service must carry the ticket-creation guard and its clone root, and no other dev-lane service gains them.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev lane compose mounts the omniclaude clone root read-only into the runtime-effects service and sets ONEX_TICKET_GUARD_PATH to the guard inside it, with a default derived from the skills directory the service already mounts -- falsifier: uv run pytest tests/ci/test_dev_lane_ticket_guard_mount.py -q'
+      - id: AC2
+        statement: 'AC2: the same test fails on a dev lane compose without the mount and the variable, and no other dev-lane service gains the mount -- falsifier: uv run pytest tests/ci/test_dev_lane_ticket_guard_mount.py -q run at the head and with the mount and variable lines removed'
+evidence_requirements:
+  - kind: tests
+    description: The mount tests pass at the head and fail on the base compose without the change.
+    command: uv run pytest tests/ci/test_dev_lane_ticket_guard_mount.py tests/ci/test_compose_no_nested_expansion.py tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22691-mount-tests
+    description: The mount, nested-expansion and dev-lane compose tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_ticket_guard_mount.py tests/ci/test_compose_no_nested_expansion.py tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
