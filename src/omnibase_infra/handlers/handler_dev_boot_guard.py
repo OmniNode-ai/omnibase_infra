@@ -672,6 +672,38 @@ class HandlerDevBootGuard:
                 "Dev recovery phase=%s status=%s", phase.value, status.value
             ),
         )
+        # A recovery recreates the family from ``recovery-compose.json``: the
+        # same retained images and settings, new container ids, and a compose
+        # config hash that differs from the regular compose model (the image is
+        # the retained tag). ``prepare`` can therefore never re-capture that
+        # family (``_capture`` refuses a hash mismatch), so without recording
+        # the new ids the snapshot keeps the ids of containers that no longer
+        # exist, and the next failed job, even one that failed before touching a
+        # container, reads the healthy family as changed and force-recreates it
+        # again (OMN-22724, job 54914064 on 2026-11-06 took the dev runtime down
+        # this way). A write failure is not a failed recovery: the family is
+        # already recovered and verified, and a snapshot that keeps the old ids
+        # is the previous behaviour.
+        try:
+            last_healthy = self.point.current
+            if last_healthy is None:
+                raise DevBootFailedError("no last healthy dev revision")
+            with_new_ids = last_healthy.model_copy(
+                update={
+                    "container_ids": tuple(sorted(c["Id"] for c in self._containers()))
+                }
+            )
+            self.execution._atomic_write_private_json(
+                self.snapshot_path, with_new_ids.model_dump(mode="json")
+            )
+            self.point.hold(with_new_ids)
+        except (
+            OSError,
+            ValueError,
+            RuntimeError,
+            self.execution.subprocess.SubprocessError,
+        ):
+            logger.warning("Cannot record recovered dev container ids", exc_info=True)
 
     @contextlib.contextmanager
     def protect(
