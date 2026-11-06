@@ -37,13 +37,16 @@ class ProtocolConsumerGroupOffsetHandover(Protocol):
         from_group: str,
         to_group: str,
         from_auto_offset_reset: Literal["earliest", "latest"],
+        handover_rule: Literal["copy_if_uncommitted", "last_ran"],
     ) -> ModelOffsetHandoverResult:
         """Seed ``to_group`` on ``topic`` from ``from_group``.
 
         Must be called before the ``subscribe`` that joins ``to_group``,
         while the retired consumer is stopped. Applies
-        ``plan_offset_handover``: a partition ``to_group`` already committed
-        is kept, so a second call is a no-op.
+        ``plan_offset_handover`` with ``handover_rule``: under
+        ``copy_if_uncommitted`` a partition ``to_group`` already committed is
+        kept, and under ``last_ran`` the later of the two commits wins; either
+        way a second call is a no-op.
 
         Args:
             topic: Canonical topic, as passed to ``subscribe``.
@@ -52,5 +55,7 @@ class ProtocolConsumerGroupOffsetHandover(Protocol):
                 the same scoping it applies there.
             from_auto_offset_reset: Where the retired consumer started on a
                 partition it never committed.
+            handover_rule: Which commit wins on a partition both groups
+                committed (``ModelConsumerGroupHandover.handover_rule``).
         """
         ...

@@ -1,0 +1,63 @@
+schema_version: 1.0.0
+ticket_id: OMN-22714
+title: T8a The effects consumer-group handover fences the side that last ran and copies its commit to the destination, so a rollback and a second fold run no effect twice
+summary: First pull request of the one-runtime plan's T8 (fold effects on dev). The consumer-group handover declaration gains handover_rule, and under last_ran the planner copies the commit of the side that last ran (the later of the two commits inside retention) over the destination, the rule of the TLA+ model formal/consumer_group_handover (verdict SAFE). No contract declares last_ran yet and no container changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22714-last-ran-handover-rule
+    statement: A handover declared with handover_rule last_ran gives the destination group the commit of the side that last ran, over whatever the destination holds, and refuses when a source commit cannot be read.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: given the group ids and committed offsets of the side that last ran and of the destination, the planner emits a fence of the source and a copy of its commit before any destination step, and nothing when the destination is already at or past the source -- falsifier: uv run pytest -q on the planner''s unit tests in omnibase_infra, red on dev without the planner'
+      - id: AC2
+        statement: 'AC2: a rollback followed by a second fold plans no copy of an offset already carried and no second run of an effect -- falsifier: uv run pytest -q on the planner''s rollback-then-refold test with the recorded offsets of the tenant registry fold'
+      - id: AC3
+        statement: 'AC3: a source whose committed offset cannot be read yields a refusal and never a copy from guessed offsets -- falsifier: uv run pytest -q on the planner''s error test with an unreadable source group'
+evidence_requirements:
+  - kind: tests
+    description: The planner's last_ran rule, the fold, rollback and second fold simulation with its two controls, the tenant-registry rollback-then-refold case, the unreadable-source refusal and the Kafka path.
+    command: uv run pytest tests/unit/handlers/test_consumer_group_handover_last_ran_omn21288.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22714-planner-copies-from-last-ran
+    description: The planner copies the later commit over the destination and plans nothing when the destination is at or past the source; the Kafka path commits that plan before the subscribe. With the three source files from origin/dev the test file fails.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_consumer_group_handover_last_ran_omn21288.py -q --no-cov --tb=line -k "copies or keeps or retention or declaration or kafka_path"
+        cwd: .
+  - id: dod-omn22714-rollback-then-refold
+    description: Fold, rollback and second fold with crashed and retried cutovers run each event's effect once, and the tenant-registry case (runtime group at 46 of 46) carries 46 back and 50 forward without a second run; the writers' rule and a rollback with no reverse copy each run an effect twice.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_consumer_group_handover_last_ran_omn21288.py -q --no-cov --tb=line -k "models_path or control or tenant_registry"
+        cwd: .
+  - id: dod-omn22714-unreadable-source-refuses
+    description: A retired group whose committed offset read raises makes the handover raise with no commit to the destination group.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_consumer_group_handover_last_ran_omn21288.py -q --no-cov --tb=line -k unreadable
+        cwd: .
+  - id: dod-deploy-omn22714-runtime-carries-last-ran
+    description: The deployed runtime container plans a last_ran handover from the later commit, a probe against the live container that fails before this change (the planner there takes no handover_rule).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: >-
+          PROBE='from omnibase_infra.handlers.handler_contract_subscribe_preflight import plan_offset_handover as p; assert p(partitions=(0,), successor_committed={0: 10}, retired_committed={0: 25}, first_offsets={0: 0}, end_offsets={0: 30}, retired_auto_offset_reset="earliest", handover_rule="last_ran") == {0: 25}'; if docker inspect ${RUNTIME_CONTAINER:-omninode-runtime} >/dev/null 2>&1; then docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "$PROBE"; else env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "$PROBE"; fi
+        cwd: ${OMNI_HOME}/omnibase_infra

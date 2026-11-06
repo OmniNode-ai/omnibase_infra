@@ -189,6 +189,9 @@ class _HandoverSemanticFake(EventBusSemanticFake):
         from_group: str,
         to_group: str,
         from_auto_offset_reset: Literal["earliest", "latest"],
+        handover_rule: Literal[
+            "copy_if_uncommitted", "last_ran"
+        ] = "copy_if_uncommitted",
     ) -> ModelOffsetHandoverResult:
         async with self._lock:
             successor = self._group_committed_offset.get((topic, to_group))
@@ -201,6 +204,7 @@ class _HandoverSemanticFake(EventBusSemanticFake):
                 first_offsets={0: self._history_base_offset.get(topic, 0)},
                 end_offsets={0: self._topic_offsets.get(topic, 0)},
                 retired_auto_offset_reset=from_auto_offset_reset,
+                handover_rule=handover_rule,
             )
             if 0 in plan:
                 self._group_committed_offset[(topic, to_group)] = plan[0]
@@ -209,7 +213,7 @@ class _HandoverSemanticFake(EventBusSemanticFake):
             from_group=from_group,
             to_group=to_group,
             committed=plan,
-            kept=(0,) if successor is not None else (),
+            kept=(0,) if successor is not None and 0 not in plan else (),
         )
 
 
