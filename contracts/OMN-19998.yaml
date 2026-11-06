@@ -215,6 +215,16 @@ requirements:
     acceptance:
       - id: AC40
         statement: 'AC40: docker/runners/Dockerfile pins runner 2.338.2 and both architecture checksums, docker/runners/runner-image.lock.json records 2.338.2 with a valid identity, and the existing fleet-floor and multiarch tests pass; the 2.336.0 merge-base Dockerfile fails the head fleet-floor test and the exact-pin deployment probe.'
+  - id: req-omn19998-delegate-skill-boot-priority
+    statement: The dev delegation first-hop consumer joins through provision, readiness and attach before first publication, even when its topics are empty; unrelated idle contracts remain demand-deferred and the effects-held alarm retains its live-member predicate.
+    acceptance:
+      - id: AC46
+        statement: 'AC46: boot priority survives the demand split; both dev main and effects carriers receive the delegate-skill priority; empty priority topics attach while unrelated idle work stays deferred, topic-not-ready still refuses attach, the real client pre-publish probe still refuses an unbound first hop, and all nine recorded Empty/0 holds still alarm until Stable with a positive member count -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly fails on the merge-base splitter and runtime policy'
+  - id: req-omn19998-effects-carrier-boot-policy
+    statement: The dev effects carrier consumes every declared boot bound and resource limit from the rendered runtime policy.
+    acceptance:
+      - id: AC48
+        statement: 'AC48: the dev effects overlay binds the readiness bound, attach concurrency, priority list and memory limit to its rendered policy; distinct policy values reach the kernel configuration readers and the carrier memory binding -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier'
   - id: req-omn19998-canary-hosted-exception
     statement: The runner routing audit admits exactly one hosted job in a private repository, the outside canary, and refuses every other hosted job there.
     acceptance:
@@ -906,6 +916,39 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC38
+  - id: dod-omn19998-ac37-delegate-skill-boot-priority
+    description: AC46 drives the production boot subscription path and client pre-publish probe with empty topics, checks readiness and lazy-start controls, and integrates the shipped main and effects policy with recorded effects-held episodes and an independent alarm clock. The receipt binding check refuses duplicate acceptance labels.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_delegation_boot_priority_omn19998.py -q -n 0 --no-cov -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC46
+  - id: dod-omn19998-ac37-dev-carrier-deploy-probe
+    description: Hosted-runner deployment artifact check reads the dev policy through its typed loader and renderer and verifies the priority environment binding in both main and effects compose carriers. It does not claim a live install.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly -k dev_delegation_priority_reaches_both_carriers
+        cwd: .
+    binds_ac:
+      - AC46
+  - id: dod-omn19998-ac40-effects-carrier-boot-policy
+    description: Hosted-runner deployment artifact probe loads the shipped effects policy and overlay, substitutes distinct bound, concurrency and memory values, and checks the fail-fast bindings plus the production kernel configuration readers. Removing a binding fails the probe. Requires no Docker daemon, credentials or live lane and does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier
+        cwd: .
+    binds_ac:
+      - AC48
   - id: dod-omn19998-ac47-canary-hosted-exception
     description: AC47 drives the real private-placement pass over fixture private repositories with and without the policy entry, with entries that are patterns, lists, another repository or incomplete, and through main.
     source: manual
