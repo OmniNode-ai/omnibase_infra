@@ -46,3 +46,12 @@ dod_evidence:
         check_value: >-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_lane_env_overlay.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'def lane_env_with_overlay_home' > /dev/null && gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'DEPLOY_AGENT_OVERLAY_HOME_CLONE' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22634-integration-proof
+    description: The overlay home reader runs against a real git clone and the real provisioning node contract, merging the lane env with the variable set and returning nothing with it unset.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_lane_env_overlay_home_clone_omn22634.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

@@ -41,7 +41,7 @@ class OverlayHomeLaneEnvError(RuntimeError):
     """The overlay home's runtime_lane_env overlay cannot be applied as written."""
 
 
-def declaration(execution: ModuleType) -> Mapping[str, str | int]:
+def declaration(execution: ModuleType) -> Mapping[str, object]:
     """The node contract's ``config.overlay_home_lane_env``: clone variable, ref, overlay path, read timeout.
 
     ``execution`` is the deploy agent's executor module, which locates the agent's checkout, as for
@@ -57,12 +57,12 @@ def declaration(execution: ModuleType) -> Mapping[str, str | int]:
         / "src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml"
     )
     config = yaml.safe_load(contract.read_text(encoding="utf-8"))["config"]
-    declared: Mapping[str, str | int] = config["overlay_home_lane_env"]
+    declared: Mapping[str, object] = config["overlay_home_lane_env"]
     return declared
 
 
 def overlay_home_clone(
-    environ: Mapping[str, str], declared: Mapping[str, str | int]
+    environ: Mapping[str, str], declared: Mapping[str, object]
 ) -> Path | None:
     """The overlay home's clone the unit names, or ``None`` when it names none."""
     clone_env = str(declared["clone_env"])
@@ -143,7 +143,7 @@ def read_overlay_home_lane_env(
     clone: Path,
     lane_id: str,
     *,
-    declared: Mapping[str, str | int],
+    declared: Mapping[str, object],
     parse_fragment: FragmentParser,
 ) -> dict[str, str]:
     """``lane_id``'s env from the overlay home ``clone`` at the declared ref; empty when it holds none.
@@ -164,7 +164,7 @@ def read_overlay_home_lane_env(
             capture_output=True,
             text=True,
             check=False,
-            timeout=int(declared["read_timeout_seconds"]),
+            timeout=int(str(declared["read_timeout_seconds"])),
             env=scrub_git_location_env(),
         )
 
@@ -207,7 +207,7 @@ def merge_lane_env_sources(
     return {**fragment, **overlay_home}
 
 
-class _LoggedLaneEnv:
+class LoggedLaneEnv:
     """The env last logged, so a change is logged once, not per compose command."""
 
     last: dict[str, str] | None = None
@@ -237,7 +237,7 @@ def lane_env_with_overlay_home(
                 clone, lane_id, declared=declared, parse_fragment=parse_fragment
             ),
         )
-    if overlay != _LoggedLaneEnv.last:
+    if overlay != LoggedLaneEnv.last:
         logger.info(
             "lane env fragment for %s from %s%s: %s",
             lane_id,
@@ -245,5 +245,5 @@ def lane_env_with_overlay_home(
             f" and {clone}" if clone is not None else "",
             ", ".join(f"{k}={v}" for k, v in sorted(overlay.items())) or "none",
         )
-        _LoggedLaneEnv.last = dict(overlay)
+        LoggedLaneEnv.last = dict(overlay)
     return overlay
