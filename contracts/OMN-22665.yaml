@@ -1,0 +1,37 @@
+schema_version: 1.0.0
+ticket_id: OMN-22665
+title: The Application ACL proof job runs on a GitHub-hosted runner and no longer waits on a cloud runner label no runner carries
+summary: The proof job resolves through the public-PR, docker and trusted seams to a hosted runner, and the capacity request job for the cloud fleet is deleted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22665-acl-proof-hosted
+    statement: The rebuilt-postgres16-proof job never reads OMNI_CLOUD_CANARY_RUNS_ON_JSON, the workflow holds no cloud capacity request, and the routing policy holds no allowlist row for a bare hosted pin in that file.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the rebuilt-postgres16-proof job runs-on never reads OMNI_CLOUD_CANARY_RUNS_ON_JSON and no job in the workflow asks the cloud fleet for capacity -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov fails on the merge base workflow with the new tests in place'
+      - id: AC2
+        statement: 'AC2: the runner routing audit passes on the changed workflow and policy -- falsifier: the routing audit tests fail on the merge base workflow, which holds the bare hosted request-cloud-capacity job'
+      - id: AC3
+        statement: 'AC3: the runner routing audit tests still pass, because the declared variable and its live value are unchanged -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: The routing audit tests, including the three that pin the hosted routing of the ACL proof job
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22665-routing-tests
+    description: The routing audit tests pass on the branch; the same file fails on the merge base workflow.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
