@@ -218,8 +218,13 @@ requirements:
   - id: req-omn19998-effects-carrier-boot-policy
     statement: The dev effects carrier consumes every declared boot bound and resource limit from the rendered runtime policy.
     acceptance:
+      - id: AC48
+        statement: 'AC48: the dev effects overlay binds the readiness bound, attach concurrency, priority list and memory limit to its rendered policy; distinct policy values reach the kernel configuration readers and the carrier memory binding -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier'
+  - id: req-omn19998-canary-hosted-exception
+    statement: The runner routing audit admits exactly one hosted job in a private repository, the outside canary, and refuses every other hosted job there.
+    acceptance:
       - id: AC47
-        statement: 'AC47: the dev effects overlay binds the readiness bound, attach concurrency, priority list and memory limit to its rendered policy; distinct policy values reach the kernel configuration readers and the carrier memory binding -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier'
+        statement: "AC47: the audit leaves the finding for floor-canary .github/workflows/canary.yml job canary out of the private-placement findings when the policy declares it with a ruling and a reason, and still reports every other job of that workflow, every other workflow of that repository and the same file and job in another private repository; an entry with a pattern, a list, another repository or a missing field admits nothing, and main fails on the other repository's job -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k \"canary or private_exception or main_passes\""
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -918,6 +923,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q --no-cov -p no:randomly -k dev_effects_boot_policy_reaches_carrier
+        cwd: .
+    binds_ac:
+      - AC48
+  - id: dod-omn19998-ac47-canary-hosted-exception
+    description: AC47 drives the real private-placement pass over fixture private repositories with and without the policy entry, with entries that are patterns, lists, another repository or incomplete, and through main.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "canary or private_exception or main_passes"
         cwd: .
     binds_ac:
       - AC47
