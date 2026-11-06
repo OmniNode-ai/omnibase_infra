@@ -40,9 +40,38 @@ def test_results_match_the_model() -> None:
     assert (RESULTS / "model.sha256").read_text().strip() == digest.hexdigest()
 
 
+def _infeasible() -> dict[str, str]:
+    """Configs the README declares too large for a lab run, each with its reason.
+
+    A line ``INFEASIBLE <cfg>: <reason>`` in the README declares one. Such a config is not
+    proven: the test reports it skipped, and it must have no result claiming it holds.
+    """
+    declared = {}
+    for line in (MODEL / "README.txt").read_text(encoding="utf-8").splitlines():
+        m = re.match(r"INFEASIBLE (\w+): (.+)", line)
+        if m:
+            declared[m.group(1)] = m.group(2)
+    return declared
+
+
+@pytest.mark.unit
+def test_infeasible_declarations_name_configs() -> None:
+    for name, reason in _infeasible().items():
+        assert (MODEL / f"{name}.cfg").is_file(), name
+        assert name.startswith(HOLDS) and reason.strip(), name
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("name", [c for c in _configs() if c.startswith(HOLDS)])
 def test_protocol_holds_exhaustively(name: str) -> None:
+    declared = _infeasible()
+    if name in declared:
+        out = RESULTS / f"{name}.out"
+        assert not (
+            out.is_file()
+            and "No error has been found" in out.read_text(encoding="utf-8")
+        )
+        pytest.skip(f"declared infeasible, not proven: {declared[name]}")
     text = _out(name)
     assert "Model checking completed. No error has been found." in text
     assert re.search(r"distinct states found, 0 states left on queue", text)

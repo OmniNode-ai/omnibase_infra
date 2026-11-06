@@ -22,7 +22,7 @@
 (* needs; a stop may open on any piece in BreakPieces (when it may open is *)
 (* 3.5's guard on one action and is not a property here).                  *)
 (***************************************************************************)
-EXTENDS Integers, FiniteSets, TLC
+EXTENDS Integers, FiniteSets, Sequences, TLC
 
 CONSTANTS
   o1, o2, o3,     \* see Ords
