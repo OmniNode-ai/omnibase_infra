@@ -199,6 +199,20 @@ def _ledger_isolation(
 
 
 @pytest.fixture(autouse=True)
+def _contract_topic_scans_start_empty() -> None:
+    """A test never reads a contract-topic scan another test stored (OMN-22607).
+
+    ``ModelContractTopicScan`` keeps a scan for the whole process; tests patch what a
+    scan reads, so each starts with none stored.
+    """
+    from omnibase_infra.models.event_bus.model_contract_topic_scan import (
+        ModelContractTopicScan,
+    )
+
+    ModelContractTopicScan.clear()
+
+
+@pytest.fixture(autouse=True)
 def _strip_test_local_git_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent one test's Git process state from leaking into the next test.
 
