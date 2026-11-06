@@ -18,7 +18,6 @@ from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers.handler_runner_hook_mount_drift import (
     DockerCli,
     HandlerRunnerHookMountDrift,
-    ProtocolRunnerDocker,
     slack_notify,
     transition_notice,
 )
@@ -30,7 +29,7 @@ from omnibase_infra.models.model_runner_hook_mount_drift_request import (
 def main(
     argv: list[str] | None = None,
     *,
-    docker: ProtocolRunnerDocker | None = None,
+    docker: DockerCli | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> int:
     """Exit 0 no drift, 1 drift, 2 the check could not read (matches the retired script)."""
@@ -49,9 +48,7 @@ def main(
     if registry is None:
         raise RuntimeError("the container has no service registry")
     asyncio.run(
-        registry.register_instance(
-            ProtocolRunnerDocker, docker or DockerCli(args.docker_timeout)
-        )
+        registry.register_instance(DockerCli, docker or DockerCli(args.docker_timeout))
     )
     asyncio.run(
         registry.register_instance(

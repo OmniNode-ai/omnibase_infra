@@ -26,7 +26,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_runner_hook_mount_drift_request import (
@@ -46,18 +46,11 @@ _JOB_STARTED_ENV = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 _JOB_STARTED_SCRIPT = "runner-job-started.sh"
 
 
-class ProtocolRunnerDocker(Protocol):
-    """The three docker reads the check needs; injected so tests replay recordings."""
-
-    def container_names(self) -> list[str]: ...
-
-    def inspect(self, name: str) -> dict[str, object]: ...
-
-    def sha256(self, name: str, path: str) -> str | None: ...
-
-
 class DockerCli:
-    """The real reads, through the docker CLI without a shell."""
+    """The docker reads the check needs, through the CLI without a shell.
+
+    Resolved from the container; tests register a recording in its place.
+    """
 
     def __init__(self, timeout_seconds: int) -> None:
         self._timeout = timeout_seconds
@@ -128,7 +121,7 @@ class HandlerRunnerHookMountDrift:
     def handle(
         self, request: ModelRunnerHookMountDriftRequest
     ) -> ModelRunnerHookMountDriftResult:
-        docker = self._container.get_service(ProtocolRunnerDocker)
+        docker = self._container.get_service(DockerCli)
         host: dict[str, str] = {}
         for script in request.scripts:
             file = Path(request.host_hook_dir) / script

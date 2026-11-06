@@ -19,14 +19,16 @@ report, and the check must still report the real runner-18 drift.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
 import pytest
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers.handler_runner_hook_mount_drift import (
+    DockerCli,
     HandlerRunnerHookMountDrift,
-    ProtocolRunnerDocker,
     executed_paths,
     slack_notify,
 )
@@ -88,18 +90,15 @@ RUNNER_18_INSPECT: dict[str, object] = {
 }
 
 
-class FakeContainer:
-    """The container as the handler sees it: it resolves the docker port."""
-
-    def __init__(self, docker: object) -> None:
-        self._docker = docker
-
-    def get_service(self, interface: type) -> object:
-        assert interface is ProtocolRunnerDocker
-        return self._docker
+def FakeContainer(docker: DockerCli) -> ModelONEXContainer:
+    """A real container with the recorded docker registered where the handler asks."""
+    container = ModelONEXContainer()
+    assert container.service_registry is not None
+    asyncio.run(container.service_registry.register_instance(DockerCli, docker))
+    return container
 
 
-class RecordedDocker:
+class RecordedDocker(DockerCli):
     """Replays the recorded host state."""
 
     def __init__(
@@ -107,6 +106,7 @@ class RecordedDocker:
         containers: dict[str, dict[str, object]],
         files: dict[str, dict[str, str]],
     ) -> None:
+        super().__init__(5)
         self.containers = containers
         self.files = files
 
@@ -318,7 +318,8 @@ def _cli(host_dir: Path, state: Path, docker: RecordedDocker, sent: list[str]) -
 def test_cli_alerts_on_a_change_in_the_finding_count_only(tmp_path: Path) -> None:
     docker = recorded_host()
     serve(docker, tmp_path)
-    state, sent = tmp_path / "state", []
+    state = tmp_path / "state"
+    sent: list[str] = []
     assert _cli(tmp_path, state, docker, sent) == 1
     assert len(sent) == 1
     assert "[HOOK MOUNT DRIFT]" in sent[0]
