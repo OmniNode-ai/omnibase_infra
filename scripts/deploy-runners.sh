@@ -1335,7 +1335,7 @@ install_host_artifact_freshness_cron() {
     log "Installing LOCAL runner host artifact-freshness cron..."
 
     if "${DRY_RUN}"; then
-        log "[DRY RUN] Would install local runner-host-artifact-freshness-check cron (every 30 min)."
+        log "[DRY RUN] Would install local runner-host-artifact-freshness-check cron (every 30 min) and the hook mount drift cron (every 15 min)."
         return 0
     fi
 
@@ -1356,14 +1356,20 @@ install_host_artifact_freshness_cron() {
     # the fleet; the fetch is part of the entry so the ref is not itself stale.
     local converge_line="*/30 * * * * cd ${repo_root} && git fetch --quiet origin dev && uv run python scripts/ci/check_runner_host_artifact_freshness.py --mode converge --ref origin/dev --runner-host ${RUNNER_HOST} --runner-host-dir ${RUNNER_HOST_DIR} >> ${log_dir}/converge.log 2>&1 # runner-host-hook-converge"
 
+    # OMN-22478: the hook mount drift check, tracked here. It reads the hook
+    # path each runner container EXECUTES (not the unused copy baked into the
+    # image) and alerts on a change in the finding count, as the host-only
+    # script it replaces did. That script's crontab entry (tag hook-mount-drift)
+    # is dropped below in the same write, so the alert has one source.
+    local drift_line="*/15 * * * * cd ${repo_root} && (uv run python -m omnibase_infra.nodes.node_deploy_runners.runtime_hook_mount_drift --hook-dir ${RUNNER_HOST_DIR}/docker/runners --container-match '^omninode-(runner-|deploy-runner$|verify-runner-|customer-plane-runner-)' --state-file ${log_dir}/hook-mount-drift.state --alert-env-file ${RUNNER_HOST_DIR}/.monitor-env --docker-timeout 60 --notify-timeout 20) >> ${log_dir}/hook-mount-drift.log 2>&1 # runner-host-hook-mount-drift"
+
     local existing
     existing=$(crontab -l 2>/dev/null || true)
     echo "${existing}" \
-        | grep -v 'runner-host-artifact-freshness-check' \
-        | grep -v 'runner-host-hook-converge' \
-        | { cat; echo "${cron_line}"; echo "${converge_line}"; } | crontab -
+        | grep -Ev 'runner-host-artifact-freshness-check|runner-host-hook-converge|runner-host-hook-mount-drift|# hook-mount-drift$' \
+        | { cat; echo "${cron_line}"; echo "${converge_line}"; echo "${drift_line}"; } | crontab -
 
-    log "Runner host artifact-freshness + hook-converge crons installed locally (every 30 minutes)."
+    log "Runner host artifact-freshness + hook-converge crons installed locally (every 30 minutes), hook mount drift every 15."
 }
 
 # ---------------------------------------------------------------------------

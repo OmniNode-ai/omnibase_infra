@@ -1,9 +1,9 @@
 {
   "_provenance": {
-    "source": "Unstubbed rolling CLI missing-token preflight, re-run with ssh, scp, rsync, docker, curl and gh shimmed to fail and record any call (none was made); no external API or credential-backed registration performed; re-captured 2026-11-06 after OMN-22478 changed the retire route idle read: same refusal text, returncode 1 and no ssh, scp, rsync, docker, curl or gh call in either mode",
-    "captured_utc": "2026-11-06T15:44:43.000000+00:00",
+    "source": "Unstubbed rolling CLI missing-token preflight, re-run with ssh, scp, rsync, docker, curl and gh shimmed to fail and record any call (none was made); no external API or credential-backed registration performed; re-captured 2026-11-06 after OMN-22478 changed the retire route idle read and added the hook mount drift cron to the freshness cron install: same refusal text, returncode 1 and no ssh, scp, rsync, docker, curl or gh call in either mode",
+    "captured_utc": "2026-11-06T16:09:32.000000+00:00",
     "source_file": "scripts/deploy-runners.sh",
-    "source_sha256": "44db28923b89cc9c8b560357474ec24dae1e102087854246d60fa3c362c67fef"
+    "source_sha256": "0e5c870546ebf469ea8dbe8b199d190b15c712eee56ec970deecdbeaf6c3cdcd"
   },
   "responses": {
     "normal": {
