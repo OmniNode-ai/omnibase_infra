@@ -18,6 +18,7 @@ import os
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -356,7 +357,13 @@ def test_compose_env_of_a_stability_job_reads_no_overlay_home(
 
 
 @pytest.fixture
-def settings_guard() -> Any:
+def settings_guard(monkeypatch: pytest.MonkeyPatch) -> Any:
+    # The instance serves the estimator page, whatever the shipped routing table says of a test's.
+    monkeypatch.setattr(
+        executor_mod,
+        "lane_config_for",
+        lambda lane: SimpleNamespace(disabled_services=(), compose_files=()),
+    )
     return executor_mod.load_dev_boot_guard(
         "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
     )
