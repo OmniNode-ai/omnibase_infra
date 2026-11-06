@@ -1,0 +1,34 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22635
+title: "Live-contact exceptions are carried one file per pull request so two pull requests do not conflict"
+summary: "The local live-contact hook read its exception from one shared file that every change to CI tooling appended to, so any two conflicted. A staged file under .github/live-contact-exception/ now carries the exception, one file per change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22635-live-contact-carrier-directory
+    statement: A staged exception file under .github/live-contact-exception/ admits a change to CI tooling locally, a missing, unstaged, short or misplaced carrier is still refused, and two branches that add different carrier files merge without a conflict.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a staged exception file under .github/live-contact-exception/ with a stated reason of at least eight words admits a CI-tooling change locally -- falsifier: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py -q'
+      - id: AC2
+        statement: 'AC2: the same change with no carrier, or a carrier of fewer than eight words, is still refused -- falsifier: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py -q'
+      - id: AC3
+        statement: 'AC3: two branches that each add a different carrier file under the directory merge with no conflict, and two appends to the shared file conflict -- falsifier: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The directory carrier is admitted, the refusals still hold, and the two-branch merge is clean.
+    command: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py tests/ci/test_ci_live_contact.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22635-live-contact-carrier-directory
+    description: The directory carrier is admitted, the refusals still hold, and the two-branch merge is clean while two appends to the shared file conflict.
+    source: manual
+    binds_ac: [AC1, AC2, AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_live_contact_directory_carrier_omn22631.py tests/ci/test_ci_live_contact.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
