@@ -1,7 +1,7 @@
 ------------------------ MODULE RebuildAdmissionExt -------------------------
 (***************************************************************************)
 (* Liveness for RebuildAdmission: the fairness each property needs, and    *)
-(* the two eventual properties the 11-06 text keeps. The *_ext_* configs   *)
+(* the eventual properties the 11-06 text keeps. The *_ext_* configs      *)
 (* run on this module; every other config runs on RebuildAdmission.tla.    *)
 (***************************************************************************)
 EXTENDS RebuildAdmission
@@ -31,6 +31,9 @@ LiveSpec == Spec /\ Fairness
 AdmissibleStarts ==
   []<>(pc[LiveTask] = "idle" /\ (~storeUp \/ Decide(K(LiveTask), LiveTask) = "admit"))
     => []<>(pc[LiveTask] = "run")
+\* P1, the consume (reader F2): a lane holding a reservation does not stay stuck in it; it starts
+\* through the store, starts logged with no answer, or loses the reservation to an advance.
+ResvNotStuck == (pc[LiveTask] = "resv") ~> (pc[LiveTask] # "resv")
 \* P3: a stop clears or escalates.
 StopClearsOrEscalates == \A p \in BreakPieces : (stop[p] = "open") ~> (stop[p] # "open")
 =============================================================================

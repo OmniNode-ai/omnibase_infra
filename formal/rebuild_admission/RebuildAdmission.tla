@@ -1,9 +1,11 @@
 -------------------------- MODULE RebuildAdmission --------------------------
 (***************************************************************************)
-(* M0 of the subsystem rebuild plan (OMN-22478, plan section 12), round 3: *)
+(* M0 of the subsystem rebuild plan (OMN-22478, plan section 12), round 4: *)
 (* admission, the stop and the holder as one state machine, written to    *)
 (* the 11-06 text of sections 6.2, 7.1 and 7.5. It implements and wires   *)
-(* nothing.                                                                *)
+(* nothing. Round 4 is round 3 with reader m0-reader-1650's findings      *)
+(* fixed: the fence fails closed (D1, RULING 2026-11-06T17:52:26Z), an     *)
+(* unanswered consume proceeds logged (F2), two kept pieces (F3).          *)
 (*                                                                         *)
 (* Mut = {} is the protocol; each name in Mut is one break, and the scope  *)
 (* constants bound the environment only. Liveness and its fairness are in  *)
@@ -30,7 +32,8 @@ CONSTANTS
   Others,         \* the other tasks by name, see KindOf
   SafetyIds,      \* safety failures that can be open together
   Limit,          \* the order overlay's WIP limit per piece
-  MaxPiece,       \* pieces are 1..MaxPiece; MaxPiece stands for 8 or 9, the kept pieces
+  MaxPiece,       \* pieces are 1..MaxPiece
+  KeptPieces,     \* the kept pieces, 8 and 9 in the text; MaxPiece is one, MaxPiece - 1 may be the other
   NSteps,         \* order steps the holder takes; step i starts piece i + 1
   BreakPieces,    \* pieces a stop can open on
   FlightTasks,    \* lanes whose outward step is two actions, Begin and Act
@@ -46,6 +49,8 @@ CONSTANTS
 
 M(x) == x \in Mut
 
+ASSUME MaxPiece \in KeptPieces /\ KeptPieces \subseteq {MaxPiece - 1, MaxPiece}
+
 Tasks == Ords \cup Others
 Procs == {"H", "F"}
 Pieces == 1..MaxPiece
@@ -60,6 +65,8 @@ KindOf(t) ==
     [] t \in {"c1", "c1b"} -> [k |-> "cause", p |-> 1, s |-> "-", r |-> "pub", sc |-> TRUE]
     [] t = "c3" -> [k |-> "cause", p |-> MaxPiece, s |-> "-", r |-> "pub", sc |-> TRUE]
     [] t = "kf" -> [k |-> "kept", p |-> MaxPiece, s |-> "-", r |-> "pub", sc |-> TRUE]
+    [] t = "c8" -> [k |-> "cause", p |-> MaxPiece - 1, s |-> "-", r |-> "pub", sc |-> TRUE]
+    [] t = "k8" -> [k |-> "kept", p |-> MaxPiece - 1, s |-> "-", r |-> "pub", sc |-> TRUE]
     [] t = "g"  -> [k |-> "cont", p |-> 0, s |-> "-", r |-> "pub", sc |-> TRUE]
     [] t = "b"  -> [k |-> "b0", p |-> 0, s |-> "-", r |-> "pub", sc |-> TRUE]
     [] t \in {"r1", "r2"} -> [k |-> "repair", p |-> 0, s |-> "-", r |-> "pub", sc |-> TRUE]
@@ -69,8 +76,9 @@ K(t) == KindOf(t)
 \* Every request the table can see, checked in every reachable state. r = "priv" is a private
 \* repository outside step 0b's list; sc = FALSE is a task outside its approved scope.
 AllKinds ==
-     [k : {"ord"}, p : Pieces \ {MaxPiece}, s : {"-"}, r : {"pub", "priv"}, sc : BOOLEAN]
-  \cup [k : {"join"}, p : 1..(MaxPiece - 2), s : {"-"}, r : {"pub", "priv"}, sc : BOOLEAN]
+     [k : {"ord"}, p : Pieces \ KeptPieces, s : {"-"}, r : {"pub", "priv"}, sc : BOOLEAN]
+  \cup [k : {"join"}, p : {q \in Pieces : q + 1 \in Pieces \ KeptPieces}, s : {"-"}, r : {"pub", "priv"},
+         sc : BOOLEAN]
   \cup [k : {"kept"}, p : Pieces, s : {"-"}, r : {"pub", "priv"}, sc : BOOLEAN]
   \cup [k : {"cause"}, p : Pieces, s : {"-"}, r : {"pub", "priv"}, sc : {TRUE}]
   \cup [k : {"b0", "cont"}, p : {0}, s : {"-"}, r : {"pub", "priv"}, sc : BOOLEAN]
@@ -80,7 +88,8 @@ AllKinds ==
 VARIABLES
   pc,       \* [Tasks -> idle, resv, run]; dec and zombie only under a mutation
   unadm,    \* lanes that started with no answer from admission (logged, 7.1 "No answer")
-  fl,       \* [FlightTasks -> none, chk, log]: a begun outward step, fenced in the store or logged
+  fl,       \* [FlightTasks -> none, chk, log]: a begun outward step, fenced in the store; log only
+            \* under down_proceeds, a step taken with no answer
   overrun,  \* [FlightTasks -> 0..2]: outward actions landed after the lane's stop was recorded
   checked,  \* fence_split only: lanes whose fence was read apart from the write
   msgs,     \* [DupTasks -> SUBSET {1, 2}]: start deliveries the bus still holds
@@ -161,7 +170,7 @@ Decide(k, e) ==
          (IF k.p \in started /\ (k.sc \/ M("no_scope")) /\ Room(k, e) /\ CreditOK(k) THEN "admit" ELSE "refuse")
   ELSE IF k.k = "b0" THEN (IF k.sc /\ CreditOK(k) THEN "admit" ELSE "refuse")           \* 4a
   ELSE IF k.k = "kept" THEN                                                             \* 5
-         (IF k.p = MaxPiece /\ k.sc /\ CreditOK(k) THEN "admit" ELSE "refuse")
+         (IF k.p \in KeptPieces /\ k.sc /\ CreditOK(k) THEN "admit" ELSE "refuse")
   ELSE IF k.k = "cont" THEN (IF k.sc /\ CreditOK(k) THEN "admit" ELSE "refuse")         \* 6
   ELSE "refuse"                                                                         \* 7
 
@@ -174,7 +183,7 @@ OutOfScope(k) ==
   \/ (k.k = "cause" /\ ~Stopped(k.p))
   \/ (k.k = "scause" /\ k.s \notin safety)
   \/ (k.k = "repair" /\ fresh)
-  \/ (k.k = "kept" /\ k.p # MaxPiece)
+  \/ (k.k = "kept" /\ k.p \notin KeptPieces)
 Why(k, e) ==
   IF k.k = "ro" THEN {}
   ELSE    (IF k.r = "priv" /\ ~PrivPass(k) THEN {"private"} ELSE {})
@@ -265,10 +274,14 @@ ConsWrite(t, d) ==  \* consume_split only: the write, on what was read
   /\ starts' = [starts EXCEPT ![t] = IF @ < 2 THEN @ + 1 ELSE @]
   /\ UNCHANGED <<unadm, fl, overrun, checked, msgs, started, stop, safety, src, fresh, pubUp,
                  storeUp, broken, engV>>
-NoAnswer(t) ==      \* admission gives no answer by the deadline: the start proceeds, logged (7.1)
-  /\ pc[t] = "idle" /\ ~storeUp /\ ~M("down_refuses")
-  /\ pc' = [pc EXCEPT ![t] = "run"] /\ unadm' = unadm \cup {t}
-  /\ UNCHANGED <<fl, overrun, checked, msgs, rd, starts, factV, evV, engV, ghV>>
+\* Admission gives no answer by the deadline: the start proceeds, logged (7.1 "No answer"). The
+\* consume is an admission request too, so a lane holding a reservation when the store stops
+\* answering proceeds the same way (reader F2); resv_waits leaves it waiting in "resv".
+NoAnswer(t) ==
+  /\ pc[t] \in (IF M("resv_waits") THEN {"idle"} ELSE {"idle", "resv"})
+  /\ ~storeUp /\ ~M("down_refuses")
+  /\ pc' = [pc EXCEPT ![t] = "run"] /\ unadm' = unadm \cup {t} /\ dirty' = dirty \ {t}
+  /\ UNCHANGED <<fl, overrun, checked, msgs, rd, starts, factV, evV, engV, ghSee, ghRead, bad>>
 
 \* ---- a running lane ----
 Ends(t) ==          \* the process exits and is read as gone: only this frees what it held
@@ -283,28 +296,33 @@ CloseRow(t) ==      \* close_frees only: a TERMINAL row frees the place while th
   /\ pc' = [pc EXCEPT ![t] = "zombie"]
   /\ UNCHANGED <<unadm, fl, overrun, checked, msgs, rd, starts, factV, evV, engV, ghV>>
 \* The fence: a running lane of a stopped piece takes no outward step; cause lanes and kept
-\* fixes are excepted because they are not ordinary or join work.
+\* fixes are excepted because they are not ordinary or join work. It fails closed: an outward
+\* step is a store write with the fence in it, so with no answer the step is not taken and the
+\* lane waits (RULING 2026-11-06T17:52:26Z). A lane cannot know without an answer whether its
+\* piece was stopped, so every fenced step waits, not only those of stopped pieces. A step
+\* begun before the outage may still land (Act needs no store).
 Fenced(t) == Wip(K(t)) /\ Stopped(WorkPiece(K(t)))
 Check(t) ==         \* fence_split only: the fence read apart from the write
   /\ M("fence_split") /\ t \in FlightTasks /\ pc[t] = "run" /\ fl[t] = "none" /\ storeUp
   /\ ~Fenced(t) /\ t \notin checked
   /\ checked' = checked \cup {t}
   /\ UNCHANGED <<pc, unadm, fl, overrun, msgs, rd, starts, factV, evV, engV, ghV>>
-Begin(t) ==         \* a store write with the fence in it; with no answer the step proceeds, logged
+Begin(t) ==         \* a store write with the fence in it; with no answer it is not taken
   /\ t \in FlightTasks /\ pc[t] = "run" /\ fl[t] = "none"
+  /\ storeUp \/ M("down_proceeds")
   /\ IF storeUp
      THEN /\ IF M("fence_split") THEN t \in checked ELSE (M("fence_off") \/ ~Fenced(t))
           /\ fl' = [fl EXCEPT ![t] = "chk"]
-          /\ bad' = IF Fenced(t) THEN bad \cup {"begin"} ELSE bad
-          /\ overrun' = IF Fenced(t) THEN overrun ELSE [overrun EXCEPT ![t] = 0]
-     ELSE /\ fl' = [fl EXCEPT ![t] = "log"]
-          /\ UNCHANGED <<bad, overrun>>
+     ELSE fl' = [fl EXCEPT ![t] = "log"]     \* down_proceeds: round 3's step taken unfenced, logged
+  \* the ghost records what happened, whatever the guard read
+  /\ bad' = IF Fenced(t) THEN bad \cup {"begin"} ELSE bad
+  /\ overrun' = IF Fenced(t) THEN overrun ELSE [overrun EXCEPT ![t] = 0]
   /\ checked' = checked \ {t}
   /\ UNCHANGED <<pc, unadm, msgs, rd, starts, factV, evV, engV, ghSee, ghRead, dirty>>
 Act(t) ==           \* the push, merge or deploy, outside the store: it may land after a stop opens
   /\ t \in FlightTasks /\ fl[t] # "none"
   /\ fl' = IF M("fence_once") THEN fl ELSE [fl EXCEPT ![t] = "none"]
-  /\ overrun' = IF fl[t] = "chk" /\ Fenced(t) /\ overrun[t] < 2
+  /\ overrun' = IF Fenced(t) /\ overrun[t] < 2
                 THEN [overrun EXCEPT ![t] = @ + 1] ELSE overrun
   /\ UNCHANGED <<pc, unadm, checked, msgs, rd, starts, factV, evV, engV, ghV>>
 Fix(t) ==           \* a cause lane may fix its piece; nothing assumes it does
@@ -477,6 +495,10 @@ NoRefusalOutsideRules == \A k \in AllKinds : Decide(k, "none") = "refuse" => Why
 \* Carried by the epoch: a start consumed later has no reason against it at the consume.
 NoStartAgainstRules == "start" \notin bad
 NoStepBeginsAfterStop == "begin" \notin bad
+\* The same rule as 7.1 O3 and section 12 P1 state it, read off the step itself with no ghost and
+\* no exception for an outage: no outward step of a fenced lane begins while its piece is stopped.
+\* Reader m0-reader-1650's StrongFence; down_proceeds breaks it with that reader's trace.
+StepFence == [][\A t \in FlightTasks : (fl[t] = "none" /\ fl'[t] # "none") => ~Fenced(t)]_vars
 AtMostOneStepAfterStop == \A t \in FlightTasks : overrun[t] <= 1
 
 (***************************************************************************)
@@ -521,7 +543,15 @@ WitLimitReached == Alive(1) < Limit
 WitStopCleared == "cleared" \notin bad   \* "cleared" marks a clear; no property reads it
 WitEscalated == \A p \in Pieces : stop[p] # "esc"
 WitLandsAfterStop == \A t \in FlightTasks : overrun[t] = 0
-WitLoggedStepUnderStop == ~(\E t \in FlightTasks : fl[t] = "log" /\ Fenced(t))
+\* The in-flight bound under an outage: a step begun before the stop lands while the store is down.
+WitInFlightLandsInOutage == ~(\E t \in FlightTasks : overrun[t] = 1 /\ ~storeUp)
+\* A kept fix runs under its own piece's stop, and a kept piece's cause lane runs under its stop.
+WitKeptRunsUnderOwnStop == ~(\E t \in Tasks : K(t).k = "kept" /\ Stopped(K(t).p) /\ pc[t] = "run" /\ t \notin unadm)
+WitCauseOfKeptRuns ==
+  ~(\E t \in Tasks : K(t).k = "cause" /\ K(t).p \in KeptPieces /\ Stopped(K(t).p) /\ pc[t] = "run" /\ t \notin unadm)
+\* Every stoppable piece stopped at once, each with its own cause lane running.
+WitEveryCauseRuns == ~(\A q \in BreakPieces : Stopped(q) /\
+  \E t \in Tasks : K(t).k = "cause" /\ K(t).p = q /\ pc[t] = "run" /\ t \notin unadm)
 WitOldEngineStillActing == ~(handed /\ up["H"] /\ phase["H"] # 0)
 WitFallbackAdvances == ~(handed /\ cur > NSteps)
 WitDuplicateDelivered == ~(\E t \in DupTasks : pc[t] = "run" /\ msgs[t] # {})
@@ -531,6 +561,7 @@ OrdSymmetry == Permutations(Ords)
 
 TypeOK ==
   /\ pc \in [Tasks -> {"idle", "dec", "resv", "run", "zombie"}]
+  /\ fl \in [FlightTasks -> {"none", "chk", "log"}]
   /\ unadm \subseteq Tasks /\ safety \subseteq SafetyIds /\ started \subseteq Pieces
   /\ stop \in [Pieces -> {"none", "open", "esc"}]
   /\ cur \in 1..(NSteps + 1)
