@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+from tests.helpers.writer_restart_bound_rule import assert_writer_bound_rule
 
 pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
@@ -65,24 +66,25 @@ def test_every_migration_gate_is_a_keepalive() -> None:
 
 
 def test_the_alarm_lanes_crash_looping_writer_carries_the_tightest_bound() -> None:
-    """The container that crash-looped unobserved for nine days is armed first.
+    """The container that crash-looped unobserved for nine days stays armed.
 
     The lab alarm reads its restart bounds from the census lane its shipped
-    config names, so the bound that matters is the manifest's.
+    config names, so the bound that matters is the manifest's. OMN-21288 folded
+    the savings writer into the dev runtime, and the census then declares it
+    ``profile_gated`` (expected absent, no restart bound) on that lane. While a
+    lane still runs it as a service its bound is the tightest; once folded, the
+    manifest must say so explicitly rather than drop it (OMN-22644).
     """
     import json
-
-    if str(_SCRIPTS) not in sys.path:
-        sys.path.insert(0, str(_SCRIPTS))
-    from lane_census_plan import restart_bounds_for_lane
 
     config = json.loads(
         (_SCRIPTS.parent / "config" / "lab_alarm.json").read_text(encoding="utf-8")
     )
-    bounds = restart_bounds_for_lane(_manifest(), config["census_lane"])
-    assert (
-        bounds["omnimarket-projection-savings-writer"]
-        < bounds["omnibase-infra-redpanda"]
+    assert_writer_bound_rule(
+        _manifest(),
+        config["census_lane"],
+        "omnimarket-projection-savings-writer",
+        "omnibase-infra-redpanda",
     )
 
 
