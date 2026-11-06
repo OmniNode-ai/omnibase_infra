@@ -8,9 +8,11 @@ This is an EFFECT handler - performs I/O against Linear API or database.
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_request import (
+    ModelRsdDataFetchRequest,
+)
 from omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_result import (
     ModelRsdDataFetchResult,
 )
@@ -31,11 +33,7 @@ class HandlerRsdDataFetch:
 
     async def handle(
         self,
-        correlation_id: UUID,
-        ticket_ids: tuple[str, ...],
-        include_dependencies: bool = True,
-        include_agent_requests: bool = True,
-        include_plan_overrides: bool = True,
+        request: ModelRsdDataFetchRequest,
     ) -> ModelRsdDataFetchResult:
         """Fetch all RSD-relevant data for the given tickets.
 
@@ -43,15 +41,16 @@ class HandlerRsdDataFetch:
         adapter via the container registry for production data.
 
         Args:
-            correlation_id: Workflow correlation ID.
-            ticket_ids: Ticket IDs to fetch data for.
-            include_dependencies: Whether to fetch dependency data.
-            include_agent_requests: Whether to fetch agent requests.
-            include_plan_overrides: Whether to fetch plan overrides.
+            request: Workflow correlation ID, tickets and data inclusion flags.
 
         Returns:
             ModelRsdDataFetchResult with fetched data.
         """
+        correlation_id = request.correlation_id
+        ticket_ids = request.ticket_ids
+        include_dependencies = request.include_dependencies
+        include_agent_requests = request.include_agent_requests
+        include_plan_overrides = request.include_plan_overrides
         logger.info(
             "Fetching RSD data for %d tickets (correlation_id=%s)",
             len(ticket_ids),

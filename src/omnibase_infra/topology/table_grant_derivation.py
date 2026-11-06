@@ -350,6 +350,12 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # same proof: the expiry module went red on the bot's pin-advance pull
     # request naming all six, and the deletion rode that pull request.
     #
+    # OMN-21970: the pin advance to 3aa4e8b26af6 retired six more the same way
+    # (delegation_lab_jobs and delegation_lab_job_outbox, omnimarket#4277;
+    # delegation_budget_readings, OMN-17427; compaction_receipts, OMN-21336;
+    # delegation_capability_cells, omnimarket#4380; local_environment,
+    # OMN-19988): the expiry module named all six on omnibase_infra#5679 and
+    # the regenerated instances came back byte-identical.
     #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
@@ -382,7 +388,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             # when node_context_install_confirm_trigger_effect reaches the pin.
             ("compaction_activations", "node_context_install_confirm_trigger_effect"),
             # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
-            # omnimarket node contract, as compaction_receipts below. 0001 grants
+            # omnimarket node contract. 0001 grants
             # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
             # USAGE. The ownership declaration names access read_write, role
             # compaction_current_context. Retired when the
@@ -415,7 +421,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             "agent_status_events",
         )
     ),
-    # OMN-19991: infra-first window; this repo
+    # OMN-19991: an infra-first window; this repo
     # vendors node_projection_local_alerts/0000-0002 ahead of the omnimarket node
     # contract that declares the relation. 0001 grants tenant_projection_writer
     # SELECT, INSERT, UPDATE. Retired when omnimarket's node_projection_local_alerts

@@ -10,8 +10,12 @@ from omnibase_infra.nodes.node_pattern_lifecycle_effect.models.model_lifecycle_r
 from omnibase_infra.nodes.node_pattern_lifecycle_effect.models.model_lifecycle_state import (
     ModelLifecycleState,
 )
+from omnibase_infra.nodes.node_pattern_lifecycle_effect.models.model_lifecycle_update_request import (
+    ModelLifecycleUpdateRequest,
+)
 
 __all__: list[str] = [
     "ModelLifecycleResult",
     "ModelLifecycleState",
+    "ModelLifecycleUpdateRequest",
 ]

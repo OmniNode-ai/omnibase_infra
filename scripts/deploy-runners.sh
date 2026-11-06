@@ -48,6 +48,12 @@
 #   9. Retry once with fresh token if poll times out
 #   10. Print stale runner report (offline runners with no host container)
 #
+# --artifacts-only mode (OMN-19998; the runner hook directory only):
+#   1. Rsync runner artifacts to the host, or the --host host
+#   Touches no container, image, token or cron. A runner reads the hook file from
+#   its bind mount at each job start, so a hook change is live at the next job.
+#   Rollback: rerun from the previous revision. Wins over every other mode flag.
+#
 # --soft mode (entrypoint-only update, no recreate):
 #   1. Rsync runner artifacts to host
 #   2. Rebuild the Docker image (for future containers)
@@ -442,6 +448,7 @@ SYNC_PATHS=(
 DRY_RUN=false
 SKIP_BUILD=false
 SOFT_DEPLOY=false
+ARTIFACTS_ONLY=false
 ROLLING_DEPLOY=false
 # OMN-19077: scale the general pool DOWN to expected_count, one idle runner at
 # a time. See the --retire-surplus block in the header.
@@ -480,6 +487,7 @@ for arg in "$@"; do
         --dry-run)    DRY_RUN=true ;;
         --skip-build) SKIP_BUILD=true ;;
         --soft)       SOFT_DEPLOY=true ;;
+        --artifacts-only) ARTIFACTS_ONLY=true ;;
         --rolling)    ROLLING_DEPLOY=true ;;
         --retire-surplus) RETIRE_SURPLUS=true ;;
         --relabel)    RELABEL_ROLL=true; RELABEL_LABEL="${RELABEL_DEFAULT_LABEL}" ;;
@@ -2004,10 +2012,6 @@ secondary_ssh() {
 # The compose variables this file reads a registration token from. The .200 and
 # .202 verify files predate this function and each named their own; reading the
 # names from the file keeps them working without editing a live runner's file.
-secondary_token_vars() {
-    grep -oE 'RUNNER_TOKEN:[[:space:]]*\$\{[A-Z0-9_]+' "${REPO_ROOT}/${COMPOSE_FILE}" \
-        | sed -E 's/.*\$\{//' | sort -u
-}
 
 secondary_target_names() {
     local count="${RUNNER_COUNT}" i
@@ -2017,6 +2021,11 @@ secondary_target_names() {
     for i in $(seq 1 "${count}"); do
         echo "${RUNNER_NAME_PREFIX}-${i}"
     done
+}
+
+# OMN-19998: dispatch preparation through the contract-backed effect.
+ensure_runner_tmp_dirs() {
+    jq -n --arg host "${RUNNER_HOST}" --arg host_dir "${RUNNER_HOST_DIR}" --arg compose_file "${REPO_ROOT}/${COMPOSE_FILE}" --arg prefix "${RUNNER_NAME_PREFIX}" --argjson count "${RUNNER_COUNT}" --argjson dry_run "${DRY_RUN}" --argjson secondary "${SECONDARY_HOST}" '$ARGS.named' | uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_deploy_runners --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_deploy_runners/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-tmp"
 }
 
 # One registry read, then "<name> <status>" per target name ("unknown" when the
@@ -2041,7 +2050,7 @@ secondary_deploy() {
     log "=== Secondary-host stand-up: ${RUNNER_NAME_PREFIX} on ${RUNNER_HOST} ==="
     [[ -f "${REPO_ROOT}/${COMPOSE_FILE}" ]] || err "missing ${COMPOSE_FILE}"
     local token_vars
-    token_vars=$(secondary_token_vars)
+    token_vars=$(relabel_token_vars)
     [[ -n "${token_vars}" ]] || err "${COMPOSE_FILE} reads no RUNNER_TOKEN variable; refusing to create runners that cannot register."
 
     local names
@@ -2060,6 +2069,8 @@ secondary_deploy() {
         log "[DRY RUN] rsync ${COMPOSE_FILE}${POOL_SLICE_SOURCE:+ and ${POOL_SLICE_SOURCE#${REPO_ROOT}/}} -> ${RUNNER_HOST}:${RUNNER_HOST_DIR}/"
     fi
 
+    ensure_runner_tmp_dirs
+
     if ! "${SKIP_BUILD}"; then
         secondary_ssh "set -euo pipefail; cd ${RUNNER_HOST_DIR} && bash scripts/ci/build_runner_image.sh --tag omninode-runner:latest"
     fi
@@ -2068,11 +2079,7 @@ secondary_deploy() {
 
     local compose_cmd="docker compose -p ${RUNNER_NAME_PREFIX} -f ${RUNNER_HOST_DIR}/${COMPOSE_FILE}"
 
-    # Fail closed on the host's own variable contract (docker/.env beside the
-    # file, lab credentials) BEFORE a token is minted.
-    secondary_ssh "set -euo pipefail; $(for v in ${token_vars}; do printf 'export %s=preflight; ' "${v}"; done) ${compose_cmd} config -q" \
-        || err "${COMPOSE_FILE} does not render on ${RUNNER_HOST}; a required variable (docker/.env beside it) or file is missing there."
-
+    # The preparation effect already rendered the host variable contract.
     local states
     if "${DRY_RUN}"; then
         states=$(printf '%s unknown\n' ${names})
@@ -2197,7 +2204,7 @@ relabel_compose_cmd() {
 # The compose variables the file reads a registration token from.
 relabel_token_vars() {
     if "${SECONDARY_HOST}"; then
-        secondary_token_vars
+        grep -oE 'RUNNER_TOKEN:[[:space:]]*\$\{[A-Z0-9_]+' "${REPO_ROOT}/${COMPOSE_FILE}" | sed -E 's/.*\$\{//' | sort -u
     else
         echo "RUNNER_TOKEN"
     fi
@@ -2470,6 +2477,7 @@ relabel_roll() {
     log "Targets (${total}): ${targets[*]}"
 
     relabel_sync_compose
+    ensure_runner_tmp_dirs
 
     RELABEL_SNAPSHOT_FILE=$(mktemp)
     RELABEL_PLAN_FILE=$(mktemp)
@@ -2560,12 +2568,11 @@ relabel_roll() {
 
 main() {
     log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY}, retire_surplus=${RETIRE_SURPLUS}, add=${ADD_SERVICES:-<none>})"
-    log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP}"
-    log "Runner count: ${RUNNER_COUNT} | Compose file: ${COMPOSE_FILE}"
+    log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP} | Runner count: ${RUNNER_COUNT} | Compose file: ${COMPOSE_FILE}"
 
-    if "${DRY_RUN}"; then
-        log "[DRY RUN MODE] No remote commands will be executed."
-    fi
+    if "${DRY_RUN}"; then log "[DRY RUN MODE] No remote commands will be executed."; fi
+
+    if "${ARTIFACTS_ONLY}"; then rsync_artifacts; return 0; fi
 
     if "${RELABEL_ROLL}"; then
         if "${SOFT_DEPLOY}" || "${ROLLING_DEPLOY}" || "${RETIRE_SURPLUS}" || [[ -n "${ADD_SERVICES}" ]]; then

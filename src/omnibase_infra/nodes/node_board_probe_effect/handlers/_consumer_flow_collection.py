@@ -21,7 +21,6 @@ from pathlib import Path
 
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_constants import (
     APPLIED_TOPIC,
-    BOOT_CONTAINERS,
     BOUNDARY_RE,
     BRANCHES,
     CURSOR_FIELD,
@@ -29,7 +28,6 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
     NEGATIVE_TESTS,
     PAIRING_LOOKAHEAD,
     PROBE_CID_PREFIX,
-    RUNTIME_CONTAINERS,
     SEAM_DLQ,
     VALIDATION_ERROR_RE,
     WIRING_MODULE,
@@ -331,7 +329,7 @@ def observe_injection(
     since_arg = since_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     while True:
         errors = boundaries = 0
-        for c in RUNTIME_CONTAINERS:
+        for c in lane.containers.runtime_containers:
             lines = lane.logs(c, since=since_arg)
             errors += sum(1 for ln in lines if VALIDATION_ERROR_RE.search(ln))
             boundaries += sum(
@@ -372,7 +370,7 @@ def _changed_boot_containers(
 ) -> dict[str, tuple[str, str | None]]:
     return {
         n: (ident_before[n]["id"], ident_after.get(n, {}).get("id"))
-        for n in BOOT_CONTAINERS
+        for n in ident_before
         if ident_before[n]["id"] != ident_after.get(n, {}).get("id")
         or ident_before[n]["started_at"] != ident_after.get(n, {}).get("started_at")
         or ident_after.get(n, {}).get("status") != "running"
@@ -435,7 +433,7 @@ def _observe_settled(
     injection_wait: float,
 ) -> TypedDictConsumerFlowCollected:
     natural: dict[str, TypedDictConsumerFlowNatural] = {}
-    for c in RUNTIME_CONTAINERS:
+    for c in lane.containers.runtime_containers:
         lines = lane.logs(c)
         total, probe, nat = natural_validation_errors(lines)
         natural[c] = {
