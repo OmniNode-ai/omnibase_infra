@@ -30,6 +30,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_dev_boot_guard_recovered_snapshot_omn22724.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22724-installed-on-dev
     description: After the deploy agent installs this change, the dev host's handler carries the snapshot refresh. The probe prints no secret.
     source: manual
