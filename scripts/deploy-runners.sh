@@ -145,7 +145,8 @@
 #   3. For each ${RUNNER_NAME_PREFIX}-N container on the host with N greater
 #      than expected_count, one at a time: two-signal idle check (the same
 #      runner_is_idle the rolling mode uses; a STOPPED container runs no job
-#      and counts as idle), re-checked immediately before stop, then
+#      and counts as idle, and so does a RUNNING container that GitHub reports
+#      offline with no Runner.Worker in its process list, OMN-22478), re-checked immediately before stop, then
 #      `docker stop` + `docker rm` of that ONE container. Never `rm -v`: the
 #      runner's named creds volume is left in place (volumes are data).
 #   4. Once GitHub reports that runner offline, delete ITS registration by id.
@@ -1633,7 +1634,13 @@ runner_is_idle() {
     state=$(github_runner_state "${name}")
     status="${state%% *}"
     busy="${state##* }"
-    if [[ "${status}" != "online" ]] || [[ "${busy}" != "false" ]]; then
+    # OMN-22478: --retire-surplus sets IDLE_ACCEPTS_OFFLINE=1 so a RUNNING
+    # container whose listener is dead (GitHub "offline", e.g. a listener that
+    # exits "runner version is deprecated" while the entrypoint loops) can read
+    # idle. Only "offline" with busy "false" qualifies; "unknown" never does,
+    # and the Runner.Worker probe below stays mandatory, so an offline runner
+    # with a live job worker still reads busy.
+    if { [[ "${status}" != "online" ]] && [[ "${status}:${IDLE_ACCEPTS_OFFLINE:-0}" != "offline:1" ]]; } || [[ "${busy}" != "false" ]]; then
         return 1
     fi
 
@@ -1874,7 +1881,7 @@ surplus_runner_is_idle() {
     local rc=0
     container_is_running "${1}" || rc=$?
     case "${rc}" in
-        0) runner_is_idle "${1}" ;;
+        0) IDLE_ACCEPTS_OFFLINE=1 runner_is_idle "${1}" ;;
         1) return 0 ;;
         *) return 1 ;;
     esac
