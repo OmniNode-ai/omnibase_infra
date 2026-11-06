@@ -1,0 +1,22 @@
+schema_version: '1.0.0'
+ticket_id: OMN-22713
+title: 'The Docker log watcher launchd plist and one deploy agent plist leave the declared installs, so a Docker-free Mac declares no unit that needs Docker'
+summary: 'The container log watcher launchd plist is deleted and the unit drift manifest no longer names the compose lane deploy agent plist of the Docker-free Mac, so no declared install puts a Docker-only unit on a Mac with no Docker engine.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The unit drift tests of the deploy agent pass
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py scripts/deploy-agent/tests/unit/test_unit_drift_wiring.py scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: The unit drift tests pass with the Docker-only Mac units removed from the manifest
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q'
