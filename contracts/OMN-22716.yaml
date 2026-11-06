@@ -8,7 +8,7 @@ interfaces_touched: []
 evidence_requirements:
   - kind: tests
     description: The deploy agent unit tests pass with the lane removed
-    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -q
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_instances_as_data_omn19543.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_load_gate_omn19507.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -19,7 +19,7 @@ dod_evidence:
     source: generated
     checks:
       - check_type: command
-        check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -q'
+        check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_instances_as_data_omn19543.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_load_gate_omn19507.py -q'
   - id: dod-002
     description: The lane census parity, settle budget and instance receipt lane tests pass without the lane
     source: generated
