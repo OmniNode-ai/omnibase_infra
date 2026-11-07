@@ -7,16 +7,13 @@ Shared-service cleanup, resource leases and abandoned-slot reaping.
 
 Why this exists
 ---------------
-``prepr_verify_lane.sh`` brings a slot up and leaves it running, because a
-slot's job is to be exercised. Until this module existed every slot on the lab
-host was then torn down BY HAND, five times on 2026-09-24, each lane working
-out again what a slot leaves on the SHARED dev-lane servers: the compose
-project's containers, volumes and images, the slot's prefixed topics and
-consumer groups on the dev broker, its Valkey logical index, and its databases
-and principals on the dev Postgres. A hand teardown that deletes by a loose
-pattern can take the dev lane's own topics, groups or keys with it. So the
-selection lives here, as functions a test runs against listings that carry the
-dev lane's names beside the slot's.
+``prepr_verify_lane.sh`` brings a slot up and leaves it running, because a slot's job is to be exercised. Until this
+module existed every slot on the lab host was then torn down BY HAND, five times on 2026-09-24, each lane working out
+again what a slot leaves on the SHARED dev-lane servers: the compose project's containers, volumes and images, the
+slot's prefixed topics and consumer groups on the dev broker, its Valkey logical index, and its databases and principals
+on the dev Postgres. A hand teardown that deletes by a loose pattern can take the dev lane's own topics, groups or keys
+with it. So the selection lives here, as functions a test runs against listings that carry the dev lane's names beside
+the slot's.
 
 What it touches, and the fence on each
 --------------------------------------
@@ -547,8 +544,15 @@ class _Teardown:
 
     def revoke_tenant(self, staging_root: Path) -> bool:
         credential = staging_root / "tenant-state" / "credential.env"
-        if not credential.exists():
-            # A slot without a gateway, or a bring-up that failed before mint.
+        # A slot without a gateway, or a bring-up that failed before mint. OMN-22863: or the
+        # offboard was proven by an earlier run (credential.env.revoked.json is written only
+        # after the refusal was seen) and no container is left to re-prove it, so insisting
+        # on a live gateway kept a dead holder's lease for ever. The proof is 0600 and the
+        # gateway user's: this reader checks that it exists, not what it says.
+        proof = credential.with_name(credential.name + ".revoked.json")
+        if not credential.exists() or (
+            proof.is_file() and not self.containers(self.sel.compose_project)
+        ):
             return True
         env = dict(self.env)
         env["COMPOSE_PROJECT"] = self.sel.compose_project
@@ -670,19 +674,15 @@ def run_teardown(
 
 LEASE_DESCRIPTION = """Heartbeat and reap the two pre-PR slots (OMN-18896).
 
-The host-local resource lease outlives a killed pool driver. It is separate
-from the pool's admission lease: acquiring an expired admission lease cannot
-erase evidence of resources still awaiting cleanup. All resource-lease writes
-and the entire reap share a kernel lock. Reaping also takes the bring-up's
-compose-project lock and delegates every deletion to prepr_teardown_slot.sh.
-Missing or unreadable evidence is never permission to delete resources.
+The host-local resource lease outlives a killed pool driver. It is separate from the pool's admission lease: acquiring
+an expired admission lease cannot erase evidence of resources still awaiting cleanup. All resource-lease writes and
+the entire reap share a kernel lock. Reaping also takes the bring-up's compose-project lock and delegates every
+deletion to prepr_teardown_slot.sh. Missing or unreadable evidence is never permission to delete resources.
 
-The default heartbeat interval is 30 seconds and expiry is five minutes after
-the last heartbeat. Keep a complete manual proof (bring-up, exercises and
-teardown) inside one `run --slot N --holder LANE -- bash proof.sh` command.
-The numbered pool does this per phase using one token for the whole run.
-Standalone bring-up alone leaves a five-minute exercise window after exit.
-Only canonical /var/tmp/onex-prepr/slot-N staging roots are admitted.
+The default heartbeat interval is 30 seconds and expiry is five minutes after the last heartbeat. Keep a complete
+manual proof (bring-up, exercises and teardown) inside one `run --slot N --holder LANE -- bash proof.sh` command. The
+numbered pool does this per phase using one token for the whole run. Standalone bring-up alone leaves a five-minute
+exercise window after exit. Only canonical /var/tmp/onex-prepr/slot-N staging roots are admitted.
 
 `reap --plan-only` reports eligibility without deleting resources. A normal
 tick persists ~/.omnibase/state/prepr-slots/last-reap.json; UNKNOWN and
@@ -693,6 +693,7 @@ the installer uses the same default state and locks as the slot entrypoints.
 """
 
 RUNTIME = "scripts/runtime_build/"
+MIGRATIONS = "docker/migrations/forward"
 FILES = tuple(
     RUNTIME + name
     for name in (
@@ -717,9 +718,9 @@ def _unit_quote(value: str) -> str:
 def install_reaper(prefix: Path, unit_dir: Path, *, enable: bool) -> dict[str, object]:
     """Install an immutable pre-PR slot reaper and its systemd user timer.
 
-    Run on a Linux host offering the numbered shared-service slots. No sudo and
-    no credentials are installed. --no-enable prepares the same artifacts without
-    contacting systemd, for review and hosted-runner smoke tests.
+    Run on a Linux host offering the numbered shared-service slots. No sudo and no credentials are installed.
+    --no-enable prepares the same artifacts without contacting systemd, for review and hosted-runner smoke
+    tests.
 
     On the slot host, with the operator's existing ~/.omnibase/.env and Docker:
         python3 scripts/runtime_build/prepr_teardown_slot.py install-reaper
@@ -744,6 +745,8 @@ def install_reaper(prefix: Path, unit_dir: Path, *, enable: bool) -> dict[str, o
                 target = staging / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO_ROOT / name, target)
+            # OMN-22863: provision_db_slot.sh --drop scans the forward migrations, so the snapshot carries them
+            shutil.copytree(REPO_ROOT / MIGRATIONS, staging / MIGRATIONS)
             staging.rename(release)
         finally:
             if staging.exists():
