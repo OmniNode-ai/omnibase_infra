@@ -4,20 +4,28 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import re
 import subprocess
 import tempfile
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
+from subprocess import TimeoutExpired
 from types import ModuleType
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.utils.util_run_coro_sync import run_coro_sync
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.handlers.handler_cost_estimator_build import (
+    REVISION_LABEL,
+    SOURCE_LABEL,
     HandlerCostEstimatorBuild,
+    validate_source,
 )
 from omnibase_infra.handlers.handler_cost_estimator_build import (
     dev_lane_build_settings as parse_build_settings,
@@ -31,6 +39,8 @@ from omnibase_infra.models.model_cost_estimator_build_request import (
 from omnibase_infra.protocols.protocol_cost_estimator_build_io import (
     ProtocolCostEstimatorBuildIO,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CostEstimatorBuildIO:
@@ -63,6 +73,20 @@ class CostEstimatorBuildIO:
         return tempfile.TemporaryDirectory(prefix="estimator-build-")
 
 
+def _declaration(execution: ModuleType) -> dict[str, object]:
+    module_file = execution.__file__
+    if not module_file:
+        raise RuntimeError("estimator build requires the deploy agent source location")
+    contract = (
+        Path(module_file).resolve().parents[3]
+        / "src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml"
+    )
+    declaration: dict[str, object] = yaml.safe_load(
+        contract.read_text(encoding="utf-8")
+    )["config"]["cost_estimator_build"]
+    return declaration
+
+
 def dev_lane_build_settings(
     execution: ModuleType, lane: str
 ) -> tuple[ModelCostEstimatorBuildConfig, dict[str, str]] | None:
@@ -71,17 +95,132 @@ def dev_lane_build_settings(
         or "cost-estimator-web" in execution.lane_config_for(lane).disabled_services
     ):
         return None
-    module_file = execution.__file__
-    if not module_file:
-        raise RuntimeError("estimator build requires the deploy agent source location")
-    contract = (
-        Path(module_file).resolve().parents[3]
-        / "src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml"
-    )
-    declaration = yaml.safe_load(contract.read_text(encoding="utf-8"))["config"][
-        "cost_estimator_build"
-    ]
-    return parse_build_settings(execution, lane, declaration)
+    return parse_build_settings(execution, lane, _declaration(execution))
+
+
+class ModelCostEstimatorWebFollow(BaseModel):
+    """The declared web source, with the two reads its idle follower decides on.
+
+    Built from the build declaration: the repository, url and branch are the
+    build's own settings; ``container`` is the contract's ``follow`` block.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str = Field(min_length=1)
+    repository_url: str = Field(min_length=1)
+    branch: str = Field(min_length=1)
+    container: str = Field(min_length=1)
+    source_label: str = Field(min_length=1)
+    revision_label: str = Field(min_length=1)
+    read_timeout_seconds: int = Field(gt=0)
+
+    def running_ref(self) -> str | None:
+        """The web commit the running estimator image was built from, or ``None``.
+
+        ``None`` for an absent container, labels that are not JSON, an image built
+        from another source repository, or a revision that is not a full commit
+        sha: an unread revision proves nothing and the decision refuses.
+        """
+        output = _read(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{json .Config.Labels}}",
+                self.container,
+            ],
+            self.read_timeout_seconds,
+        )
+        try:
+            labels = json.loads(output or "null")
+        except ValueError:
+            return None
+        if (
+            not isinstance(labels, dict)
+            or labels.get(self.source_label) != self.repository
+        ):
+            return None
+        return _sha(labels.get(self.revision_label))
+
+    def head_ref(self) -> str | None:
+        """The head of the declared branch on the declared url, or ``None``."""
+        output = _read(
+            [
+                "git",
+                "ls-remote",
+                "--",
+                self.repository_url,
+                f"refs/heads/{self.branch}",
+            ],
+            self.read_timeout_seconds,
+        )
+        return _sha(next(iter((output or "").split()), None))
+
+
+def _read(argv: list[str], timeout: int) -> str | None:
+    try:
+        result = subprocess.run(
+            argv,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=scrub_git_location_env(),
+        )
+    except (OSError, TimeoutExpired):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def _sha(value: object) -> str | None:
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value):
+        return value
+    return None
+
+
+def dev_lane_web_follow(
+    execution: ModuleType, lane: str
+) -> ModelCostEstimatorWebFollow | None:
+    """The web source the idle follower tracks, from the declaration (OMN-22808).
+
+    ``None`` when the lane is not dev, the estimator service is disabled, the
+    declaration has no ``follow`` block, the lane fragment names no source yet
+    (the build itself refuses that, naming the missing settings, before it
+    touches anything), or the declaration cannot be read: the follower then
+    follows nothing and says why, and the agent's other followed repositories
+    are unaffected. Nothing here reads the gate secret.
+    """
+    if (
+        lane != execution.EnumRuntimeLane.DEV
+        or "cost-estimator-web" in execution.lane_config_for(lane).disabled_services
+    ):
+        return None
+    try:
+        declaration = _declaration(execution)
+        follow = declaration.get("follow")
+        build = declaration["build"]
+        if not isinstance(follow, dict) or not isinstance(build, dict):
+            return None
+        environment = execution._compose_env()
+        values = {
+            field: environment.get(str(build[f"{field}_env"]), "").strip()
+            for field in ("repository", "repository_url")
+        }
+        if not all(values.values()):
+            return None
+        validate_source(values["repository"], values["repository_url"])
+        return ModelCostEstimatorWebFollow(
+            **values,
+            branch=str(build["branch"]),
+            container=str(follow["container"]),
+            source_label=SOURCE_LABEL,
+            revision_label=REVISION_LABEL,
+            read_timeout_seconds=int(build["read_timeout_seconds"]),
+        )
+    except (OSError, KeyError, ValueError, TypeError, RuntimeError, yaml.YAMLError):
+        logger.warning("estimator web follow declaration unreadable", exc_info=True)
+        return None
 
 
 def build_dev_lane_services(
