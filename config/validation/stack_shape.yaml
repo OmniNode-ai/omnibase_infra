@@ -715,13 +715,13 @@ baseline:
     files: 3
     ticket: OMN-21288
   - service: agent-actions-consumer
-    files: 8
-    ticket: OMN-21288
-  - service: autoheal
     files: 7
     ticket: OMN-21288
+  - service: autoheal
+    files: 6
+    ticket: OMN-21288
   - service: context-audit-consumer
-    files: 8
+    files: 7
     ticket: OMN-21288
   - service: cost-estimator-web
     files: 1
@@ -736,40 +736,40 @@ baseline:
     files: 1
     ticket: OMN-21288
   - service: infra-routing-decisions-consumer
-    files: 5
+    files: 4
     ticket: OMN-21288
   - service: intelligence-api
-    files: 8
+    files: 7
     ticket: OMN-21288
   - service: omninode-contract-resolver
-    files: 8
+    files: 7
     ticket: OMN-21288
   - service: onex-api
-    files: 6
+    files: 5
     ticket: OMN-21288
   - service: projection-api
-    files: 12
+    files: 11
     ticket: OMN-21288
   - service: projection-claude-hook-events-writer
-    files: 6
+    files: 5
     ticket: OMN-21288
   - service: projection-delegation-writer
-    files: 7
+    files: 6
     ticket: OMN-21288
   - service: projection-live-events-writer
-    files: 6
+    files: 5
     ticket: OMN-21288
   - service: projection-registration-writer
-    files: 6
+    files: 5
     ticket: OMN-21288
   - service: projection-savings-writer
-    files: 6
+    files: 5
     ticket: OMN-21288
   - service: projection-tenant-credentials-writer
-    files: 6
+    files: 5
     ticket: OMN-21288
   - service: projection-tenant-registry-writer
-    files: 7
+    files: 6
     ticket: OMN-21288
   - service: redpanda-topic-manager
     files: 1
@@ -778,14 +778,14 @@ baseline:
     files: 1
     ticket: OMN-21288
   - service: runtime-effects
-    files: 12
+    files: 11
     ticket: OMN-21288
   - service: runtime-worker
-    files: 8
+    files: 7
     ticket: OMN-21288
   - service: skill-lifecycle-consumer
-    files: 8
+    files: 7
     ticket: OMN-21288
   - service: tenant-projection-writer
-    files: 8
+    files: 7
     ticket: OMN-21288

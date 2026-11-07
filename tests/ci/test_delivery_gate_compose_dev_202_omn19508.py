@@ -86,7 +86,7 @@ def _gate(
 def test_sibling_compose_dev_202_is_added_for_omnimarket_only() -> None:
     """OMN-19543: the instance lanes come from the routing table, not a literal;
     tests/scripts/ci/test_instance_receipt_lanes_omn19543.py pins that the table
-    gives omnimarket compose-dev-202 (and compose-dev-200) and nothing else."""
+    gives omnimarket its one instance receipt lane and nothing else."""
     code = _code_lines(_step_run(SIBLING_STEP))
     assert (
         'SIBLING_LANES=(--lane compose-dev --instance-lanes-for "${PINNED_REPO}")'
