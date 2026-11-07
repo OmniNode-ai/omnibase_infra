@@ -5981,6 +5981,7 @@ def evaluate_workflow_verdict(
     dispatch_title_contains: str = "",
     drill_red_until: str = "",
     drill_ticket: str = "",
+    no_verdict_conclusions: Sequence[str] = (),
 ) -> int:
     """Fail closed unless the NEWEST completed measurement of a workflow is green.
 
@@ -5994,10 +5995,9 @@ def evaluate_workflow_verdict(
     must be an ``OMN-<n>`` id and ``drill_red_until`` a parseable UTC
     timestamp no more than :data:`DRILL_MAX_WINDOW_HOURS` in the future. Past
     its own expiry the drill has NO effect at all -- nobody has to turn it
-    off. There is deliberately no symmetric flag that forces a PASS: the drill
-    can only make delivery more conservative, never less. When active it does
-    not call the GitHub API at all -- it is a synthetic, clearly-labelled red,
-    not a spoofed real one.
+    off. There is deliberately no flag that forces a PASS: the drill can only
+    make delivery more conservative. When active it calls no GitHub API -- it is
+    a synthetic, clearly-labelled red, not a spoofed real one.
 
     Operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending the
     16:10:08Z every-check-blocks ruling) binds four chronically red checks to a
@@ -6156,6 +6156,11 @@ def evaluate_workflow_verdict(
         file=out,
     )
 
+    # OMN-22821: no_verdict_conclusions names conclusions that carry no verdict
+    # (the delegation-health config lists cancelled and skipped). Such a run
+    # measured nothing, so it is dropped here and the newest COMPLETED verdict
+    # decides; a failure still decides. The default is empty, so staging
+    # delivery and the lab alarm still block on a cancelled newest run.
     candidates = [
         r
         for r in runs
@@ -6163,6 +6168,7 @@ def evaluate_workflow_verdict(
         and r.get("status") == "completed"
         and r.get("head_branch") == branch
         and r.get("event") in admitted
+        and r.get("conclusion") not in no_verdict_conclusions
         and (
             not dispatch_title_contains
             or r.get("event") != "workflow_dispatch"
@@ -6171,8 +6177,7 @@ def evaluate_workflow_verdict(
     ]
     ignored = len(runs) - len(candidates)
     print(
-        f"  events read : {', '.join(admitted)} "
-        f"({len(candidates)} completed run(s) admitted, {ignored} other(s) ignored)",
+        f"  events read : {', '.join(admitted)} ({len(candidates)} completed run(s) admitted, {ignored} other(s) ignored)",
         file=out,
     )
     if dispatch_title_contains:
