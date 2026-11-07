@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-22552"
+title: "The omnidash sibling pin advances with the omnimarket pin, so exposure-reader-coverage reads the readers current omnimarket contracts need"
+summary: "omnibase_infra#5679 moved the omnidash sibling pin to d6718d2ed with the omnimarket pin. The recorded Credentials page fixture was still captured at the old omnidash sha e0dadfc6. It is re-recorded at the pinned sha, with the page's sibling credentials.contracts.yaml that the page now resolves its data source through, and a test holds the recording to the sibling pin."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn22552-credentials-recording-at-pin"
+    statement: |-
+      The Credentials page recording the exposure-reader gate replays is the page at the pinned omnidash sha.
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: the recorded Credentials page fixture is re-recorded at the new omnidash sha and the gate replays it as a reader"
+evidence_requirements:
+  - kind: "tests"
+    description: "The recording names the pinned omnidash sha and the replayed page is a reader of tenant-credentials.v1."
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_pin_handoff_omn17292.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn22552-ac2-recording-at-pin"
+    description: "The Credentials recording's provenance and every response ref name the omnidash sibling pin, and the replayed page reads tenant-credentials.v1. At the merge base the recording names e0dadfc6 while the pin is d6718d2ed, so the pin test fails."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_pin_handoff_omn17292.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"

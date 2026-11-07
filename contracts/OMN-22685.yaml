@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22685
+title: "The dev runtime resolver maps LINEAR_API_KEY, so a lab lane's ticket write over the bus is not refused secret_unavailable"
+summary: "The dev profile of the runtime policy contract maps the logical name LINEAR_API_KEY, which node_create_ticket resolves through its own contract's secrets block, to the environment variable of the same name that the dev containers already hold. docker/runtime-policy.env is re-rendered from it. The key value is in the secret store and never in this repository."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22685-linear-key-resolver-mapping
+    statement: Every dev runtime resolver config must map LINEAR_API_KEY to the environment variable LINEAR_API_KEY, so the ticket write node resolves its key under enable_convention_fallback false.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev profile secret resolver config maps LINEAR_API_KEY to the environment variable LINEAR_API_KEY and docker/runtime-policy.env is the render of the contract -- falsifier: uv run pytest tests/unit/runtime/test_render_secret_resolver_config.py tests/ci/test_runtime_env_anchor.py tests/ci/test_runtime_policy_contract.py -q'
+      - id: AC2
+        statement: 'AC2: a resolver built from a rendered dev config resolves LINEAR_API_KEY from the environment and one built from the same config without the mapping refuses it -- falsifier: uv run pytest tests/unit/runtime/test_linear_key_resolver_mapping_omn22685.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The mapping tests pass at the head, and the control tests show the lookup refused without the mapping.
+    command: uv run pytest tests/unit/runtime/test_linear_key_resolver_mapping_omn22685.py tests/ci/test_runtime_policy_contract.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22685-mapping-tests
+    description: The mapping, render and control tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_linear_key_resolver_mapping_omn22685.py tests/ci/test_runtime_policy_contract.py tests/ci/test_runtime_env_anchor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

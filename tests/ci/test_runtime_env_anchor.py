@@ -413,6 +413,24 @@ class TestResolverEnvRefsReachTheAnchor:
         declaration = "OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}"
         assert declaration in COMPOSE_PATH.read_text(), declaration
 
+    @pytest.mark.unit
+    def test_typesafe_key_is_mapped_for_every_dev_resolver_and_optional(self) -> None:
+        """The TypeSafe Jev rung's ref resolves on every dev runtime (OMN-22650).
+
+        ``cloud-typesafe-jev`` declares ``llm.typesafe.api_key``. Every dev
+        resolver config must map it to ``LLM_TYPESAFE_API_KEY``, and the anchor
+        must pass that variable in the optional form so other lanes still render.
+        """
+        refs = self._env_refs_by_policy_key()
+        missing = {
+            policy_key
+            for policy_key, pairs in refs.items()
+            if ("llm.typesafe.api_key", "LLM_TYPESAFE_API_KEY") not in pairs
+        }
+        assert refs and not missing, sorted(missing)
+        declaration = "LLM_TYPESAFE_API_KEY: ${LLM_TYPESAFE_API_KEY:-}"
+        assert declaration in COMPOSE_PATH.read_text(), declaration
+
 
 class TestRuntimeLaneActSwitchPassthrough:
     """OMN-20867: the six per-lane act switches are value-less pass-throughs.

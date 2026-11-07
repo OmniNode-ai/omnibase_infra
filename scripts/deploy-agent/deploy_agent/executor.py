@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -278,6 +279,9 @@ SELF_UPDATE_KNOWN_BYPRODUCT_PATHS: tuple[str, ...] = (
     "workspace/sibling-vcs-provenance.json",
     "workspace/routing_tiers.yaml",
 )
+
+# Prefix of the argv that restarts our own unit from a transient unit (OMN-22683).
+SELF_RESTART_COMMAND = "systemd-run --user --collect --wait systemctl --user restart"
 COMPOSE_PROJECT = "omnibase-infra"
 # OMN-18640: the deps-convergence observation runs before the deps leg and
 # must never become the reason a deploy is slow. Three read-only commands,
@@ -3930,11 +3934,12 @@ class DeployExecutor:
                 )
                 if on_before_reexec is not None:
                     on_before_reexec()
-                subprocess.run(
-                    ["systemctl", "--user", "restart", synced_unit],
-                    check=True,
-                    timeout=60,
-                )
+                # A transient unit outside this cgroup runs the restart (OMN-22683): run from
+                # inside it, the restart command was killed by the unit stop, which re-execed in
+                # this pid and let systemd SIGKILL the next job. Ending 0 or -SIGTERM is under way.
+                restart = _run([*SELF_RESTART_COMMAND.split(), synced_unit], timeout)
+                if restart.returncode not in (0, -signal.SIGTERM):
+                    raise RuntimeError(f"unit restart exited {restart.returncode}")
                 return
         except Exception as exc:  # noqa: BLE001
             logger.warning(

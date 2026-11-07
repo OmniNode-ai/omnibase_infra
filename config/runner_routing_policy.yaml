@@ -651,6 +651,16 @@ cloud_canary_runner_variable:
   #
   # Three capability gaps, none visible offline, all found by one real job of
   # one real class. That is the argument for a canary of exactly this shape.
+  # SUPERSEDED, 2026-11-06 (OMN-22665). No workflow reads this variable any more:
+  # `rebuilt-postgres16-proof` resolves through the public-PR, docker and trusted
+  # seams to a hosted runner, and the capacity request job is deleted. The
+  # revert condition below fired: no runner carrying omni-cloud-ci has
+  # registered since 2026-11-05T03:51Z (the last completed run of the job was
+  # 41928549324, success at 2026-11-04T22:51:49Z, and six runs sat queued while
+  # their request job reported success). The declaration stays, with the value
+  # the live variable still holds, so the hourly audit holds the repository to
+  # it until the variable is deleted; deleting the variable and this entry
+  # together is the follow-up, and the repository variable is not written here.
   expected_json: '["self-hosted","omni-cloud-ci"]'
   repositories:
     - omnibase_infra
@@ -797,8 +807,6 @@ private_repo_hosted_exception:
   ruling: "Operator ruling of 2026-11-05 (OMN-22478): the outside canary is a hosted job that emails the alerts address, every 15 minutes, with a one-job audit exception; operator words \"Sure, I'm fine with the canary. Can we do it in GitHub? Don't they have like VMs that you can use?\""
   reason: "The outside canary reads the one status file the lab publishes and fails when the lab goes silent, so it must not share fate with the lab: on a lab runner it would go quiet at the moment it exists to report. It reads no secret, touches no lab host and reaches no tailnet address; a failed scheduled run is GitHub's own notice to the owner of the schedule. The job is pinned to a literal GitHub-hosted label so that no seam flip can relocate it onto the fleet."
 hosted_runner_allowlist:
-  - path: .github/workflows/application-acl-postgres16-proof.yml
-    reason: "OMN-18291: the `request-cloud-capacity` job is bare hosted BY NECESSITY -- it is the job that asks the scale-to-zero cloud fleet for the runner the routed job below it needs, so it cannot itself resolve through the routing variable it is serving. Pinning it by literal also means no future flip of any seam can relocate the requester onto the capacity it is trying to request. The workflow's other job, `rebuilt-postgres16-proof`, is NOT hosted -- it is the canary routed to the cloud fleet through cloud_canary_runner_variable."
   - path: .github/workflows/ci.yml
     reason: "OMN-14127: CI Summary is a lightweight hosted fail-closed aggregator so required status always posts during self-hosted saturation."
   - path: .github/workflows/build-and-push-runtime.yml

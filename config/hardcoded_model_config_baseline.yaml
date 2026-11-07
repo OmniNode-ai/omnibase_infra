@@ -1384,9 +1384,6 @@ entries:
     content_sha1: 33af7195b1ab55231e8925ede4c200326ea74e0c
   - path: scripts/deploy-agent/deploy_agent/executor.py
     family: O
-    content_sha1: 38d2b7c964b563bd5574a5d6d454f51eeb25c594
-  - path: scripts/deploy-agent/deploy_agent/executor.py
-    family: O
     content_sha1: 3cee5fd0bc7d99662a83600a92a5c5766a1642a6
   - path: scripts/deploy-agent/deploy_agent/executor.py
     family: O

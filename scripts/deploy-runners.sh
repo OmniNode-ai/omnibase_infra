@@ -103,6 +103,14 @@
 #   3. docker compose up -d --no-deps <service>...  -- with NEITHER
 #      --force-recreate NOR --remove-orphans
 #   4. Wait for exactly those runners to come online
+#   IDLE FIRST, TOKEN SUPPLIED (OMN-22604). Every target that already exists
+#   must read idle on the container's own evidence (running, no Runner.Worker in
+#   `docker top`, no unfinished "Running job:" in its listener log) before
+#   compose touches it, waiting up to RELABEL_DRAIN_TIMEOUT_SECONDS (default
+#   1800); a target still busy or unreadable is left running and the run ends
+#   non-zero. The registration token is the supplied one (DEPLOY_RUNNER_TOKEN or
+#   --token-file); this mode does not mint one through gh and refuses, naming the
+#   operator's command, when none is given.
 #   Skips: the fleet-wide poll, every cron install, the stale report.
 #   Use when: standing up or converging ONE non-general-pool runner
 #   (omninode-deploy-runner, omninode-verify-runner-1, the customer-plane pair).
@@ -137,7 +145,8 @@
 #   3. For each ${RUNNER_NAME_PREFIX}-N container on the host with N greater
 #      than expected_count, one at a time: two-signal idle check (the same
 #      runner_is_idle the rolling mode uses; a STOPPED container runs no job
-#      and counts as idle), re-checked immediately before stop, then
+#      and counts as idle, and so does a RUNNING container that GitHub reports
+#      offline with no Runner.Worker in its process list, OMN-22478), re-checked immediately before stop, then
 #      `docker stop` + `docker rm` of that ONE container. Never `rm -v`: the
 #      runner's named creds volume is left in place (volumes are data).
 #   4. Once GitHub reports that runner offline, delete ITS registration by id.
@@ -655,9 +664,7 @@ fetch_registration_token() {
     local token
     token=$(gh api --method POST "/orgs/${RUNNER_ORG}/actions/runners/registration-token" --jq .token) \
         || err "gh api failed. Check gh auth and org admin permissions (need admin:org scope)."
-    if [[ -z "${token}" ]]; then
-        err "Registration token is empty. Check gh auth and org admin permissions."
-    fi
+    [[ -n "${token}" ]] || err "Registration token is empty. Check gh auth and org admin permissions."
     echo "${token}"
 }
 
@@ -1328,7 +1335,7 @@ install_host_artifact_freshness_cron() {
     log "Installing LOCAL runner host artifact-freshness cron..."
 
     if "${DRY_RUN}"; then
-        log "[DRY RUN] Would install local runner-host-artifact-freshness-check cron (every 30 min)."
+        log "[DRY RUN] Would install local runner-host-artifact-freshness-check cron (every 30 min) and the hook mount drift cron (every 15 min)."
         return 0
     fi
 
@@ -1349,14 +1356,20 @@ install_host_artifact_freshness_cron() {
     # the fleet; the fetch is part of the entry so the ref is not itself stale.
     local converge_line="*/30 * * * * cd ${repo_root} && git fetch --quiet origin dev && uv run python scripts/ci/check_runner_host_artifact_freshness.py --mode converge --ref origin/dev --runner-host ${RUNNER_HOST} --runner-host-dir ${RUNNER_HOST_DIR} >> ${log_dir}/converge.log 2>&1 # runner-host-hook-converge"
 
+    # OMN-22478: the hook mount drift check, tracked here. It reads the hook
+    # path each runner container EXECUTES (not the unused copy baked into the
+    # image) and alerts on a change in the finding count, as the host-only
+    # script it replaces did. That script's crontab entry (tag hook-mount-drift)
+    # is dropped below in the same write, so the alert has one source.
+    local drift_line="*/15 * * * * cd ${repo_root} && (uv run python -m omnibase_infra.nodes.node_deploy_runners.runtime_hook_mount_drift --hook-dir ${RUNNER_HOST_DIR}/docker/runners --container-match '^omninode-(runner-|deploy-runner$|verify-runner-|customer-plane-runner-)' --state-file ${log_dir}/hook-mount-drift.state --alert-env-file ${RUNNER_HOST_DIR}/.monitor-env --docker-timeout 60 --notify-timeout 20) >> ${log_dir}/hook-mount-drift.log 2>&1 # runner-host-hook-mount-drift"
+
     local existing
     existing=$(crontab -l 2>/dev/null || true)
     echo "${existing}" \
-        | grep -v 'runner-host-artifact-freshness-check' \
-        | grep -v 'runner-host-hook-converge' \
-        | { cat; echo "${cron_line}"; echo "${converge_line}"; } | crontab -
+        | grep -Ev 'runner-host-artifact-freshness-check|runner-host-hook-converge|runner-host-hook-mount-drift|# hook-mount-drift$' \
+        | { cat; echo "${cron_line}"; echo "${converge_line}"; echo "${drift_line}"; } | crontab -
 
-    log "Runner host artifact-freshness + hook-converge crons installed locally (every 30 minutes)."
+    log "Runner host artifact-freshness + hook-converge crons installed locally (every 30 minutes), hook mount drift every 15."
 }
 
 # ---------------------------------------------------------------------------
@@ -1389,17 +1402,29 @@ validate_add_services() {
     done
 }
 
+add_wait_target_idle() {
+    local name="${1}" waited=0
+    [[ "$(runner_container_state "${name}")" == "absent" ]] && return 0
+    until relabel_container_idle "${name}"; do
+        [[ "${waited}" -lt "${RELABEL_DRAIN_TIMEOUT_SECONDS}" ]] || return 1
+        sleep "${RELABEL_DRAIN_INTERVAL_SECONDS}"; waited=$((waited + RELABEL_DRAIN_INTERVAL_SECONDS))
+    done
+}
+
 add_services_deploy() {
     log "=== Additive deploy of: ${ADD_SERVICES} ==="
     validate_add_services
 
-    local reg_handle
-    if "${DRY_RUN}"; then
-        reg_handle="dry-run-handle"
-    else
-        # A brand-new container has NO cached registration to restore from, so
-        # unlike --rolling this path does need a real handle.
-        reg_handle="$(fetch_registration_token)"
+    # A brand-new container has NO cached registration to restore from, so
+    # unlike --rolling this path does need a real handle. It is the supplied one:
+    # this mode does not mint a token through gh (OMN-22604). The operator's
+    # command: gh api --method POST /orgs/OmniNode-ai/actions/runners/registration-token --jq .token > <token-file>
+    local reg_handle="dry-run-handle"
+    if ! "${DRY_RUN}"; then
+        reg_handle="${DEPLOY_RUNNER_TOKEN:-}"
+        # supplied_registration_token: --token-file when given, else DEPLOY_RUNNER_TOKEN.
+        [[ -z "${TOKEN_FILE}" ]] || reg_handle=$(<"${TOKEN_FILE}") || err "Cannot read --token-file=${TOKEN_FILE}."
+        [[ -n "${reg_handle//[[:space:]]/}" ]] || err "--add requires DEPLOY_RUNNER_TOKEN or --token-file with an org registration token (it mints none through gh). The operator mints one: gh api --method POST /orgs/${RUNNER_ORG}/actions/runners/registration-token --jq .token > <token-file>, then --token-file=<token-file>."
     fi
 
     rsync_artifacts
@@ -1441,20 +1466,21 @@ add_services_deploy() {
     # Both want the same treatment. This is the one place `--add` is allowed to
     # recreate, and it can never reach a general-pool runner -- those are
     # refused at flag-validation time, before this runs.
-    local name state flags
+    # IDLE FIRST (OMN-22604): `up -d` recreates a running container whose
+    # rendered config changed, and a not-online one is forced to recreate, so
+    # either could kill a running job. Each existing target must read idle on the
+    # container's own evidence (relabel_container_idle, fail closed); one that
+    # stays busy or unreadable is left running and the run ends non-zero. The
+    # probe is read-only, so --dry-run runs it too, as --rolling's busy probes do.
+    local name state flags rc=0
     for name in ${ADD_SERVICES}; do
-        flags="--no-deps"
-        if "${DRY_RUN}"; then
-            state="$(github_runner_state "${name}" 2>/dev/null || echo "unknown unknown")"
-        else
-            state="$(github_runner_state "${name}")"
+        if ! add_wait_target_idle "${name}"; then
+            warn "  ${name} stayed busy or unreadable for ${RELABEL_DRAIN_TIMEOUT_SECONDS}s -- left running and untouched; rerun when it is idle."
+            rc=1; continue
         fi
-        if [[ "${state%% *}" == "online" ]]; then
-            log "  ${name} is already registered and online -- converging without recreate."
-        else
-            log "  ${name} is not registered (state: ${state%% *}) -- recreating so it re-reads its env."
-            flags="${flags} --force-recreate"
-        fi
+        state="$(github_runner_state "${name}")"
+        [[ "${state%% *}" == "online" ]] && flags="--no-deps" || flags="--no-deps --force-recreate"
+        log "  ${name} reads ${state%% *} on GitHub -- compose up -d ${flags} (an online runner is converged without recreate; one not registered is recreated so it re-reads its env)."
 
         ssh_token_stdin "${reg_handle}" "
         set -euo pipefail
@@ -1470,7 +1496,6 @@ add_services_deploy() {
 
     # Service name == container_name == RUNNER_NAME for every non-pool runner
     # in the compose file, which is what makes this an identity, not a lookup.
-    local name rc=0
     for name in ${ADD_SERVICES}; do
         if "${DRY_RUN}"; then
             log "[DRY RUN] would wait for ${name} to come online."
@@ -1615,7 +1640,13 @@ runner_is_idle() {
     state=$(github_runner_state "${name}")
     status="${state%% *}"
     busy="${state##* }"
-    if [[ "${status}" != "online" ]] || [[ "${busy}" != "false" ]]; then
+    # OMN-22478: --retire-surplus sets IDLE_ACCEPTS_OFFLINE=1 so a RUNNING
+    # container whose listener is dead (GitHub "offline", e.g. a listener that
+    # exits "runner version is deprecated" while the entrypoint loops) can read
+    # idle. Only "offline" with busy "false" qualifies; "unknown" never does,
+    # and the Runner.Worker probe below stays mandatory, so an offline runner
+    # with a live job worker still reads busy.
+    if { [[ "${status}" != "online" ]] && [[ "${status}:${IDLE_ACCEPTS_OFFLINE:-0}" != "offline:1" ]]; } || [[ "${busy}" != "false" ]]; then
         return 1
     fi
 
@@ -1856,7 +1887,7 @@ surplus_runner_is_idle() {
     local rc=0
     container_is_running "${1}" || rc=$?
     case "${rc}" in
-        0) runner_is_idle "${1}" ;;
+        0) IDLE_ACCEPTS_OFFLINE=1 runner_is_idle "${1}" ;;
         1) return 0 ;;
         *) return 1 ;;
     esac

@@ -1398,11 +1398,14 @@ def test_the_cloud_canary_variable_points_at_the_cloud_fleet_label() -> None:
     assert declaration["revert_when"].strip()
 
 
-def test_the_canary_variable_is_read_ahead_of_the_docker_seam() -> None:
-    """Precedence is the whole design, and it is only true if it is written.
+def test_the_acl_proof_job_never_reads_the_cloud_canary_variable() -> None:
+    """OMN-22665: the one job class the canary governed is routed hosted again.
 
-    Read from the PARSED runs-on of the one job it governs, so a mention of the
-    variable in a comment elsewhere in the file cannot satisfy it.
+    The canary pointed ``rebuilt-postgres16-proof`` at the scale-to-zero cloud
+    fleet. From 2026-11-05T03:51Z no runner carrying the fleet label
+    registered, and every run's job sat queued; the policy's own revert
+    condition names exactly that observation. Read from the PARSED runs-on, so
+    a mention of the variable in a comment cannot satisfy it.
     """
     import yaml
 
@@ -1413,47 +1416,51 @@ def test_the_canary_variable_is_read_ahead_of_the_docker_seam() -> None:
     )
     runs_on = workflow["jobs"]["rebuilt-postgres16-proof"]["runs-on"]
 
-    canary = runs_on.index("OMNI_CLOUD_CANARY_RUNS_ON_JSON")
+    assert "OMNI_CLOUD_CANARY_RUNS_ON_JSON" not in runs_on
+    assert "omni-cloud-ci" not in runs_on
+
+    # The hosted fallbacks stay in their order, and the fork branch still comes
+    # first: this repository is public and a fork pull request must never reach
+    # a self-hosted runner of any kind.
+    fork = runs_on.index("OMNI_PUBLIC_PR_RUNS_ON_JSON")
     docker = runs_on.index("OMNI_DOCKER_CI_RUNS_ON_JSON")
     trusted = runs_on.index("OMNI_TRUSTED_CI_RUNS_ON_JSON")
-    assert canary < docker < trusted
-
-    # NEGATIVE CONTROL for the ordering above: the fork branch must still come
-    # first of all, because this repository is public and a fork pull request
-    # must never reach a self-hosted runner of any kind.
-    assert runs_on.index("OMNI_PUBLIC_PR_RUNS_ON_JSON") < canary
+    assert fork < docker < trusted
 
 
-def test_the_capacity_requester_cannot_resolve_onto_the_fleet_it_requests() -> None:
-    """The requester is hosted by literal, and that is load-bearing.
+def test_the_acl_proof_workflow_asks_no_cloud_fleet_for_capacity() -> None:
+    """A capacity request for a fleet nothing routes to is a job that cannot help.
 
-    A requester that resolved through any routing variable could be relocated
-    onto the scale-to-zero fleet it exists to start, which deadlocks: the job
-    that would ask for capacity is itself waiting for capacity.
+    The request job reported success on every run while nothing registered, so
+    it hid the cause from anyone reading the run's first job. No job in the
+    workflow may name the cloud fleet's scaler or its role variable, and the
+    proof job carries no ``needs`` on a requester.
     """
     import yaml
 
-    workflow = yaml.safe_load(
-        (
-            REPO_ROOT / ".github" / "workflows" / "application-acl-postgres16-proof.yml"
-        ).read_text(encoding="utf-8")
-    )
-    requester = workflow["jobs"]["request-cloud-capacity"]
+    text = (
+        REPO_ROOT / ".github" / "workflows" / "application-acl-postgres16-proof.yml"
+    ).read_text(encoding="utf-8")
+    for token in (
+        "omninode-ci-runner-scaler",
+        "AWS_CI_RUNNER_SCALER_ROLE_NAME",
+        "request-cloud-capacity",
+        "id-token",
+    ):
+        assert token not in text, f"{token} is back in the ACL proof workflow"
 
-    assert requester["runs-on"] == "ubuntu-latest"
-    assert "${{" not in str(requester["runs-on"])
-    assert workflow["jobs"]["rebuilt-postgres16-proof"]["needs"] == (
-        "request-cloud-capacity"
-    )
+    workflow = yaml.safe_load(text)
+    assert set(workflow["jobs"]) == {"rebuilt-postgres16-proof"}
+    assert "needs" not in workflow["jobs"]["rebuilt-postgres16-proof"]
 
 
-def test_the_requester_file_is_allowlisted_for_its_bare_hosted_pin() -> None:
-    """Otherwise the local-workflow audit reports it as a routing violation."""
+def test_the_acl_proof_file_holds_no_bare_hosted_pin_allowlist_entry() -> None:
+    """The workflow has no literal hosted pin left, so its allowlist row is stale."""
     import yaml
 
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
     paths = {entry["path"] for entry in policy["hosted_runner_allowlist"]}
-    assert ".github/workflows/application-acl-postgres16-proof.yml" in paths
+    assert ".github/workflows/application-acl-postgres16-proof.yml" not in paths
 
 
 def test_public_pr_runner_variable_drift_is_reported_at_org_scope(

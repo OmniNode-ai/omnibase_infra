@@ -67,6 +67,15 @@ profiles:
         source:
           source_type: env
           source_path: GEMINI_API_KEY
+      # OMN-22650: the TypeSafe Jev typed-decision rung (cloud-typesafe-jev in
+      # omnimarket bifrost_delegation.yaml) declares secret_ref
+      # llm.typesafe.api_key. The value lives in the secret store at
+      # /shared/env/LLM_TYPESAFE_API_KEY (dev) and reaches the container through
+      # x-runtime-env; the value is never committed.
+      - logical_name: llm.typesafe.api_key
+        source:
+          source_type: env
+          source_path: LLM_TYPESAFE_API_KEY
       # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
       # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
       # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
@@ -187,6 +196,18 @@ profiles:
         source:
           source_type: env
           source_path: GITHUB_WEBHOOK_SECRET
+      # OMN-22685: the Linear key for node_create_ticket and node_linear_ticket_write_effect,
+      # which lab lanes reach over the bus (`onex ticket`). The handler resolves it through
+      # contract_secret_ref(_CONTRACT_PATH, "LINEAR_API_KEY"), the LITERAL name from the node's own
+      # contract.yaml secrets: block, the same shape as SLACK_BOT_TOKEN and ONEXBOT_OCC_* above.
+      # Unmapped, this lane's enable_convention_fallback: false made every lab ticket write
+      # terminate secret_unavailable (linear_api_key_unresolved) while the container env already
+      # held the key (docker-compose.infra.yml, x-runtime-env). Source of truth: secret store key
+      # dev:/shared/env/LINEAR_API_KEY. The value never appears here.
+      - logical_name: LINEAR_API_KEY
+        source:
+          source_type: env
+          source_path: LINEAR_API_KEY
     services:
       main:
         runtime_id: dev-main
