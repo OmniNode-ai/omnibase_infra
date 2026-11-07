@@ -504,6 +504,8 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
         "lane_drift_and_stalls",
         "brief_quality_vs_outcome",
         "subagent_waste",
+        # OMN-22478: the overlay store holds the same grant.
+        "overlay_store",
     ):
         work_question_declared = {
             privilege

@@ -31,9 +31,19 @@ handler_routing:
         name: ModelDeployRunnersRequest
         module: omnibase_infra.models.model_deploy_runners_request
       output_events: [ModelDeployRunnersResult]
+    - operation: runner.hook-mount.check
+      handler:
+        name: HandlerRunnerHookMountDrift
+        module: omnibase_infra.handlers.handler_runner_hook_mount_drift
+      event_model:
+        name: ModelRunnerHookMountDriftRequest
+        module: omnibase_infra.models.model_runner_hook_mount_drift_request
+      output_events: [ModelRunnerHookMountDriftResult]
 capabilities:
   - name: runner.tmp.prepare
     description: Prepare normalized Compose TMPDIR bind sources and refuse failed readback.
+  - name: runner.hook-mount.check
+    description: Read the hook path each runner container executes and compare it with the host copy (OMN-22478).
 metadata:
   ticket: OMN-19998
   description: "Prepare and verify declared runner TMPDIR binds before registration or recreation."
