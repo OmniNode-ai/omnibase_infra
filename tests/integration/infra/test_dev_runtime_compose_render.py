@@ -210,7 +210,7 @@ def _docker_compose_available() -> bool:
     return result.returncode == 0
 
 
-# OMN-21288 folds five of the six standalone writers into the dev runtime: the
+# OMN-21288 folds the six standalone writers into the dev runtime: the
 # committed policy env points their compose profiles at retired `folded-*`
 # names, so a default render omits them. The writer-definition assertions in
 # this file are about the unfolded definitions, so they render with the
@@ -218,6 +218,7 @@ def _docker_compose_available() -> bool:
 _UNFOLDED_WRITER_PROFILES: dict[str, str] = {
     f"DEV_RUNTIME_MAIN_PROJECTION_{name}_WRITER_{kind}_PROFILE": kind.lower()
     for name in (
+        "DELEGATION",
         "LIVE_EVENTS",
         "REGISTRATION",
         "SAVINGS",
