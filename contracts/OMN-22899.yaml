@@ -1,0 +1,38 @@
+schema_version: '1.0.0'
+ticket_id: OMN-22899
+title: 'The view seam readings vendor grant moves to omnibase_infra so omnimarket#4904 goes green'
+summary: 'omnibase_infra vendors the view_seam_readings migrations and grants tenant_projection_writer SELECT, INSERT and UPDATE on public.view_seam_readings, declared in the instances and the rendered catalogs.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-22899-1
+    statement: The topology instances and rendered catalogs grant tenant_projection_writer SELECT, INSERT and UPDATE on public.view_seam_readings.
+    acceptance:
+      - id: AC22899001
+        statement: Every topology instance and database topology catalog carries exactly one view_seam_readings grant for tenant_projection_writer with SELECT, INSERT and UPDATE.
+      - id: AC22899002
+        statement: With the base branch's dev topology instance put back, the grant test fails.
+evidence_requirements:
+  - kind: tests
+    description: The grant test passes on the branch (12 passed on h053) and fails for the dev topology instance taken from origin/dev (1 failed, 11 passed).
+    command: uv run --frozen pytest tests/unit/test_view_seam_readings_grant.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: Every instance and catalog carries the view seam readings grant (12 passed on h053)
+    source: generated
+    binds_ac: [AC22899001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_view_seam_readings_grant.py -q --no-cov
+  - id: dod-002
+    description: The dev topology instance of the base branch carries no such grant (grant test 1 failed, 11 passed on h053 with that file taken from origin/dev)
+    source: generated
+    binds_ac: [AC22899002]
+    checks:
+      - check_type: command
+        check_value: 'grep -rq view_seam_readings src/omnibase_infra/topology/instances'

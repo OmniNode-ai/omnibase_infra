@@ -151,6 +151,7 @@ options:
   --boot-timeout <s>  seconds to allow the slot to become ready. Default 2400.
   --lock-timeout <s>  seconds to wait for the slot and pool-build locks.
                       Default 5400, which must exceed one full build.
+  --composed-omnimarket <path>  layer this omnimarket worktree's HEAD over the slot's runtime image (OMN-22863)
   --plan-only         do every check and refusal, print what WOULD be built,
                       and open no connection, build nothing and start nothing.
   -h, --help          this text.
@@ -171,6 +172,7 @@ BUILD_TIMEOUT=3600
 BOOT_TIMEOUT=2400
 LOCK_TIMEOUT=5400
 PLAN_ONLY=0
+COMPOSED_OMNIMARKET=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -182,6 +184,7 @@ while [[ $# -gt 0 ]]; do
         --build-timeout)   shift || usage; [[ $# -gt 0 ]] || usage; BUILD_TIMEOUT="$1" ;;
         --boot-timeout)    shift || usage; [[ $# -gt 0 ]] || usage; BOOT_TIMEOUT="$1" ;;
         --lock-timeout)    shift || usage; [[ $# -gt 0 ]] || usage; LOCK_TIMEOUT="$1" ;;
+        --composed-omnimarket) shift || usage; [[ $# -gt 0 ]] || usage; COMPOSED_OMNIMARKET="$1" ;;
         --with-gateway)    WITH_GATEWAY=1 ;;
         --plan-only)       PLAN_ONLY=1 ;;
         -h|--help)         usage ;;
@@ -260,8 +263,7 @@ ONEX_DEPLOY_REASON="${REASON}" \
 # image is a false pass waiting to happen -- refuse rather than label it.
 # -----------------------------------------------------------------------------
 [[ -d "${WORKTREE}" ]] || fail "${EXIT_USAGE}" "worktree '${WORKTREE}' does not exist."
-git -C "${WORKTREE}" rev-parse --git-dir >/dev/null 2>&1 \
-    || fail "${EXIT_USAGE}" "'${WORKTREE}' is not a git worktree."
+git -C "${WORKTREE}" rev-parse --git-dir >/dev/null 2>&1 || fail "${EXIT_USAGE}" "'${WORKTREE}' is not a git worktree."
 
 TARGET_DIRT="$(git -C "${WORKTREE}" status --porcelain)"
 if [[ -n "${TARGET_DIRT}" ]]; then
@@ -283,8 +285,7 @@ log "target ${TARGET_REPO} @ ${TARGET_COMMIT} (${TARGET_BRANCH}), clean."
 # normal shape here and building the target's branch against canonical siblings
 # would test a combination that exists nowhere.
 OMNI_HOME_RESOLVED="${OMNI_HOME:-}"
-[[ -n "${OMNI_HOME_RESOLVED}" ]] || fail "${EXIT_USAGE}" \
-    "OMNI_HOME must be set; the sibling repositories are resolved from it."
+[[ -n "${OMNI_HOME_RESOLVED}" ]] || fail "${EXIT_USAGE}" "OMNI_HOME must be set; the sibling repositories are resolved from it."
 TICKET_DIR="$(dirname "${WORKTREE}")"
 
 declare -A SIBLING_SRC=()
@@ -424,8 +425,7 @@ fi
 # isolated snapshot exists to remove.
 # -----------------------------------------------------------------------------
 log "staging a slot-private snapshot into ${STAGING_ROOT} ..."
-[[ ! -f "${TENANT_STATE_DIR}/credential.env" ]] \
-    || fail "${EXIT_PROVENANCE_MISMATCH}" "the prior slot tenant must be offboarded by teardown before rebuilding."
+[[ ! -f "${TENANT_STATE_DIR}/credential.env" ]] || fail "${EXIT_PROVENANCE_MISMATCH}" "the prior slot tenant must be offboarded by teardown before rebuilding."
 rm -rf "${STAGING_ROOT}"
 mkdir -p "${STAGING_ROOT}" "${SLOT_ENV_DIR}" "${TENANT_STATE_DIR}"
 chmod 700 "${SLOT_ENV_DIR}"
@@ -558,8 +558,7 @@ log "first-party audit build context for this slot: ${SLOT_AUDIT_CONTEXT}"
 # installs no omnimarket). The committed file is an empty-ladder placeholder; the
 # slot gets the ladder from the omnimarket snapshot staged above, as
 # stage_workspace.sh does for the declared lanes.
-cp "${STAGING_ROOT}/repo/workspace/sibling-repos/omnimarket/src/omnimarket/configs/routing_tiers.yaml" \
-    "${STAGING_ROOT}/repo/workspace/routing_tiers.yaml"
+cp "${STAGING_ROOT}/repo/workspace/sibling-repos/omnimarket/src/omnimarket/configs/routing_tiers.yaml" "${STAGING_ROOT}/repo/workspace/routing_tiers.yaml"
 
 TARGET_SNAPSHOT_DIGEST="$(snapshot_digest "${STAGING_ROOT}/repo")"
 declare -A SIBLING_SNAPSHOT_DIGEST=()
@@ -751,8 +750,7 @@ if [[ "${WITH_GATEWAY}" == "1" ]]; then
     # same immutable local image even if a shared tag moves during the build.
     ONEX_API_IMAGE="$(docker image inspect --format '{{.Id}}' "${ONEX_API_IMAGE:?ONEX_API_IMAGE must be set}")" \
         || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image is not present locally."
-    [[ "${ONEX_API_IMAGE}" =~ ^sha256:[0-9a-f]{64}$ ]] \
-        || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image did not resolve to an immutable digest."
+    [[ "${ONEX_API_IMAGE}" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image did not resolve to an immutable digest."
     export ONEX_API_IMAGE
     docker run --rm --network none -i -e KAFKA_TOPIC_NAMESPACE \
         --entrypoint python3 "${ONEX_API_IMAGE}" - <<'PYIMAGE' \
@@ -772,8 +770,7 @@ fi
 # ONEX_WORKSPACE_CONFIG_ROOT); a slot with none is refused before any build.
 # shellcheck source=./compose_files.sh
 source "${SCRIPT_DIR}/compose_files.sh"
-resolve_lane_overlay_dir "${COMPOSE_PROJECT}" || fail "${EXIT_USAGE}" \
-    "no lane overlay for the slot's compose project (see the error above)."
+resolve_lane_overlay_dir "${COMPOSE_PROJECT}" || fail "${EXIT_USAGE}" "no lane overlay for the slot's compose project (see the error above)."
 
 SNAPSHOT_DOCKER="${STAGING_ROOT}/repo/docker"
 COMPOSE_FILES=(
@@ -840,8 +837,7 @@ match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
 print(match.group(1) if match else "")
 PYVER
 )"
-[[ -n "${RUNTIME_VERSION}" && "${RUNTIME_VERSION}" != "0.1.0" ]] || fail "${EXIT_BUILD_FAILED}" \
-    "could not read a real RUNTIME_VERSION from the snapshot's pyproject.toml
+[[ -n "${RUNTIME_VERSION}" && "${RUNTIME_VERSION}" != "0.1.0" ]] || fail "${EXIT_BUILD_FAILED}" "could not read a real RUNTIME_VERSION from the snapshot's pyproject.toml
   (got '${RUNTIME_VERSION}'). A workspace build refuses the placeholder, and
   stamping one would put a false version on every proof packet the image
   produces."
@@ -872,6 +868,17 @@ if ! timeout "${BUILD_TIMEOUT}" env -C "${STAGING_ROOT}/repo" \
         docker compose -p "${COMPOSE_PROJECT}" "${COMPOSE_FILES[@]}" "${PROFILES[@]}" \
         build --progress=plain "${BUILD_ARGS[@]}" "${SLOT_BUILD_SERVICES[@]}"; then
     fail "${EXIT_BUILD_FAILED}" "the workspace build failed or timed out."
+fi
+# OMN-22863: the runtime image installs no omnimarket (OMN-21279), so a slot built from
+# the infra target alone names no container that runs it and an omnimarket proof can never
+# read its identity. With --composed-omnimarket, omnimarket's Dockerfile.runtime is built
+# over the slot's runtime image from a git archive of the worktree's HEAD (a working tree
+# cannot reach the build, as with the siblings above) and tagged as the image of every slot
+# service, so the `up --no-build` below starts every service on it. The project label lets
+# the teardown's image listing find and remove it with the slot.
+if [[ -n "${COMPOSED_OMNIMARKET}" ]]; then
+    git -C "${COMPOSED_OMNIMARKET}" archive --format=tar HEAD | docker build -f Dockerfile.runtime --build-arg "INFRA_RUNTIME_IMAGE=${COMPOSE_PROJECT}-omninode-runtime:latest" --build-arg "OMNIMARKET_VCS_REF=$(git -C "${COMPOSED_OMNIMARKET}" rev-parse HEAD)" --label "com.docker.compose.project=${COMPOSE_PROJECT}" -t "${COMPOSE_PROJECT}-omnimarket-runtime:latest" - || fail "${EXIT_BUILD_FAILED}" "the composed omnimarket image did not build."
+    for svc in "${SLOT_BUILD_SERVICES[@]}"; do docker image inspect "${COMPOSE_PROJECT}-${svc}:latest" >/dev/null || fail "${EXIT_BUILD_FAILED}" "slot service ${svc} has no built image for the composed one to replace."; docker tag "${COMPOSE_PROJECT}-omnimarket-runtime:latest" "${COMPOSE_PROJECT}-${svc}:latest" || fail "${EXIT_BUILD_FAILED}" "could not tag the composed image for ${svc}."; done
 fi
 pool_build_lock_release
 
@@ -968,8 +975,7 @@ while [[ $(date +%s) -lt ${deadline} ]]; do
     fi
     sleep 15
 done
-[[ "${ready}" == "1" ]] || fail "${EXIT_BOOT_FAILED}" \
-    "the slot runtime did not become ready on port ${MAIN_PORT} within ${BOOT_TIMEOUT}s."
+[[ "${ready}" == "1" ]] || fail "${EXIT_BOOT_FAILED}" "the slot runtime did not become ready on port ${MAIN_PORT} within ${BOOT_TIMEOUT}s."
 
 if [[ "${WITH_GATEWAY}" == "1" ]]; then
     # Probe the gateway's own transform, using the same environment it serves

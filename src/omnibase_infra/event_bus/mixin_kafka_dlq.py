@@ -58,6 +58,18 @@ from omnibase_infra.event_bus.topic_constants import (
     get_dlq_topic_for_original,
     is_dlq_topic,
 )
+from omnibase_infra.models.event_bus.model_dlq_replay_headers import (
+    REPLAY_COUNT_HEADER as _REPLAY_COUNT_HEADER,
+)
+from omnibase_infra.models.event_bus.model_dlq_replay_headers import (
+    REPLAY_COUNT_PARSE_FAILURE_SENTINEL as _REPLAY_COUNT_PARSE_FAILURE_SENTINEL,
+)
+from omnibase_infra.models.event_bus.model_dlq_replay_headers import (
+    envelope_consumer_group,
+)
+from omnibase_infra.models.event_bus.model_dlq_replay_headers import (
+    extract_replay_count_from_raw_headers as _extract_replay_count_from_raw_headers,
+)
 from omnibase_infra.topics import SUFFIX_PLATFORM_DLQ_MESSAGE
 from omnibase_infra.utils import sanitize_error_message
 from omnibase_infra.utils.util_dlq_credential_redaction import (
@@ -110,22 +122,6 @@ DlqCallbackType = Callable[[ModelDlqEvent], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
-# Header ``node_dlq_replay_effect.engine_dlq_replay.DLQProducer.replay_message``
-# stamps onto a message it republishes to its original topic. Must match that
-# producer's header name verbatim -- this is the sole read side of that
-# contract for the raw Kafka header shape. ``EventBusKafka._kafka_headers_to_model``
-# reads the same constant to populate ``ModelEventHeaders.retry_count`` for the
-# parsed-message shape (see the isinstance branch below).
-_REPLAY_COUNT_HEADER: str = "x-replay-count"
-
-# OMN-14551 defect 4: a malformed/negative/absent-value replay-count header
-# must NOT reset replay lineage to 0 -- that would silently reopen the
-# unbounded-replay amplification the header exists to bound. Any
-# ``max_replay_count`` in practice (default 5) is tiny; this sentinel
-# guarantees ``retry_count >= max_replay_count`` trips on the very next
-# replay-eligibility check, forcing quarantine instead of blind replay.
-_REPLAY_COUNT_PARSE_FAILURE_SENTINEL: int = 2**31 - 1
-
 # OMN-17896: what a DLQ record writes when the failed message's value could not
 # be established. NEVER an empty string: the replay engine reads this field
 # back and publishes it to the original topic, so an empty string there becomes
@@ -135,95 +131,6 @@ _REPLAY_COUNT_PARSE_FAILURE_SENTINEL: int = 2**31 - 1
 # it for exactly that reason. Same shape as the ``"<decode_failed>"`` and
 # ``"<non-serializable>"`` markers this module already writes.
 DLQ_UNREADABLE_VALUE_MARKER: str = "<unreadable_value>"
-
-
-def _extract_replay_count_from_raw_headers(raw_msg: object) -> int:
-    """Read the replay lineage count off a DLQ-bound message, if present.
-
-    OMN-14551: a message replayed by ``node_dlq_replay_effect`` carries an
-    ``x-replay-count`` header when it lands back on its original topic. If it
-    fails again there, ``_publish_raw_to_dlq``/``_publish_to_dlq`` must carry
-    that count forward into the new DLQ record's ``retry_count`` field so
-    ``should_replay``'s ``retry_count >= max_replay_count`` guard is
-    reachable -- otherwise every re-published copy resets to 0 and the guard
-    can never trip (the live DLQ amplification incident this fixes).
-
-    Two ``raw_msg.headers`` shapes are recognized, matching the two shapes
-    the four production ``_publish_raw_to_dlq`` call sites actually pass:
-
-    1. Raw Kafka ``list[tuple[str, bytes]]`` header shape (a real
-       ``ConsumerRecord`` or a test double of one) -- the deserialization-
-       error call site (``EventBusKafka._consume_loop``). Read directly off
-       the ``x-replay-count`` entry.
-    2. A parsed ``ModelEventHeaders`` instance -- the ``handler_exception``
-       call site (``handler_wiring.py``) and the five
-       ``event_bus_subcontract_wiring.py`` call sites, all of which pass a
-       ``ModelEventMessage``/``ProtocolEventMessage`` as ``raw_msg`` once the
-       consume loop has already deserialized it. Its ``.headers.retry_count``
-       was itself already populated from ``x-replay-count`` by
-       ``EventBusKafka._kafka_headers_to_model`` at consume time, so it is
-       read directly here rather than re-parsed.
-
-    Any other ``raw_msg.headers`` shape (missing, unrecognized type) has no
-    replay lineage to read and defaults to 0 -- the pre-existing
-    first-failure behavior.
-    """
-    headers = getattr(raw_msg, "headers", None)
-
-    if isinstance(headers, ModelEventHeaders):
-        retry_count = headers.retry_count
-        if isinstance(retry_count, int) and not isinstance(retry_count, bool):
-            if retry_count >= 0:
-                return retry_count
-            logger.warning(
-                "Negative ModelEventHeaders.retry_count %d on raw DLQ "
-                "message, failing closed to stop replay",
-                retry_count,
-            )
-            return _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-        logger.warning(
-            "Invalid ModelEventHeaders.retry_count %r on raw DLQ message, "
-            "failing closed to stop replay",
-            retry_count,
-        )
-        return _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-
-    if not isinstance(headers, list | tuple):
-        return 0
-    for entry in headers:
-        if not isinstance(entry, list | tuple) or len(entry) != 2:
-            continue
-        key, value = entry
-        if key != _REPLAY_COUNT_HEADER:
-            continue
-        if value is None:
-            logger.warning(
-                "Empty %s header value on raw DLQ message, failing closed "
-                "to stop replay",
-                _REPLAY_COUNT_HEADER,
-            )
-            return _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-        try:
-            decoded = value.decode("utf-8") if isinstance(value, bytes) else str(value)
-            parsed = int(decoded)
-        except (ValueError, TypeError, UnicodeDecodeError):
-            logger.warning(
-                "Malformed %s header %r on raw DLQ message, failing closed "
-                "to stop replay",
-                _REPLAY_COUNT_HEADER,
-                value,
-            )
-            return _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-        if parsed < 0:
-            logger.warning(
-                "Negative %s header value %d on raw DLQ message, failing "
-                "closed to stop replay",
-                _REPLAY_COUNT_HEADER,
-                parsed,
-            )
-            return _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-        return parsed
-    return 0
 
 
 class MixinKafkaDlq:
@@ -463,6 +370,7 @@ class MixinKafkaDlq:
             "correlation_id": str(correlation_id),
             "retry_count": failed_message.headers.retry_count,
             "error_type": error_type,
+            "consumer_group": envelope_consumer_group(consumer_group),
         }
         if redacted_fields:
             dlq_payload["redacted_fields"] = list(redacted_fields)
@@ -511,6 +419,7 @@ class MixinKafkaDlq:
                 "correlation_id": str(correlation_id),
                 "retry_count": failed_message.headers.retry_count,
                 "error_type": error_type,
+                "consumer_group": envelope_consumer_group(consumer_group),
                 "serialization_fallback": True,
             }
             # OMN-18385: carry the redaction record onto the fallback shape too,
@@ -974,6 +883,7 @@ class MixinKafkaDlq:
             "correlation_id": str(correlation_id),
             "retry_count": replay_count,
             "error_type": error_type,
+            "consumer_group": envelope_consumer_group(consumer_group),
         }
         if redacted_fields:
             dlq_payload["redacted_fields"] = list(redacted_fields)
@@ -1024,6 +934,7 @@ class MixinKafkaDlq:
                 "correlation_id": str(correlation_id),
                 "retry_count": replay_count,
                 "error_type": error_type,
+                "consumer_group": envelope_consumer_group(consumer_group),
                 "serialization_fallback": True,
             }
             # OMN-18385: carry the redaction record onto the fallback shape too,

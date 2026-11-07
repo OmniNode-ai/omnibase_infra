@@ -103,7 +103,10 @@ class DlqConsumerDrainState:
 
     ``replayed_sources`` is OMN-20589: the source coordinates this consumer has
     already replayed, so the other dead letters of the same source record are
-    completed rather than replayed again. It lives here for the same reason:
+    completed rather than replayed again. OMN-22822: a replay is addressed to
+    the one consumer group that failed the record, so a coordinate is
+    remembered per target group (``None`` is an unaddressed replay, which
+    reached every group). It lives here for the same reason:
     the three dispatchers share the consumer, and siblings of one source record
     can arrive in different runs.
     """
@@ -118,14 +121,31 @@ class DlqConsumerDrainState:
         self.halted: dict[int, int] = {}
         # (original topic, partition, offset) of every source record replayed,
         # oldest first, bounded by _MAX_REPLAYED_SOURCES.
-        self.replayed_sources: OrderedDict[tuple[str, int, str], None] = OrderedDict()
+        self.replayed_sources: OrderedDict[
+            tuple[tuple[str, int, str], str | None], None
+        ] = OrderedDict()
 
-    def already_replayed(self, source: tuple[str, int, str]) -> bool:
-        return source in self.replayed_sources
+    def already_replayed(
+        self, source: tuple[str, int, str], group: str | None = None
+    ) -> bool:
+        """Whether a confirmed replay already reached ``group`` for ``source``.
 
-    def mark_replayed(self, source: tuple[str, int, str]) -> None:
-        self.replayed_sources[source] = None
-        self.replayed_sources.move_to_end(source)
+        An unaddressed replay (``group`` None) reached every group, so it also
+        answers a dead letter that names one. An addressed replay answers only
+        its own group: another group's dead letter for the same source record
+        still needs its own replay (OMN-22822).
+        """
+        return (source, group) in self.replayed_sources or (
+            source,
+            None,
+        ) in self.replayed_sources
+
+    def mark_replayed(
+        self, source: tuple[str, int, str], group: str | None = None
+    ) -> None:
+        key = (source, group)
+        self.replayed_sources[key] = None
+        self.replayed_sources.move_to_end(key)
         while len(self.replayed_sources) > _MAX_REPLAYED_SOURCES:
             self.replayed_sources.popitem(last=False)
 
@@ -1071,11 +1091,22 @@ class HandlerDlqReplay:
         # runtime tick into 63 copies on the dev-202 lane (1/2/4/8/16/32 by
         # x-replay-count). Refusal is still decided per dead letter above, so a
         # sibling at the cap is quarantined, never skipped.
+        #
+        # OMN-22822: a replay is now addressed to the ONE consumer group that
+        # failed the record (``x-replay-target-group``), so it no longer
+        # re-delivers to the siblings' groups. The duplicate test is therefore
+        # per (source record, group): a sibling dead letter written by a
+        # DIFFERENT group is not answered by this replay and is replayed to its
+        # own group; a sibling of the SAME group (two subscriptions in one
+        # group) still is. A dead letter that names no group was replayed to
+        # everyone, and answers every sibling, exactly as before.
         source = _source_coordinate(message)
-        if source is not None and state.already_replayed(source):
+        if source is not None and state.already_replayed(
+            source, message.consumer_group
+        ):
             detail = (
                 f"source record {source[0]}/{source[1]}@{source[2]} was already "
-                "replayed for another subscriber's dead letter; that replay "
+                "replayed for this dead letter's subscriber; that replay "
                 "re-delivered it here too (OMN-20589)"
             )
             if self._config.dry_run:
@@ -1141,7 +1172,7 @@ class HandlerDlqReplay:
             )
 
         if source is not None:
-            state.mark_replayed(source)
+            state.mark_replayed(source, message.consumer_group)
         await self._record(message, EnumReplayStatus.COMPLETED, replay_correlation_id)
         return ModelDlqReplayResult(
             correlation_id=message.correlation_id,

@@ -1,0 +1,42 @@
+schema_version: 1.0.0
+ticket_id: OMN-22844
+title: A replayed dead letter returns only to the subscriber that failed it
+summary: The dead-letter replay node replayed a dead letter by publishing the source record back onto its original topic, where every consumer group subscribed to that topic received it again, not only the group whose handler failed it. The dead-letter envelope now records the failing consumer group, the replay stamps it on the record as the x-replay-target-group header, and a consumer group that is not the named one skips the record and commits past it. A record without the header, and a dead letter written before the envelope carried the group, behave as before. The OMN-20589 duplicate test is now per source record and group.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22844-replay-to-failed-subscriber
+    statement: A replayed dead letter is delivered only to the consumer group that failed it.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a dead letter written by one of two consumer groups for the same source record is replayed with the x-replay-target-group header naming that group, and the other group skips the replayed record while the named group processes it, in a test from a recorded two-group fixture with a failing control -- falsifier: uv run pytest of the replay-to-failed-subscriber test'
+      - id: AC2
+        statement: 'AC2: a record without the header, and a dead letter without a consumer group, behave exactly as before -- falsifier: the headerless and legacy-envelope cases of the same test file'
+evidence_requirements:
+  - kind: tests
+    description: The recorded two-group dead letters, the envelope, the replay header, the consumer skip and process, the unchanged headerless record, and the closed replay chain that stays with the failing groups
+    command: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn22822_replay_to_failed_subscriber.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22844-replay-to-failed-subscriber
+    description: Dead letters written by two consumer groups for one source record are replayed each with its own group as x-replay-target-group; the other group skips the record at INFO and commits past it, the named group processes it, and a record with no such header is processed by every group.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn22822_replay_to_failed_subscriber.py -q --no-cov
+        cwd: .
+  - id: dod-omn22844-deploy
+    description: Deploy-scope probe the hosted runner can run, a read of the changed file at the pushed head. The package carries the replay target header from the one shared constant and its dead-letter envelope writer records the failing consumer group, so a replay produced there is addressed to the subscriber that failed it.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: grep -c 'x-replay-target-group' src/omnibase_infra/models/event_bus/model_dlq_replay_headers.py && gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/event_bus/model_dlq_replay_headers.py?ref=18dfa367d2d0c2e1eac483b21aa5902e37df309a --jq '.content' | base64 -d | grep -c 'x-replay-target-group'
