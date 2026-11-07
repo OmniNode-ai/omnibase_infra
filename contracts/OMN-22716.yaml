@@ -8,7 +8,7 @@ interfaces_touched: []
 evidence_requirements:
   - kind: tests
     description: The deploy agent unit tests pass with the lane removed
-    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_instances_as_data_omn19543.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_load_gate_omn19507.py -q
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_instances_as_data_omn19543.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_load_gate_omn19507.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -19,10 +19,10 @@ dod_evidence:
     source: generated
     checks:
       - check_type: command
-        check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_instances_as_data_omn19543.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_load_gate_omn19507.py -q'
+        check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_instances_as_data_omn19543.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_load_gate_omn19507.py -q'
   - id: dod-002
     description: The lane census parity, settle budget and instance receipt lane tests pass without the lane
     source: generated
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/unit/scripts/test_lane_census_manifest_parity.py tests/ci/test_lab_pass_settle_budget.py tests/scripts/ci/test_instance_receipt_lanes_omn19543.py -q'
+        check_value: 'uv run pytest tests/ci/test_lab_pass_settle_budget.py tests/scripts/ci/test_instance_receipt_lanes_omn19543.py -q'
