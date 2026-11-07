@@ -24,7 +24,8 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO = "OmniNode-ai/omnibase_infra"
 SOURCE_PATHS = (
-    "src/omnibase_infra/handlers/handler_developer_principal_plan.py",
+    "src/omnibase_infra/handlers/handler_developer_principal_plan/handler.py",
+    "src/omnibase_infra/handlers/handler_developer_principal_plan/contract.yaml",
     "deploy/local/developer-principal-grants.yaml",
     "deploy/local/machine-principal-bindings.yaml",
     "deploy/local/machine-principal-derived-grants.json",
