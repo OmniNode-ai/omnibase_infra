@@ -18,6 +18,7 @@ alarm host failing to resolve the broker says nothing about the broker.
 
 from __future__ import annotations
 
+import errno
 import socket
 import threading
 
@@ -154,3 +155,58 @@ def test_the_real_probe_reads_a_closed_port_as_an_alarm() -> None:
         port = probe_socket.getsockname()[1]
     report = evaluate_broker_listener(f"127.0.0.1:{port}", probe=probe_tcp_listener)
     assert report.outcome is EnumConditionOutcome.ALARM
+
+
+# ---------------------------------------------------------------------------
+# Recorded rows (friction class 173, OMN-19998): 2026-10-23 to 2026-11-02 the
+# alarm fired three times, twice on a refused connect and once on a network
+# that was unreachable from the alarm host. Each was a broker the dev-lane
+# clients could not reach, so each stays an ALARM: an unreachable network is
+# not the unresolvable-name case and must not read INDETERMINATE.
+# ---------------------------------------------------------------------------
+
+RECORDED_BOOTSTRAP = "192.0.2.10:19092"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused"),
+        OSError(errno.ENETUNREACH, "Network is unreachable"),
+    ],
+    ids=["recorded-refused", "recorded-network-unreachable"],
+)
+def test_recorded_rows_stay_alarms(exc: OSError) -> None:
+    report = evaluate_broker_listener(
+        RECORDED_BOOTSTRAP, probe=_RaisingProbe(exc), timeout_seconds=10.0
+    )
+    assert report.outcome is EnumConditionOutcome.ALARM, report.evidence
+    (alarm,) = report.alarms
+    assert alarm.detail.startswith(
+        f"the dev broker's external listener {RECORDED_BOOTSTRAP} did not answer "
+        "a Kafka ApiVersions request within 10s: "
+        f"{RECORDED_BOOTSTRAP} ({type(exc).__name__}: "
+    ), alarm.detail
+    assert exc.strerror is not None
+    assert exc.strerror in alarm.detail
+
+
+def test_an_unreachable_network_beside_a_refusal_is_still_an_alarm() -> None:
+    """Falsifier: no address answers, none fails to resolve, so it is an ALARM."""
+
+    def probe(host: str, port: int, *, timeout: float) -> None:
+        if host == "192.0.2.10":
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+        raise OSError(errno.ENETUNREACH, "Network is unreachable")
+
+    report = evaluate_broker_listener("192.0.2.10:19092,192.0.2.11:19092", probe=probe)
+    assert report.outcome is EnumConditionOutcome.ALARM, report.evidence
+    assert "Connection refused" in report.alarms[0].detail
+    assert "Network is unreachable" in report.alarms[0].detail
+
+
+def test_recorded_addresses_answering_clear_the_alarm() -> None:
+    """Positive control: the same bootstrap with an answering listener is OK."""
+    report = evaluate_broker_listener(RECORDED_BOOTSTRAP, probe=_probe_answering)
+    assert report.outcome is EnumConditionOutcome.OK
+    assert report.alarms == ()

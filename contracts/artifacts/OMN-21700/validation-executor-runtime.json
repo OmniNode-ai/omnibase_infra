@@ -1,0 +1,101 @@
+{
+  "_provenance": {
+    "source": "h101 local RuntimeLocal in-memory event bus; uv run --frozen onex node node_validation_executor --input <run-dir>/validation-runtime-input.json --backend event_bus=inmemory --state-root <run-dir>/runtime-readback-green",
+    "captured_utc": "2026-10-31T14:10:03.459665+00:00",
+    "source_sha256": "527f90d53c533e5ed9047f9b030cfdf7f64c069de3acdf45a3468d469cb4e715"
+  },
+  "request": {
+    "candidate_id": "a4e7e002-7eb7-46a3-8f64-38992dc7c44e",
+    "plan_id": "92d54dc4-fd35-42db-ad83-c0964adfa582",
+    "checks": [
+      {
+        "check_code": "shape-enabled",
+        "label": "Enabled request entry",
+        "severity": "required",
+        "enabled": true,
+        "command": "true"
+      },
+      {
+        "check_code": "shape-disabled",
+        "label": "Disabled request entry",
+        "severity": "required",
+        "enabled": false,
+        "command": "true"
+      }
+    ]
+  },
+  "response": {
+    "result": "completed",
+    "exit_code": 0,
+    "workflow": "<checkout>/src/omnibase_infra/nodes/node_validation_executor/contract.yaml",
+    "run_id": "0d46c28e-c383-48f9-9546-5cbdff37aee3",
+    "handler_locus": "in_process",
+    "terminal_payload": {
+      "plan_id": "92d54dc4-fd35-42db-ad83-c0964adfa582",
+      "candidate_id": "a4e7e002-7eb7-46a3-8f64-38992dc7c44e",
+      "check_results": [
+        {
+          "check_code": "shape-enabled",
+          "label": "Enabled request entry",
+          "severity": "required",
+          "passed": true,
+          "skipped": false,
+          "message": "Skeleton pass for 'true'.",
+          "error_output": "",
+          "duration_ms": 0.0004169996827840805,
+          "executed_at": "2026-10-31T14:10:03.354430Z"
+        },
+        {
+          "check_code": "shape-disabled",
+          "label": "Disabled request entry",
+          "severity": "required",
+          "passed": false,
+          "skipped": true,
+          "message": "Check disabled in plan.",
+          "error_output": "",
+          "duration_ms": 0.0,
+          "executed_at": "2026-10-31T14:10:03.354439Z"
+        }
+      ],
+      "total_duration_ms": 0.014833989553153515,
+      "score_threshold": 0.8
+    },
+    "handler_result": {
+      "plan_id": "92d54dc4-fd35-42db-ad83-c0964adfa582",
+      "candidate_id": "a4e7e002-7eb7-46a3-8f64-38992dc7c44e",
+      "check_results": [
+        {
+          "check_code": "shape-enabled",
+          "label": "Enabled request entry",
+          "severity": "required",
+          "passed": true,
+          "skipped": false,
+          "message": "Skeleton pass for 'true'.",
+          "error_output": "",
+          "duration_ms": 0.0004169996827840805,
+          "executed_at": "2026-10-31T14:10:03.354430Z"
+        },
+        {
+          "check_code": "shape-disabled",
+          "label": "Disabled request entry",
+          "severity": "required",
+          "passed": false,
+          "skipped": true,
+          "message": "Check disabled in plan.",
+          "error_output": "",
+          "duration_ms": 0.0,
+          "executed_at": "2026-10-31T14:10:03.354439Z"
+        }
+      ],
+      "total_duration_ms": 0.014833989553153515,
+      "score_threshold": 0.8
+    }
+  },
+  "before_fix": {
+    "result": "failed",
+    "exit_code": 1,
+    "workflow": "<checkout>/src/omnibase_infra/nodes/node_validation_executor/contract.yaml",
+    "run_id": "d0c094e5-91c8-47ad-8e9d-a03090b04578",
+    "handler_locus": "in_process"
+  }
+}

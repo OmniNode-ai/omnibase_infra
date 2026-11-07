@@ -30,6 +30,7 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.models.lane_census import ModelLaneCensusRegistry
 from scripts.ci.lab_pass_receipt import (
     EnumLabLane,
     EnumLabPassResult,
@@ -3632,10 +3633,8 @@ def test_recorded_manifest_unhealthy_runtime_readings_replay_census_threshold(
     # bound, so that declaration is derived from the recording itself.
     manifest = {
         "schema_version": "1.0.0",
-        "hosts": {"recorded-host": {"aliases": [envelope["host"]]}},
         "lanes": {
             envelope["lane"]: {
-                "hosts": ["recorded-host"],
                 "network": envelope["networks"][0],
                 "services": [
                     {"name": runtime["Names"], "kind": "service", "replicas": 1}
@@ -3643,24 +3642,33 @@ def test_recorded_manifest_unhealthy_runtime_readings_replay_census_threshold(
             }
         },
     }
+    registry = ModelLaneCensusRegistry.from_rows(
+        [
+            {
+                "name": "recorded-host",
+                "aliases": [envelope["host"]],
+                "lanes": [envelope["lane"]],
+            }
+        ]
+    )
     assert runtime["Health"] == {"Status": "healthy", "FailingStreak": 0}
     assert runtime["HealthcheckIntervalSeconds"] == 30.0
     assert runtime["RestartCount"] == 0
     assert not any(
         finding["kind"] == "container_unhealthy"
-        for finding in build_plan(envelope, manifest)["findings"]
+        for finding in build_plan(envelope, manifest, registry)["findings"]
     )
 
     # This is a synthetic control over recorded input, not a runtime mutation.
     runtime["Health"] = {"Status": "unhealthy", "FailingStreak": 59}
     assert not any(
         finding["kind"] == "container_unhealthy"
-        for finding in build_plan(envelope, manifest)["findings"]
+        for finding in build_plan(envelope, manifest, registry)["findings"]
     )
     runtime["Health"]["FailingStreak"] = 60
     unhealthy = [
         finding
-        for finding in build_plan(envelope, manifest)["findings"]
+        for finding in build_plan(envelope, manifest, registry)["findings"]
         if finding["kind"] == "container_unhealthy"
     ]
     assert len(unhealthy) == 1

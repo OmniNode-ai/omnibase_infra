@@ -359,6 +359,32 @@ class TestCiSummaryGate:
         assert code == EXIT_FAILURE
         assert STRICT_GATE_JOBS[1] in report
 
+    def test_lint_failure_alone_fails_ci_summary(self) -> None:
+        """OMN-22545: the test matrix no longer waits for Lint, so CI Summary is
+        the only thing that holds a merge when Lint is red.
+
+        Every strict and skippable gate is green, the test matrix is green, and
+        only Lint concludes ``failure``: the verdict must be FAILURE and the
+        report must name Lint. With Lint green again the same snapshot passes,
+        so the failure is Lint's and nothing else's.
+        """
+        # The snapshot below is the real outcome of a red Lint only if the test
+        # matrix does not wait for it: a matrix still behind Lint would be
+        # skipped, and a merge-base workflow shows exactly that.
+        jobs = _load_workflow(CI_WORKFLOW)["jobs"]
+        for name in ("detect-changes", "test-parallel"):
+            needs = jobs[name].get("needs", [])
+            needs = [needs] if isinstance(needs, str) else needs
+            assert "lint" not in needs, f"{name} still waits for lint: {needs!r}"
+        green = _all_gates("success") + [_job("Detect Changes", "success")]
+        code, _ = evaluate(green)
+        assert code == EXIT_SUCCESS
+        red = [_job("Lint", "failure") if j["name"] == "Lint" else j for j in green]
+        assert any(j["name"] == "Lint" and j["conclusion"] == "failure" for j in red)
+        code, report = evaluate(red)
+        assert code == EXIT_FAILURE
+        assert "Lint" in report
+
     def test_strict_gate_cancelled_is_failure(self) -> None:
         jobs = _all_gates("success")
         jobs[2] = _job(STRICT_GATE_JOBS[2], "cancelled")
@@ -2565,12 +2591,21 @@ class TestExternalSweepExclusions:
             "Security Scan (Trivy)",
             "Image Size Analysis",
             "Hostile Reviewer (adversarial gate)",
+            "Hostile Review Gate",
+            "Hostile Review Thread Gate",
+            "Hostile Review Judge",
             "Enforce clean + promoted build source",
         }
 
     def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
         added_late = {"Enforce clean + promoted build source": "2026-09-22"}
+        # OMN-22478, operator RULING 2026-11-05T20:27:56Z: the automated review.
+        review = {n for n in EXTERNAL_SWEEP_EXCLUSIONS if "Hostile Review" in n}
         for name, entry in EXTERNAL_SWEEP_EXCLUSIONS.items():
+            if name in review:
+                assert entry.ticket == "OMN-22478", name
+                assert (entry.added, entry.expires) == ("2026-11-05", "2027-02-03")
+                continue
             assert entry.reason.strip(), name
             assert entry.ticket.startswith("OMN-"), name
             assert entry.added == added_late.get(name, "2026-09-21"), name
@@ -3658,89 +3693,20 @@ class TestDraftReadySupersessionOmn19379:
 
 
 class TestDevBaseExternalContextsOmn17427:
-    """The Hostile Review Thread Gate is required on dev, not on main.
+    """The base-scoped mechanism outlives its one member.
 
-    Operator RULING 2026-10-21T13:00:04Z. Before this, a dev PR whose thread
-    gate was absent or still running could pass CI Summary: the gate was in no
-    asserted tuple, and the default-deny sweep only sees a red that has
-    already posted.
+    OMN-22478, operator RULING 2026-11-05T20:27:56Z, took the Hostile Review
+    Thread Gate out of what holds a merge, so the set is empty and every base
+    asserts the same tuple. The mechanism is kept for the gate's return.
     """
 
-    THREAD_GATE = "Hostile Review Thread Gate"
-    NOW = datetime(2026, 10, 21, 13, 0, 0, tzinfo=UTC)
-
-    def _row(
-        self, name: str, conclusion: str | None, status: str = "completed"
-    ) -> dict[str, Any]:
-        return {
-            "id": abs(hash(name)) % 10_000_000,
-            "name": name,
-            "status": status,
-            "conclusion": conclusion,
-            "started_at": "2026-10-21T11:00:00Z",
-            "completed_at": "2026-10-21T11:05:00Z" if status == "completed" else None,
-            "head_sha": "a" * 40,
-        }
-
-    def _check_runs(self, thread_gate: str | None) -> list[dict[str, Any]]:
-        rows = [
-            self._row(c, "success")
-            for c in EXPECTED_EXTERNAL_CONTEXTS
-            if c != self.THREAD_GATE
-        ]
-        if thread_gate == "in_progress":
-            rows.append(self._row(self.THREAD_GATE, None, status="in_progress"))
-        elif thread_gate is not None:
-            rows.append(self._row(self.THREAD_GATE, thread_gate))
-        return rows
-
-    def test_the_thread_gate_is_registered_and_dev_only(self) -> None:
-        assert self.THREAD_GATE in EXPECTED_EXTERNAL_CONTEXTS
-        assert frozenset({self.THREAD_GATE}) == DEV_BASE_ONLY_CONTEXTS
-        assert set(EXPECTED_EXTERNAL_CONTEXTS) >= DEV_BASE_ONLY_CONTEXTS
-
-    def test_dev_asserts_it_and_main_does_not(self) -> None:
-        assert scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "dev") == (
-            EXPECTED_EXTERNAL_CONTEXTS
-        )
-        on_main = scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "main")
-        assert set(EXPECTED_EXTERNAL_CONTEXTS) - set(on_main) == {self.THREAD_GATE}
+    def test_the_set_is_empty_and_scoping_changes_nothing(self) -> None:
+        assert frozenset() == DEV_BASE_ONLY_CONTEXTS
+        for base in ("dev", "main", ""):
+            assert scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, base) == (
+                EXPECTED_EXTERNAL_CONTEXTS
+            )
         assert scoped_to_base((), "dev") == ()
-
-    def test_an_unknown_base_enforces(self) -> None:
-        assert scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "") == (
-            EXPECTED_EXTERNAL_CONTEXTS
-        )
-
-    @pytest.mark.parametrize(
-        ("thread_gate", "expected"),
-        [
-            ("success", EXIT_SUCCESS),
-            ("failure", EXIT_FAILURE),
-            ("skipped", EXIT_FAILURE),
-            (None, EXIT_PENDING),
-            ("in_progress", EXIT_PENDING),
-        ],
-    )
-    def test_a_dev_pr_needs_a_green_thread_gate(
-        self, thread_gate: str | None, expected: int
-    ) -> None:
-        code, report = evaluate(
-            _all_gates(),
-            check_runs=self._check_runs(thread_gate),
-            external_contexts=scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "dev"),
-            now=self.NOW,
-        )
-        assert code == expected, report
-
-    def test_a_main_pr_is_not_held_by_an_absent_thread_gate(self) -> None:
-        code, report = evaluate(
-            _all_gates(),
-            check_runs=self._check_runs(None),
-            external_contexts=scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "main"),
-            now=self.NOW,
-        )
-        assert code == EXIT_SUCCESS, report
 
     def test_the_ci_workflow_passes_the_base_ref(self) -> None:
         text = (

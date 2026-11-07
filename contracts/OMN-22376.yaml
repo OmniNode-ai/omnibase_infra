@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22376
+title: Model the shared-listener start-first runtime handover in TLA+ and check it on the lab
+summary: >-
+  Rewrites formal/runtime_start_first for design revision 4 of OMN-22151 stage 2 (the draft model of the retired front container is replaced). The spec RuntimeStartFirst.tla models one shared accept queue with provisional and confirmed sessions and detach grants, the revocation hold, passive standby, stop as the fence, epoch-stamped seeding over three groups from the source's snapshot, the owner record, and the first-install window with rollback, roll-forward and the watchdog. Http.cfg holds AcceptedIsReady and NoRefusalWithoutFault, Bus.cfg holds AtMostOneConsuming, NoSkip and ReplayOnlyX2, Install.cfg holds WindowBounded and the three bus properties, each property has a mutant that makes TLC report a violation of exactly that property, and the TLC output under results/ is bound to the spec and cfg digest. No runtime code changes here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22376-transcribed-acceptance-criteria
+    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the model checks AcceptedIsReady, NoRefusalWithoutFault, AtMostOneConsuming, NoSkip, ReplayOnlyX2 and WindowBounded under its stated bounds -- falsifier: TLC run on lab h051 over formal/runtime_start_first with the verdict bound to the spec digest'
+      - id: AC2
+        statement: 'AC2: every property has a mutant that makes TLC report a violation, and a test fails if a mutant stops failing -- falsifier: uv run pytest tests/unit/formal -k runtime_start_first -q'
+evidence_requirements:
+  - kind: tests
+    description: The committed TLC output matches the current spec and cfg digest, each base config holds its properties, each mutant and witness reports its named violation, and the design-review verdict is recorded.
+    command: uv run pytest tests/unit/formal -k runtime_start_first -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22376-ac1-model-holds
+    description: results/Http.out, Bus.out, Install.out and Install1.out report no error with 0 states left on queue, results/model.sha256 binds them to the spec and cfg digest, and each of the six properties is an INVARIANT of a base config.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_runtime_start_first_model.py -q -k "digest or passing or stated"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22376-ac2-mutants-fail
+    description: Each property's mutant output reports a violation of exactly that property, every other mutant and witness reports its named violation, and a mutant that stops failing fails the test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_runtime_start_first_model.py -q -k "mutant or witness or bounds"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn22376-install-bounds-and-clock-witnesses
+    description: The install configurations cover three records and two runtime crashes with ClockMax 16; a repeated-X2 witness reaches two crashes and three effects on one record, the missing-watchdog mutant breaches WBound 8 at tick 9, and a separate witness reaches the clock horizon. These are bounded single-partition checks without a cutoff theorem or a multi-partition claim.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/formal/test_runtime_start_first_model.py::test_install_checks_repeated_crashes_and_clock_headroom -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2

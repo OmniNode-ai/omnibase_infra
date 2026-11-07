@@ -367,7 +367,7 @@ def _declared_guard_configurations(repo_path: Path) -> set[str]:
         for job in workflow["jobs"].values():
             if not isinstance(job, dict) or not re.fullmatch(
                 r"OmniNode-ai/omnibase_core/\.github/workflows/"
-                r"imperative-contract-guard\.yml@[0-9a-f]{40}",
+                r"imperative-contract-guard\.yml@(?:[0-9a-f]{40}|dev-\d{14}-[0-9a-f]{12})",
                 str(job.get("uses", "")),
             ):
                 continue

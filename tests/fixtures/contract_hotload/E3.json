@@ -1,0 +1,70 @@
+{
+  "chain": "E3",
+  "kind": "error",
+  "title": "replayed request",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "cli",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "07b9ec8b-9577-52ea-aba0-d740b05c8eb9",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:07b9ec8b-9577-52ea-aba0-d740b05c8eb9",
+        "outcome": "replayed",
+        "reason": null,
+        "registry_version": 1
+      },
+      "key": "lab-deploy:07b9ec8b-9577-52ea-aba0-d740b05c8eb9",
+      "note": "the request id was already applied by that sender; the recorded outcome is returned"
+    },
+    {
+      "step": 3,
+      "actor": "cli",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "registration_request_id": "07b9ec8b-9577-52ea-aba0-d740b05c8eb9",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x",
+      "note": "the same id with other content"
+    },
+    {
+      "step": 4,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:07b9ec8b-9577-52ea-aba0-d740b05c8eb9",
+        "outcome": "rejected",
+        "reason": "REQUEST_ID_REUSED",
+        "registry_version": 1
+      },
+      "key": "lab-deploy:07b9ec8b-9577-52ea-aba0-d740b05c8eb9"
+    }
+  ],
+  "ends_in": "the recorded outcome for the same content; REQUEST_ID_REUSED for other content"
+}

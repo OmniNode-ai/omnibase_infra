@@ -1,0 +1,169 @@
+{
+  "chain": "E7",
+  "kind": "error",
+  "title": "runtime refusal",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 2,
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "operation": "replace",
+        "owner": "lab-deploy",
+        "registration_request_id": "f4600749-44ce-547f-9a3c-b9d48c5b6fe9",
+        "contract_yaml": "name: node_x\nnode_version: 2.0.0\n"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 2,
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "operation": "replace",
+        "status": "refused",
+        "reason": "PACKAGE_HASH_MISMATCH",
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 3,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_n",
+        "registry_version": 1,
+        "content_hash": "30589cf3c94cd077d6d640a7e8772b62f3e7bec8abd1370c2664cf89f1cd83f0",
+        "operation": "register",
+        "owner": "lab-deploy",
+        "registration_request_id": "b07006b3-c430-54e4-8c4a-a8dc25ed101b",
+        "contract_yaml": "name: node_n\nnode_version: 1.0.0\n"
+      },
+      "key": "node_n"
+    },
+    {
+      "step": 4,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_n",
+        "registry_version": 1,
+        "content_hash": "30589cf3c94cd077d6d640a7e8772b62f3e7bec8abd1370c2664cf89f1cd83f0",
+        "operation": "register",
+        "status": "refused",
+        "reason": "NOT_INSTALLED",
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_n"
+    },
+    {
+      "step": 5,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_k",
+        "registry_version": 1,
+        "content_hash": "ef871d5033b55f32e4d2b459455a4d98191c984cfa8e04bd48967edda16a4e92",
+        "operation": "register",
+        "owner": "lab-deploy",
+        "registration_request_id": "96695969-94fd-55dc-af3e-0884fdd5f596",
+        "contract_yaml": "name: node_k\nnode_version: 1.0.0\n"
+      },
+      "key": "node_k"
+    },
+    {
+      "step": 6,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_k",
+        "registry_version": 1,
+        "content_hash": "ef871d5033b55f32e4d2b459455a4d98191c984cfa8e04bd48967edda16a4e92",
+        "operation": "register",
+        "status": "refused",
+        "reason": "NO_PROVISIONER",
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_k"
+    },
+    {
+      "step": 7,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "state",
+      "model": "ModelRuntimeHotloadState",
+      "record": {
+        "entity_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f",
+        "bootstrap_ready": true,
+        "serving_ready": true,
+        "names": {
+          "node_x": {
+            "observed": {
+              "registry_version": 2,
+              "status": "refused",
+              "reason": "PACKAGE_HASH_MISMATCH"
+            },
+            "served": {
+              "registry_version": 1,
+              "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87"
+            }
+          },
+          "node_n": {
+            "observed": {
+              "registry_version": 1,
+              "status": "refused",
+              "reason": "NOT_INSTALLED"
+            },
+            "served": null
+          },
+          "node_k": {
+            "observed": {
+              "registry_version": 1,
+              "status": "refused",
+              "reason": "NO_PROVISIONER"
+            },
+            "served": null
+          }
+        }
+      },
+      "key": "8c242722-5f7b-5b52-86f1-0961206fa958"
+    }
+  ],
+  "ends_in": "applied{refused, reason} and the state record; nothing instantiated, registered, subscribed or created",
+  "note": "the ineligible case (plugin-managed, no live dispatcher) names no reason token in the plan text read for H1 and is not given a fixture step here"
+}

@@ -206,7 +206,12 @@ RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
 HOST_RECONCILER="$DISPATCH_VENV/bin/onex-host-reconcile"
 FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
 RECONCILE_RECEIPT="${ONEX_RECONCILE_RECEIPT:-$OMNI_HOME/.onex-workspace-reconcile.json}"
-RECONCILE_LOCK_DIR="$OMNI_HOME/.onex-reconcile-host.lock"
+RECONCILE_LOCK_DIRS=("$OMNI_HOME/.onex-reconcile-host.lock" "$OMNI_HOME/.onex-reconcile-venv.lock")
+# The second lock is the dispatch-venv leg's own (OMN-20888). A venv-only pass,
+# which the host drift fix runs after every omnimarket merge, holds it and not
+# the host lock, yet it is the pass that installs the new head and then stamps
+# the floor. Waiting only on the host lock refused evidence commands for the
+# whole install of every such pass (OMN-19998).
 
 # --------------------------------------------------------------------------- #
 # Shadow warning
@@ -390,6 +395,9 @@ _floor_verdict() {
   ' "$FLOOR_FILE" -
 }
 
+# The lock a running peer reconcile holds, or nothing.
+_peer_reconcile_lock() { local d; for d in "${RECONCILE_LOCK_DIRS[@]}"; do [[ -d "$d" ]] && { printf '%s' "$d"; return; }; done; }
+
 # A peer reconcile holds the host lock (OMN-20111). Several hook ticks and
 # several lanes' wrappers fire at once, so this is the ordinary case, and the
 # peer is doing exactly the work that would clear the refusal. Wait for it, a
@@ -402,22 +410,21 @@ _await_peer_reconcile() {
   local step_budget="${ONEX_RECONCILE_STEP_TIMEOUT_S:-1800}" default_budget
   [[ "$step_budget" =~ ^[1-9][0-9]*$ ]] || step_budget=1800
   default_budget=$(( 2 * step_budget + 60 ))
-  local budget="${ONEX_FLOOR_LOCK_WAIT_S:-$default_budget}" poll="${ONEX_FLOOR_LOCK_POLL_S:-5}"
-  local waited=0
+  local budget="${ONEX_FLOOR_LOCK_WAIT_S:-$default_budget}" poll="${ONEX_FLOOR_LOCK_POLL_S:-5}" waited=0
   [[ "$budget" =~ ^[0-9]+$ ]] || budget="$default_budget"
   [[ "$poll" =~ ^[1-9][0-9]*$ ]] || poll=5
-  _say "a peer reconcile holds $RECONCILE_LOCK_DIR; waiting up to ${budget}s for it before refusing."
+  _say "a peer reconcile holds $(_peer_reconcile_lock); waiting up to ${budget}s for it before refusing."
   while :; do
     if [[ "$(_floor_verdict)" == "OK" ]]; then
       _say "the peer reconcile proved the floor after ${waited}s; proceeding."
       return 0
     fi
-    [[ -d "$RECONCILE_LOCK_DIR" ]] || break
+    [[ -n "$(_peer_reconcile_lock)" ]] || break
     (( waited < budget )) || break
     sleep "$poll"
     waited=$(( waited + poll ))
   done
-  if [[ -d "$RECONCILE_LOCK_DIR" ]]; then
+  if [[ -n "$(_peer_reconcile_lock)" ]]; then
     _say "the peer reconcile still holds the lock after ${waited}s; not waiting longer."
   else
     _say "the peer reconcile finished after about ${waited}s without proving the floor."
@@ -479,7 +486,7 @@ _enforce_floor() {
   if _is_evidence_invocation "$@"; then
     # A peer tick may finish proving the floor; this invocation never repairs
     # or restamps the build it is about to judge.
-    if [[ -d "$RECONCILE_LOCK_DIR" ]]; then
+    if [[ -n "$(_peer_reconcile_lock)" ]]; then
       _await_peer_reconcile && return 0
       result="$(_floor_verdict)"
       [[ "$result" == "OK" ]] && return 0

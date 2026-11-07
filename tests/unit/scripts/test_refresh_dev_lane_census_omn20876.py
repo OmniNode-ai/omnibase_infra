@@ -14,6 +14,8 @@ warm refresh. A recreate that is interrupted leaves the old container renamed to
 recreate containers, reads the census, and exits with the census's own code when
 the lane has drifted. ``--census-gate`` runs that closing step alone, which is
 also how a lane that already carries the drift is repaired without a refresh.
+Recovery runs the same closing step while preserving the failed refresh's
+result and exit code; remaining census findings are recorded separately.
 
 Every case drives the real script against a ``docker`` shim that holds the lane
 inventory in a file, so a ``docker rm`` changes what the second census read sees.
@@ -41,6 +43,7 @@ from tests.helpers.lane_census_fixtures import (
     NEUTRAL_CONFIG_ROOT,
     NEUTRAL_HOSTNAME,
     NEUTRAL_MANIFEST,
+    NEUTRAL_REGISTRY,
 )
 
 pytestmark = pytest.mark.unit
@@ -123,8 +126,10 @@ def _run(
     rows: list[dict[str, str]],
     *args: str,
     fail_ps: bool = False,
+    completion_result: str | None = None,
+    manifest: Path | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], list[dict[str, str]]]:
-    """Run ``refresh_dev_lane.sh --census-gate`` over ``rows``.
+    """Run the census-only command or the refresh's completion block over rows.
 
     Returns (process, docker call log lines, inventory after the run).
     """
@@ -145,7 +150,10 @@ def _run(
     env["HOME"] = str(tmp_path)
     env["OMNI_HOME"] = str(tmp_path)
     env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+    env["LANE_CENSUS_REGISTRY"] = str(NEUTRAL_REGISTRY)
     env.pop("LANE_MANIFEST", None)
+    if manifest is not None:
+        env["LANE_MANIFEST"] = str(manifest)
     env["SHIM_INVENTORY"] = str(inventory)
     env["SHIM_CALLS"] = str(calls)
     env["SHIM_NETWORK"] = _MANIFEST_DATA["lanes"]["dev"]["network"]
@@ -158,8 +166,51 @@ def _run(
     if fail_ps:
         env["SHIM_FAIL_PS"] = "1"
 
+    command = ["bash", str(_SCRIPT), "--census-gate", *args]
+    if completion_result is not None:
+        # Run the actual completion block, census functions and final exit
+        # mapping. Upstream build/rollback results are inputs; the census still
+        # inventories and removes through the same Docker shim as --census-gate.
+        text = _SCRIPT.read_text()
+        functions_start = text.index('CENSUS_SCRIPT="')
+        functions = text[
+            functions_start : text.index('if [[ "${CENSUS_ONLY}"', functions_start)
+        ]
+        completion = text[
+            text.index("# --- close with the lane census") : text.index(
+                "# --- emit receipt"
+            )
+        ]
+        exit_case = text[text.index('case "${RESULT}" in') :]
+        shell = "\n".join(
+            [
+                "set -euo pipefail",
+                'REPO_ROOT="$1"; RESULT="$2"; MODE="$3"; LANE=dev',
+                'log() { echo "LOG:$*" >&2; }',
+                'err() { echo "ERR:$*" >&2; }',
+                functions,
+                completion,
+                'jq -n --arg result "${RESULT}" '
+                '--argjson ran "${CENSUS_RAN}" '
+                '--argjson exit "${CENSUS_EXIT}" '
+                '--argjson removed "${CENSUS_REMOVED_JSON}" '
+                "'{result: $result, lane_census: "
+                "{ran: $ran, exit: $exit, leftovers_removed: $removed}}'",
+                exit_case,
+            ]
+        )
+        command = [
+            "bash",
+            "-c",
+            shell,
+            "refresh-completion",
+            str(_REPO),
+            completion_result,
+            "execute" if "--execute" in args else "plan",
+        ]
+
     proc = subprocess.run(
-        ["bash", str(_SCRIPT), "--census-gate", *args],
+        command,
         capture_output=True,
         text=True,
         env=env,
@@ -299,3 +350,105 @@ def test_refresh_removes_leftover_lane_containers_only_in_execute_mode(
     assert _LEFTOVER in {r["name"] for r in after}
     assert proc.returncode == _EXIT_DRIFT, proc.stderr
     assert f"would remove leftover recreate container {_LEFTOVER}" in proc.stderr
+
+
+@pytest.fixture
+def recorded_refresh(tmp_path: Path) -> tuple[Path, list[dict[str, str]], str]:
+    """Replay the 2026-10-09 dev leftover against an isolated manifest.
+
+    The recorded alarm supplies the name and lane; steady-state companion rows
+    are fixture data, not a claim about the historical host's inventory.
+    """
+    declared = "omnibase-infra-forward-migration"
+    leftover = f"b4320b97cc9a_{declared}"
+    data = yaml.safe_load(_MANIFEST.read_text())
+    data["lanes"]["dev"]["services"].append({"name": declared, "kind": "oneshot"})
+    manifest = tmp_path / "lane-manifest.yaml"
+    manifest.write_text(yaml.safe_dump(data))
+    rows = [
+        *_clean_dev_lane(),
+        _row(declared, "dev", oneshot=True),
+        _row(leftover, "dev", oneshot=True),
+    ]
+    return manifest, rows, leftover
+
+
+@pytest.mark.parametrize(
+    ("result", "exit_code"),
+    [
+        ("SUCCESS", 0),
+        ("FAILED_ROLLED_BACK", 1),
+        ("FAILED_BUILD_PROVENANCE", 1),
+        ("FAILED_CLOUD_MIGRATION", 1),
+        ("FAILED", 2),
+    ],
+)
+@pytest.mark.parametrize("drift", [False, True])
+def test_refresh_completion_reconciles_recorded_leftover_without_hiding_failures(
+    tmp_path: Path,
+    recorded_refresh: tuple[Path, list[dict[str, str]], str],
+    result: str,
+    exit_code: int,
+    drift: bool,
+) -> None:
+    manifest, rows, leftover = recorded_refresh
+    foreign = "aaaaaaaaaaaa_example-dogfood-runtime"
+    rows.append(_row(foreign, "dogfood"))
+    if drift:
+        rows.append(_row("dddddddddddd_not-a-dev-service", "dev"))
+        rows = [r for r in rows if r["name"] != _DEV_SERVICE]
+    proc, calls, after = _run(
+        tmp_path,
+        rows,
+        "--execute",
+        completion_result=result,
+        manifest=manifest,
+    )
+    assert _rm_calls(calls) == [f"docker rm -f {leftover}"], proc.stderr
+    assert sum(c.startswith("docker ps -a ") for c in calls) == 2
+    assert leftover not in {r["name"] for r in after}
+    assert foreign in {r["name"] for r in after}
+    census_exit = _EXIT_DRIFT if drift else 0
+    expected_result = "FAILED_CENSUS_DRIFT" if drift and result == "SUCCESS" else result
+    expected_exit = census_exit if result == "SUCCESS" else exit_code
+    assert proc.returncode == expected_exit, proc.stderr
+    assert json.loads(proc.stdout) == {
+        "result": expected_result,
+        "lane_census": {
+            "ran": True,
+            "exit": census_exit,
+            "leftovers_removed": [leftover],
+        },
+    }
+    if drift:
+        assert (
+            "unexpected_container dddddddddddd_not-a-dev-service (dev)" in proc.stderr
+        )
+        assert f"container_absent {_DEV_SERVICE} (dev)" in proc.stderr
+
+
+@pytest.mark.parametrize(
+    ("result", "exit_code"),
+    [("SUCCESS", 4), ("FAILED_ROLLED_BACK", 1), ("FAILED", 2)],
+)
+def test_refresh_completion_records_unobservable_census_without_replacing_failure(
+    tmp_path: Path, result: str, exit_code: int
+) -> None:
+    proc, calls, _ = _run(
+        tmp_path,
+        _clean_dev_lane(),
+        "--execute",
+        fail_ps=True,
+        completion_result=result,
+    )
+    assert proc.returncode == exit_code, proc.stderr
+    assert _rm_calls(calls) == []
+    receipt = json.loads(proc.stdout)
+    assert receipt["lane_census"] == {
+        "ran": True,
+        "exit": _EXIT_INVENTORY_UNOBSERVABLE,
+        "leftovers_removed": [],
+    }
+    assert receipt["result"] == (
+        "FAILED_CENSUS_DRIFT" if result == "SUCCESS" else result
+    )

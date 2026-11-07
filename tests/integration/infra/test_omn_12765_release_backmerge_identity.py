@@ -21,9 +21,9 @@ def _declared_pins() -> dict[str, str]:
     verbatim, so a substring assertion is satisfied by prose and keeps passing
     after the pin it names has moved (OMN-18918).
 
-    SPI and compat retain exact release pins. Core publishes a floor range
-    and resolves solely from its dev-merge tag; its lock identity is checked
-    separately below (OMN-17427).
+    Compat retains an exact release pin. Core and SPI publish ranges (core
+    resolves solely from its dev-merge tag; its lock identity is checked
+    separately below, OMN-17427), so neither appears here (OMN-22360).
     """
 
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -97,13 +97,15 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     OMN-21110 refresh: spi 0.23.5 -> 0.23.7, the floor omnimarket needs for
     ProtocolContextSource; core stays 0.47.46.
     OMN-22359 refresh: spi 0.23.7 -> 0.23.12, the newest published release.
+    OMN-13902 refresh: the lock moves to spi 0.23.14; the check is the range floor.
     """
 
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     pins = _declared_pins()
 
-    # Core uses a dev-merge tag; SPI retains its exact published release.
+    # Core uses a dev-merge tag; SPI is a range (OMN-22360) the lock resolves
+    # to the newest published release.
     locked = tomllib.loads(uv_lock)
     core_packages = [p for p in locked["package"] if p["name"] == "omnibase-core"]
     assert len(core_packages) == 1
@@ -111,7 +113,14 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     assert violations(tomllib.loads(pyproject), "omnibase-core") == []
     assert tuple(int(part) for part in core["version"].split(".")) >= (0, 47, 44)
     assert "git" in core["source"]
-    assert pins["omnibase-spi"] == "0.23.12"
+    assert "omnibase-spi" not in pins
+    spi_packages = [p for p in locked["package"] if p["name"] == "omnibase-spi"]
+    assert len(spi_packages) == 1
+    assert tuple(int(part) for part in spi_packages[0]["version"].split(".")) >= (
+        0,
+        23,
+        12,
+    )
 
     # The retired git-rev overrides must be gone from both manifest and lock:
     # the OMN-13762 core rev and the OMN-12549 seam core/spi revs.

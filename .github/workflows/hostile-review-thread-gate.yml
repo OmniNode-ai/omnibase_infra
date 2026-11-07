@@ -7,8 +7,10 @@
 #
 # The gate itself is the `hostile-review-thread-gate` job of
 # hostile-reviewer.yml, which runs after every review on a pull_request
-# event. It is REQUIRED on dev through CI Summary (operator RULING
-# 2026-10-21T13:00:04Z): every hostile-reviewer thread needs a reply
+# event. It was REQUIRED on dev through CI Summary (operator RULING
+# 2026-10-21T13:00:04Z) until OMN-22478 (operator RULING 2026-11-05T20:27:56Z)
+# took the automated review out of what holds a merge: every hostile-reviewer
+# thread needs a reply
 # `fixed-in <sha>` (a commit of the PR that touched the cited lines) or
 # `rejected: <reason>`. Resolving a thread fires no workflow event, so the
 # reply is the trigger: this workflow runs the same script on the reply and
@@ -45,6 +47,9 @@ concurrency:
 jobs:
   hostile-review-thread-gate:
     name: Hostile Review Thread Gate
+    # OMN-22478, operator RULING 2026-11-05T20:27:56Z: stopped, so a reply on an
+    # old finding thread cannot post a red row on a head. To restore: delete this `if:`.
+    if: ${{ false }}
     # GitHub-hosted: a public repository adds no self-hosted job (OMN-19998),
     # and this job reads only GitHub thread state and the PR's history.
     runs-on: ubuntu-latest

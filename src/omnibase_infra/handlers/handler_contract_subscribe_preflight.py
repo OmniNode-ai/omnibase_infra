@@ -40,6 +40,14 @@ Which offset each partition of the successor group gets is one pure rule,
    during the window on a partition the retired consumer never saw is at or
    after the first retained offset, and the bus default would skip it.
 
+That is the ``copy_if_uncommitted`` rule of the projection writers. A
+declaration with ``handover_rule: last_ran`` (effects and the worker, one-runtime
+plan T8) replaces rule 1: of the two commits still inside retention, the later
+wins, because it belongs to the side that last ran. The successor's own commit
+is kept only when it is that later one; otherwise the retired group's commit is
+copied over it. Rule 3 applies when neither side holds a commit inside
+retention.
+
 Substrates:
 
 * ``EventBusKafka``: two short-lived consumers, one per group, each manually
@@ -60,27 +68,39 @@ Substrates:
   in-process group-offset substrate in the tests) is asked directly.
 
 The retired consumer must already be stopped (the fold's deploy retires the
-container before it recreates the runtime). A handover from a consumer still
-running copies a position it then moves past: records projected twice, never
-records lost, and the projection writers deduplicate on the event key.
+container before it recreates the runtime), and on Kafka the handover confirms
+it: before reading any offset it describes the retired group and proceeds only
+when the group has no members (the fence, OMN-22714). A member still listed is
+waited for up to the declaration's ``fence.wait_seconds``, then refused with
+``ConsumerGroupFenceError``, as is a group whose membership cannot be read. A
+handover from a consumer still running would copy a position that consumer then
+moves past, so a fold would run an effect twice or, after a rollback, lose the
+retired side's later commit. The rule holds for every fold, writers included.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-import yaml
 from aiokafka import AIOKafkaConsumer
+from aiokafka.client import CoordinationType
+from aiokafka.protocol.admin import DescribeGroupsRequest
 from aiokafka.structs import TopicPartition
 
 from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.kafka_transport import create_offset_consumer
+from omnibase_infra.models.event_bus.model_consumer_group_fence import (
+    ModelConsumerGroupFence,
+)
 from omnibase_infra.models.event_bus.model_consumer_group_handover import (
     ModelConsumerGroupHandover,
 )
@@ -100,11 +120,12 @@ from omnibase_infra.protocols.protocol_consumer_group_offset_handover import (
     ProtocolConsumerGroupOffsetHandover,
 )
 from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
-    load_consume_concurrency,
+    ModelConsumeConcurrency,
 )
 
 __all__ = [
     "CONSUMER_GROUP_HANDOVER_KEY",
+    "ConsumerGroupFenceError",
     "HandlerContractSubscribePreflight",
     "hand_over_committed_offsets",
     "load_consumer_group_handover",
@@ -115,6 +136,20 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 CONSUMER_GROUP_HANDOVER_KEY = "consumer_group_handover"
+
+# DescribeGroups answers (error_code, group_id, state, protocol_type, protocol,
+# members[, authorized_operations]) per group in every version aiokafka speaks.
+_DESCRIBED_ERROR_CODE = 0
+_DESCRIBED_GROUP_ID = 1
+_DESCRIBED_MEMBERS = 5
+
+
+class ConsumerGroupFenceError(RuntimeError):
+    """The retired group still has members, or its membership cannot be read.
+
+    Raised before any offset is read or committed, so a refused handover leaves
+    both groups exactly as it found them (OMN-22714).
+    """
 
 
 def load_consumer_group_handover(
@@ -132,7 +167,7 @@ def load_consumer_group_handover(
     """
     if not contract_path.exists():
         return None
-    raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    raw = read_contract_yaml(contract_path)
     if not isinstance(raw, dict):
         raise ValueError(f"{contract_path} must contain a mapping")
     if CONSUMER_GROUP_HANDOVER_KEY not in raw:
@@ -155,6 +190,7 @@ def plan_offset_handover(
     first_offsets: Mapping[int, int],
     end_offsets: Mapping[int, int],
     retired_auto_offset_reset: Literal["earliest", "latest"],
+    handover_rule: Literal["copy_if_uncommitted", "last_ran"] = "copy_if_uncommitted",
 ) -> dict[int, int]:
     """Partition to offset for every partition the successor must be given.
 
@@ -162,13 +198,23 @@ def plan_offset_handover(
     """
     plan: dict[int, int] = {}
     for partition in sorted(partitions):
-        if successor_committed.get(partition) is not None:
-            continue
+        first = first_offsets[partition]
+        successor = successor_committed.get(partition)
         retired = retired_committed.get(partition)
-        if retired is not None and retired >= first_offsets[partition]:
+        if handover_rule == "last_ran":
+            retained = [c for c in (successor, retired) if c is not None and c >= first]
+            if retained:
+                later = max(retained)
+                if successor != later:
+                    plan[partition] = later
+                continue
+        elif successor is not None:
+            continue
+        elif retired is not None and retired >= first:
             plan[partition] = retired
-        elif retired_auto_offset_reset == "earliest":
-            plan[partition] = first_offsets[partition]
+            continue
+        if retired_auto_offset_reset == "earliest":
+            plan[partition] = first
         else:
             plan[partition] = end_offsets[partition]
     return plan
@@ -180,6 +226,56 @@ def supports_offset_handover(event_bus: object) -> bool:
         event_bus,
         (ProtocolConsumerGroupOffsetHandover, EventBusKafka, EventBusInmemory),
     )
+
+
+async def _member_count(consumer: AIOKafkaConsumer, group: str) -> int:
+    """Members of ``group`` now, from one DescribeGroups of that group alone.
+
+    Sent to the group's coordinator over the started offset consumer's own
+    connection, so the fence builds no client of its own. One group per
+    describe, as ``backend_probe`` does: a batched describe has failed to decode
+    against MSK.
+    """
+    client = consumer._client
+    coordinator = await client.coordinator_lookup(CoordinationType.GROUP, group)
+    response = await client.send(coordinator, DescribeGroupsRequest(groups=[group]))
+    for described in getattr(response, "groups", []):
+        if (
+            len(described) <= _DESCRIBED_MEMBERS
+            or str(described[_DESCRIBED_GROUP_ID]) != group
+        ):
+            continue
+        if described[_DESCRIBED_ERROR_CODE] != 0:
+            raise ConsumerGroupFenceError(
+                f"describing retired consumer group {group!r} returned error "
+                f"code {described[_DESCRIBED_ERROR_CODE]}; its membership is "
+                "unknown, so its position is not taken over"
+            )
+        return len(described[_DESCRIBED_MEMBERS])
+    raise ConsumerGroupFenceError(
+        f"describing retired consumer group {group!r} returned no answer for "
+        "it; its membership is unknown, so its position is not taken over"
+    )
+
+
+async def _fence_retired_group(
+    consumer: AIOKafkaConsumer, *, group: str, fence: ModelConsumerGroupFence
+) -> None:
+    """Return once ``group`` has no members; refuse after ``fence.wait_seconds``."""
+    deadline = time.monotonic() + fence.wait_seconds
+    while True:
+        members = await _member_count(consumer, group)
+        if members == 0:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ConsumerGroupFenceError(
+                f"retired consumer group {group!r} still has {members} "
+                f"member(s) after {fence.wait_seconds}s; its consumer is still "
+                "running, so its position is not taken over (OMN-22714). Stop "
+                "the retired consumer, then restart."
+            )
+        await asyncio.sleep(min(fence.poll_seconds, remaining))
 
 
 async def _committed(
@@ -199,6 +295,8 @@ async def _hand_over_on_kafka(
     from_group: str,
     to_group: str,
     from_auto_offset_reset: Literal["earliest", "latest"],
+    handover_rule: Literal["copy_if_uncommitted", "last_ran"],
+    fence: ModelConsumerGroupFence,
 ) -> ModelOffsetHandoverResult:
     effective = bus._resolve_effective_group_id(
         to_group, topic, uuid4(), (topic, to_group)
@@ -216,6 +314,8 @@ async def _hand_over_on_kafka(
     try:
         await retired.start()
         try:
+            # The fence comes first: no offset of a group still consumed is read.
+            await _fence_retired_group(retired, group=from_group, fence=fence)
             # ``topics()`` and ``partitions_for_topic()`` read different
             # metadata objects on a consumer with no subscription; read the
             # partitions off the fetched cluster, as the DLQ depth monitor does.
@@ -240,6 +340,7 @@ async def _hand_over_on_kafka(
                 first_offsets={tp.partition: off for tp, off in first.items()},
                 end_offsets={tp.partition: off for tp, off in end.items()},
                 retired_auto_offset_reset=from_auto_offset_reset,
+                handover_rule=handover_rule,
             )
             if plan:
                 await successor.commit(
@@ -254,7 +355,12 @@ async def _hand_over_on_kafka(
         from_group=from_group,
         to_group=successor_group,
         committed=plan,
-        kept=tuple(p for p in partition_ids if successor_committed[p] is not None),
+        kept=tuple(
+            p
+            for p in partition_ids
+            if p not in plan and successor_committed[p] is not None
+        ),
+        fenced_group=from_group,
     )
 
 
@@ -265,12 +371,16 @@ async def hand_over_committed_offsets(
     from_group: str,
     to_group: str,
     from_auto_offset_reset: Literal["earliest", "latest"],
+    handover_rule: Literal["copy_if_uncommitted", "last_ran"] = "copy_if_uncommitted",
+    fence: ModelConsumerGroupFence | None = None,
 ) -> ModelOffsetHandoverResult:
     """Seed ``to_group`` (the id passed to ``subscribe``) from ``from_group``.
 
     Raises:
         TypeError: ``event_bus`` cannot hand offsets over; see
             :func:`supports_offset_handover`.
+        ConsumerGroupFenceError: On Kafka, ``from_group`` still has members
+            after ``fence.wait_seconds``, or its membership cannot be read.
     """
     if isinstance(event_bus, ProtocolConsumerGroupOffsetHandover):
         return await event_bus.hand_over_committed_offsets(
@@ -278,6 +388,7 @@ async def hand_over_committed_offsets(
             from_group=from_group,
             to_group=to_group,
             from_auto_offset_reset=from_auto_offset_reset,
+            handover_rule=handover_rule,
         )
     if isinstance(event_bus, EventBusKafka):
         return await _hand_over_on_kafka(
@@ -286,6 +397,8 @@ async def hand_over_committed_offsets(
             from_group=from_group,
             to_group=to_group,
             from_auto_offset_reset=from_auto_offset_reset,
+            handover_rule=handover_rule,
+            fence=fence if fence is not None else ModelConsumerGroupFence(),
         )
     if isinstance(event_bus, EventBusInmemory):
         return ModelOffsetHandoverResult(
@@ -304,16 +417,18 @@ class HandlerContractSubscribePreflight:
         self,
         *,
         contract_name: str,
-        contract_path: Path,
+        concurrency: ModelConsumeConcurrency,
+        handover: ModelConsumerGroupHandover | None,
         event_bus: object,
         environment: str,
         consumer_group: str,
     ) -> None:
-        """Read both declarations and refuse a bus that cannot honour them.
+        """Validate injected declarations and refuse a bus that cannot honour them.
 
         Args:
             contract_name: The contract, for messages and logs.
-            contract_path: The contract YAML the declarations are read from.
+            concurrency: The contract's parsed consume-concurrency declaration.
+            handover: The contract's parsed consumer-group handover, if declared.
             event_bus: The bus the contract's topics will be subscribed on.
             environment: The runtime environment; the handover's retired group
                 is derived in it.
@@ -327,7 +442,7 @@ class HandlerContractSubscribePreflight:
         self._contract_name = contract_name
         self._event_bus = event_bus
         self._consumer_group = consumer_group
-        self._concurrency = load_consume_concurrency(contract_path)
+        self._concurrency = concurrency
         if not self._concurrency.is_serial and not isinstance(
             event_bus, ProtocolConsumeConcurrencyDeclarer
         ):
@@ -341,7 +456,7 @@ class HandlerContractSubscribePreflight:
                 "A declared bound that silently does "
                 "nothing is the defect OMN-18852 exists to remove"
             )
-        self._handover = load_consumer_group_handover(contract_path)
+        self._handover = handover
         if self._handover is not None and not supports_offset_handover(event_bus):
             raise TypeError(
                 f"contract '{contract_name}' declares consumer_group_handover, "
@@ -398,15 +513,18 @@ class HandlerContractSubscribePreflight:
                 from_group=self._retired_group,
                 to_group=self._consumer_group,
                 from_auto_offset_reset=self._handover.from_auto_offset_reset,
+                handover_rule=self._handover.handover_rule,
+                fence=self._handover.fence,
             )
             logger.info(
                 "Consumer group handover: topic=%s from=%s to=%s committed=%s "
-                "kept=%s node=%s (OMN-21753)",
+                "kept=%s fenced=%s node=%s (OMN-21753)",
                 topic,
                 handover.from_group,
                 handover.to_group,
                 handover.committed,
                 list(handover.kept),
+                handover.fenced_group,
                 self._contract_name,
             )
         return ModelContractSubscribePreflightResult(

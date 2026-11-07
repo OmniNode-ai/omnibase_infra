@@ -22,6 +22,7 @@ silent_skip_allowed: false
 # keys on junit skip reasons, not on this list — kept in sync with the ci.yml
 # "Run the service-backed suites" step.
 curated_test_paths:
+  - "tests/integration/runtime/test_lane_entry_point_census_omn21923.py"
   - "tests/integration/event_bus/test_kafka_event_bus_integration.py"
   - "tests/integration/handlers/test_handler_qdrant_integration.py"
   # OMN-18795: six suites that had no execution path at all.

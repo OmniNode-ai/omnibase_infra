@@ -313,6 +313,13 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 # installed package, so the @main anchor that makes the gate un-self-issuable
 # does not depend on anything being baked in here.
 #
+# OMN-22153: workspace mode also reinstalls omninode-intelligence from its staged
+# tree, a checkout of omniintelligence's newest dev-merge tag, over the registry
+# range installed with the plugins above. The registry install stays because
+# release mode (the non-dev lanes) never reaches this block. The install is
+# --no-deps like the registry one: the plugin's third-party dependencies come from
+# the external-deps step below.
+#
 # OMN-13405: workspace mode reinstalls omnibase_core FIRST from the staged dev-HEAD
 # clone. `uv sync` above already installed omnibase-core from omnibase_infra/uv.lock,
 # but that lock pins a released 0.45.0 wheel at a commit PREDATING dev enum modules
@@ -374,7 +381,7 @@ ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archi
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
-        for repo in omnibase_core omnibase_spi; do \
+        for repo in omnibase_core omnibase_spi omniintelligence; do \
             p="/workspace/sibling-repos/${repo}"; \
             if [ ! -d "${p}" ]; then \
                 echo "workspace mode: missing staged repo ${p}" >&2; exit 2; \
@@ -388,6 +395,10 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
         ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnibase-spi \
             "omnibase-spi @ file:///workspace/sibling-repos/omnibase_spi" ); \
+        uv-with-retry pip uninstall omninode-intelligence; \
+        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+            --no-deps --no-sources --no-cache --reinstall-package omninode-intelligence \
+            "omninode-intelligence @ file:///workspace/sibling-repos/omniintelligence" ); \
     else \
         uv-with-retry pip install --no-deps \
             "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
@@ -423,7 +434,7 @@ ARG FIRST_PARTY_DECLARED_PR=""
 RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
         /app/.venv/bin/python -c 'import os, sys; from pathlib import Path; from omnibase_infra.validation.checker_first_party_sources import run_audit; sys.exit(run_audit(Path("/workspace/sibling-vcs-provenance.json"), record_into=Path("/app/build-provenance.json"), require=sys.argv[1:], context=os.environ.get("FIRST_PARTY_BUILD_CONTEXT", ""), declared_pr=os.environ.get("FIRST_PARTY_DECLARED_PR", "")))' \
-            omnibase-core omnibase-spi omnibase-infra; \
+            omnibase-core omnibase-spi omninode-intelligence omnibase-infra; \
     fi
 
 # The runtime image still installs legacy packages for import compatibility while

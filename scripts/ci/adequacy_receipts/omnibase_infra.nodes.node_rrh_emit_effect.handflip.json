@@ -1,0 +1,20 @@
+{
+  "base_ref": "65e3994c3d870c6d24a9c233872b3498c3c9ec39",
+  "canonical_handler_module": "omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_repo_state_collect",
+  "legacy_handler_module": "omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_repo_state_collect",
+  "node_id": "omnibase_infra.nodes.node_rrh_emit_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:7b662e12300065a3051d6725b64e209cfe7eef6826fe16ca7b3b49c4c6d7b5c3"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_handler_shape_signatures_omn21536.py::test_rrh_emit_effect_handle_takes_one_typed_request"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerRepoStateCollect._git",
+    "HandlerRepoStateCollect._sanitize_remote_url"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

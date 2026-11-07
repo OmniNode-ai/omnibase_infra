@@ -325,7 +325,8 @@ def test_the_additive_mode_fetches_a_real_registration_handle() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     start = text.index("add_services_deploy() {")
     body = text[start : text.index("\n}\n", start)]
-    assert "fetch_registration_" + "token" in body, (
-        "the additive path must mint a real registration handle: a brand-new "
-        "container has no cached registration to restore from"
+    assert "DEPLOY_RUNNER_" + "TOKEN" in body, (
+        "the additive path must take a real registration handle (supplied, "
+        "OMN-22604): a brand-new container has no cached registration to "
+        "restore from"
     )

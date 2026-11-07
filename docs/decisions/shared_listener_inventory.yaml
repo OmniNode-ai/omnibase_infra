@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Shared listener inventory (OMN-22377, rule A2 and the end of section 4).
+#
+# Part of the OMN-22151 stage-2 design (task T1). The runtime serves the shared
+# host socket only while it reads ready; this file records what can flip
+# readiness and what is served from two runtimes at once.
+# tests/unit/services/test_shared_listener_inventory.py fails when a readiness
+# probe or an http_mount is added without an entry below.
+#
+# Rule A2: a probe that can flip without a fault of its own runtime is a T1
+# failure. None below can.
+readiness_check:
+  # runtime_host_process.py
+  expression: ready = _is_running and not _is_draining and event_bus_ready and supplemental_ready
+  inputs:
+    - name: _is_running
+      flips_on: the runtime has not finished start, or has stopped
+      fault_of_this_runtime: "yes: boot, or its own stop"
+    - name: _is_draining
+      flips_on: runtime.stop() (the kernel, after the listener drain of A5)
+      fault_of_this_runtime: "yes: its own stop"
+    - name: event_bus_ready
+      flips_on: an empty assignment or a dead consume loop for a required topic; the bus cause is a rebalance revocation
+      fault_of_this_runtime: >-
+        revocation is caught before it happens (SharedListener.begin_revocation, latch first); a dead consume task is a fault
+    - name: supplemental probes
+      flips_on: see probe_sites
+      fault_of_this_runtime: yes
+# Every register_readiness_probe( call site in src/, with the call count the test
+# compares against the scan, and the fault that flips it.
+probe_sites:
+  src/omnibase_infra/runtime/service_kernel.py:
+    count: 1
+    probe: contract-attach gate (CONTRACT_ATTACH_PROBE_NAME)
+    armed: before the wiring interleave
+    flips_when: >-
+      a required command-topic contract is still pending, NOT_READY or FAILED (ContractAttachReadinessGate.status). After boot record() only moves contracts toward ATTACHED (the NOT_READY reconciliation loop); it never regresses an attached contract
+    flips_without_fault_of_its_runtime: >-
+      no. A boot-time state of this runtime's own wiring. A runtime attaches the shared socket only after it has read ready, so a boot-time false never occurs on an attached runtime
+  src/omnibase_infra/runtime/core_runtime/kernel_glue.py:
+    count: 1
+    probe: core_runtime_loop (readiness_snapshot of the core runtime handle)
+    flips_when: >-
+      the dispatch loop task ended unexpectedly (is_loop_healthy), or the phantom-subscription probe flagged a core-runtime topic: assigned, HWM advanced by this runtime's own polls, LAG 0 and zero messages dispatched (PhantomAlarmMonitor.evaluate)
+    flips_without_fault_of_its_runtime: >-
+      no. Both inputs are this runtime's own task and its own poll and dispatch counters. Note for T2: a paused standby must keep polled_by_topic at zero, or the phantom rule reads a paused partition as a phantom
+# Contract HTTP mounts and local-ingress handlers, served by both runtimes during
+# an overlap. The listener's second web.Application is built by the same
+# ServiceHealth._build_app as the in-container one, including the AsgiMounts
+# middleware, so every mount and the /skill ingress answer on the shared socket too.
+http_mounts:
+  src/omnibase_infra/nodes/node_contract_resolver_bridge/contract.yaml:
+    surface: http_mount of node_contract_resolver_bridge (/api/nodes, factory services.contract_resolver.main:create_mounted_app)
+    in_process_singleton_state: >-
+      app.state.event_bus and app.state.container, both per process, both read by request handlers; no cache, no counter, no module-level mutable state found in contract_resolver/main.py or routes.py
+    disposition: stateless per request, served by both runtimes like two replicas. No gate to active
+other_surfaces:
+  - surface: POST /skill (ServiceHealth._handle_skill)
+    in_process_singleton_state: >-
+      none in the handler: it validates the body and calls RuntimeHostProcess.dispatch_local_ingress_request; the routes come from the contracts' local_ingress declarations (discover_runtime_local_ingress_routes)
+    disposition: >-
+      the dispatch path holds no singleton state. Not audited: the individual handlers behind each contract-declared local-ingress route. A handler that keeps in-process state must be gated to active by its own lane before the standby slot (T2) is installed
+  - surface: /health, /health/detailed, /v1/introspection/manifest
+    in_process_singleton_state: read-only views of the process
+    disposition: none
+open_items:
+  - >-
+    The rebalance listener that calls begin_revocation and end_revocation does not exist in src/ yet (on_partitions_revoked has no caller); T2 owns it. T1 supplies the API only.
+  - >-
+    role, epoch and consuming in the /ready body read role, epoch and is_consuming from the runtime when it has them; an active runtime without them reads active, 0, true.

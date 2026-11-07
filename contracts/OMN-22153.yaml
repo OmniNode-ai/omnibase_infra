@@ -1,0 +1,90 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22153
+title: omniintelligence builds into the dev image from its dev-merge tag through first_party_sources.yaml, and the registry install stays for non-dev
+summary: first_party_sources.yaml lists omniintelligence as a vendored package, the sibling clone manifest vendors it, stage_workspace.sh stages it at its newest dev-merge tag, and the workspace branch of Dockerfile.runtime installs it from the staged tree and requires it in the first-party audit. The release branch keeps the registry range install, and the lock-pin preflight leaves out the one sibling no lock pins.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22153-vendored-source
+    statement: The dev image takes omniintelligence from its dev-merge tag, staged and installed like the other vendored first-party packages, while non-dev lanes keep the registry install.
+    acceptance:
+      - id: AC1
+        statement: "AC1: first_party_sources.yaml lists omniintelligence as a vendored package built from its dev-merge tag, and the sibling clone manifest and the dev image build stage it, with the registry install kept for non-dev lanes -- falsifier: uv run --frozen pytest tests/scripts/test_first_party_sources_omn17427.py -q -n 0 --no-cov"
+      - id: AC4
+        statement: "AC4: the pre-merge pool driver and its on-host script hold none of the values check-hardcoded-model-config-compute named in them: the driver's timeouts, ssh connect timeout, command prefixes and git host come from the prepr_runtime_pool contract overlay in the workspace config root, and the clone base and poll interval reach the script as driver-set params -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_overlay_omn22153.py and the hook run over both files reads zero findings"
+  - id: req-omn22153-dev-deploy
+    statement: A dev deploy through the deploy agent carries omniintelligence at a dev-merge tag that contains omniintelligence#1202.
+    acceptance:
+      - id: AC2
+        statement: "AC2: a dev deploy through the deploy agent carries omniintelligence at a dev-merge tag that contains omniintelligence#1202 -- falsifier: the build-provenance.json of that deploy read for the omniintelligence tag, then git merge-base --is-ancestor of the #1202 merge commit against that tag"
+  - id: req-omn22153-t15-live
+    statement: The T15 live check on the dev lane answers 200 for the intelligence API health and patterns paths.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the T15 live check on port 8085 returns HTTP 200 for /api/v1/health and /api/v1/patterns -- falsifier: curl -s -o /dev/null -w '%{http_code}' against both paths on the dev lane"
+evidence_requirements:
+  - kind: tests
+    description: The first-party source contract, the clone manifest parity and the workspace staging tests of this change.
+    command: uv run --frozen pytest tests/scripts/test_first_party_sources_omn17427.py tests/scripts/test_sibling_clone_manifest_parity.py tests/scripts/test_ensure_runner_clones.py tests/scripts/test_stage_workspace_vcs_provenance.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22153-ac1-omniintelligence-vendored
+    description: The contract file named in the ticket does not exist in this repository; the first-party source contract is tests/scripts/test_first_party_sources_omn17427.py. With omniintelligence in first_party_sources.yaml, the clone manifest, the in-image provenance set and the Dockerfile workspace install, the audit refuses a registry install, a sha staging and a branch staging of it, the pin preflight leaves out exactly the lock-unpinned set, and the registry install stays in the release branch. At the merge base none of those tests exist.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_first_party_sources_omn17427.py tests/scripts/test_sibling_clone_manifest_parity.py tests/scripts/test_ensure_runner_clones.py tests/scripts/test_stage_workspace_vcs_provenance.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22153-ac2-deploy-installs-staged-tree
+    description: Hosted-runner deploy probe reads the policy data and the runtime Dockerfile from GitHub at the checked-out commit and requires omniintelligence as a vendored package and its staged-tree install, so a checkout without the change fails it. The deploy itself runs through the deploy agent after the merge; its build-provenance.json tag and the ancestry of the omniintelligence#1202 merge commit are read from the lane and reported on the ticket.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/validation/first_party_sources.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'repo: omniintelligence' <<<"$doc";
+          dockerfile="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'omninode-intelligence @ file:///workspace/sibling-repos/omniintelligence' <<<"$dockerfile"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22153-ac3-mount-in-the-built-tag
+    description: Hosted-runner probe requires omniintelligence in first_party_sources.yaml at the checked-out commit (absent at the merge base) and reads the omniintelligence node contract from GitHub at its newest dev-merge tag, the tag the dev image stages, and requires its http_mount declaration, the surface the T15 live check on port 8085 answers from. The HTTP 200 reads of /api/v1/health and /api/v1/patterns on the dev lane are taken by the lane after the deploy and reported on the ticket.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          grep -q 'repo: omniintelligence' src/omnibase_infra/validation/first_party_sources.yaml;
+          tag="$(gh api --paginate repos/OmniNode-ai/omniintelligence/git/matching-refs/tags/dev- --jq '.[].ref' | sed 's#refs/tags/##' | sort | tail -n 1)";
+          test -n "$tag";
+          doc="$(gh api "repos/OmniNode-ai/omniintelligence/contents/src/omniintelligence/nodes/node_pattern_storage_effect/contract.yaml?ref=$tag" --jq .content | base64 -d)";
+          grep -q '^http_mount:' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22153-ac1-pool-proof-clones-vendored-set
+    description: The pre-merge pool proof clones every sibling in the tree under test's SIBLING_VENDORED_REPOS, omniintelligence included, and passes a repo-ref for each to the workspace stage, in both the sha-pin mode and the STAGE_DEV_TAGS mode. At the merge base the pool script cloned only omnibase_core, omnibase_spi and omnimarket and the sha-pin stage ended missing=['omniintelligence'] with rc=4.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22153-ac2-pool-values-in-overlay
+    description: The pool driver reads its values from the typed overlay and the overlay model refuses a missing or unknown key; the hook that named 29 findings in the driver and its script reads none.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_overlay_omn22153.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

@@ -6,10 +6,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.nodes.node_board_probe_effect.contract_topics import (
     consumer_flow_projection_api_base_url,
+)
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
 )
 
 
@@ -18,6 +21,10 @@ class ModelConsumerFlowRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     subject_lane: str = Field(min_length=1)
+    # OMN-21485: the compose project of the lane the workflow resolved; the
+    # containers C28 reads are derived from it (ModelConsumerFlowLane). No
+    # default: a request that names no lane cannot fall back to one.
+    compose_project: str = Field(min_length=1)
     # Bound from the node contract's consumer_flow_endpoints (OMN-21688).
     base_url: str = Field(
         default_factory=consumer_flow_projection_api_base_url, min_length=1
@@ -38,3 +45,9 @@ class ModelConsumerFlowRequest(BaseModel):
     scratch: Path = Path()
 
     record: Path | None = None
+
+    @field_validator("compose_project")
+    @classmethod
+    def _lane_compose_project(cls, value: str) -> str:
+        ModelConsumerFlowLane.from_compose_project(value)
+        return value

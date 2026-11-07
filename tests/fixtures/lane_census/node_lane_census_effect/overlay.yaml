@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# A NEUTRAL lane census registry overlay for tests (OMN-22152). It describes no
+# real lab.
+#
+# The lab host registry (which hosts exist for the census, the names each one
+# reports, the lanes each may host) is overlay data of the lane census node, in
+# a file the deployment's overlay supplies. The census collector reads the
+# `registry:` key of the file that LANE_CENSUS_REGISTRY names and nothing else
+# of it. Tests point LANE_CENSUS_REGISTRY at this file.
+#
+# The `hosts:` key is the node's own (which hosts INSTALL the schedule); the
+# collector never reads it, and it is here so a test can prove that.
+hosts:
+  host-a:
+    scheduler: systemd-user
+    docker: engine
+
+registry:
+  - name: host-a
+    aliases: [box-a]
+    lanes: [dogfood, dev]
+  - name: host-b
+    aliases: [box-b]
+    lanes: [principal-issuer]

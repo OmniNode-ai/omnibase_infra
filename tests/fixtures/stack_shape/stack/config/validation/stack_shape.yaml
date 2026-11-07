@@ -9,6 +9,32 @@ one_shots: [forward-migration, "*-topics"]
 compose_files: docker/docker-compose*.yml
 not_a_stack:
   - docker/docker-compose.unrelated.yml
+allowed_commands:
+- argv:
+  - onex-runtime
+  match: executable
+  field: command
+  services: []
+  reason: The one-runtime kernel carries all in-process nodes.
+- argv:
+  - onex-gateway-forwarder
+  match: executable
+  field: command
+  services:
+  - gateway-forwarder
+  reason: T26 retains the standalone lane-mirror transport bridge between separately credentialed brokers.
+- argv:
+  - python
+  - -m
+  - example.legacy_consumer
+  match: exact
+  field: command
+  services:
+  - legacy-consumer
+  reason: Fixture-only legacy command; a changed command is refused.
+command_only_compose_files: []
+console_scripts: {}
+command_baseline: []
 baseline:
   - service: legacy-consumer
     files: 1

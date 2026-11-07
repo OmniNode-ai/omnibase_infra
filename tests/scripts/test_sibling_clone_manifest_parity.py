@@ -24,6 +24,8 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
 CHECK_PINS = REPO_ROOT / "scripts" / "runtime_build" / "check_sibling_lock_pins.py"
@@ -31,12 +33,24 @@ CHECK_PINS = REPO_ROOT / "scripts" / "runtime_build" / "check_sibling_lock_pins.
 
 def _bash_array(source: str, name: str) -> list[str]:
     match = re.search(
-        rf"^{re.escape(name)}=\(\n(.*?)\n\)",
+        # Only quoted words may sit between the parentheses, so the match cannot
+        # run on past the array's own closing parenthesis into a later array, and
+        # an array holding a comment or a bare word fails the lookup loudly
+        # instead of parsing short.
+        rf'^{re.escape(name)}=\(((?:\s*"[^"]*")*)\s*\)',
         source,
-        re.DOTALL | re.MULTILINE,
+        re.MULTILINE,
     )
     assert match, f"could not find bash array {name!r} in {MANIFEST}"
     return re.findall(r'"([^"]+)"', match.group(1))
+
+
+def test_bash_array_reader_stops_at_its_own_parenthesis_and_refuses_a_comment() -> None:
+    source = 'A=("a" "b")\nB=(\n    "c"\n    "d"\n)\nC=(\n    "e"  # note\n)\n'
+    assert _bash_array(source, "A") == ["a", "b"]
+    assert _bash_array(source, "B") == ["c", "d"]
+    with pytest.raises(AssertionError):
+        _bash_array(source, "C")
 
 
 def _python_default_package_repo_dirs() -> dict[str, str]:
@@ -74,7 +88,14 @@ def test_manifest_dirs_match_python_pin_check_authority_exactly() -> None:
         "index-aligned and the same length"
     )
 
-    manifest_pairs = dict(zip(manifest_dist_names, manifest_dirs, strict=True))
+    # OMN-22153: the pin authority is the consuming lock, which cannot pin a
+    # sibling it does not carry. The declared lock-unpinned set is the one gap.
+    unpinned = _bash_array(source, "SIBLING_LOCK_UNPINNED_REPOS")
+    manifest_pairs = {
+        dist: directory
+        for dist, directory in zip(manifest_dist_names, manifest_dirs, strict=True)
+        if directory not in unpinned
+    }
     python_pairs = _python_default_package_repo_dirs()
 
     assert manifest_pairs == python_pairs, (
@@ -288,3 +309,70 @@ def test_lane_refresh_set_is_tag_set_minus_declared_exclusions() -> None:
     assert _manifest_array("SIBLING_LANE_REFRESH_REPOS") == [
         repo for repo in tag_set if repo not in excluded
     ]
+
+
+# ---------------------------------------------------------------------------
+# OMN-22153: omniintelligence is vendored at its dev-merge tag but pinned by no
+# lock. The pin preflight refuses a requested package absent from the consuming
+# lock, so the build leaves the unpinned set out of the preflight and nothing
+# else.
+# ---------------------------------------------------------------------------
+
+
+def test_lock_unpinned_siblings_are_vendored_and_declared_once() -> None:
+    unpinned = _manifest_array("SIBLING_LOCK_UNPINNED_REPOS")
+    assert unpinned == ["omniintelligence"]
+    # An excuse from the lock is only for a package the build stages at a tag.
+    assert set(unpinned) <= set(_manifest_array("SIBLING_VENDORED_REPOS"))
+    # The foundation packages stay pinned by the lock.
+    assert not {"omnibase_core", "omnibase_spi", "omnimarket", "omnibase_infra"} & set(
+        unpinned
+    )
+
+
+def _preflight_repo_args(unpinned: str) -> list[str]:
+    """Run stage_workspace.sh's own PREFLIGHT_REPO_ARGS loop over the manifest."""
+    script = (RUNTIME_BUILD / "stage_workspace.sh").read_text(encoding="utf-8")
+    match = re.search(
+        r"^PREFLIGHT_REPO_ARGS=\(\)\nfor i in .*?\ndone$",
+        script,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert match is not None, "the PREFLIGHT_REPO_ARGS loop was not found"
+    harness = "\n".join(
+        [
+            "set -euo pipefail",
+            f'source "{MANIFEST}"',
+            f"SIBLING_LOCK_UNPINNED_REPOS=({unpinned})",
+            'sibling_source() { printf "/clones/%s" "$1"; }',
+            match.group(0),
+            'printf "%s\\n" "${PREFLIGHT_REPO_ARGS[@]}"',
+        ]
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.split()
+
+
+def test_the_pin_preflight_leaves_out_exactly_the_lock_unpinned_siblings() -> None:
+    args = _preflight_repo_args('"omniintelligence"')
+    assert args == [
+        "--repo",
+        "omnibase-infra=/clones/omnibase_infra",
+        "--repo",
+        "omnibase-core=/clones/omnibase_core",
+        "--repo",
+        "omnibase-spi=/clones/omnibase_spi",
+        "--repo",
+        "omnimarket=/clones/omnimarket",
+    ]
+
+
+def test_the_pin_preflight_skip_is_the_declared_set_not_a_blanket() -> None:
+    """Positive control: with nothing declared the preflight asks for every
+    manifest member, so the skip above is proven to come from the declaration."""
+    args = _preflight_repo_args("")
+    assert "omninode-intelligence=/clones/omniintelligence" in args
+    assert len(args) == 2 * len(_manifest_array("SIBLING_CLONE_MANIFEST"))

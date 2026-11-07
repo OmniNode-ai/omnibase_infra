@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 
 _EXCEPTION = re.compile(r"^Live-contact exception:[ \t]*(\S[^\n]*)$", re.MULTILINE)
 _LOCAL_EXCEPTION_PATH = ".github/live-contact-exception.md"
+# One carrier file per pull request (OMN-22635): two changes add different files, so
+# they merge without the conflict that appending to the shared file above causes.
+_LOCAL_EXCEPTION_DIR = _LOCAL_EXCEPTION_PATH.removesuffix(".md") + "/"
 # A pin-only workflow edit swaps a full commit sha on an existing `uses:` or
 # `ref:` line (or the comment naming it) and changes nothing else: no step,
 # command, trigger, permission or logic, so it reaches no new contact surface.
@@ -169,12 +172,18 @@ class HandlerCILiveContact:
             # The local hook reads only a carrier changed in this index. Its
             # declared location fits the existing clean-root policy; CI uses
             # the actual PR body and never borrows a repository exception.
-            if (
-                not request.base_ref
-                and _LOCAL_EXCEPTION_PATH in paths
-                and _LOCAL_EXCEPTION_PATH in present
-            ):
-                body = read(_LOCAL_EXCEPTION_PATH)
+            if not request.base_ref:
+                carriers = [
+                    p
+                    for p in paths
+                    if p in present
+                    and (
+                        p == _LOCAL_EXCEPTION_PATH
+                        or (p.startswith(_LOCAL_EXCEPTION_DIR) and p.endswith(".md"))
+                    )
+                ]
+                if carriers:
+                    body = "\n".join(read(p) for p in carriers)
             body = re.sub(r"```.*?```|<!--.*?-->", "", body, flags=re.DOTALL)
             exception = _EXCEPTION.search(body)
             if exception and len(exception.group(1).split()) >= 8:
@@ -299,7 +308,7 @@ class HandlerCILiveContact:
             reason = (
                 "CI-tooling change requires a live-contact test with a recorded "
                 "response/replay, or a Live-contact exception: reason in the PR "
-                f"body (locally, stage {_LOCAL_EXCEPTION_PATH})"
+                f"body (locally, stage {_LOCAL_EXCEPTION_PATH} or a new file under {_LOCAL_EXCEPTION_DIR})"
             )
             if problems:
                 reason += "; " + "; ".join(problems)

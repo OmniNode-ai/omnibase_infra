@@ -9,7 +9,7 @@
 # contract). Build args MUST match docker/runners/runner-image.lock.json — CI
 # verifies the bound identity via scripts/ci/runner_image_identity.py.
 
-ARG RUNNER_VERSION=2.336.0
+ARG RUNNER_VERSION=2.338.2
 ARG GH_VERSION=2.67.0
 ARG KUBECTL_VERSION=1.32.1
 ARG AWSCLI_VERSION=2.36.29
@@ -109,6 +109,11 @@ ENV OMNI_CI_ENV_ROOT=${OMNI_CI_ENV_ROOT}
 # root, and any ad hoc bare `docker exec` inherits it). See the sudoers rule
 # below: NOPASSWD, one command, one argument pattern, confined under this
 # runner's own `_work` tree -- never a general root shell.
+# tzdata (OMN-19998): the ubuntu:22.04 base ships no IANA zoneinfo database, so
+# python's zoneinfo.ZoneInfo("America/New_York") raises ZoneInfoNotFoundError on
+# every runner built without it (a merge group for a private repository failed
+# on exactly that on two runners). A job has no passwordless package manager
+# here, so the database has to be in the image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -118,6 +123,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     rsync \
     sudo \
+    tzdata \
     libatomic1 \
     libicu-dev \
     libkrb5-3 \
@@ -347,10 +353,10 @@ RUN groupadd --gid 1001 runner \
 # that would delete the supply-chain verification this pin exists for, on
 # exactly the hosts that have no other proof. tests/ci/
 # test_runner_image_multiarch.py fails if either digest goes missing.
-# SHA256 for actions-runner-linux-x64-2.336.0.tar.gz
-ENV RUNNER_SHA256_AMD64=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
-# SHA256 for actions-runner-linux-arm64-2.336.0.tar.gz
-ENV RUNNER_SHA256_ARM64=58b758e420b87093fbd4bfddd368074960053e2f1388f01848c82624b90f27d1
+# SHA256 for actions-runner-linux-x64-2.338.2.tar.gz
+ENV RUNNER_SHA256_AMD64=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
+# SHA256 for actions-runner-linux-arm64-2.338.2.tar.gz
+ENV RUNNER_SHA256_ARM64=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
 
 RUN mkdir -p "${RUNNER_HOME}" \
     && cd "${RUNNER_HOME}" \

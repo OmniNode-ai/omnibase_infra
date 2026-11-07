@@ -28,7 +28,6 @@ permissions:
   contents: read
 
 env:
-  CORE_PIN: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@422e207e953841b11b7ae4919bd486f8c84b8c24"
   GATE: omnibase_core.nodes.node_direct_model_call_check_effect.runtime_direct_model_call
 
 jobs:
@@ -50,6 +49,20 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
+
+      # OMN-22360: the core pin has one home, the omnibase_core block of
+      # .pre-commit-config.yaml that holds the check-direct-model-call hook (the gate below).
+      - name: Read the core pin from .pre-commit-config.yaml
+        run: |
+          set -eu
+          spec="$(uv run --no-project --with pyyaml python -c '
+          import yaml
+          config = yaml.safe_load(open(".pre-commit-config.yaml"))
+          blocks = [r for r in config["repos"] if any(h["id"] == "check-direct-model-call" for h in r["hooks"])]
+          assert len(blocks) == 1, blocks
+          print("omnibase-core @ git+" + blocks[0]["repo"] + "@" + blocks[0]["rev"])
+          ')"
+          echo "CORE_PIN=${spec}" >> "$GITHUB_ENV"
 
       - name: Scan the repository against the shrink-only baseline
         env:

@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shlex
 import subprocess
 import tarfile
@@ -68,6 +69,7 @@ from deploy_agent.events import (
     ModelLaneMirrorReceipt,
 )
 from deploy_agent.routing import ROUTING_TABLE_RELPATH, PhaseName, RoutingTableError
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 
 #: The key an instance's composition sits under in the routing table.
 LANE_KEY: Final = "lane"
@@ -194,6 +196,8 @@ LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
             "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD",
             "ONEX_RUNTIME_LANE_CLASS",
             "ONEX_RUNTIME_LANE_CLASS_CONTRACTS",
+            "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY",
+            "COST_ESTIMATOR_WEB_SOURCE_URL",
         }
     ),
 }
@@ -303,13 +307,7 @@ def read_lane_env_fragment(
         return {}
 
     def git(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-C", str(clone), *args],
-            capture_output=True,
-            text=True,
-            timeout=GIT_READ_TIMEOUT_SECONDS,
-            check=False,
-        )
+        return _git_text(_default_run, clone, *args)
 
     if git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
         raise LaneEnvFragmentError(
@@ -351,19 +349,12 @@ def discover_lane_overlay_clone(search_root: Path) -> Path | None:
         child
         for child in search_root.iterdir()
         if (child / ".git").exists()
-        and subprocess.run(
-            [
-                "git",
-                "-C",
-                str(child),
-                "cat-file",
-                "-e",
-                f"{LANE_ENV_FRAGMENT_REF}:{LANE_ENV_FRAGMENT_DIR}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=GIT_READ_TIMEOUT_SECONDS,
-            check=False,
+        and _git_text(
+            _default_run,
+            child,
+            "cat-file",
+            "-e",
+            f"{LANE_ENV_FRAGMENT_REF}:{LANE_ENV_FRAGMENT_DIR}",
         ).returncode
         == 0
     )
@@ -470,6 +461,8 @@ class _LaneMirrorStopError(Exception):
 def _default_run(
     argv: list[str], timeout: float, env: Mapping[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
+    if argv[0] == "git":
+        env = scrub_git_location_env(os.environ if env is None else env)
     return subprocess.run(
         argv,
         capture_output=True,

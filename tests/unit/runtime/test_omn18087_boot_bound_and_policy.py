@@ -102,7 +102,13 @@ def test_the_renderer_writes_main_policy_and_the_committed_env_matches() -> None
 
 
 def test_a_process_that_declares_no_boot_policy_renders_none() -> None:
-    rendered = renderer.render_env(_contract())
+    contract = _contract()
+    effects = contract.profiles["dev"].processes["effects"]
+    # Exercise an absent policy explicitly; dev effects now declares one.
+    contract.profiles["dev"].processes["effects"] = effects.model_copy(
+        update={"boot": None}
+    )
+    rendered = renderer.render_env(contract)
 
     assert not [
         key

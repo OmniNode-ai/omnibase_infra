@@ -67,6 +67,7 @@ no_implicit_reexport = false
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
+    "cost_estimator_build: exercises the real estimator build settings and host effect",
     "unit: unit tests in isolation",
     "dev_boot_guard: test drives the real dev boot guard and recovery store (OMN-21279)",
     "runtime_boot_gate: test drives the candidate-image boot gate (OMN-21279)",

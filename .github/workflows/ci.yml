@@ -1761,7 +1761,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
+          ref: 63aaa30a25583b6af10a44daa4316cfb2d24f809 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -2106,6 +2106,14 @@ jobs:
           uv run python scripts/validation/check_topic_literals.py \
             --baseline scripts/validation/topic_literal_baseline.txt
 
+      - name: Lane entry-point census fixtures and bus wiring (OMN-21923)
+        run: >-
+          uv run --frozen pytest
+          tests/unit/nodes/node_lane_entry_point_census_effect/test_handler_lane_entry_point_census.py
+          tests/unit/nodes/node_lane_entry_point_census_effect/test_dev_lane_recorded_census.py
+          tests/integration/runtime/test_lane_entry_point_census_omn21923.py
+          -m "not kafka" -q --no-cov
+
       - name: Operator script topic namespace gate (OMN-18913)
         run: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
 
@@ -2401,7 +2409,13 @@ jobs:
   detect-changes:
     timeout-minutes: 30
     name: Detect Changes
-    needs: [lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
+    # OMN-22545: `lint` is deliberately NOT in this list. Lint ended at a median
+    # 9.4 min over 68 completed runs while the 14 gates below ended at a median
+    # 3.0 min, so waiting for it started the tests a median 6.4 min late. Lint
+    # still gates the merge: it is in STRICT_GATE_JOBS of
+    # scripts/ci/ci_summary_gate.py, and the NO-`needs` CI Summary poller fails
+    # when it fails (tests/ci/test_ci_test_matrix_not_gated_on_lint.py).
+    needs: [onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
     # OMN-19927: on a push or a dispatch this job must run even when the
     # docs-only tier skipped its lint-class needs, because the provenance
     # step below decides whether that push may skip tests at all. On every
@@ -2546,7 +2560,8 @@ jobs:
   # -n 2 rather than -n auto, after repeated xdist OOM crashes on shard 3.
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
+    # OMN-22545: no `lint` here either, for the reason given on `detect-changes`.
+    needs: [zone-filter, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
     # OMN-16216: draft-state CI admission gate (mirrors onex_change_control
     # PR #6686 / OMN-15731). The heavy split-matrix test run only dispatches
     # once the PR is out of draft; `contains(...'ci:ready')` is retained as a
@@ -2565,14 +2580,14 @@ jobs:
     # `unvalidated_push` selection even when the docs-only tier skipped the
     # lint-class needs.
     if: ((success() && needs.zone-filter.outputs.docs_only != 'true') || (!cancelled() && !failure() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.full_suite_reason == 'unvalidated_push')) && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    # OMN-22812: pinned by literal, not routed through OMNI_RUNNER_SELECTOR_V1. ubuntu-latest became Ubuntu 26.04 on
+    # 2026-11-06, which has no PostgreSQL 16 binaries, so the ephemeral-PostgreSQL tests skip there and Skip Count
+    # Ratchet (OMN-18776) reads the new skips as growth. OMNI_TRUSTED_CI_RUNS_ON_JSON is set to ["ubuntu-latest"] at
+    # organisation scope and on this repository (config/runner_routing_policy.yaml), so a fallback literal behind that
+    # variable never applies and the variable would keep placing this job on the floating image. A literal answers to
+    # no variable. Pull requests did not show it because the impacted-test selector narrows their run; the merge_group
+    # run is full width.
+    runs-on: ubuntu-24.04
     # OMN-18542. Raised 15 -> 20 ALONGSIDE the sizing fix above, never instead of
     # it: a budget raised on its own would have let #3652's 25-minute shard keep
     # running rather than stop it being minted. Measured over the 134 completed
@@ -3582,9 +3597,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-          # Pinned to the commit that exports the validate-validator-requirements hook (OMN-13291).
+          # Same core commit as the dev-merge tag of the core hooks (OMN-22360); its spec schema carries emits.
           # Update by running: gh api repos/OmniNode-ai/omnibase_core/commits/dev --jq '.sha'
-          ref: d163312724489f10f58ffdf8115ba1fa9d5783e8
+          ref: 74e0b0f127670fd0d675b83ee9f4d3e1268cc630
           path: omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -3702,10 +3717,23 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: "0.8.3"
+      # OMN-22360: the core pin has one home, the omnibase_core block of
+      # .pre-commit-config.yaml that holds the no-noncanonical-lifecycle-classes hook (the ratchet below).
+      - name: Read the core pin from .pre-commit-config.yaml
+        run: |
+          set -eu
+          spec="$(uv run --no-project --with pyyaml python -c '
+          import yaml
+          config = yaml.safe_load(open(".pre-commit-config.yaml"))
+          blocks = [r for r in config["repos"] if any(h["id"] == "no-noncanonical-lifecycle-classes" for h in r["hooks"])]
+          assert len(blocks) == 1, blocks
+          print("omnibase-core @ git+" + blocks[0]["repo"] + "@" + blocks[0]["rev"])
+          ')"
+          echo "LIFECYCLE_CORE=${spec}" >> "$GITHUB_ENV"
       - name: Ratchet non-canonical lifecycle-word classes against frozen allowlist (OMN-14350)
         run: |
           uv run --no-project \
-            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@63635097705d832e0ee9c4811093efb31349105c' \
+            --with "$LIFECYCLE_CORE" \
             python -m omnibase_core.validators.no_noncanonical_lifecycle_classes \
             --check-stale \
             --allowlist .onex_ratchets/noncanonical_class_allowlist.yaml \
@@ -3754,6 +3782,8 @@ jobs:
           export STACK_SHAPE_BASE_REF
           uv sync --frozen
           uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -n 0 -p no:cacheprovider
+          # OMN-21924: command and console-script rules extend this same gate.
+          uv run --frozen pytest tests/unit/docker -q -k allowed_commands --no-cov -n 0 -p no:cacheprovider
 
   # OMN-15378 AC3: scripts/deploy-agent's own pytest root (201 tests) ran in a
   # SEPARATELY-TRIGGERED workflow, so the CI Summary poller — which reads
@@ -4395,8 +4425,6 @@ jobs:
     name: Node Boundary Imports (OMN-20703)
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     timeout-minutes: 15
-    env:
-      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@031148215620031436cba30619bbae67c0bb38ad"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4410,6 +4438,19 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: "0.8.3"
+      # OMN-22360: the core pin has one home, the omnibase_core block of
+      # .pre-commit-config.yaml that holds the check-node-boundary-imports hook (the gate below).
+      - name: Read the core pin from .pre-commit-config.yaml
+        run: |
+          set -eu
+          spec="$(uv run --no-project --with pyyaml python -c '
+          import yaml
+          config = yaml.safe_load(open(".pre-commit-config.yaml"))
+          blocks = [r for r in config["repos"] if any(h["id"] == "check-node-boundary-imports" for h in r["hooks"])]
+          assert len(blocks) == 1, blocks
+          print("omnibase-core @ git+" + blocks[0]["repo"] + "@" + blocks[0]["rev"])
+          ')"
+          echo "NODE_BOUNDARY_CORE=${spec}" >> "$GITHUB_ENV"
       - name: Positive control (planted boundary import refused)
         run: |
           set -u
@@ -4459,8 +4500,6 @@ jobs:
     name: Public Runner Placement (OMN-19998)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      RUNNER_PLACEMENT_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@c880801d4deeaa1627535c8622ab6c4ab8cfbecd"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4474,6 +4513,19 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: "0.8.3"
+      # OMN-22360: the core pin has one home, the omnibase_core block of
+      # .pre-commit-config.yaml that holds the check-public-runner-placement hook (the check below).
+      - name: Read the core pin from .pre-commit-config.yaml
+        run: |
+          set -eu
+          spec="$(uv run --no-project --with pyyaml python -c '
+          import yaml
+          config = yaml.safe_load(open(".pre-commit-config.yaml"))
+          blocks = [r for r in config["repos"] if any(h["id"] == "check-public-runner-placement" for h in r["hooks"])]
+          assert len(blocks) == 1, blocks
+          print("omnibase-core @ git+" + blocks[0]["repo"] + "@" + blocks[0]["rev"])
+          ')"
+          echo "RUNNER_PLACEMENT_CORE=${spec}" >> "$GITHUB_ENV"
       - name: Positive control (planted self-hosted job refused)
         run: |
           set -u
@@ -4507,6 +4559,40 @@ jobs:
           fi
           uv run --no-project --with "$RUNNER_PLACEMENT_CORE" \
             python -m omnibase_core.handlers.handler_public_runner_placement_cli "${args[@]}"
+      # OMN-19998: the same refusal as the check-public-lab-selection hook, at that
+      # hook's rev. The job is registered in the CI Summary sweep, so this is required.
+      - name: Read the core pin of the lab selection hook
+        run: |
+          set -eu
+          spec="$(uv run --no-project --with pyyaml python -c '
+          import yaml
+          config = yaml.safe_load(open(".pre-commit-config.yaml"))
+          blocks = [r for r in config["repos"] if any(h["id"] == "check-public-lab-selection" for h in r["hooks"])]
+          assert len(blocks) == 1, blocks
+          print("omnibase-core @ git+" + blocks[0]["repo"] + "@" + blocks[0]["rev"])
+          ')"
+          echo "LAB_SELECTION_CORE=${spec}" >> "$GITHUB_ENV"
+      - name: Failing control (planted lab job refused)
+        run: |
+          set -u
+          planted="$RUNNER_TEMP/planted"
+          mkdir -p "$planted/.github/workflows"
+          printf 'on: push\njobs:\n  planted:\n    runs-on: [self-hosted, omnibase-ci]\n    steps:\n      - run: "true"\n' \
+            > "$planted/.github/workflows/zz-planted.yml"
+          if uv run --no-project --with "$LAB_SELECTION_CORE" \
+            python -m omnibase_core.validation.validator_public_lab_selection \
+            --root "$planted" --repo omnibase_infra --visibility public; then
+            echo "FAILING CONTROL FAILED: a planted lab job was accepted"
+            exit 1
+          fi
+          echo "failing control: a planted lab job refused"
+      - name: Refuse a public workflow selecting a lab runner
+        env:
+          LIVE_VARIABLES: ${{ toJSON(vars) }}
+        run: |
+          uv run --no-project --with "$LAB_SELECTION_CORE" \
+            python -m omnibase_core.validation.validator_public_lab_selection \
+            --repo omnibase_infra --visibility public --variables-json "$LIVE_VARIABLES"
 
   # OMN-21538: omnibase_core's generic validators run in CI as the hook ids of
   # .pre-commit-config.yaml over the files a change touches, so this job and the local hooks
@@ -4576,6 +4662,19 @@ jobs:
             check-no-io-outside-effects handler-di-gate; do
             uvx pre-commit@4.5.1 run "$hook" --from-ref "$from_ref" --to-ref HEAD
           done
+
+  # OMN-22360 (operator ruling 2026-11-03T14:21:07Z): first-party dependency pins
+  # follow omnibase_core's declared layer order, form no cycle, stay inside the pin
+  # policy's release bound and style, and every core hook rev in
+  # .pre-commit-config.yaml stays inside its bound. The layer order and the policy are
+  # read from the pinned core checkout, so this repository cannot widen them. Same core
+  # dev-merge tag as the core hooks in .pre-commit-config.yaml. Unconditional: no
+  # needs/if. A CI Summary member through STRICT_GATE_JOBS in
+  # scripts/ci/ci_summary_gate.py ("<caller job id> / <inner job name>").
+  dependency-pins:
+    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261105190003-87a6f5ddcbcc
+    permissions:
+      contents: read
 
   ci-summary:
     name: CI Summary
@@ -4657,8 +4756,8 @@ jobs:
           # also absent from branch protection (dev requires exactly "CI Summary"),
           # so those checks previously blocked nothing.
           EVENT_NAME: ${{ github.event_name }}
-          # OMN-17427: only a PR into dev asserts DEV_BASE_ONLY_CONTEXTS (the
-          # Hostile Review Thread Gate). Empty off a pull request.
+          # OMN-17427: only a PR into dev asserts DEV_BASE_ONLY_CONTEXTS. Empty
+          # off a pull request.
           BASE_REF: ${{ github.base_ref }}
           # OMN-15532 — PR author login. Drops ONLY the contexts that this
           # author's PRs structurally cannot produce
@@ -6360,6 +6459,7 @@ jobs:
           # for where that one stands.
           uv run pytest \
             tests/integration/event_bus/test_kafka_event_bus_integration.py \
+            tests/integration/runtime/test_lane_entry_point_census_omn21923.py \
             tests/integration/handlers/test_handler_qdrant_integration.py \
             tests/integration/event_bus/test_dlq_integration.py \
             tests/integration/nodes/test_node_reward_binder_effect.py \

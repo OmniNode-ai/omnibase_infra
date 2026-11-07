@@ -19,7 +19,7 @@ a service or breaking the parse would report every absence as satisfied.
 
 The parity half matters too, and is asserted in the same place: the verify
 runner must keep the docker socket, the `host.docker.internal` host-gateway
-alias and the operator env file, because the five moved jobs read container
+alias, because the five moved jobs read container
 revision labels and lane health endpoints off the host daemon through exactly
 those. A "hardening" change that dropped one would turn every moved probe into
 a false red that looks like a lane outage.
@@ -214,29 +214,35 @@ def test_verify_runner_keeps_the_host_gateway_alias(verify_service: str) -> None
 
 
 @pytest.mark.parametrize("verify_service", VERIFY_SERVICES)
-def test_verify_runner_mounts_the_operator_env_read_only(verify_service: str) -> None:
-    """Identical treatment to the deploy runner's (OMN-14983): the host file is
-    bind-mounted read-only at a neutral path, and the root phase copies it into
-    the runner-owned creds volume, because the `runner` job user cannot read a
-    0600 file owned by the host operator uid once the entrypoint drops."""
-    mounts = [v for v in _volumes(verify_service) if OPERATOR_ENV_TARGET in v]
+def test_verify_runner_is_given_no_operator_env_file(verify_service: str) -> None:
+    """OMN-22478: no job on this class reads a key from the operator env file.
+
+    The readers of OMNIBASE_OPERATOR_ENV_FILE are the deploy handlers, which only
+    the deploy runner's workflow calls. The verify class gets neither the bind
+    mount, nor the root-phase copy into its creds volume, nor the variable that
+    points at the copy. The deploy runner is the positive control: it keeps all
+    three, so the absence cannot pass vacuously.
+    """
+    assert not [v for v in _volumes(verify_service) if OPERATOR_ENV_TARGET in v]
+    assert "OMNIBASE_OPERATOR_ENV_FILE" not in _environment(verify_service)
+    entrypoint = " ".join(str(part) for part in _service(verify_service)["entrypoint"])
+    assert OPERATOR_ENV_TARGET not in entrypoint
+    # The creds volume outlives a recreate and holds the copy the root phase used to install,
+    # so the root phase removes it; it never installs or copies one.
+    lines = [ln.strip() for ln in entrypoint.splitlines() if "operator.env" in ln]
+    assert len(lines) == 1, lines
+    assert lines[0].startswith("rm -f ") and lines[0].endswith(
+        "/.runner-creds/operator.env"
+    )
+    assert "install " not in entrypoint
+    assert " cp " not in entrypoint
+
+
+def test_the_deploy_runner_keeps_the_operator_env_file() -> None:
+    mounts = [v for v in _volumes(CONTROL_SERVICE) if OPERATOR_ENV_TARGET in v]
     assert len(mounts) == 1
     assert mounts[0].endswith(":ro")
-    assert "DEPLOY_RUNNER_OPERATOR_ENV_FILE" in mounts[0]
-    assert (
-        _environment(verify_service)["OMNIBASE_OPERATOR_ENV_FILE"]
-        == _environment(CONTROL_SERVICE)["OMNIBASE_OPERATOR_ENV_FILE"]
-    )
-
-
-@pytest.mark.parametrize("verify_service", VERIFY_SERVICES)
-def test_verify_runner_never_exposes_the_raw_operator_mount_to_job_steps(
-    verify_service: str,
-) -> None:
-    """The scripts are pointed at the root-phase COPY, never the raw mount."""
-    assert _environment(verify_service)["OMNIBASE_OPERATOR_ENV_FILE"] != (
-        OPERATOR_ENV_TARGET
-    )
+    assert "OMNIBASE_OPERATOR_ENV_FILE" in _environment(CONTROL_SERVICE)
 
 
 # ---------------------------------------------------------------------------

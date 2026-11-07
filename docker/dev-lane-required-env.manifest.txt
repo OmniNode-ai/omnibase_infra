@@ -60,6 +60,10 @@ DEV_REDPANDA_ADVERTISE_HOST
 # Dev broker values are contract-rendered; private runtime-policy overlays use the same bounds.
 DEV_REDPANDA_MEMORY
 DEV_REDPANDA_MEM_LIMIT
+DEV_RUNTIME_EFFECTS_BOOT_PRIORITY_CONTRACTS
+DEV_RUNTIME_EFFECTS_MAX_CONCURRENT_CONTRACT_ATTACH
+DEV_RUNTIME_EFFECTS_MEMORY
+DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS
 # OMN-20533 provenance: runtime-effects' resolver config with the tenant
 # credential namespace rule. Contract-rendered into docker/runtime-policy.env,
 # never an operator value.

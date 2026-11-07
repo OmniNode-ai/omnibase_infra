@@ -22,9 +22,10 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
     BRANCHES,
     KINDS,
     LIVE_WINDOW_MINUTES,
-    RUNTIME_CONTAINERS,
+    RUNTIME_ROLES,
     SEAM_DLQ,
     WIRING_MODULE,
+    runtime_role,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models import (
     EnumBoardCheckId,
@@ -75,7 +76,7 @@ def kind_rows(
         r
         for r in rows
         if isinstance(r, dict)
-        and str(r.get("consumer_group", "")).startswith(prefix)
+        and str(r.get("consumer_group", "")).partition(".")[2].startswith(prefix)
         and r.get("topic") == topic
     ]
 
@@ -100,7 +101,7 @@ def grade_kinds(
             "kinds",
             f"{kind}_present_in_every_sample",
             bool(per_sample) and all(present),
-            f"{prefix}* on {topic}: present per sample {present}",
+            f"<env>.{prefix}* on {topic}: present per sample {present}",
         )
         flat = [r for rows in per_sample for r in rows]
         bad = [
@@ -300,7 +301,7 @@ def grade_boot(
         rec,
         "boot",
         "runtime_logs_read",
-        set(logs) == set(RUNTIME_CONTAINERS)
+        sorted(map(runtime_role, logs), key=str) == sorted(RUNTIME_ROLES)
         and all(_is_int(lines := v.get("lines")) and lines > 0 for v in logs.values()),
         "log lines read per container: "
         + ", ".join(f"{c}={v.get('lines')}" for c, v in sorted(logs.items())),

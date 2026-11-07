@@ -12,6 +12,9 @@ import pytest
 from omnibase_infra.nodes.node_scope_manifest_write_effect.handlers.handler_scope_manifest_write import (
     HandlerScopeManifestWrite,
 )
+from omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_write_request import (
+    ModelScopeManifestWriteRequest,
+)
 
 
 @pytest.mark.unit
@@ -29,14 +32,16 @@ class TestHandlerScopeManifestWrite:
         cid = uuid4()
 
         result = await handler.handle(
-            output_path=str(output),
-            plan_file_path="docs/plan.md",
-            files=("src/api.py", "tests/test_api.py"),
-            directories=("src/",),
-            repos=("omniclaude",),
-            systems=("hooks",),
-            adjacent_files=(),
-            correlation_id=cid,
+            ModelScopeManifestWriteRequest(
+                output_path=str(output),
+                plan_file_path="docs/plan.md",
+                files=("src/api.py", "tests/test_api.py"),
+                directories=("src/",),
+                repos=("omniclaude",),
+                systems=("hooks",),
+                adjacent_files=(),
+                correlation_id=cid,
+            )
         )
 
         assert result.success is True
@@ -60,14 +65,16 @@ class TestHandlerScopeManifestWrite:
         cid = uuid4()
 
         result = await handler.handle(
-            output_path=str(output),
-            plan_file_path="plan.md",
-            files=(),
-            directories=(),
-            repos=(),
-            systems=(),
-            adjacent_files=(),
-            correlation_id=cid,
+            ModelScopeManifestWriteRequest(
+                output_path=str(output),
+                plan_file_path="plan.md",
+                files=(),
+                directories=(),
+                repos=(),
+                systems=(),
+                adjacent_files=(),
+                correlation_id=cid,
+            )
         )
 
         assert result.success is True
@@ -82,14 +89,16 @@ class TestHandlerScopeManifestWrite:
         cid = uuid4()
 
         result = await handler.handle(
-            output_path="/dev/null/impossible/manifest.json",
-            plan_file_path="plan.md",
-            files=(),
-            directories=(),
-            repos=(),
-            systems=(),
-            adjacent_files=(),
-            correlation_id=cid,
+            ModelScopeManifestWriteRequest(
+                output_path="/dev/null/impossible/manifest.json",
+                plan_file_path="plan.md",
+                files=(),
+                directories=(),
+                repos=(),
+                systems=(),
+                adjacent_files=(),
+                correlation_id=cid,
+            )
         )
 
         assert result.success is False

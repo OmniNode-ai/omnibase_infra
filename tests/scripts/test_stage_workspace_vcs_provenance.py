@@ -36,6 +36,7 @@ SIBLING_REPOS = (
     "omnibase_core",
     "omnibase_spi",
     "omnimarket",
+    "omniintelligence",
 )
 
 
@@ -57,7 +58,11 @@ _DIST_NAME = {
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
     "omnibase_spi": "omnibase-spi",
+    "omniintelligence": "omninode-intelligence",
 }
+# OMN-22153: no lock pins these (omnimarket does not depend on omniintelligence),
+# so the lock below omits them; the preflight must not ask for them.
+_LOCK_UNPINNED = frozenset({"omniintelligence"})
 _PIN_VERSION = "9.9.9"
 
 
@@ -89,7 +94,9 @@ def _init_repo(path: Path, dist: str, *, dirty: bool = False) -> None:
 def _write_consumer_lock(omni_home: Path) -> None:
     """Write a uv.lock pinning every vendored sibling at _PIN_VERSION."""
     blocks = []
-    for dist in _DIST_NAME.values():
+    for repo, dist in _DIST_NAME.items():
+        if repo in _LOCK_UNPINNED:
+            continue
         blocks.append(f'[[package]]\nname = "{dist}"\nversion = "{_PIN_VERSION}"\n')
     (omni_home / "omnimarket" / "uv.lock").write_text(
         "\n".join(blocks), encoding="utf-8"

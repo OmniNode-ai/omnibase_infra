@@ -22,8 +22,19 @@ from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_locat
 ROOT = Path(__file__).resolve().parents[3]
 BUILD = ROOT / "scripts" / "runtime_build"
 CHECKER = ROOT / "src/omnibase_infra/validation/checker_first_party_sources.py"
-SIBLINGS = ("omnibase_core", "omnibase_spi", "omnimarket")
-INSTALLED = (*SIBLINGS[:2], "omnibase_infra")
+SIBLINGS = ("omnibase_core", "omnibase_spi", "omnimarket", "omniintelligence")
+INSTALLED = (*SIBLINGS[:2], "omniintelligence", "omnibase_infra")
+
+
+def distribution(repo: str) -> str:
+    """The distribution name a repo publishes (omniintelligence is omninode-intelligence)."""
+    return (
+        "omninode-intelligence"
+        if repo == "omniintelligence"
+        else repo.replace("_", "-")
+    )
+
+
 pytestmark = pytest.mark.integration
 
 
@@ -61,7 +72,8 @@ def _sources(
         _git(origin, "config", "user.email", "test@example.com")
         (origin / "pyproject.toml").write_text(
             '[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n'
-            f'[project]\nname = "{repo.replace("_", "-")}"\nversion = "9.9.9"\n',
+            f'[project]\nname = "{distribution(repo)}"\nversion = "9.9.9"\n'
+            f'[tool.hatch.build.targets.wheel]\npackages = ["src/{repo}"]\n',
             encoding="utf-8",
         )
         package = origin / "src" / repo
@@ -74,7 +86,7 @@ def _sources(
             )
             (origin / "uv.lock").write_text(
                 "\n".join(
-                    f'[[package]]\nname = "{name.replace("_", "-")}"\nversion = "9.9.9"\n'
+                    f'[[package]]\nname = "{distribution(name)}"\nversion = "9.9.9"\n'
                     for name in (*SIBLINGS, "omnibase_infra")
                 ),
                 encoding="utf-8",
@@ -152,7 +164,7 @@ def _audit(
         f"m = runpy.run_path({str(CHECKER)!r}); "
         f"sys.exit(m['run_audit'](Path({str(staging or manifest)!r}), "
         f"record_into=Path({str(manifest)!r}), search_paths=[{str(site)!r}], "
-        f"require={[name.replace('_', '-') for name in INSTALLED]!r}))"
+        f"require={[distribution(name) for name in INSTALLED]!r}))"
     )
     return _run(sys.executable, "-c", code, cwd=site)
 
@@ -204,7 +216,7 @@ def test_staged_wheels_have_tag_identity_and_content_parity(tmp_path: Path) -> N
             "--no-build-isolation",
             "--no-cache",
             "--no-sources",
-            f"{repo.replace('_', '-')} @ {source.as_uri()}",
+            f"{distribution(repo)} @ {source.as_uri()}",
             cwd=tmp_path,
         )
         assert installed.returncode == 0, installed.stdout + installed.stderr
@@ -218,7 +230,10 @@ def test_staged_wheels_have_tag_identity_and_content_parity(tmp_path: Path) -> N
     assert {row["repo"]: row["tag"] for row in written["first_party_sources"]} == {
         repo: tags[repo] for repo in INSTALLED
     }
-    assert {row["repo"] for row in written["proofs"]} == set(SIBLINGS[:2])
+    assert {row["repo"] for row in written["proofs"]} == {
+        *SIBLINGS[:2],
+        "omniintelligence",
+    }
 
     # A running environment is re-audited from the folded manifest alone.
     assert _audit(site, manifest).returncode == 0

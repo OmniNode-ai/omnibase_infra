@@ -269,11 +269,11 @@ class TestComposeUpUsesTheDerivedCeiling:
         """The regression guard: the old value was the bare ``300``."""
         from deploy_agent import executor as executor_mod
 
-        seen: list[int] = []
+        seen: dict[str, tuple[list[str], int]] = {}
 
         def _fake_run(cmd: list[str], timeout: int, **kwargs: Any) -> Any:
             if "up" in cmd and "--no-deps" in cmd:
-                seen.append(timeout)
+                seen[cmd[-1]] = (cmd, timeout)
             return subprocess.CompletedProcess(
                 args=cmd, returncode=0, stdout="", stderr=""
             )
@@ -315,8 +315,15 @@ class TestComposeUpUsesTheDerivedCeiling:
             _LIVE_COMPOSE_FILES,
             services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV),
         ).timeout_seconds
-        assert set(seen) == {expected}
-        assert 300 not in seen
+        assert seen
+        for service, (argv, timeout) in seen.items():
+            health_budget = executor_mod.runtime_health_probe_budget(
+                EnumRuntimeLane.DEV, service
+            )
+            assert "--wait" in argv
+            assert int(argv[argv.index("--wait-timeout") + 1]) == health_budget
+            assert timeout >= expected
+            assert timeout > health_budget
 
     def test_the_core_compose_up_no_longer_takes_the_flat_phase_bound(self) -> None:
         """SUPERSEDED BY OMN-18692. This assertion used to be the opposite.

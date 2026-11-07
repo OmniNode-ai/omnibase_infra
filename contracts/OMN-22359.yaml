@@ -10,7 +10,7 @@ requirements:
     statement: "omnibase_infra declares and locks the newest omnibase-spi release exactly, and every follower of that pin agrees."
     acceptance:
       - id: "AC1"
-        statement: "pyproject.toml carries omnibase-spi==0.23.12 in [project.dependencies] and override-dependencies, uv.lock resolves it, the version matrix is current and the pin tests pass."
+        statement: "pyproject.toml carries the omnibase-spi range >=0.23.12,<0.24.0 in [project.dependencies] and override-dependencies, uv.lock resolves it, the version matrix is current and the pin tests pass."
       - id: "AC2"
         statement: "The unit-test suite passes at the PR head with the new spi and nothing outside the pin files, the lock and the matrix changes."
 evidence_requirements:
@@ -42,11 +42,11 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2"]
   - id: "dod-omn22359-deploy-probe-spi-pin"
-    description: "Deploy probe for the pin change: read pyproject.toml from GitHub at the evaluated checkout's commit and require the omnibase-spi==0.23.12 pin. This does not deploy a service or claim that a runtime has been promoted. The probe fails on the merge-base pyproject.toml, which pins 0.23.7."
+    description: "Deploy probe for the pin change: read pyproject.toml from GitHub at the evaluated checkout's commit and require the omnibase-spi>=0.23.12,<0.24.0 range. This does not deploy a service or claim that a runtime has been promoted. The probe fails on the merge-base pyproject.toml, which pins 0.23.7."
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/pyproject.toml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F '\"omnibase-spi==0.23.12\",'"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/pyproject.toml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F '\"omnibase-spi>=0.23.12,<0.24.0\",'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
   - id: "dod-omn22359-spi-nullable-shutdown"

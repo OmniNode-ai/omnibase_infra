@@ -4,7 +4,11 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.nodes.node_architecture_validator.models.model_stack_shape_snapshot import (
+    ModelStackShapeSnapshot,
+)
 
 
 class ModelArchitectureValidationRequest(BaseModel):
@@ -25,6 +29,11 @@ class ModelArchitectureValidationRequest(BaseModel):
         frozen=True,
         extra="forbid",
         strict=True,
+    )
+
+    stack_shape: ModelStackShapeSnapshot | None = Field(
+        default=None,
+        description="T1 stack snapshots for command and console-script validation",
     )
 
     nodes: tuple[object, ...] = Field(
@@ -51,6 +60,12 @@ class ModelArchitectureValidationRequest(BaseModel):
         default=None,
         description="Correlation ID for tracing",
     )
+
+    @field_validator("nodes", "handlers", "rule_ids", mode="before")
+    @classmethod
+    def _wire_sequences(cls, value: object) -> object:
+        """Materialized JSON arrays retain the model's immutable tuple representation."""
+        return tuple(value) if isinstance(value, list) else value
 
 
 __all__ = ["ModelArchitectureValidationRequest"]

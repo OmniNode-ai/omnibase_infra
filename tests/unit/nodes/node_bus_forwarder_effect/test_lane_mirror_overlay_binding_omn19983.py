@@ -21,7 +21,7 @@ import yaml
 from pydantic import ValidationError
 
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
-from omnibase_infra.handlers.handler_broker_grant_derive import (
+from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
     HandlerBrokerGrantDerive,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
