@@ -25,6 +25,9 @@
 #   ESTIMATOR_GATE_PASSWORD         the gate password. Passed through from the host env file, which takes it from
 #                                   the secret store; it is never in this repository, and no default here names
 #                                   one (unset reads as empty, and the page then opens nothing).
+#   ESTIMATOR_GATE_OPEN_SOURCES     OMN-23011: the CIDR blocks, comma-separated, whose sources open the page with no
+#                                   password. Passed through from the host env file; the dev lane's compose declares
+#                                   the same variable, and each host's own file names its value.
 # On .51 the host env file may set FEATURE_ESTIMATOR_GATE_ENABLED=false, because the host is tailnet only and
 # nobody outside the tailnet can reach it. With the flag on, the password is required: the gate is on and the page
 # renders only its password form until a visitor holds a valid signed cookie.
@@ -60,6 +63,9 @@ services:
       FEATURE_ESTIMATOR_ENABLED: "true"
       FEATURE_ESTIMATOR_GATE_ENABLED: ${FEATURE_ESTIMATOR_GATE_ENABLED:-true}
       ESTIMATOR_GATE_PASSWORD: ${ESTIMATOR_GATE_PASSWORD:-}
+      # OMN-23011: the CIDR blocks (comma-separated) whose sources open the page with no password. From the
+      # host env file; unset reads as empty and opens nothing, so the gate stands for every source.
+      ESTIMATOR_GATE_OPEN_SOURCES: ${ESTIMATOR_GATE_OPEN_SOURCES:-}
       # A production build of the front end redirects any host it does not know to its public origin; visitors
       # reach this host at its tailnet name and port, so the page opts in to serving that host (OMN-21481).
       OMNIWEB_SERVE_ANY_HOST: "true"
