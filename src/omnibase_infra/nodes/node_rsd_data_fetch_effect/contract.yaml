@@ -4,6 +4,8 @@
 #
 name: "node_rsd_data_fetch_effect"
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 contract_version:
   major: 1
   minor: 0
@@ -25,6 +27,9 @@ handler_routing:
       handler:
         name: "HandlerRsdDataFetch"
         module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.handlers.handler_rsd_data_fetch"
+      input_model:
+        name: "ModelRsdDataFetchRequest"
+        module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_request"
 metadata:
   description: "Data fetch effect for RSD priority scoring workflow"
   author: "OmniNode Team"

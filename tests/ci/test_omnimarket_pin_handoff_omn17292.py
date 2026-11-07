@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from omnibase_infra.validators.bus_backed_exposure_readers import (
     collect_local_page_readers,
@@ -28,3 +30,19 @@ def test_pinned_credentials_page_is_a_reader(
     assert readers["onex.snapshot.projection.tenant-credentials.v1"] == {
         "local-page:credentials.page.yaml"
     }
+
+
+def test_credentials_recording_is_captured_at_the_omnidash_sibling_pin() -> None:
+    """OMN-22552: the replayed page is the one the gate reads at the pinned omnidash."""
+    root = Path(__file__).resolve().parents[2]
+    pins = yaml.safe_load((root / ".github/sibling-pins.yaml").read_text())
+    omnidash_pin = pins["pins"]["omnidash"]
+    recording = json.loads(
+        (
+            root / "tests/ci/fixtures/omnimarket_pin_credentials_reader_omn17292.json"
+        ).read_text()
+    )
+    source = recording["_provenance"]["source"]
+    assert f"/omnidash/tree/{omnidash_pin}/" in source
+    for path, response in recording["responses"].items():
+        assert response["url"].endswith(f"?ref={omnidash_pin}"), path

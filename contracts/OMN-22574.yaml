@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22574
+title: "The runner-label-exists gate in omnibase_infra calls the hosted reusable, so it no longer runs on a lab runner"
+summary: "The runner-label-exists caller pins the omniclaude reusable at the commit that selects a GitHub-hosted runner (omniclaude#3171), instead of the earlier commit that selected a self-hosted label."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22574-hosted-caller-pin
+    statement: A public pull request or merge group in this repository must run the runner-label-exists gate on a GitHub-hosted runner.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the caller pins the reusable commit that selects a hosted runner and not the earlier commit that selected a self-hosted label -- falsifier: uv run pytest tests/ci/test_runner_label_exists_caller_hosted_omn22574.py -q, which fails on the earlier pin'
+evidence_requirements:
+  - kind: tests
+    description: The caller pin tests pass at the head.
+    command: uv run pytest tests/ci/test_runner_label_exists_caller_hosted_omn22574.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22574-caller-pin
+    description: The caller pin tests pass.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_label_exists_caller_hosted_omn22574.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

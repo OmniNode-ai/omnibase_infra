@@ -34,5 +34,7 @@ lanes:
     # OMN-22158 raised repo_specs by 2: node_api_fixture_record_effect is meant
     # to add its command and terminal topics (api-fixture-record, -recorded).
     # OMN-21923 adds the census command and result topics (2 more specs).
-    repo_specs: 219
-    repo_specs_measured_at: "05c5e773d1a5f6af158998282cf878fee4b6c38e"
+    # OMN-19998 adds the runner-tmp-prepare command and runner-tmp-prepared
+    # terminal topics (2 more specs).
+    repo_specs: 221
+    repo_specs_measured_at: "bf76c6681c90088fb9ca6dbca626d226c327c529"

@@ -34,6 +34,7 @@ on:
       - "src/omnibase_infra/enums/enum_message_category.py"
       - "src/omnibase_infra/nodes/**/contract.yaml"
       - "tests/fixtures/dispatch_parity/**"
+      - "tests/ci/fixtures/dispatch_parity_readback_omn20074.json"
       - "tests/integration/runtime/test_dispatch_selection_parity.py"
       - ".github/workflows/dispatch-parity-gate.yml"
   workflow_dispatch:
@@ -97,38 +98,18 @@ jobs:
         run: |
           uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -v
 
-      - name: Verify committed fixture is not stale
+      - name: Verify committed fixtures are not stale
         if: github.event_name != 'merge_group'
         run: |
           set -euo pipefail
-          # Regenerate the fixture into a temp file and diff against the committed
-          # one, ignoring the VOLATILE header fields (wall-clock generated_at_utc +
-          # installed_package_versions). Those vary with the CI venv/clock but not
-          # with the dispatch corpus, so leaving them in re-broke the baseline on
-          # every tracked-package release (OMN-14361). The committed file carries contract
-          # references instead of topic literals (OMN-22002); both sides are compared
-          # after load_snapshot_file / load_selection_oracle resolve them. A drift in anything else means
-          # someone changed selection logic without regenerating the oracle.
-          uv run python -m tests.fixtures.dispatch_parity.harness --out /tmp/parity-live.json
-          uv run python - <<'PY'
-          import json, sys
-          from tests.fixtures.dispatch_parity.harness import (
-              load_selection_oracle,
-              load_snapshot_file,
-              strip_volatile_header_fields,
-          )
-          committed = strip_volatile_header_fields(
-              load_selection_oracle()
-          )
-          live = strip_volatile_header_fields(load_snapshot_file("/tmp/parity-live.json"))
-          if json.dumps(committed, sort_keys=True) != json.dumps(live, sort_keys=True):
-              print(
-                  "::error::Committed selection-oracle-v2.json is STALE vs the live "
-                  "engine. Regenerate with: uv run python -m "
-                  "tests.fixtures.dispatch_parity.harness --out "
-                  "tests/fixtures/dispatch_parity/selection-oracle-v2.json",
-                  file=sys.stderr,
-              )
-              sys.exit(1)
-          print("Committed fixture matches live engine (ex-volatile-header-fields).")
-          PY
+          # Rebuild the live snapshot and compare it with every committed fixture:
+          # the oracle tests/fixtures/dispatch_parity/selection-oracle-v2.json (with
+          # its OCC-free header) and the recorded readback. The
+          # VOLATILE header fields (wall-clock generated_at_utc + installed package
+          # versions) are ignored, because they vary with the CI venv/clock but not
+          # with the dispatch corpus (OMN-14361). The committed oracle carries
+          # contract references instead of topic literals (OMN-22002). A drift in
+          # anything else means selection logic or the corpus changed without a
+          # refresh; the failure names the one command that refreshes all fixtures
+          # together (OMN-22580), so no pull request edits a count by hand.
+          uv run python -m tests.fixtures.dispatch_parity.harness --check

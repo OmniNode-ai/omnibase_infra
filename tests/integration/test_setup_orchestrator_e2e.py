@@ -53,6 +53,9 @@ from omnibase_infra.nodes.node_setup_orchestrator.handlers.handler_setup_orchest
 from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_output import (
     ModelSetupOrchestratorOutput,
 )
+from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_request import (
+    ModelSetupOrchestratorRequest,
+)
 from omnibase_infra.nodes.node_setup_preflight_effect.handlers.handler_preflight_check import (
     HandlerPreflightCheck,
 )
@@ -227,7 +230,13 @@ async def _run_handler(
 ) -> ModelSetupOrchestratorOutput:
     """Run the orchestrator handler and return the unwrapped output."""
     corr_id = uuid4()
-    result = await handler.handle(topology, corr_id, compose_file_path)
+    result = await handler.handle(
+        ModelSetupOrchestratorRequest(
+            topology=topology,
+            correlation_id=corr_id,
+            compose_file_path=compose_file_path,
+        )
+    )
     return result.result  # type: ignore[return-value]
 
 

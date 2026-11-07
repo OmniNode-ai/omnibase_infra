@@ -28,6 +28,9 @@ from omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_runtime_target_c
 from omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_toolchain_collect import (
     HandlerToolchainCollect,
 )
+from omnibase_infra.nodes.node_rrh_emit_effect.models.model_repo_state_collect_request import (
+    ModelRepoStateCollectRequest,
+)
 from omnibase_infra.nodes.node_rrh_emit_effect.models.model_runtime_target_collect_request import (
     ModelRuntimeTargetCollectRequest,
 )
@@ -101,18 +104,22 @@ class TestHandlerRepoStateCollect:
         self, handler: HandlerRepoStateCollect
     ) -> None:
         with pytest.raises(ValueError, match="non-empty absolute path"):
-            await handler.handle("relative/path")
+            await handler.handle(
+                ModelRepoStateCollectRequest(repo_path="relative/path")
+            )
 
     @pytest.mark.anyio
     async def test_repo_state_rejects_empty_path(
         self, handler: HandlerRepoStateCollect
     ) -> None:
         with pytest.raises(ValueError, match="non-empty absolute path"):
-            await handler.handle("")
+            await handler.handle(ModelRepoStateCollectRequest(repo_path=""))
 
     @pytest.mark.anyio
     async def test_handles_invalid_path(self, handler: HandlerRepoStateCollect) -> None:
-        result = await handler.handle("/nonexistent/path")
+        result = await handler.handle(
+            ModelRepoStateCollectRequest(repo_path="/nonexistent/path")
+        )
         assert isinstance(result, ModelRRHRepoState)
         # Should return empty values, not raise.
         assert result.branch == ""
@@ -153,7 +160,9 @@ class TestHandlerRepoStateCollect:
             return proc
 
         with patch("asyncio.create_subprocess_exec", side_effect=_fake_subprocess):
-            result = await handler.handle("/fake/repo")
+            result = await handler.handle(
+                ModelRepoStateCollectRequest(repo_path="/fake/repo")
+            )
 
         assert isinstance(result, ModelRRHRepoState)
         assert result.branch == "main"

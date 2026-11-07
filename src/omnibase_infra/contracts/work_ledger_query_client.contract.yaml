@@ -9,3 +9,6 @@ client:
   lane: dev
   consumer_group_prefix: local.omnimarket.work_ledger_query_client.consume.v1.
   queries: [rows, open-claims, holds, inbox, newest-per-lane, rulings]
+  # Answered from work_ledger_state with a status, a page size and a watermark
+  # (omnimarket OMN-21948); they carry no freshness or parity.
+  point_queries: [open-claims, holds, inbox]

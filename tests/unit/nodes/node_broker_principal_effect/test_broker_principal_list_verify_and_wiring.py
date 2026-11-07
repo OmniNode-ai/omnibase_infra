@@ -27,7 +27,9 @@ from omnibase_infra.handlers.handler_broker_principal_list import (
 from omnibase_infra.handlers.handler_broker_principal_verify import (
     HandlerBrokerPrincipalVerify,
 )
-from omnibase_infra.handlers.handler_developer_principal_plan import principal_name
+from omnibase_infra.handlers.handler_developer_principal_plan.handler import (
+    principal_name,
+)
 from omnibase_infra.models.developer_principal import (
     ModelBrokerAclBinding,
     ModelBrokerPrincipalListRequest,

@@ -51,6 +51,14 @@ CANARIES = (
     ("chain-canary-c28-consumer-flow.yml", "c28-consumer-flow", LANE_SIDE_RUNS_ON),
 )
 
+STABILITY_PROOFS = frozenset(
+    {
+        "chain-canary.yml",
+        "chain-canary-c16-receipt-identity.yml",
+        "chain-canary-c28-consumer-flow.yml",
+    }
+)
+
 
 def _load_resolver() -> ModuleType:
     spec = importlib.util.spec_from_file_location(
@@ -285,7 +293,14 @@ def test_canary_lane_resolution_wired_into_each_canary(
     text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
     assert _job(workflow, job)["runs-on"] == runs_on
     assert "./.github/actions/resolve-lab-lane" in text
-    assert "vars.LAB_LANES_JSON" in text
+    # OMN-21485: the C15, C16 and C28 proofs walk the stability overlay; the
+    # other canaries still walk the lab overlay.
+    overlay = (
+        "vars.LAB_PROOF_LANES_JSON"
+        if workflow in STABILITY_PROOFS
+        else "vars.LAB_LANES_JSON"
+    )
+    assert overlay in text
     if runs_on == LANE_SIDE_RUNS_ON:
         assert _job(workflow, "resolve-lane")["runs-on"] == POOL_RUNS_ON
 

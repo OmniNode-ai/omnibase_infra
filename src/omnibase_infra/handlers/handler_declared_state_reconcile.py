@@ -6,7 +6,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.handler_declared_state_apply import (
     HandlerDeclaredStateApply,
 )
-from omnibase_infra.handlers.handler_declared_state_diff import (
+from omnibase_infra.handlers.handler_declared_state_diff.handler import (
     HandlerDeclaredStateDiff,
 )
 from omnibase_infra.models.declared_state.enum_declared_state_reconcile_mode import (

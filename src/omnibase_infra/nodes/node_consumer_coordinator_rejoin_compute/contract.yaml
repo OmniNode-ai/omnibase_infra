@@ -6,6 +6,8 @@ node_name: node_consumer_coordinator_rejoin_compute
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
 description: Decide bounded coordinator recovery and one alarm per episode, without I/O.
 input_model:
   name: ModelConsumerCoordinatorRejoinRequest
@@ -24,7 +26,7 @@ handler_routing:
     - operation: consumer_coordinator.rejoin_decide
       handler:
         name: HandlerConsumerCoordinatorRejoin
-        module: omnibase_infra.handlers.handler_consumer_coordinator_rejoin
+        module: omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler
       description: Pure decision from coordinator and broker availability.
       supported_operations: [consumer_coordinator.rejoin_decide]
       input_model:

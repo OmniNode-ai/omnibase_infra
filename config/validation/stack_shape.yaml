@@ -230,7 +230,7 @@ allowed_commands:
     services:
       - sha256:507bc462899da89b26b7c5a1fe0ddadda13b09bf89a240fb5cd47803c3014834
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
-    argv_sha256: b7337e93a9277ddd070d844fae1e2d4292ed29bb50586a124ed13ad4e473340b
+    argv_sha256: a6a125fd9fbd6c695b305162a56a881a2ed7a8b078ee0574e01ddf82c6cb83c9
     command_hint: set -eu
   - match: exact
     field: command
@@ -265,7 +265,7 @@ allowed_commands:
     services:
       - sha256:1311c9dd9bc027d732005196555d06fa3316d3ea1d7b743d40b40cdbd97e8e49
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
-    argv_sha256: 39ca48216317a8718f14bec9b22450c5b663c11da0e449eaa0cba1ff0007c8c4
+    argv_sha256: 277618a03ccb6155c456c7b51a6fabe2e591779157ecd6e2c70cc9ddc2074a39
     command_hint: set -eu
   - match: exact
     field: command

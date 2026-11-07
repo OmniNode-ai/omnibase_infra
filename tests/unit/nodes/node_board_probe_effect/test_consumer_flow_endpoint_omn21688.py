@@ -38,12 +38,19 @@ def _declared() -> str:
 
 
 def test_request_default_is_the_contract_declared_base_url() -> None:
-    assert ModelConsumerFlowRequest(subject_lane="dev").base_url == _declared()
+    assert (
+        ModelConsumerFlowRequest(
+            subject_lane="dev", compose_project="omnibase-infra"
+        ).base_url
+        == _declared()
+    )
 
 
 def test_request_keeps_an_injected_base_url() -> None:
     request = ModelConsumerFlowRequest(
-        subject_lane="dev", base_url="http://projection.example.invalid:1"
+        subject_lane="dev",
+        compose_project="omnibase-infra",
+        base_url="http://projection.example.invalid:1",
     )
     assert request.base_url == "http://projection.example.invalid:1"
 

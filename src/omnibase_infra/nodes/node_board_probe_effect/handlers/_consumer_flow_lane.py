@@ -16,16 +16,16 @@ from typing import IO, cast
 
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_constants import (
     ANALYTICS_DB,
-    BOOT_CONTAINERS,
-    BROKER_CONTAINER,
     BROKER_INTERNAL_ADDRESS,
     EXPOSURE_TOPIC,
     LIVE_WINDOW_SQL,
-    PG_CONTAINER,
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
     ConsumerFlowInputError,
     ConsumerFlowLaneUnsettledError,
+)
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models.typed_dict_consumer_flow import (
     TypedDictConsumerFlowIdentity,
@@ -34,13 +34,14 @@ from omnibase_infra.nodes.node_board_probe_effect.models.typed_dict_consumer_flo
 
 
 class ConsumerFlowLane:
-    """One request's Docker socket, projection endpoint and injectable I/O."""
+    """One request's Docker socket, lane containers, projection endpoint and I/O."""
 
     def __init__(
         self,
         *,
         docker: str,
         base_url: str,
+        containers: ModelConsumerFlowLane,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
         urlopen: Callable[
             ..., AbstractContextManager[IO[bytes]]
@@ -50,6 +51,7 @@ class ConsumerFlowLane:
     ) -> None:
         self.docker = docker
         self.base_url = base_url
+        self.containers = containers
         self.http_timeout = 30.0
         self.runner = runner
         self.urlopen = urlopen
@@ -59,7 +61,7 @@ class ConsumerFlowLane:
     # ---- containers -------------------------------------------------------
     def identity(self) -> dict[str, TypedDictConsumerFlowIdentity]:
         out: dict[str, TypedDictConsumerFlowIdentity] = {}
-        for name in BOOT_CONTAINERS:
+        for name in self.containers.boot_containers:
             raw = self._run([self.docker, "inspect", name], timeout=30)
             try:
                 info = json.loads(raw)[0]
@@ -133,10 +135,13 @@ class ConsumerFlowLane:
     def rpk(self, *args: str, stdin: str | None = None, timeout: float = 60.0) -> str:
         # The credential reaches rpk through its environment, never as a -X flag:
         # the expanded flag would sit in the in-container rpk argv, which every user
-        # on the host reads through `ps` (OMN-17427).
+        # on the host reads through `ps` (OMN-17427). OMN-21485: SASL only where
+        # the broker container carries a login; the stability lane's internal
+        # listener takes none, and an empty SCRAM user would be refused there.
         script = (
-            'RPK_USER="$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$DEV_KAFKA_SASL_PASSWORD" '
-            "RPK_SASL_MECHANISM=SCRAM-SHA-256 "
+            'if [ -n "${DEV_KAFKA_SASL_USERNAME:-}" ]; then '
+            'export RPK_USER="$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$DEV_KAFKA_SASL_PASSWORD" '
+            "RPK_SASL_MECHANISM=SCRAM-SHA-256; fi; "
             f'rpk "$@" -X brokers="{BROKER_INTERNAL_ADDRESS}"'
         )
         return self._run(
@@ -144,7 +149,7 @@ class ConsumerFlowLane:
                 self.docker,
                 "exec",
                 "-i",
-                BROKER_CONTAINER,
+                self.containers.broker_container,
                 "sh",
                 "-c",
                 script,
@@ -162,6 +167,7 @@ class ConsumerFlowLane:
     def live_groups(self) -> list[str]:
         sql = LIVE_WINDOW_SQL
         script = f'psql -U "$POSTGRES_USER" -d {ANALYTICS_DB} -AtX -v ON_ERROR_STOP=1 -c "{sql}"'
+        PG_CONTAINER = self.containers.postgres_container  # the graded lane's own
         out = self._run(
             [self.docker, "exec", PG_CONTAINER, "sh", "-c", script], timeout=120
         )

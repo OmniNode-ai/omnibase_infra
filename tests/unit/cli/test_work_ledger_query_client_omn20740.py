@@ -366,6 +366,12 @@ def test_cli_inbox_and_repeated_kinds_preserve_request(
         "omnibase_infra.cli.cli_ledger.resolve_work_ledger_query_transport",
         lambda lane: ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092"),
     )
+    # inbox is answered from work_ledger_state: status, watermark and page size.
+    wire.reply_override = {
+        "status": "ok",
+        "watermark": "2026-10-25T00:00:00Z",
+        "page_size": 500,
+    }
     result = CliRunner().invoke(
         ledger_group,
         [

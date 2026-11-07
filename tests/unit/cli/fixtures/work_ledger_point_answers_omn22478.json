@@ -1,0 +1,211 @@
+{
+ "holds": {
+  "completeness": null,
+  "correlation_id": "cc340a2d-fe57-4c6c-91c8-1fb4bddd68f4",
+  "error": null,
+  "freshness": null,
+  "hold_counts": {
+   "checked": 1,
+   "expired": 0,
+   "legacy_no_id": 0,
+   "released": 0
+  },
+  "holds": [
+   {
+    "by": "orch-1",
+    "hold_id": "hold-a",
+    "pr": "omnimarket#7",
+    "repo": "omnimarket",
+    "row": {
+     "ingested_at": null,
+     "ledger_seq": null,
+     "projected_at": "2026-11-01T10:00:00Z",
+     "raw_row": "2026-11-01T10:00:00Z | HOLD | lane=orch-1 | id=hold-a | to=lane-x,lane-y | repo=omnimarket | pr=omnimarket#7 | surface=surface-a | until=2026-11-03T10:00:00Z | pause the surface",
+     "row_id": "row-hold-a",
+     "row_lane": null,
+     "row_ts": "2026-11-01T10:00:00Z",
+     "row_type": "HOLD",
+     "source": "test",
+     "text": "2026-11-01T10:00:00Z | HOLD | lane=orch-1 | id=hold-a | to=lane-x,lane-y | repo=omnimarket | pr=omnimarket#7 | surface=surface-a | until=2026-11-03T10:00:00Z | pause the surface"
+    },
+    "surface": "surface-a",
+    "to": "lane-x,lane-y",
+    "until": "2026-11-03T10:00:00Z"
+   }
+  ],
+  "inbox": [],
+  "lines": [
+   "HOLD hold-a by=orch-1 scope=<to=lane-x,lane-y;repo=omnimarket;pr=omnimarket#7;surface=surface-a> until=2026-11-03T10:00:00Z db:row-hold-a"
+  ],
+  "matched": 1,
+  "next_cursor": null,
+  "open_claims": [],
+  "page_size": 500,
+  "parity": null,
+  "query": "holds",
+  "refusal": null,
+  "rows": [],
+  "status": "ok",
+  "watermark": "2026-11-02T02:59:40Z",
+  "window_since": null,
+  "window_until": "2026-11-02T03:00:00Z"
+ },
+ "inbox": {
+  "completeness": null,
+  "correlation_id": "cc340a2d-fe57-4c6c-91c8-1fb4bddd68f4",
+  "error": null,
+  "freshness": null,
+  "hold_counts": null,
+  "holds": [],
+  "inbox": [
+   {
+    "entries": [
+     {
+      "needs_action": true,
+      "row": {
+       "ingested_at": null,
+       "ledger_seq": null,
+       "projected_at": "2026-11-01T10:00:00Z",
+       "raw_row": "2026-11-01T10:00:00Z | HOLD | lane=orch-1 | id=hold-a | to=lane-x,lane-y | repo=omnimarket | pr=omnimarket#7 | surface=surface-a | until=2026-11-03T10:00:00Z | pause the surface",
+       "row_id": "row-hold-a",
+       "row_lane": null,
+       "row_ts": "2026-11-01T10:00:00Z",
+       "row_type": "HOLD",
+       "source": "test",
+       "text": "2026-11-01T10:00:00Z | HOLD | lane=orch-1 | id=hold-a | to=lane-x,lane-y | repo=omnimarket | pr=omnimarket#7 | surface=surface-a | until=2026-11-03T10:00:00Z | pause the surface"
+      }
+     },
+     {
+      "needs_action": true,
+      "row": {
+       "ingested_at": null,
+       "ledger_seq": null,
+       "projected_at": "2026-11-01T11:00:00Z",
+       "raw_row": "2026-11-01T11:00:00Z | MSG | from=orch-1 | to=lane-x | id=msg-a | ticket=OMN-1 | please answer the question about the plan",
+       "row_id": "row-msg-a",
+       "row_lane": null,
+       "row_ts": "2026-11-01T11:00:00Z",
+       "row_type": "MSG",
+       "source": "test",
+       "text": "2026-11-01T11:00:00Z | MSG | from=orch-1 | to=lane-x | id=msg-a | ticket=OMN-1 | please answer the question about the plan"
+      }
+     }
+    ],
+    "lane": "lane-x"
+   }
+  ],
+  "lines": [
+   "inbox lane-x: 2 open, 2 need action (HOLD:1 ask:1), 0 FYI, newest=2026-11-01T11:00:00Z",
+   "  HOLD id=hold-a from=orch-1 db:row-hold-a: pause the surface",
+   "  MSG id=msg-a from=orch-1 db:row-msg-a: please answer the question about the plan"
+  ],
+  "matched": 2,
+  "next_cursor": null,
+  "open_claims": [],
+  "page_size": 500,
+  "parity": null,
+  "query": "inbox",
+  "refusal": null,
+  "rows": [],
+  "status": "ok",
+  "watermark": "2026-11-02T02:59:40Z",
+  "window_since": null,
+  "window_until": "2026-11-02T03:00:00Z"
+ },
+ "open-claims": {
+  "completeness": null,
+  "correlation_id": "cc340a2d-fe57-4c6c-91c8-1fb4bddd68f4",
+  "error": null,
+  "freshness": null,
+  "hold_counts": null,
+  "holds": [],
+  "inbox": [],
+  "lines": [
+   "open-claims since=beginning claims=3 open=3 ledger-newest=2026-11-02T02:59:30Z now=2026-11-02T03:00:00Z",
+   "OPEN-CLAIM lane=orch-1 claim=2026-11-01T10:00:00Z db:row-hold-a ticket=none newest-row=2026-11-01T10:00:00Z kind=HOLD age=17h00m rows=1 host=none run=none leases=none liveness=unknown",
+   "OPEN-CLAIM lane=orch-1 claim=2026-11-01T11:00:00Z db:row-msg-a ticket=OMN-1 newest-row=2026-11-01T11:00:00Z kind=MSG age=16h00m rows=1 host=none run=none leases=none liveness=unknown",
+   "OPEN-CLAIM lane=lane-x claim=2026-11-01T09:00:00Z db:row-claim-x ticket=OMN-21948 newest-row=2026-11-02T02:30:00Z kind=STATUS age=0h30m rows=4 host=h051 run=r1 leases=lease-1 liveness=unknown"
+  ],
+  "matched": 3,
+  "next_cursor": null,
+  "open_claims": [
+   {
+    "claim": {
+     "ingested_at": null,
+     "ledger_seq": null,
+     "projected_at": "2026-11-01T10:00:00Z",
+     "raw_row": "2026-11-01T10:00:00Z | HOLD | lane=orch-1 | id=hold-a | to=lane-x,lane-y | repo=omnimarket | pr=omnimarket#7 | surface=surface-a | until=2026-11-03T10:00:00Z | pause the surface",
+     "row_id": "row-hold-a",
+     "row_lane": null,
+     "row_ts": "2026-11-01T10:00:00Z",
+     "row_type": "HOLD",
+     "source": "test",
+     "text": "2026-11-01T10:00:00Z | HOLD | lane=orch-1 | id=hold-a | to=lane-x,lane-y | repo=omnimarket | pr=omnimarket#7 | surface=surface-a | until=2026-11-03T10:00:00Z | pause the surface"
+    },
+    "host": "none",
+    "lane": "orch-1",
+    "leases": [],
+    "newest_row_kind": "HOLD",
+    "newest_row_stamp": "2026-11-01T10:00:00Z",
+    "rows": 1,
+    "run": "none",
+    "ticket": "none"
+   },
+   {
+    "claim": {
+     "ingested_at": null,
+     "ledger_seq": null,
+     "projected_at": "2026-11-01T11:00:00Z",
+     "raw_row": "2026-11-01T11:00:00Z | MSG | from=orch-1 | to=lane-x | id=msg-a | ticket=OMN-1 | please answer the question about the plan",
+     "row_id": "row-msg-a",
+     "row_lane": null,
+     "row_ts": "2026-11-01T11:00:00Z",
+     "row_type": "MSG",
+     "source": "test",
+     "text": "2026-11-01T11:00:00Z | MSG | from=orch-1 | to=lane-x | id=msg-a | ticket=OMN-1 | please answer the question about the plan"
+    },
+    "host": "none",
+    "lane": "orch-1",
+    "leases": [],
+    "newest_row_kind": "MSG",
+    "newest_row_stamp": "2026-11-01T11:00:00Z",
+    "rows": 1,
+    "run": "none",
+    "ticket": "OMN-1"
+   },
+   {
+    "claim": {
+     "ingested_at": null,
+     "ledger_seq": null,
+     "projected_at": "2026-11-01T09:00:00Z",
+     "raw_row": "2026-11-01T09:00:00Z | CLAIM | lane=lane-x | ticket=OMN-21948 | host=h051 | run=r1 | scope=anything",
+     "row_id": "row-claim-x",
+     "row_lane": null,
+     "row_ts": "2026-11-01T09:00:00Z",
+     "row_type": "CLAIM",
+     "source": "test",
+     "text": "2026-11-01T09:00:00Z | CLAIM | lane=lane-x | ticket=OMN-21948 | host=h051 | run=r1 | scope=anything"
+    },
+    "host": "h051",
+    "lane": "lane-x",
+    "leases": [
+     "lease-1"
+    ],
+    "newest_row_kind": "STATUS",
+    "newest_row_stamp": "2026-11-02T02:30:00Z",
+    "rows": 4,
+    "run": "r1",
+    "ticket": "OMN-21948"
+   }
+  ],
+  "page_size": 500,
+  "parity": null,
+  "query": "open-claims",
+  "refusal": null,
+  "rows": [],
+  "status": "ok",
+  "watermark": "2026-11-02T02:59:40Z",
+  "window_since": null,
+  "window_until": "2026-11-02T03:00:00Z"
+ }
+}

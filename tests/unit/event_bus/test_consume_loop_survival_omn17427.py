@@ -46,6 +46,9 @@ from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
 )
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
+    HandlerConsumerCoordinatorRejoin,
+)
 from omnibase_infra.models.health.enum_consumer_stall_reason import (
     EnumConsumerStallReason,
 )
@@ -540,6 +543,7 @@ def _supervisor(
         raise AssertionError("no rejoin expected")
 
     return ConsumerRejoinSupervisor(
+        coordinator_handler=HandlerConsumerCoordinatorRejoin(),
         topic=TOPIC,
         group_id=GROUP,
         policy=ModelConsumerRejoinPolicy(

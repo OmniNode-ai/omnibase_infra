@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22650
+title: "The dev runtime resolver maps llm.typesafe.api_key to LLM_TYPESAFE_API_KEY and the dev-lane runtimes receive it, so the cloud-typesafe-jev rung resolves"
+summary: "The dev profile of the runtime policy contract maps the TypeSafe Jev rung's secret ref to LLM_TYPESAFE_API_KEY, docker/runtime-policy.env is re-rendered from it, and x-runtime-env passes the variable in the optional form. The key itself is seeded in the secret store and is never in this repository."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22650-typesafe-resolver-mapping
+    statement: Every dev runtime resolver config must map llm.typesafe.api_key to LLM_TYPESAFE_API_KEY and the runtime anchor must pass that variable to the container in the optional form.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev profile secret resolver config maps llm.typesafe.api_key to LLM_TYPESAFE_API_KEY and docker/runtime-policy.env is the render of the contract -- falsifier: uv run pytest tests/unit/runtime/test_render_secret_resolver_config.py tests/ci/test_runtime_env_anchor.py -q'
+      - id: AC2
+        statement: 'AC2: x-runtime-env passes LLM_TYPESAFE_API_KEY as ${LLM_TYPESAFE_API_KEY:-} and the no-silent-fallbacks allowlist names it -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py tests/unit/infra/test_compose_no_silent_fallbacks.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The anchor and render tests pass at the head, and the new test fails on the base without the change.
+    command: uv run pytest tests/ci/test_runtime_env_anchor.py tests/unit/runtime/test_render_secret_resolver_config.py tests/unit/infra/test_compose_no_silent_fallbacks.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22650-anchor-tests
+    description: The anchor, render and no-silent-fallbacks tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_env_anchor.py tests/unit/runtime/test_render_secret_resolver_config.py tests/unit/infra/test_compose_no_silent_fallbacks.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22650-effects-container-holds-key
+    description: After the next dev deploy the dev runtime-effects container holds a non-empty LLM_TYPESAFE_API_KEY, so the mapped ref can resolve. The test prints no value.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" docker exec omninode-runtime-effects sh -c 'test -n "$LLM_TYPESAFE_API_KEY"'
+        cwd: ${OMNI_HOME}/omnibase_infra

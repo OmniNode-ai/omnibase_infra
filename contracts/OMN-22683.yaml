@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22683
+title: "The dev deploy agent restarts its own unit from outside the unit, so a self-update no longer kills the next job"
+summary: "self_update restarts the agent's own unit through a transient systemd-run unit that lives outside the unit's cgroup, and a restart that ends 0 or -SIGTERM ends the update instead of re-execing in the same pid, so systemd no longer waits out the stop timeout and kills the next job's build."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22683-restart-from-outside-the-unit
+    statement: A self-update that syncs the agent's unit file restarts the unit from a transient unit outside the unit's cgroup, and the job that follows the self-update completes; the h201 harness read of that is in the pull request body.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a unit test of self_update with the restart command ending -SIGTERM does not call os.execv, and it fails on origin/dev -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_self_update_restart_omn22478.py -q -k sigterm'
+      - id: AC2
+        statement: 'AC2: a restart that fails for another reason, or a host without systemd-run, still falls back to the re-exec path, and a restart that returned 0 ends the update without re-exec -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_self_update_restart_omn22478.py -q -k "fails or clean or systemd_run"'
+evidence_requirements:
+  - kind: tests
+    description: The self-update tests pass at the head, and the sigterm test fails on the origin/dev executor.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_self_update_restart_omn22478.py scripts/deploy-agent/tests/unit/test_unit_drift_wiring.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22683-self-update-tests
+    description: The self-update restart tests and the unit-drift wiring tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_self_update_restart_omn22478.py scripts/deploy-agent/tests/unit/test_unit_drift_wiring.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

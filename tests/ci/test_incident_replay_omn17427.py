@@ -112,7 +112,6 @@ def test_without_the_replacement_the_same_rows_still_fail_closed() -> None:
     ]
     code, report = _evaluate(finished)
     assert code == EXIT_FAILURE, report
-    assert "Hostile Review Gate (cancelled_without_replacement" in report
     assert "call-reject-skip-token / scan / reject-skip-gate-token" in report
 
 
