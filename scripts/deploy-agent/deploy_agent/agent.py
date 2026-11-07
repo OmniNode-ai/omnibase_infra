@@ -241,15 +241,35 @@ def _running_contains(repository: str, ancestor: str, running_ref: str) -> bool:
     return contains_commit(clone, ancestor, running_ref)
 
 
-def _read_dev_head(repository: str) -> str | None:
-    """A followed repository's dev head, read in the clone its build uses.
+def _web_source() -> Any:
+    # OMN-22808: the web repository the estimator build declares, or None. It is
+    # followed like the runtime's siblings; no repository name is written here.
+    executor = sys.modules["deploy_agent.executor"]
+    return executor.load_dev_boot_guard(
+        "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+    ).dev_lane_web_follow(executor, EnumRuntimeLane.DEV)
 
-    OMN-19509. omnimarket's is the clone a workspace build stages from, under
-    ``OMNI_HOME``. OMN-20867: omnibase_infra's is the deploy-source clone the
-    git phase pulls. OMN-19998: for a tag-followed repository the head is its
-    newest ``dev-*`` tag on origin, the commit a lab build stages, and its dev
-    branch head only while origin carries no such tag.
-    """
+
+def _read_running_ref(repository: str) -> str | None:
+    web = _web_source()
+    if web is not None and repository == web.repository:
+        ref: str | None = web.running_ref()
+        return ref
+    container = _runtime_container_for_lane(EnumRuntimeLane.DEV)
+    return read_running_ref(container, repository)
+
+
+def _read_dev_head(repository: str) -> str | None:
+    # A followed repository's dev head, read in the clone its build uses.
+    # OMN-19509: omnimarket's is the clone a workspace build stages from, under
+    # OMNI_HOME. OMN-20867: omnibase_infra's is the deploy-source clone the git
+    # phase pulls. OMN-19998: a tag-followed repository's head is its newest
+    # dev-* tag on origin, and its dev branch head only while origin carries no
+    # such tag. OMN-22808: the declared web source's is its branch on its url.
+    web = _web_source()
+    if web is not None and repository == web.repository:
+        ref: str | None = web.head_ref()
+        return ref
     if repository == "omnibase_infra":
         return read_dev_head(Path(REPO_DIR))
     clone = _sibling_clone(repository)
@@ -523,9 +543,7 @@ class DeployAgent:
         self._branch_install_exec: Callable[
             [list[str], int, dict[str, str]], subprocess.CompletedProcess[str]
         ] = lambda argv, timeout, env: run_command(argv, timeout, env=env)
-        self._idle_read_running_ref: Callable[[str], str | None] = lambda repo: (
-            read_running_ref(_runtime_container_for_lane(EnumRuntimeLane.DEV), repo)
-        )
+        self._idle_read_running_ref: Callable[[str], str | None] = _read_running_ref
         self._idle_read_head_ref: Callable[[str], str | None] = _read_dev_head
         # OMN-19998: the stability lane follows the omnimarket tag dev runs, on
         # a lab dev agent whose fence admits it; its seams and its last verdict.
@@ -1330,17 +1348,15 @@ class DeployAgent:
         }
 
     def _maybe_idle_converge(self) -> None:
-        """Converge on a followed repository's dev head when idle (OMN-19509).
-
-        See ``deploy_agent.idle_converge`` for the rule and the model behind
-        it. Throttled to one check per interval. Each followed repository is
-        decided in turn (OMN-20867) and the first that says converge runs; a
-        converge builds every repository at its dev head, so one is enough.
-        Every refusal is logged once per change of verdict, not once per
-        second. A converge runs as an ordinary job through ``_execute_command``,
-        under the same single-flight and lane locks, with its own job record and
-        terminal event named ``agent/idle-converge``.
-        """
+        # Converge on a followed repository's dev head when idle (OMN-19509); see
+        # deploy_agent.idle_converge for the rule and the model behind it.
+        # Throttled to one check per interval. Each followed repository is decided
+        # in turn (OMN-20867), the declared web source (OMN-22808) after the
+        # runtime's siblings, and the first that says converge runs; a converge
+        # builds every repository at its dev head, so one is enough. A refusal is
+        # logged once per change of verdict. A converge runs as an ordinary job
+        # through _execute_command, under the same single-flight and lane locks,
+        # with its own job record and terminal event named agent/idle-converge.
         if self._router is None:
             return
         tick = time.monotonic()
@@ -1364,7 +1380,11 @@ class DeployAgent:
         if lane_down:
             return
         decision: ModelIdleConvergeDecision | None = None
-        for repository in IDLE_CONVERGE_REPOSITORIES:
+        web = _web_source()
+        for repository in (
+            *IDLE_CONVERGE_REPOSITORIES,
+            *((web.repository,) if web else ()),
+        ):
             decision = self._decide_idle_converge(repository, now)
             if decision.verdict is not self._idle_converge_last_verdicts.get(
                 repository
@@ -1536,7 +1556,10 @@ class DeployAgent:
         routed_to = self._router.table.route(
             EnumRuntimeLane.DEV, f"gha/{repository}/idle-converge"
         )
-        routed_elsewhere = routed_to != self._router.instance.name
+        # OMN-22808: a web merge publishes no rebuild to any instance, so no
+        # routing row sends it elsewhere; this instance is its only follower.
+        web = getattr(_web_source(), "repository", None) == repository
+        routed_elsewhere = web or routed_to != self._router.instance.name
         running_ref = head_ref = probe_blocker = windows_error = None
         if routed_elsewhere:
             try:
@@ -1555,9 +1578,10 @@ class DeployAgent:
             self._dev_lag_behind_since.pop(repository, None)
         else:
             self._dev_lag_behind_since[repository] = behind_since
-        self._record_dev_lane_drift(
-            repository, running_ref, head_ref, behind_since, lane_flags, now
-        )
+        if not web:  # the drift record names the runtime container and image
+            self._record_dev_lane_drift(
+                repository, running_ref, head_ref, behind_since, lane_flags, now
+            )
         return decide_idle_converge(
             ModelIdleConvergeInputs(
                 now=now,
@@ -1589,13 +1613,12 @@ class DeployAgent:
         lane_flags: ModelLaneFlags,
         now: datetime,
     ) -> None:
-        """Keep the lane's drift behind ``repository``'s head, and say it (OMN-21146).
-
-        An overdue lane is published, then again every
-        :data:`DEV_LANE_DRIFT_REPUBLISH_AFTER` while it stays overdue, with a
-        WARNING carrying ``friction_type=dev_lane_drift``. A lane that was
-        published overdue and now runs the head is published once more, cleared.
-        """
+        # Keep the lane's drift behind ``repository``'s head, and say it (OMN-21146).
+        #
+        # An overdue lane is published, then again every
+        # :data:`DEV_LANE_DRIFT_REPUBLISH_AFTER` while it stays overdue, with a
+        # WARNING carrying ``friction_type=dev_lane_drift``. A lane that was
+        # published overdue and now runs the head is published once more, cleared.
         max_lag = lane_flags.max_dev_lag()
         if max_lag is None:
             return

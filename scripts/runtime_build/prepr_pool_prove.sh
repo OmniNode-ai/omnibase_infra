@@ -93,8 +93,7 @@ neighbour_diff() {
 # --- slot-ports-readback begin ---
 slot_ports_readback() {
   local pub out p
-  pub=$(docker ps --filter "label=com.docker.compose.project=$P" --format '{{.Ports}}' \
-    | tr ',' '\n' | sed -n 's/.*:\([0-9][0-9-]*\)->.*/\1/p' | sort -u | tr '\n' ' ')
+  pub=$(docker ps --filter "label=com.docker.compose.project=$P" --format '{{.Ports}}' | tr ',' '\n' | sed -n 's/.*:\([0-9][0-9-]*\)->.*/\1/p' | sort -u | tr '\n' ' ')
   out=""
   for p in $pub; do
     case "|$PORTS|" in *"|$p|"*) ;; *) out="$out $p" ;; esac
@@ -367,10 +366,7 @@ proof_containers() { # one line; rc 1 and no output when the composed list is ab
 }
 composed_build() { # build the composed omnimarket image and read its containers from the render
   local img="$P-omnimarket-runtime:latest" brc need
-  docker build -f "$R/omnimarket/Dockerfile.runtime" \
-    --build-arg INFRA_RUNTIME_IMAGE="$P-runtime:latest" \
-    --build-arg OMNIMARKET_VCS_REF="$(git -C "$R/omnimarket" rev-parse HEAD)" \
-    -t "$img" "$R/omnimarket" > "$W/composed-build.log" 2>&1
+  docker build -f "$R/omnimarket/Dockerfile.runtime" --build-arg INFRA_RUNTIME_IMAGE="$P-runtime:latest" --build-arg OMNIMARKET_VCS_REF="$(git -C "$R/omnimarket" rev-parse HEAD)" -t "$img" "$R/omnimarket" > "$W/composed-build.log" 2>&1
   brc=$?; echo "composed build rc=$brc $(date -u +%FT%TZ)"; tail -4 "$W/composed-build.log"
   [ "$brc" = 0 ] || return 1
   rm -f "$W/composed-containers"
@@ -381,6 +377,13 @@ composed_build() { # build the composed omnimarket image and read its containers
   done
   mv "$W/composed-containers.out" "$W/composed-containers"
   echo "composed-containers: $(tr '\n' ' ' < "$W/composed-containers")"
+}
+slot_composed_containers() { # a prepr slot's containers on the composed image its route layered (OMN-22863)
+  local id c need; id=$(docker image inspect -f '{{.Id}}' "$P-omnimarket-runtime:latest") || { echo "composed-containers: the slot route left no composed image"; return 1; }
+  rm -f "$W/composed-containers"
+  for c in $(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}'); do [ "$(docker inspect -f '{{.Image}}' "$c")" = "$id" ] && echo "$c"; done | sort -u > "$W/composed-containers.out"
+  for need in $M $E; do grep -qx "$need" "$W/composed-containers.out" || { echo "composed-containers lacks the kernel $need: $(tr '\n' ' ' < "$W/composed-containers.out")"; return 1; }; done
+  mv "$W/composed-containers.out" "$W/composed-containers"; echo "composed-containers: $(tr '\n' ' ' < "$W/composed-containers")"
 }
 starting_count() { # containers still in their health start period: the runtimes and the composed services
   local rows
@@ -491,16 +494,16 @@ build)
       export ONEX_LANE_OVERLAY_DIR="$W/lane-overlay"
       echo "overlay mounted as $P.bifrost.yaml sha256=$(shasum -a 256 "$OVERLAY_FILE" | cut -c1-12)"
     fi
+    # OMN-22863: a proof with omnimarket in it has the slot route layer that tree over the slot's runtime image
+    COMPOSED_ARGS=(); market_under_test && COMPOSED_ARGS=(--composed-omnimarket "$R/omnimarket")
     echo "slot $PREPR_SLOT bring-up start $(ts) GIT_SHA=$(git rev-parse HEAD)"
-    OMNI_HOME="$R" bash scripts/runtime_build/prepr_verify_lane.sh --slot "$PREPR_SLOT" \
-      --worktree "$R/omnibase_infra" --reason "${REASON:?REASON is required on a prepr slot}" \
-      --descriptor-out "$W/descriptor.json" > "$W/build.log" 2>&1
+    OMNI_HOME="$R" bash scripts/runtime_build/prepr_verify_lane.sh --slot "$PREPR_SLOT" --worktree "$R/omnibase_infra" --reason "${REASON:?REASON is required on a prepr slot}" --descriptor-out "$W/descriptor.json" ${COMPOSED_ARGS[@]+"${COMPOSED_ARGS[@]}"} > "$W/build.log" 2>&1
     src=$?; echo "prepr_verify_lane rc=$src $(ts)"; grep '^\[prepr-verify-lane\]' "$W/build.log" | tail -6
     # The rendered-slot verifier lists its mismatches on lines the grep above does not
     # match, so an exit 12 reached the receipt with its reason dropped (OMN-21433).
     [ "$src" = 12 ] && grep -E '^\[prepr-verify-rendered\]|^  - ' "$W/build.log" | head -12 | cut -c1-300
     case $src in
-      0) echo "build rc=0"; echo "up rc=0"; : > "$W/migrated" ;;
+      0) if market_under_test && ! slot_composed_containers; then echo "build rc=1 the slot's composed omnimarket containers were not read"; exit 1; fi; echo "build rc=0"; echo "up rc=0"; : > "$W/migrated" ;;
       8) # another holder owns the slot: never tear down what this run did not start
          : > "$W/foreign-slot"; echo "build rc=8 slot lock held by another process" ;;
       9) if grep -q 'migration failed' "$W/build.log"; then
@@ -559,11 +562,7 @@ json.dump(cfg, open(sys.argv[1],"w"))' "$DC/config.json"
     export DOCKER_CONFIG="$DC"; echo "docker config isolated at $DC (no credential store)"
   fi
   echo "build start $(ts) RUNTIME_VERSION=$RV GIT_SHA=$(git rev-parse HEAD)"
-  docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build \
-    --build-arg BUILD_SOURCE=workspace --build-arg EXPECTED_BUILD_SOURCE=workspace \
-    --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true \
-    --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" \
-    --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1
+  docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build --build-arg BUILD_SOURCE=workspace --build-arg EXPECTED_BUILD_SOURCE=workspace --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1
   brc=$?; echo "build rc=$brc $(ts)"; tail -4 "$W/build.log"
   if [ "$brc" != 0 ]; then
     grep -qi keychain "$W/build.log" && echo "build failed on the docker credential keychain: set docker_config: isolated for this host"
