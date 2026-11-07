@@ -251,13 +251,16 @@ def test_load_gate_the_routing_parser_still_routes_a_table_with_a_gate() -> None
     assert table.default_instance == "dev-201"
 
 
-def test_load_gate_the_committed_table_gates_dev_200_and_nothing_else() -> None:
+def test_load_gate_the_committed_table_gates_no_instance() -> None:
+    """The one gated instance left the table with its Docker (OMN-22704)."""
     text = (REPO_ROOT / ROUTING_TABLE_RELPATH).read_text(encoding="utf-8")
     gates = parse_load_gates(text)
 
-    assert set(gates) == {"dev-200"}, "the .201 and .202 agents are unchanged"
-    assert load_gate_for_instance(REPO_ROOT, "dev-200") == gates["dev-200"]
-    assert load_gate_for_instance(REPO_ROOT, "dev-201") is None
+    assert gates == {}
+    table = parse_routing_table(text)
+    assert table.instances, "positive control: the table declares instances"
+    for name in table.instances:
+        assert load_gate_for_instance(REPO_ROOT, name) is None, name
 
 
 # --- .101 is out of the pool ----------------------------------------------------

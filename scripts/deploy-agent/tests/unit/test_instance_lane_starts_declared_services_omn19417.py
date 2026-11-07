@@ -63,7 +63,7 @@ def _lab_manifest() -> Path:
 
 #: The instances whose manifest entry is parity-checked against its overlay and
 #: therefore declares every service the composition runs.
-_OVERLAY_INSTANCES = ("dev-202", "dev-200")
+_OVERLAY_INSTANCES = tuple(DEV_INSTANCE_LANE_CONFIGS)
 
 
 def _merged_services(config: ModelLaneConfig) -> dict[str, dict[str, Any]]:
