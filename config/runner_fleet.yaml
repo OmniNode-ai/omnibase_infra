@@ -117,15 +117,6 @@ hosts:
       - runner_name_prefix: omninode-customer-plane-runner
         expected_count: 2
         classes: [customer-plane]
-  # .101 — Mac mini, M2 Pro, 12 cores. Docker Desktop, data root on an external
-  # volume. Deploy/verify class first: those jobs are cloud-touching
-  # (kubectl/aws/gh) and architecture-neutral, so they are the class that can
-  # move to arm64 without any workflow carrying an architecture assumption.
-  - host: stickybeatz-2.tail75df5e.ts.net
-    arch: arm64
-    runner_name_prefix: omninode-mini-runner
-    expected_count: 1
-    classes: [verify]
   # .105 was removed from the lab mix by the operator on 2026-10-01.
   # OMN-17427 readback on 2026-10-06 found no omninode-air-runner registered;
   # retired capacity is not part of the declared verify fleet.
