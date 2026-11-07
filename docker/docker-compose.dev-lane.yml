@@ -961,6 +961,17 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   runtime-effects:
     build: *dev_lane_composed_runtime_build
+    # OMN-22930 (T8): gated from the runtime policy like the folded writers. On
+    # primary dev the policy folds the effects role into main and these render
+    # as folded-effects-*, so no bring-up that requests `runtime` or `full`
+    # starts this service; every other dev instance renders `runtime` and
+    # `full` and keeps its own effects container. `!override` because a plain
+    # list would merge with the base service's `runtime` and `full` profiles
+    # and keep the container up. Rolling back to a revision before this change
+    # restores the service by revision, with the image and overlay together.
+    profiles: !override
+      - "${DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_RUNTIME_PROFILE:-runtime}"
+      - "${DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_FULL_PROFILE:-full}"
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
       ONEX_BOOT_READY_BOUND_SECONDS: ${DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS:?runtime policy contract must set DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS}
