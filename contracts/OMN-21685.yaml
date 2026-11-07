@@ -1,0 +1,44 @@
+# OMN-21685 contract file for omnibase_infra: the runner PyPI cache index is a parameter and this repository names no cache host.
+schema_version: "1.0.0"
+ticket_id: "OMN-21685"
+title: "the runner PyPI cache index reaches a runner only as OMNI_PYPI_CACHE_INDEX, so the devpi cache can move between lab hosts without a lab host in this repository"
+summary: "The devpi pull-through cache moved off the runner host. The job-started hook defaulted its index to a lab host literal and the canary override carried one too, so a repoint meant adding a different lab host literal, which the public-repo hygiene gate refuses. docker-compose.runners.yml now passes OMNI_PYPI_CACHE_INDEX through from the runner host's docker/.env with an empty default, the hook treats an unset or empty value as a failed probe (a DEGRADE that names the variable, direct pypi.org egress), and the canary override reads the same variable with pypi.org as its default. The lab's value is kept in a private overlay."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21685-index-is-a-parameter
+    statement: "No cache endpoint is named in the job-started hook or the canary override; the index arrives as OMNI_PYPI_CACHE_INDEX and the hook wires exactly that value when it answers."
+    acceptance:
+      - id: AC1
+        statement: "AC1: with OMNI_PYPI_CACHE_INDEX unset or empty the hook wires nothing and records a DEGRADE naming the variable, and with it set to an answering index the hook wires that index as UV_INDEX and PIP_INDEX_URL -- falsifier: uv run pytest tests/scripts/test_runner_pypi_cache_index_param_omn21685.py -k hook fails at origin/dev aceff4fb1"
+      - id: AC2
+        statement: "AC2: docker-compose.runners.yml passes OMNI_PYPI_CACHE_INDEX through with an empty default and neither the hook nor the canary override names a cache port or tailnet host -- falsifier: uv run pytest tests/scripts/test_runner_pypi_cache_index_param_omn21685.py -k 'compose or no_cache_host' fails at origin/dev aceff4fb1"
+      - id: AC3
+        statement: "AC3: a runner container recreated after the change carries OMNI_PYPI_CACHE_INDEX naming the live devpi index -- falsifier: the container env read on the runner host lacks the variable"
+evidence_requirements:
+  - kind: tests
+    description: "The hook, the compose passthrough and the no-host-literal checks pass."
+    command: "uv run pytest tests/scripts/test_runner_pypi_cache_index_param_omn21685.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The hook wires nothing and says so when the index is unset, and wires the declared index when it answers."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/scripts/test_runner_pypi_cache_index_param_omn21685.py -q -p no:cacheprovider -k hook'
+  - id: dod-002
+    description: "The compose passthrough has an empty default and no shipped file names a cache host."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/scripts/test_runner_pypi_cache_index_param_omn21685.py -q -p no:cacheprovider -k "compose or no_cache_host"'
+  - id: dod-003
+    description: "A running runner container on the runner host carries OMNI_PYPI_CACHE_INDEX naming a devpi simple index."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'ssh "$(awk "/^runner_host:/{print \$2}" config/runner_fleet.yaml)" docker exec omninode-runner-7 printenv OMNI_PYPI_CACHE_INDEX | grep -q "/root/pypi/+simple/"'
