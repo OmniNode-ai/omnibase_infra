@@ -39,7 +39,7 @@ ALTER TABLE public.view_seam_readings ADD COLUMN IF NOT EXISTS read_at TIMESTAMP
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
+        SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'public.view_seam_readings'::regclass AND contype = 'p'
     ) THEN
         ALTER TABLE public.view_seam_readings
@@ -47,26 +47,11 @@ BEGIN
     END IF;
 END$$;
 
-DO $$
-DECLARE
-    v_col text;
-    v_nulls bigint;
-BEGIN
-    FOREACH v_col IN ARRAY ARRAY['window_end', 'state', 'read_at'] LOOP
-        EXECUTE format(
-            'SELECT count(*) FROM public.view_seam_readings WHERE %I IS NULL', v_col
-        ) INTO v_nulls;
-        IF v_nulls = 0 THEN
-            EXECUTE format(
-                'ALTER TABLE public.view_seam_readings ALTER COLUMN %I SET NOT NULL', v_col
-            );
-        ELSE
-            RAISE EXCEPTION
-                'OMN-15376: cannot converge view_seam_readings.% to NOT NULL -- % pre-existing row(s) hold NULL; this needs a data ruling, the migration refuses to guess.',
-                v_col, v_nulls;
-        END IF;
-    END LOOP;
-END$$;
+-- A column that holds NULL in a pre-existing row makes these statements fail loud
+-- and name the column; the migration never invents a value.
+ALTER TABLE public.view_seam_readings ALTER COLUMN window_end SET NOT NULL;
+ALTER TABLE public.view_seam_readings ALTER COLUMN state SET NOT NULL;
+ALTER TABLE public.view_seam_readings ALTER COLUMN read_at SET NOT NULL;
 -- ---- END OMN-15376 shape reconciliation: view_seam_readings ----
 
 CREATE INDEX IF NOT EXISTS idx_view_seam_readings_read_at
