@@ -294,8 +294,9 @@ def test_unknown_profile_propagates_when_caller_handles_failure(override: bool) 
     assert "Unknown folded runtime profile: unknown-role" in result.stderr
 
 
-# OMN-21288: the five projection writers main dispatches in-process.
+# OMN-21288: the six projection writers main dispatches in-process.
 _DEV_RUNTIME_WRITERS = (
+    "projection-delegation-writer",
     "projection-live-events-writer",
     "projection-registration-writer",
     "projection-savings-writer",
@@ -307,7 +308,7 @@ _DEV_RUNTIME_WRITERS = (
 def test_committed_dev_fold_retires_every_writer_before_main_and_keeps_the_rest() -> (
     None
 ):
-    """The committed dev policy retires the five writers, the tenant carrier and the hook-events writer."""
+    """The committed dev policy retires the six writers, the tenant carrier and the hook-events writer."""
     harness = (
         _harness(
             "effects",
@@ -354,7 +355,5 @@ restart_services /tmp "$PROJECT"
             < up
         )
         assert f" {service}" not in lines[up]
-    # The writer that still runs its own consume loop is recreated as before.
-    assert "projection-delegation-writer" in lines[up]
     assert "omninode-runtime" in lines[up]
     assert " -v" not in result.stdout

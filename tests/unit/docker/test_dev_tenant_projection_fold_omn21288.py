@@ -200,17 +200,20 @@ def test_fold_overlay_always_triggers_the_stack_gate() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OMN-21288: the five projection writers that dispatch in-process
+# OMN-21288: the six projection writers that dispatch in-process
 # ---------------------------------------------------------------------------
 # omnimarket#4492 routes these contracts to handler_runtime_writer classes
 # (onex_runtime_inprocess_dispatch), so main runs them as nodes once it owns
-# their profiles. Runtime profile -> the dev-lane service that ran it alone.
+# their profiles. The delegation writer is plan task T10 (OMN-22664): its
+# contract names the retired container's consumer group for the handover.
+# Runtime profile -> the dev-lane service that ran it alone.
 RUNTIME_WRITERS = {
     "projection-writer-live-events": "projection-live-events-writer",
     "projection-writer-registration": "projection-registration-writer",
     "projection-writer-savings": "projection-savings-writer",
     "projection-writer-tenant-credentials": "projection-tenant-credentials-writer",
     "projection-writer-tenant-registry": "projection-tenant-registry-writer",
+    "projection-writer-delegation": "projection-delegation-writer",
 }
 # The contract names those profiles own, as omnimarket declares them.
 RUNTIME_WRITER_CONTRACTS = {
@@ -219,6 +222,7 @@ RUNTIME_WRITER_CONTRACTS = {
     "projection-writer-savings": "projection_savings",
     "projection-writer-tenant-credentials": "projection_tenant_credentials",
     "projection-writer-tenant-registry": "projection_tenant_registry",
+    "projection-writer-delegation": "projection_delegation",
 }
 HANDLER = ROOT / "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
 
@@ -286,7 +290,6 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
         assert rendered[f"{key}_RUNTIME_PROFILE"] == f"folded-{profile}-runtime"
         assert rendered[f"{key}_FULL_PROFILE"] == f"folded-{profile}-full"
         assert service not in dev_stack_services()
-    assert "projection-delegation-writer" in dev_stack_services()
     # Retired by name (retired_services), not folded by profile: the fold
     # overlay's gate keeps the inert carrier out of every bring-up.
     assert "projection-claude-hook-events-writer" not in dev_stack_services()
