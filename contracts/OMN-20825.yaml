@@ -30,14 +30,12 @@ dod_evidence:
     binds_ac:
       - AC6
   - id: dod-omn20825-ac6-dev-unchanged
-    description: dev machine supplement remains validated and bound to digest but never selected for developer requests.
+    description: "dev machine supplement remains validated and bound to digest but never selected for developer requests. Regression guard, unbound: it passes at the merge base by design."
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k test_machine_supplement_is_bound_to_digest_but_never_a_developer_plan -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC6
   - id: dod-omn20825-deploy-source
     description: Published source blobs match HEAD and the local-plan fixture passes; this does not prove a live broker mint, and readiness still waits on OMN-20823 and live proof.
     source: manual
