@@ -18,6 +18,8 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: runner_image_identity.py --mode verify exits 0 on the refreshed uv.lock; it exits non-zero when the lock identity is stale -- falsifier: python3 scripts/ci/runner_image_identity.py --mode verify'
+      - id: AC4
+        statement: 'AC4: The committed uv.lock pins omnibase-spi 0.23.14 after the sibling lock refresh; the merge base pins 0.23.12 -- falsifier: uv run pytest tests/ci/test_uv_lock_spi_pin_omn13902.py -q'
 evidence_requirements:
   - kind: tests
     description: The refresh step's own shell runs against a throwaway git repository with a stub uv that rewrites only the revision header, and the step reports no change.
@@ -77,3 +79,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-13902-ac6
+    description: The refreshed uv.lock pins omnibase-spi 0.23.14, which the merge base's lock does not.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_uv_lock_spi_pin_omn13902.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
