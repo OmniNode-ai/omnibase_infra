@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22792
+title: "The dev deploy agent's launcher pulls its declared house model keys through the house-model-key CLI into the agent environment, so the TypeSafe rung key reaches the dev runtimes"
+summary: "When the dev unit declares DEPLOY_AGENT_HOUSE_KEYS, the launcher execs the agent through the house-model-key CLI of omnimarket in its --exec-names mode, which resolves each key the env store does not set into the environment and then execs the agent. No value is printed, written or put on a command line; an unresolved key is named on stderr and the agent still starts."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22792-launcher-house-keys
+    statement: The dev deploy agent's environment holds every house model key its unit declares that the secret store resolves, without the value appearing in any output.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: with DEPLOY_AGENT_HOUSE_KEYS declared the launcher execs the agent through the house-model-key CLI --exec-names mode with the argv of the agent, and with none it execs the agent directly -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q'
+      - id: AC2
+        statement: 'AC2: the dev unit declares DEPLOY_AGENT_HOUSE_KEYS=LLM_TYPESAFE_API_KEY and its interpreter, both protected -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The launcher tests pass at the head, and the new tests fail on the base without the change.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22792-launcher-tests
+    description: The launcher tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
