@@ -390,6 +390,7 @@ class HandlerDevBootGuard:
             for service in DEV_BOOT_SERVICES
             if service not in self.config.disabled_services
         )
+        self._retained_services = self.services
         self.root = state_dir / "dev-boot-guard" / self.config.compose_project
         self.snapshot_path = self.root / "last-healthy.json"
         self.point: ModelValueHolder[ModelDevBootPoint] = ModelValueHolder()
@@ -418,6 +419,24 @@ class HandlerDevBootGuard:
         else:
             deliver_reports(self.root, execution=self.execution, config=self.reporting)
         return ModelDevBootResult(operation=request.operation, status="pass")
+
+    def _adopt_deployed_generation(self) -> None:
+        """Re-read the services the lane runs once git_pull replaced the policy.
+
+        The guard is built before git_pull, from the previous generation's
+        policy, so recovery knows what that generation ran. A deploy that folds
+        a role (OMN-22930: runtime-effects into main) retires a service the
+        pre-pull list still names, and the post-roll health wait would fail on
+        "dev runtime containers absent: ['runtime-effects']" with the folded
+        runtime healthy. The retained list is kept for the recovery path.
+        """
+        self._retained_services = self.services
+        self.config = self.execution.lane_config_for(self.execution.EnumRuntimeLane.DEV)
+        self.services = tuple(
+            service
+            for service in DEV_BOOT_SERVICES
+            if service not in self.config.disabled_services
+        )
 
     def _containers(self) -> list[ModelDevBootContainer]:
         ids = _checked(
@@ -459,8 +478,14 @@ class HandlerDevBootGuard:
             )
         return containers
 
-    def wait(self) -> None:
-        """All replicas must be Docker healthy; exhausted boots fail immediately."""
+    def wait(self, *, deployed_generation: bool = False) -> None:
+        """All replicas must be Docker healthy; exhausted boots fail immediately.
+
+        ``deployed_generation`` is the post-roll wait of a deploy: it adopts the
+        service list of the generation just rolled before it reads containers.
+        """
+        if deployed_generation:
+            self._adopt_deployed_generation()
         started = self.execution._dev_boot_clock()
         containers = self._containers()
         window = max(_window(c) for c in containers)
@@ -719,6 +744,9 @@ class HandlerDevBootGuard:
             yield
             self.point.hold(self._capture())
         except Exception as exc:
+            # Recovery restores the retained generation, which ran the services
+            # the guard was built with, not the ones the failed candidate runs.
+            self.services = self._retained_services
             boot_causes: list[str] = []
             try:
                 for container in self._containers():
