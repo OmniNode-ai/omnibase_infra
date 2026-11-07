@@ -1,36 +1,41 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-23024: the broker-lag alarm reads the runtime's delegation writer groups.
+"""OMN-23024: the broker-lag alarm reads the runtime's live consumer groups.
 
 ## The defect
 
-``config/lab_alarm.json`` declared the standalone delegation writer's group
-``local.omnimarket-projections.delegation-writer.consume.v1``. The writer was
-folded into omninode-runtime (omnibase_infra#5743) and that group has had no
-members since: read on the dev broker 2026-11-07 it was ``Empty`` with 0
-members, so the alarm watched a group nobody consumes while the runtime's own
-groups carried the lag (159 on delegate-skill-completed, 3 on
-delegate-skill-failed).
+``config/lab_alarm.json`` declared six standalone projection-writer groups
+(``local.omnimarket-projections.<name>-writer.consume.v1``). The writers were
+folded into omninode-runtime (omnibase_infra#5743) and those groups have had no
+members since: read on the dev broker 2026-11-07 the delegation one was
+``Empty`` with 0 members, three others never held a commit, and the alarm
+watched groups nobody consumes while the runtime's own groups carried the lag
+(159 on delegate-skill-completed, 3 on delegate-skill-failed).
 
-## What replaces it
+## What replaces them
 
-The runtime mints one group per subscribed topic from the node's contract
+The runtime mints one group per subscribed topic from each node's contract
 identity, ``{env}.{package}.{node}.consume.{version}.__i.{instance}.__t.{topic}``.
-For ``node_projection_delegation`` that is the eight names pinned below, each read
-``Stable`` with one member on the dev broker on 2026-11-07 through the alarm's own
-in-process reader. The growth rule is not touched: a group that grows between two
-consecutive samples alarms, and a flat lag, however high, does not.
+The alarm now names those groups for all six writers. They are not typed by hand:
+``CONTRACTS`` below is the contract data (name, version, subscribed topics) of the
+six nodes as the running image served it on 2026-11-07, and the expected set is
+DERIVED from it through the derivation the lab-pass receipt uses
+(``scripts/runtime_build/declared_consumer_groups.py``). The shipped config must
+equal the derived set, so a contract version bump that is recorded here turns this
+file red until the config follows, and the failing control below shows it does.
 
-The names are pinned literally rather than derived because the node's package is
-not a dependency of this repository (a derivation test would have to skip where
-it is absent). A contract version bump mints new names; this file is the thing
-that goes red and names the repin.
+The growth rule is not touched: a group that grows between two consecutive
+samples alarms, and a flat lag, however high, does not. No bound was added or
+widened.
+
+The contract data is a fixture so this file runs everywhere and never skips.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -40,31 +45,22 @@ from scripts.lab_alarm import (
     ModelAlarmConfig,
     evaluate_consumer_group_lag,
 )
+from scripts.runtime_build.declared_consumer_groups import (
+    INSTANCE_INFIX,
+    TOPIC_INFIX,
+    derive_expected_keys,
+)
 from tests.helpers.lane_census_fixtures import use_neutral_lane_census
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG = REPO_ROOT / "config" / "lab_alarm.json"
 
-RETIRED_STANDALONE_GROUP = "local.omnimarket-projections.delegation-writer.consume.v1"
+ENV = "local"
+INSTANCE = "runtime-main"
 
-RUNTIME_BASE = "local.omnimarket.projection_delegation.consume.1.0.0"
-RUNTIME_INSTANCE = "runtime-main"
-DELEGATION_TOPICS = (
-    "onex.evt.omnibase-infra.delegation-completed.v1",
-    "onex.evt.omnibase-infra.delegation-failed.v1",
-    "onex.evt.omnibase-infra.quality-gate-result.v1",
-    "onex.evt.omniclaude.delegation-shadow-comparison.v1",
-    "onex.evt.omnimarket.delegate-skill-completed.v1",
-    "onex.evt.omnimarket.delegate-skill-failed.v1",
-    "onex.evt.omnimarket.node-generation-completed.v1",
-    "onex.evt.omnimarket.node-generation-failed.v1",
-)
-LIVE_DELEGATION_GROUPS = tuple(
-    f"{RUNTIME_BASE}.__i.{RUNTIME_INSTANCE}.__t.{topic}" for topic in DELEGATION_TOPICS
-)
-
-#: Declared before this change and not touched by it.
-UNCHANGED_STANDALONE_GROUPS = (
+#: The standalone groups the alarm used to read; none holds a member.
+RETIRED_STANDALONE_GROUPS = (
+    "local.omnimarket-projections.delegation-writer.consume.v1",
     "local.omnimarket-projections.live-events-writer.consume.v1",
     "local.omnimarket-projections.registration-writer.consume.v1",
     "local.omnimarket-projections.savings-writer.consume.v1",
@@ -72,9 +68,116 @@ UNCHANGED_STANDALONE_GROUPS = (
     "local.omnimarket-projections.tenant-registry-writer.consume.v1",
 )
 
-COMPLETED_GROUP = LIVE_DELEGATION_GROUPS[
-    DELEGATION_TOPICS.index("onex.evt.omnimarket.delegate-skill-completed.v1")
-]
+#: node -> (contract version, subscribed topics), read from the dev runtime's
+#: ``/v1/introspection/manifest`` on 2026-11-07.
+CONTRACTS: dict[str, tuple[tuple[int, int, int], tuple[str, ...]]] = {
+    "projection_delegation": (
+        (1, 0, 0),
+        (
+            "onex.evt.omniclaude.delegation-shadow-comparison.v1",
+            "onex.evt.omnimarket.node-generation-completed.v1",
+            "onex.evt.omnimarket.node-generation-failed.v1",
+            "onex.evt.omnimarket.delegate-skill-completed.v1",
+            "onex.evt.omnimarket.delegate-skill-failed.v1",
+            "onex.evt.omnibase-infra.delegation-completed.v1",
+            "onex.evt.omnibase-infra.delegation-failed.v1",
+            "onex.evt.omnibase-infra.quality-gate-result.v1",
+        ),
+    ),
+    "projection_live_events": (
+        (1, 3, 0),
+        (
+            "onex.evt.platform.log-entry.v1",
+            "onex.evt.platform.node-heartbeat.v1",
+            "onex.evt.platform.node-introspection.v1",
+            "onex.evt.platform.node-state-change.v1",
+            "onex.evt.platform.node-registration.v1",
+            "onex.cmd.omnimarket.delegate-skill.v1",
+            "onex.evt.omnimarket.delegate-skill-completed.v1",
+            "onex.evt.omnimarket.delegate-skill-failed.v1",
+            "onex.cmd.omnibase-infra.delegation-request.v1",
+            "onex.evt.omnibase-infra.routing-decision.v1",
+            "onex.evt.omnibase-infra.inference-response.v1",
+            "onex.evt.omnibase-infra.quality-gate-result.v1",
+            "onex.evt.omnibase-infra.delegation-completed.v1",
+            "onex.evt.omnibase-infra.delegation-failed.v1",
+            "onex.cmd.omnimarket.node-generation-requested.v1",
+            "onex.evt.omnimarket.node-generation-completed.v1",
+            "onex.evt.omnimarket.node-generation-failed.v1",
+            "onex.cmd.omnimarket.node-deploy.v1",
+            "onex.evt.omnimarket.generated-node-invoked.v1",
+            "onex.evt.omnimarket.delegation-escalation-triggered.v1",
+            "onex.cmd.omnimarket.tool-reuse-match-requested.v1",
+            "onex.evt.omnimarket.tool-reuse-matched.v1",
+            "onex.evt.omnimarket.tool-reuse-no-match.v1",
+        ),
+    ),
+    "projection_registration": (
+        (1, 0, 0),
+        (
+            "onex.evt.platform.node-introspection.v1",
+            "onex.evt.platform.node-heartbeat.v1",
+            "onex.evt.platform.node-state-change.v1",
+        ),
+    ),
+    "projection_savings": (
+        (1, 0, 0),
+        (
+            "onex.evt.omnibase-infra.savings-estimated.v1",
+            "onex.evt.omnimarket.delegate-skill-completed.v1",
+            "onex.evt.omnimarket.delegate-skill-failed.v1",
+            "onex.evt.omnibase-infra.delegation-completed.v1",
+            "onex.evt.omnibase-infra.delegation-failed.v1",
+            "onex.evt.omniclaude.hook-event.v1",
+        ),
+    ),
+    "projection_tenant_credentials": (
+        (1, 0, 0),
+        (
+            "onex.evt.omnimarket.credential-registered.v1",
+            "onex.evt.omnimarket.credential-revoked.v1",
+            "onex.evt.omnimarket.tenant-credential-state.v1",
+            "onex.evt.omnimarket.tenant-routing-overlay-state.v1",
+            "onex.evt.omnimarket.delegate-skill-completed.v1",
+            "onex.evt.omnimarket.delegate-skill-failed.v1",
+        ),
+    ),
+    "projection_tenant_registry": ((1, 0, 0), ("onex.tenant.events",)),
+}
+
+COMPLETED_TOPIC = "onex.evt.omnimarket.delegate-skill-completed.v1"
+COMPLETED_GROUP = (
+    "local.omnimarket.projection_delegation.consume.1.0.0.__i.runtime-main."
+    f"__t.{COMPLETED_TOPIC}"
+)
+
+
+def _derived_groups(
+    bumped: dict[str, tuple[int, int, int]] | None = None,
+) -> tuple[str, ...]:
+    """Every group the runtime mints for CONTRACTS, derived, never typed."""
+    bumped = bumped or {}
+    contracts: list[dict[str, Any]] = []
+    for name, (version, topics) in CONTRACTS.items():
+        major, minor, patch = bumped.get(name, version)
+        contracts.append(
+            {
+                "name": name,
+                "package_name": "omnimarket",
+                "contract_version": {"major": major, "minor": minor, "patch": patch},
+                "event_bus": {
+                    "plugin_managed": False,
+                    "subscribe_topics": list(topics),
+                },
+            }
+        )
+    keys = derive_expected_keys([{"contracts": contracts}], env=ENV)
+    return tuple(
+        sorted(
+            f"{k.base_group_id}{INSTANCE_INFIX}{INSTANCE}{TOPIC_INFIX}{k.topic}"
+            for k in keys
+        )
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -100,51 +203,63 @@ def _reader(lags: dict[str, int]) -> GroupLagReader:
 
 
 # ---------------------------------------------------------------------------
-# The binding: the alarm names the runtime's groups, not the orphaned one.
+# The binding: the alarm names the runtime's groups, derived from contracts.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_the_alarm_no_longer_reads_the_orphaned_standalone_group(
+def test_the_alarm_declares_exactly_the_groups_derived_from_the_contracts(
     declared_groups: tuple[str, ...],
 ) -> None:
-    assert RETIRED_STANDALONE_GROUP not in declared_groups
-
-
-@pytest.mark.unit
-def test_the_alarm_reads_every_live_runtime_delegation_group(
-    declared_groups: tuple[str, ...],
-) -> None:
-    missing = [g for g in LIVE_DELEGATION_GROUPS if g not in declared_groups]
-    assert missing == [], f"declared but not bound to the runtime's groups: {missing}"
-    assert len(LIVE_DELEGATION_GROUPS) == 8
-
-
-@pytest.mark.unit
-def test_every_runtime_delegation_group_shares_the_contract_identity() -> None:
-    for group in LIVE_DELEGATION_GROUPS:
-        base, _, rest = group.partition(".__i.")
-        instance, _, topic = rest.partition(".__t.")
-        assert base == RUNTIME_BASE
-        assert instance == RUNTIME_INSTANCE
-        assert topic in DELEGATION_TOPICS
-
-
-@pytest.mark.unit
-def test_the_other_declared_groups_are_untouched(
-    declared_groups: tuple[str, ...],
-) -> None:
-    assert all(group in declared_groups for group in UNCHANGED_STANDALONE_GROUPS)
-    assert len(declared_groups) == len(LIVE_DELEGATION_GROUPS) + len(
-        UNCHANGED_STANDALONE_GROUPS
+    expected = _derived_groups()
+    assert sorted(declared_groups) == list(expected), (
+        "the shipped consumer_groups differ from the set derived from the "
+        f"contracts: missing {sorted(set(expected) - set(declared_groups))}, "
+        f"extra {sorted(set(declared_groups) - set(expected))}"
     )
 
 
 @pytest.mark.unit
-def test_the_shipped_json_names_the_groups_literally() -> None:
+def test_no_standalone_writer_group_is_declared(
+    declared_groups: tuple[str, ...],
+) -> None:
+    assert not set(declared_groups) & set(RETIRED_STANDALONE_GROUPS)
+    assert all(INSTANCE_INFIX in g and TOPIC_INFIX in g for g in declared_groups)
+
+
+@pytest.mark.unit
+def test_every_one_of_the_six_writers_is_read_through_the_runtime(
+    declared_groups: tuple[str, ...],
+) -> None:
+    for name in CONTRACTS:
+        assert any(f".omnimarket.{name}.consume." in g for g in declared_groups), name
+    assert (
+        "local.omnimarket.projection_tenant_registry.consume.1.0.0."
+        "__i.runtime-main.__t.onex.tenant.events" in declared_groups
+    )
+    assert COMPLETED_GROUP in declared_groups
+
+
+@pytest.mark.unit
+def test_the_shipped_json_has_no_retired_group() -> None:
     declared = json.loads(CONFIG.read_text(encoding="utf-8"))["consumer_groups"]
-    assert RETIRED_STANDALONE_GROUP not in declared
-    assert COMPLETED_GROUP in declared
+    assert not set(declared) & set(RETIRED_STANDALONE_GROUPS)
+    assert len(declared) == len(set(declared)) == 47
+
+
+@pytest.mark.unit
+def test_a_recorded_version_bump_turns_the_binding_red(
+    declared_groups: tuple[str, ...],
+) -> None:
+    """The failing control: the derivation follows a contract bump and the
+    shipped config, which has not been repinned, no longer matches it."""
+    bumped = _derived_groups({"projection_delegation": (1, 1, 0)})
+    assert sorted(declared_groups) != list(bumped)
+    assert COMPLETED_GROUP not in bumped
+    assert (
+        "local.omnimarket.projection_delegation.consume.1.1.0.__i.runtime-main."
+        f"__t.{COMPLETED_TOPIC}" in bumped
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +284,24 @@ def test_planted_lag_growth_on_the_runtime_group_raises_an_alarm(
 
 
 @pytest.mark.unit
+def test_planted_lag_on_a_formerly_standalone_writer_now_alarms(
+    declared_groups: tuple[str, ...],
+) -> None:
+    """The five writers the first repair left on dead groups are read live."""
+    savings = next(g for g in declared_groups if ".projection_savings." in g)
+    previous = dict.fromkeys(declared_groups, 10)
+    planted = dict(previous)
+    planted[savings] = 11
+
+    report, _ = evaluate_consumer_group_lag(
+        _reader(planted), declared_groups, previous=previous
+    )
+
+    assert report.outcome is EnumConditionOutcome.ALARM
+    assert [a.subject for a in report.alarms] == [savings]
+
+
+@pytest.mark.unit
 def test_growth_by_one_still_alarms_and_flat_lag_still_does_not(
     declared_groups: tuple[str, ...],
 ) -> None:
@@ -189,17 +322,18 @@ def test_growth_by_one_still_alarms_and_flat_lag_still_does_not(
 
 
 @pytest.mark.unit
-def test_lag_on_the_retired_group_raises_nothing_because_it_is_no_longer_read(
+def test_lag_on_a_retired_standalone_group_raises_nothing_because_it_is_not_read(
     declared_groups: tuple[str, ...],
 ) -> None:
     """The control for the control: a dead group's lag is not this alarm's read."""
     previous = dict.fromkeys(declared_groups, 0)
     readings = dict(previous)
-    readings[RETIRED_STANDALONE_GROUP] = 874
+    for retired in RETIRED_STANDALONE_GROUPS:
+        readings[retired] = 874
 
     report, sample = evaluate_consumer_group_lag(
         _reader(readings), declared_groups, previous=previous
     )
 
-    assert RETIRED_STANDALONE_GROUP not in sample
+    assert not set(sample) & set(RETIRED_STANDALONE_GROUPS)
     assert report.outcome is EnumConditionOutcome.OK
