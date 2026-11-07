@@ -11,7 +11,7 @@ the folded profile owns that declares none of its own.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,7 +30,9 @@ class ModelFoldHandover(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    from_instance_id: str = Field(
+    from_instance_id: Annotated[
+        str, Field(min_length=1, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    ] = Field(
         ...,
         description=(
             "KAFKA_INSTANCE_ID of the retired container that ran the profile's "
