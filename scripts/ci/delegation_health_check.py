@@ -42,6 +42,9 @@ class ModelVerdictSource(BaseModel):
     max_age_hours: float
     events: tuple[str, ...]
     dispatch_title_contains: str = ""
+    # Conclusions that carry no verdict (OMN-22821): the newest COMPLETED
+    # verdict decides instead.
+    no_verdict_conclusions: tuple[str, ...] = ()
 
 
 class ModelHealthConfig(BaseModel):
@@ -114,16 +117,15 @@ def evaluate_delegation_health(
                 detail,
                 now=now,
                 dispatch_title_contains=source.dispatch_title_contains,
+                no_verdict_conclusions=source.no_verdict_conclusions,
             )
         except Exception as exc:  # noqa: BLE001 - unreadable sources fail closed
             code = 1
             print(f"unreadable: {exc}", file=detail)
         else:
             match = re.search(r"newest run\s*:\s*(\d+)", detail.getvalue())
-            if match:
-                run_id = match.group(1)
-        state = "red" if code else "green"
-        print(f"{source.name}: {state}, run {run_id}", file=out)
+            run_id = match.group(1) if match else run_id
+        print(f"{source.name}: {'red' if code else 'green'}, run {run_id}", file=out)
         print(detail.getvalue().rstrip(), file=out)
         if code:
             red_runs.append({"source": source.name, "run_id": run_id})

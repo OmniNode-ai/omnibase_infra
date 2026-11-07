@@ -150,55 +150,20 @@ def _declared_table(
 # reported green, the exact "declared but never granted" shape OMN-15656
 # exists to prevent. This is the sanctioned, checked-in way a state_io table
 # still participates in derivation (OMN-15337 / operator ruling R-q).
-STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
+STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
     _declared_table(
-        "state_io:delegation_workflow_state",
-        "delegation_workflow_state",
-        "docker/migrations/forward/090_create_delegation_workflow_state.sql",
+        f"state_io:{table}",
+        table,
+        f"docker/migrations/forward/{migration}",
         database_ref="omnibase_infra",
         role="state",
-    ),
-    # OMN-16924. Same seam, same classification: durable REDUCER state for
-    # node_session_phase_reducer, keyed on ``session_id`` rather than
-    # ``correlation_id``. Its ``tenant_id`` column is likewise denormalized
-    # provenance extracted from the opaque payload, never an authorization key,
-    # so operator ruling R-q's OMNINODE_INTERNAL classification carries over
-    # unchanged.
-    _declared_table(
-        "state_io:session_phase_state",
-        "session_phase_state",
-        "docker/migrations/forward/102_create_session_phase_state.sql",
-        database_ref="omnibase_infra",
-        role="state",
-    ),
-    # OMN-19829. Same seam, same classification: durable per-PR landing
-    # workflow state for omnimarket's node_pr_landing_orchestrator, keyed on
-    # ``landing_key`` (``owner/repo#<number>``). Its ``tenant_id`` column is
-    # denormalized provenance from the opaque payload, never an authorization
-    # key, so operator ruling R-q's OMNINODE_INTERNAL classification holds.
-    _declared_table(
-        "state_io:pr_landing_workflow_state",
-        "pr_landing_workflow_state",
-        "docker/migrations/forward/108_create_pr_landing_workflow_state.sql",
-        database_ref="omnibase_infra",
-        role="state",
-    ),
-    # OMN-21935. The omnibase_infra database's grants are derived from this
-    # manifest alone, and omnimarket's node_projection_infra_routing_decisions
-    # declares a db_io write on public.infra_routing_decisions there: the
-    # relation migration 080 already creates. The runtime refuses to wire a
-    # projection whose binding principal (role_omnibase_infra) lacks SELECT,
-    # INSERT and UPDATE on it. No new migration; the grant is provisioned from
-    # the topology. Once the pinned omnimarket contracts carry the node the
-    # same relation derives from the contract too, and the derivation is
-    # idempotent per relation, so this entry may then be deleted.
-    _declared_table(
-        "state_io:infra_routing_decisions",
-        "infra_routing_decisions",
-        "docker/migrations/forward/080_create_infra_routing_decisions.sql",
-        database_ref="omnibase_infra",
-        role="state",
-    ),
+    )
+    for table, migration in (
+        ("delegation_workflow_state", "090_create_delegation_workflow_state.sql"),
+        ("session_phase_state", "102_create_session_phase_state.sql"),
+        ("pr_landing_workflow_state", "108_create_pr_landing_workflow_state.sql"),
+        ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
+    )
 )
 
 
@@ -357,6 +322,15 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "context_audit_events",
         "node_projection_context_audit",
         "0000_add_context_audit_event_key.sql",
+        schema="public",
+    ),
+    # OMN-22020: node_view_seam_reading_reducer/0001 creates view_seam_readings and
+    # 0002 grants tenant_projection_writer SELECT, INSERT, UPDATE, ahead of the
+    # omnimarket node contract reaching the pin; expire this bridge when it does.
+    _vendored_read_write(
+        "view_seam_readings",
+        "node_view_seam_reading_reducer",
+        "0001_create_view_seam_readings.sql",
         schema="public",
     ),
     # The bridges below share one shape: 0000_create_<table>.sql under the

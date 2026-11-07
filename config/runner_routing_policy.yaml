@@ -823,6 +823,8 @@ hosted_runner_allowlist:
     reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors."
   - path: .github/workflows/model-review-capability-canary.yml
     reason: "OMN-17876: capability contract evidence must stay on hosted compute until separately authorized live runner selection."
+  - path: .github/workflows/security-scan.yml
+    reason: "OMN-22896: the secret-scan job runs the TruffleHog action in a public repository. The repository is public, so the job is pinned to a literal ubuntu-latest and never follows a variable onto an internal runner; the action also cannot run on the self-hosted fleet, where its docker bind mount resolves on the host daemon (OMN-16045)."
   - path: .github/workflows/runner-broker-dispatch-wedge-rerun.yml
     reason: "OMN-15776: scheduled broker-dispatch-wedge rerun must not share fate with the self-hosted runner fleet it remediates -- same isolation rationale as runner-fleet-canary.yml above."
   - path: .github/workflows/pr-ci-zombie-detector.yml
