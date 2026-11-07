@@ -359,7 +359,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_add_context_audit_event_key.sql",
         schema="public",
     ),
-    # The four bridges below share one shape: 0000_create_<table>.sql under the
+    # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
         _vendored_read_write(t, d)
@@ -368,6 +368,10 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
             # when node_context_install_confirm_trigger_effect reaches the pin.
             ("compaction_activations", "node_context_install_confirm_trigger_effect"),
+            # OMN-22478: node_projection_overlay_store/0000 creates the overlay store
+            # ahead of the omnimarket writer's contract and 0001 grants omninode_runtime
+            # SELECT, INSERT, UPDATE; expire this bridge when that contract reaches the pin.
+            ("overlay_store", None),
             # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
             # omnimarket node contract. 0001 grants
             # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
@@ -514,17 +518,14 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # The gateway_link_health_status VIEW is not declared at all: no runtime
     # node reads or writes it, so its privileges are revoked rather than
     # declared.
-    _vendored_read_write(
-        "savings_injection_signals",
-        "node_savings_estimation_compute",
-        "0001_create_savings_signal_tables.sql",
-        node="infra_direct_sql:node_savings_estimation_compute",
-    ),
-    _vendored_read_write(
-        "savings_validator_catch_signals",
-        "node_savings_estimation_compute",
-        "0001_create_savings_signal_tables.sql",
-        node="infra_direct_sql:node_savings_estimation_compute",
+    *(
+        _vendored_read_write(
+            table,
+            "node_savings_estimation_compute",
+            "0001_create_savings_signal_tables.sql",
+            node="infra_direct_sql:node_savings_estimation_compute",
+        )
+        for table in ("savings_injection_signals", "savings_validator_catch_signals")
     ),
     _vendored_read_write(
         "savings_correlation_finalizations",

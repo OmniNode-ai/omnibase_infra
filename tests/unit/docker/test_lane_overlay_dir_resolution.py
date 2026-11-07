@@ -101,7 +101,7 @@ def test_the_shipped_overlay_directory_holds_only_the_neutral_template() -> None
 
 def test_all_lane_compose_recipes_are_covered() -> None:
     assert sorted(len(services) for services in _LANE_COMPOSE_MOUNTS.values()) == (
-        [2] * 3 + [3] * 2 + [4] * 5 + [5]
+        [2] * 3 + [3] * 2 + [4] * 4 + [5]
     )
     assert "docker-compose.prod.yml" in _LANE_COMPOSE_MOUNTS
 

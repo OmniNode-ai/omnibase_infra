@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 # OMN-20037: declare installed copies so a tracked fix cannot hide stale units.
-# dev-200 health port 42098 was read from the installed LaunchAgent plist.
 units:
   - name: deploy-agent-dev.service
     tracked: scripts/deploy-agent/deploy/deploy-agent-dev.service
@@ -115,16 +114,6 @@ units:
     installed: ~/.config/systemd/user/deploy-agent-dev-202.service
     hosts:
       - omnipc2
-  - name: ai.omninode.deploy-agent-dev-200.plist
-    tracked: scripts/deploy-agent/deploy/launchd/deploy-agent-instance.plist.template
-    installed: ~/Library/LaunchAgents/ai.omninode.deploy-agent-dev-200.plist
-    hosts:
-      - Stickybeatz-Studio
-    render_script: scripts/deploy-agent/deploy/launchd/render-deploy-agent-plist.sh
-    render_args:
-      - dev-200
-      - '42098'
-      - '{home}/onex-lanes/dev-200'
   - name: onex-rung-eval.service
     tracked: deploy/rung-eval/onex-rung-eval.service
     installed: ~/.config/systemd/user/onex-rung-eval.service
