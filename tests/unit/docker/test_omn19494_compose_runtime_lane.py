@@ -97,15 +97,6 @@ STACKS: dict[str, _Stack] = {
         lane="compose-dev-105",
         lane_naming_services=_LANE_NAMING_SERVICES,
     ),
-    "dev-200": _Stack(
-        files=(
-            "docker-compose.infra.yml",
-            "docker-compose.dev-lane.yml",
-            "docker-compose.dev-200.yml",
-        ),
-        lane="compose-dev-200",
-        lane_naming_services=_LANE_NAMING_SERVICES,
-    ),
     "dev-202": _Stack(
         files=(
             "docker-compose.infra.yml",
