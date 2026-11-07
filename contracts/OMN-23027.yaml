@@ -1,0 +1,64 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23027
+title: The CI Summary poll stops destroying its own job listing, and its deadline names the unreadable input instead of blaming healthy gates
+summary: A bare "> jobs.json" truncates the file before the fetch pipeline runs, so a failed read of the run's own job listing left an empty listing that the gate reads as "no gate has reported". The deadline branch reported off exactly that file and printed 57 finished, green gates plus 34 contexts as missing/pending, in one sentence that also offered "the API unreachable" as an alternative without saying which held. Three pull requests failed this way inside one hour on 2026-11-07 behind one API outage. The listing is now written through a temporary file and moved into place only on success, the failed reads are counted, the gh error is captured beside the failure line, and the deadline distinguishes an unreadable input from genuinely pending gates. Fail-closed behaviour is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23027-honest-poll-inputs
+    statement: The CI Summary poll never leaves its own job listing truncated by a failed read, and a deadline reached without one successful read reports the unreadable input rather than a gate list computed from it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a failed read of the run's job listing leaves the previous listing byte-for-byte intact, invents none where there was none, and leaves no temporary file behind -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k never_empties"
+      - id: AC2
+        statement: "AC2: a deadline reached with no successful read of the job listing prints the count of failed reads and says the API was unreachable rather than that gating jobs are pending, and does not print a gate list -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k unreadable_input"
+      - id: AC3
+        statement: "AC3: the gh error text, HTTP status included, is captured beside the failure line in the step log -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k http_status"
+      - id: AC4
+        statement: "AC4: every deadline branch of the poll still exits non-zero, so nothing added here can resolve the gate green on a timeout -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k fails_closed"
+evidence_requirements:
+  - kind: tests
+    description: The CI Summary poll-input tests of this change, which drive the step's own shell with a failing gh and a controlled clock.
+    command: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23027-ac1-listing-survives
+    description: A failed read leaves a seeded listing unchanged and writes none when there was none. At the merge base both cases fail, because the redirection truncates the file before the pipeline runs.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k never_empties
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23027-ac2-deadline-is-honest
+    description: With the clock driven past the deadline after one failed read, the step names the unreadable job listing and omits the gate list. At the merge base it prints the conflated sentence instead, which is how run 42397877196 attempt 3 reported 91 green gates as pending.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k unreadable_input
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23027-ac3-status-captured
+    description: The gh error is captured beside the failure line rather than left to the runner's interleaving, so the HTTP status behind a failed read is readable at the point of failure. The 2026-11-07 logs carry 90 failure lines and no status.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k http_status
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23027-ac4-still-fails-closed
+    description: Every deadline branch exits non-zero and the verdict case keeps its single exit 0, so the honesty fix is not a fail-open loosening.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k fails_closed
+        cwd: ${OMNI_HOME}/omnibase_infra
