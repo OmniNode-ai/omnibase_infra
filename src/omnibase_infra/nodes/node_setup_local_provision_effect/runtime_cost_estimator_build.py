@@ -16,6 +16,7 @@ from subprocess import TimeoutExpired
 from types import ModuleType
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.utils.util_run_coro_sync import run_coro_sync
@@ -31,7 +32,6 @@ from omnibase_infra.handlers.handler_cost_estimator_build import (
 )
 from omnibase_infra.models.model_cost_estimator_build_config import (
     ModelCostEstimatorBuildConfig,
-    ModelCostEstimatorWebFollow,
 )
 from omnibase_infra.models.model_cost_estimator_build_request import (
     ModelCostEstimatorBuildRequest,
@@ -98,8 +98,22 @@ def dev_lane_build_settings(
     return parse_build_settings(execution, lane, _declaration(execution))
 
 
-class CostEstimatorWebFollow(ModelCostEstimatorWebFollow):
-    """The declared web source, with the two reads its idle follower decides on."""
+class CostEstimatorWebFollow(BaseModel):
+    """The declared web source, with the two reads its idle follower decides on.
+
+    Built from the build declaration: the repository, url and branch are the
+    build's own settings; ``container`` is the contract's ``follow`` block.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str = Field(min_length=1)
+    repository_url: str = Field(min_length=1)
+    branch: str = Field(min_length=1)
+    container: str = Field(min_length=1)
+    source_label: str = Field(min_length=1)
+    revision_label: str = Field(min_length=1)
+    read_timeout_seconds: int = Field(gt=0)
 
     def running_ref(self) -> str | None:
         """The web commit the running estimator image was built from, or ``None``.

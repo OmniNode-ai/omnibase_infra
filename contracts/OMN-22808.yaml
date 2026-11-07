@@ -52,3 +52,15 @@ dod_evidence:
       - check_type: command
         check_value: ssh "$DEPLOY_PROBE_HOST" docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' omninode-cost-estimator-web
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22808-integration-proof
+    description: The dev host's running estimator container carries the image revision label the web follower compares, and the shipped contract's follow block builds the follow model. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_estimator_web_follow_contract_omn22808.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' omninode-cost-estimator-web
+        cwd: ${OMNI_HOME}/omnibase_infra
