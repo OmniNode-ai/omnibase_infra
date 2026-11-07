@@ -129,6 +129,7 @@ def test_schema_declares_exactly_the_act_switches_and_the_lane_class() -> None:
         | frozenset(
             {"COST_ESTIMATOR_WEB_SOURCE_REPOSITORY", "COST_ESTIMATOR_WEB_SOURCE_URL"}
         )
+        | frozenset({"ESTIMATOR_GATE_OPEN_SOURCES"})
     } == LANE_ENV_FRAGMENT_SCHEMA_KEYS
 
 

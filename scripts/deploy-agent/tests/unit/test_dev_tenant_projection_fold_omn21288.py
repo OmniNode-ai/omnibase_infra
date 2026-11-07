@@ -46,6 +46,7 @@ RUNTIME_WRITERS = {
     "projection-writer-savings": "projection-savings-writer",
     "projection-writer-tenant-credentials": "projection-tenant-credentials-writer",
     "projection-writer-tenant-registry": "projection-tenant-registry-writer",
+    "projection-writer-delegation": "projection-delegation-writer",
 }
 # The hook-events writer has no runtime profile of its own: main runs its node by
 # default, so the policy retires it by service name (``retired_services``).
@@ -80,7 +81,7 @@ def test_primary_dev_disables_the_tenant_carrier_only(
 
 
 def test_committed_policy_disables_every_folded_writer() -> None:
-    """The committed policy folds the five in-process writers; each container is disabled."""
+    """The committed policy folds the six in-process writers; each container is disabled."""
     policy = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
     with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy):
         folded = lane_folded_profiles(EnumRuntimeLane.DEV)
@@ -95,8 +96,8 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             *DEV_LANE_GATEWAY_SERVICES,
         }
     )
-    # The writer that still runs its own consume loop keeps its container.
-    assert "projection-delegation-writer" not in config.disabled_services
+    # The delegation writer is folded too (plan task T10, OMN-22664).
+    assert "projection-delegation-writer" in config.disabled_services
 
 
 def test_folded_profile_without_a_gated_service_is_refused(

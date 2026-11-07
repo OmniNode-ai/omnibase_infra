@@ -486,3 +486,109 @@ async def test_the_fence_refuses_a_retired_group_still_consumed_on_redpanda(
     )
     assert result.fenced_group == retired_group
     assert result.committed == {0: 0, 1: 0, 2: 0}
+
+
+@pytest.mark.asyncio
+async def test_from_instance_id_resumes_the_retired_instance_commits_on_redpanda(
+    tmp_path: Path, bootstrap: str, topic: str
+) -> None:
+    """OMN-22877 (T8 part 2a): ``from_instance_id`` on the broker.
+
+    The retired effects container ran this same contract under its own
+    ``KAFKA_INSTANCE_ID``, so its group is the runtime's group id with that
+    instance discriminator and the per-topic scope. The runtime main bus
+    derives that group (``resolve_retired_group``), takes its commits under
+    ``last_ran`` and projects the window and the events after it exactly once.
+    """
+    from omnibase_infra.enums import EnumConsumerGroupPurpose
+    from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
+        resolve_retired_group,
+    )
+    from omnibase_infra.models.event_bus.model_consumer_group_handover import (
+        ModelConsumerGroupHandover,
+    )
+
+    _projected.clear()
+    suffix = uuid.uuid4().hex[:8]
+    environment = f"omn22877-{suffix}"
+    retired_instance = f"runtime-effects-{suffix}"
+    declaration = (
+        "consumer_group_handover:\n"
+        f"  from_instance_id: {retired_instance}\n"
+        "  from_auto_offset_reset: earliest\n"
+        "  handover_rule: last_ran\n"
+    )
+    main = EventBusKafka(
+        config=ModelKafkaEventBusConfig(
+            bootstrap_servers=bootstrap,
+            environment=BUS_TEST_ENVIRONMENT,
+            timeout_seconds=30,
+            max_retry_attempts=2,
+            retry_backoff_base=0.5,
+            instance_id=f"runtime-main-{suffix}",
+        )
+    )
+    await main.start()
+    try:
+        to_group = compute_consumer_group_id(
+            ModelNodeIdentity(
+                env=environment,
+                service="omnimarket",
+                node_name="projection_live_events",
+                version="1.3.0",
+            ),
+            EnumConsumerGroupPurpose.CONSUME,
+        )
+        retired_group = resolve_retired_group(
+            main,
+            ModelConsumerGroupHandover(
+                from_instance_id=retired_instance,
+                from_auto_offset_reset="earliest",
+                handover_rule="last_ran",
+            ),
+            environment=environment,
+            to_group=to_group,
+            topic=topic,
+        )
+        assert retired_instance in retired_group
+        assert retired_group != to_group
+
+        before = [(0, "before-0"), (0, "before-1"), (1, "before-2")]
+        await _publish(bootstrap, topic, before)
+        container = await _retired_container(
+            bootstrap, topic, retired_group, len(before)
+        )
+        await _publish(
+            bootstrap, topic, [(0, "window-0"), (1, "window-1"), (2, "window-2")]
+        )
+
+        engine = MessageDispatchEngine()
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            return_value=_ProjectionWriter,
+        ):
+            await wire_from_manifest(
+                ModelAutoWiringManifest(
+                    contracts=(_contract(tmp_path, topic, declaration=declaration),)
+                ),
+                engine,
+                event_bus=main,
+                environment=environment,
+            )
+        engine.freeze()
+
+        await _publish(bootstrap, topic, [(0, "after-0"), (2, "after-1")])
+        async with asyncio.timeout(60):
+            while "after-0" not in _projected or "after-1" not in _projected:
+                await asyncio.sleep(0.2)
+        await asyncio.sleep(3.0)  # a duplicate would arrive here
+    finally:
+        await main.close()
+
+    assert sorted(container) == ["before-0", "before-1", "before-2"]
+    assert sorted(_projected) == sorted(
+        ["window-0", "window-1", "window-2", "after-0", "after-1"]
+    )
+    every = Counter(container + _projected)
+    assert set(every.values()) == {1}, every
+    assert len(every) == 8

@@ -23,14 +23,22 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from omnibase_infra.enums.enum_bifrost_lane_media_capability import (
+    EnumBifrostLaneMediaCapability,
+)
 from omnibase_infra.models.delegation.model_bifrost_lane_endpoint_capacity import (
     ModelBifrostLaneEndpointCapacity,
+)
+from omnibase_infra.models.delegation.model_bifrost_lane_media_capability_resolver import (
+    resolve_media_capability,
+)
+from omnibase_infra.models.delegation.model_bifrost_lane_overlay_checks import (
+    validate_overlay_bindings,
 )
 from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
-    LOCAL_TIER,
     ModelBifrostLaneBackendBinding,
 )
 
@@ -75,41 +83,16 @@ class ModelBifrostLaneOverlay(BaseModel):
 
     @model_validator(mode="after")
     def _validate_bindings_against_locale(self) -> Self:
-        backend_keys = [binding.backend_key for binding in self.backends]
-        if len(backend_keys) != len(set(backend_keys)):
-            raise ValueError(
-                f"lane {self.lane!r}: backends must not contain duplicate "
-                f"backend_id values, got {backend_keys}"
-            )
-
-        capacity_endpoints = [capacity.endpoint for capacity in self.endpoint_capacity]
-        if len(capacity_endpoints) != len(set(capacity_endpoints)):
-            raise ValueError(
-                f"lane {self.lane!r}: endpoint_capacity must not declare an "
-                f"endpoint twice, got {capacity_endpoints}"
-            )
-
-        if self.locale is EnumBifrostLaneLocale.CLOUD:
-            for binding in self.backends:
-                if binding.declares_new_backend and binding.tier == LOCAL_TIER:
-                    raise ValueError(
-                        f"lane {self.lane!r} declares locale "
-                        f"{EnumBifrostLaneLocale.CLOUD.value!r} but adds local-tier "
-                        f"backend {binding.backend_key!r}: a cloud lane must "
-                        "reach no lab endpoint (OMN-17502)."
-                    )
-            return self
-
-        if not backend_keys:
-            raise ValueError(
-                f"lane {self.lane!r} declares locale "
-                f"{EnumBifrostLaneLocale.LAB.value!r} and must bind at least one "
-                "backend. A lab lane with no local backends silently degrades "
-                "to the metered ceiling (OMN-16833); a lane that runs off the lab "
-                f"network declares locale {EnumBifrostLaneLocale.CLOUD.value!r} "
-                "instead (OMN-17502)."
-            )
+        validate_overlay_bindings(
+            self.lane, self.locale, self.backends, self.endpoint_capacity
+        )
         return self
+
+    def resolve_media_capability(
+        self, capability: str
+    ) -> ModelBifrostLaneBackendBinding:
+        """Return the serving binding for a media capability (OMN-22756)."""
+        return resolve_media_capability(self.lane, self.backends, capability)
 
 
 __all__ = [
