@@ -69,7 +69,6 @@ _NAMESPACE = "tenant_inference_credentials"
 # when a new overlay claims the dev-lane layering and is missing here.
 _BORROWER_OVERLAYS = (
     "docker-compose.dev-105.yml",
-    "docker-compose.dev-200.yml",
     "docker-compose.dev-202.yml",
     "docker-compose.prepr.yml",
 )
