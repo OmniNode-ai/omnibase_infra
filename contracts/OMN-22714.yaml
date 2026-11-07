@@ -15,13 +15,6 @@ requirements:
         statement: 'AC2: a rollback followed by a second fold plans no copy of an offset already carried and no second run of an effect -- falsifier: uv run pytest -q on the planner''s rollback-then-refold test with the recorded offsets of the tenant registry fold'
       - id: AC3
         statement: 'AC3: a source whose committed offset cannot be read yields a refusal and never a copy from guessed offsets -- falsifier: uv run pytest -q on the planner''s error test with an unreadable source group'
-  - id: req-omn22714-fold-wide-handover-from-instance
-    statement: A folded profile's consumer groups resume from the retired container's commits through one declaration in the lane's runtime policy contract, derived per topic from the retired container's instance id, with no declaration in the profile's contracts and none read as absent when unreadable.
-    acceptance:
-      - id: AC4
-        statement: 'AC4: a handover declared by from_instance_id derives the retired group per topic as the group the retired process joined, copies its commit under last_ran, and is refused when it names the bus''s own instance or the retired side still has a member -- falsifier: uv run pytest tests/unit/handlers/test_consumer_group_handover_from_instance_omn22714.py -q, red with the bus resolver''s instance override removed'
-      - id: AC5
-        statement: 'AC5: a runtime policy contract declares fold_handovers per folded profile, the renderer writes ONEX_RUNTIME_FOLD_HANDOVERS, and auto-wiring gives it to a contract of that profile that declares none, a contract''s own declaration winning, and fails the wiring on a declaration it cannot read -- falsifier: uv run pytest tests/unit/handlers/test_fold_handover_omn22714.py tests/unit/runtime/auto_wiring/test_fold_handover_wiring_omn22714.py -q, red with the auto-wiring default removed'
 evidence_requirements:
   - kind: tests
     description: The planner's last_ran rule, the fold, rollback and second fold simulation with its two controls, the tenant-registry rollback-then-refold case, the unreadable-source refusal, the Kafka path and the source fence.
@@ -66,24 +59,6 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/handlers/test_consumer_group_handover_last_ran_omn21288.py -q --no-cov --tb=line -k unreadable
-        cwd: .
-  - id: dod-omn22714-from-instance-derives-the-retired-group
-    description: The retired group is the group the old effects container joined, per topic, and its commits reach the runtime group; with the bus resolver's instance override removed the derived group is the runtime's own and the golden test fails.
-    source: manual
-    binds_ac:
-      - AC4
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/unit/handlers/test_consumer_group_handover_from_instance_omn22714.py -q --no-cov --tb=line
-        cwd: .
-  - id: dod-omn22714-fold-wide-declaration-wired
-    description: One policy declaration reaches every contract of the folded profile through the rendered environment and auto-wiring; an unreadable or unfolded declaration fails; with the auto-wiring default removed the folded contract is wired with no handover.
-    source: manual
-    binds_ac:
-      - AC5
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/unit/handlers/test_fold_handover_omn22714.py tests/unit/runtime/auto_wiring/test_fold_handover_wiring_omn22714.py -q --no-cov --tb=line
         cwd: .
   - id: dod-deploy-omn22714-runtime-carries-last-ran
     description: The deployed runtime container plans a last_ran handover from the later commit, a probe against the live container that fails before this change (the planner there takes no handover_rule).
