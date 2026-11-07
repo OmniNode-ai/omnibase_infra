@@ -12,11 +12,9 @@ requirements:
       - id: AC1
         statement: "AC1: a failed read of the run's job listing leaves the previous listing byte-for-byte intact, invents none where there was none, and leaves no temporary file behind -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k never_empties"
       - id: AC2
-        statement: "AC2: a deadline reached with no successful read of the job listing prints the count of failed reads and says the API was unreachable rather than that gating jobs are pending, and does not print a gate list -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k unreadable_input"
+        statement: "AC2: a deadline reached with no successful read of the job listing exits non-zero, prints the count of failed reads and says the API was unreachable rather than that gating jobs are pending, and does not print a gate list -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k unreadable_input"
       - id: AC3
         statement: "AC3: the gh error text, HTTP status included, is captured beside the failure line in the step log -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k http_status"
-      - id: AC4
-        statement: "AC4: every deadline branch of the poll still exits non-zero, so nothing added here can resolve the gate green on a timeout -- falsifier: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -k fails_closed"
 evidence_requirements:
   - kind: tests
     description: The CI Summary poll-input tests of this change, which drive the step's own shell with a failing gh and a controlled clock.
@@ -53,9 +51,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k http_status
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn23027-ac4-still-fails-closed
+  - id: dod-omn23027-fail-closed-invariant
     description: >-
-      Every deadline branch exits non-zero and the verdict case keeps its single exit 0, so the honesty fix is not a fail-open loosening. This is an invariant guard, not evidence of a change, and it deliberately binds no AC: it passes at the merge base as well, because the merge base already fails closed. A control that FAILED here would mean the base had been fail-open, so there is no earlier behaviour to control and dod-verify's merge-base control cannot apply. AC4 is instead carried by its falsifier in the requirement and by the returncode assertion inside AC2's test, which does fail at the merge base.
+      Every deadline branch exits non-zero and the verdict case keeps its single exit 0, so the honesty fix is not a fail-open loosening. This is an invariant guard, not evidence of a change, and it deliberately binds no AC: it passes at the merge base as well, because the merge base already fails closed. A control that FAILED here would mean the base had been fail-open, so there is no earlier behaviour to control and dod-verify's merge-base control cannot apply. It is deliberately NOT an acceptance criterion: the local mirror of this gate requires every AC to carry bound evidence, and this check can carry none, so an AC here would deadlock the two halves of the same gate against each other. The guarantee is carried by AC2 instead, whose test asserts the new branch's non-zero exit and does fail at the merge base.
     source: manual
     execution_scope: local_done_gate
     checks:
