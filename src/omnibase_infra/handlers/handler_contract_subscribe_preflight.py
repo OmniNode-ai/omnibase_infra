@@ -83,7 +83,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -197,6 +196,7 @@ FOLD_HANDOVERS_ENV_VAR = "ONEX_RUNTIME_FOLD_HANDOVERS"
 
 def load_contract_handover(
     contract: ModelDiscoveredContract,
+    environ: Mapping[str, str],
 ) -> ModelConsumerGroupHandover | None:
     """The handover a discovered contract is wired with (OMN-22714).
 
@@ -206,12 +206,12 @@ def load_contract_handover(
     """
     return load_consumer_group_handover(
         contract.contract_path
-    ) or resolve_fold_handover(contract.runtime_profiles)
+    ) or resolve_fold_handover(contract.runtime_profiles, environ)
 
 
 def resolve_fold_handover(
     contract_profiles: Sequence[str],
-    environ: Mapping[str, str] | None = None,
+    environ: Mapping[str, str],
 ) -> ModelConsumerGroupHandover | None:
     """The fold-wide handover of the first folded profile a contract belongs to.
 
@@ -226,8 +226,7 @@ def resolve_fold_handover(
             declaration must not read as absent, which would start the folded
             groups at the bus default.
     """
-    env = os.environ if environ is None else environ
-    raw = env.get(FOLD_HANDOVERS_ENV_VAR, "").strip()
+    raw = environ.get(FOLD_HANDOVERS_ENV_VAR, "").strip()
     if not raw:
         return None
     try:
@@ -236,7 +235,7 @@ def resolve_fold_handover(
         raise ValueError(f"{FOLD_HANDOVERS_ENV_VAR} is not valid JSON: {exc}") from exc
     if not isinstance(declared, dict):
         raise ValueError(f"{FOLD_HANDOVERS_ENV_VAR} must be a JSON object")
-    folded = set(resolve_runtime_folded_profiles(env))
+    folded = set(resolve_runtime_folded_profiles(environ))
     if unfolded := sorted(set(declared) - folded):
         raise ValueError(
             f"{FOLD_HANDOVERS_ENV_VAR} names {unfolded}, which "

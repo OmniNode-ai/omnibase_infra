@@ -11528,7 +11528,7 @@ async def _subscribe_contract_topics(
     preflight = HandlerContractSubscribePreflight(
         contract_name=contract.name,
         concurrency=load_consume_concurrency(contract.contract_path),
-        handover=load_contract_handover(contract),
+        handover=load_contract_handover(contract, os.environ),
         event_bus=event_bus,
         environment=environment,
         consumer_group=consumer_group,

@@ -22,7 +22,7 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn22877-from-instance-derives-the-retired-group
+  - id: dod-omn22877-from-instance-derives-retired-group
     description: The retired group is the group the old effects container joined, per topic, and its commits reach the runtime group; with the bus resolver's instance override removed the derived group is the runtime's own and the golden test fails.
     source: manual
     binds_ac:
