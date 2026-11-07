@@ -162,14 +162,18 @@ def test_a_cluster_that_cannot_start_fails_rather_than_skips(
 ) -> None:
     """A cluster that will not start is RED, never a silent skip.
 
-    ``initdb`` is allowed to succeed and ``pg_ctl start`` is forced to fail,
+    ``initdb`` is made to succeed and ``pg_ctl start`` is forced to fail,
     which is exactly the shape the fleet runner produced. The fixture must
     raise pytest's Failed, not its Skipped.
     """
-    if module._postgres_bin_dir() is None:
-        pytest.skip("PostgreSQL 16 binaries are unavailable on this host")
-
-    real_run = subprocess.run
+    # Hermetic on purpose: the fixture is driven against a stand-in binary
+    # directory and a stand-in subprocess layer, so the proof runs on a host
+    # with no PostgreSQL 16 (the Ubuntu 26.04 hosted image carries none). A
+    # skip here would be collected-and-never-executed, which the skip-count
+    # ratchet reads as growth. Only the fixture's own handling of a failed
+    # start is under test, and that needs no real server.
+    fake_bin_dir = tmp_path_factory.mktemp("omn18762-fake-pg-bin")
+    monkeypatch.setattr(module, "_postgres_bin_dir", lambda: fake_bin_dir)
 
     def fake_run(
         argv: list[str], *args: Any, **kwargs: Any
@@ -178,7 +182,8 @@ def test_a_cluster_that_cannot_start_fails_rather_than_skips(
             return subprocess.CompletedProcess(
                 argv, 1, stdout="", stderr="pg_ctl: could not start server\n"
             )
-        return real_run(argv, *args, **kwargs)
+        # initdb succeeds, as it did on the fleet runner.
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 

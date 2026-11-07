@@ -1018,7 +1018,6 @@ _READ_BINDING_GROUP = "local.omnimarket-projections.runtime-read.consume.v1"
 # claims the dev-lane layering and is missing here.
 _BORROWER_OVERLAYS: dict[str, str] = {
     "docker-compose.dev-105.yml": "runtime",
-    "docker-compose.dev-200.yml": "runtime",
     "docker-compose.dev-202.yml": "runtime",
     "docker-compose.prepr.yml": "prepr",
 }
@@ -1224,7 +1223,10 @@ def test_every_lane_layering_the_dev_overlay_is_listed() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("overlay", [None, "dev-200", "dev-202", "dev-105"])
+@pytest.mark.parametrize(
+    "overlay",
+    [None, *(k.split(".")[1] for k in _BORROWER_OVERLAYS if "prepr" not in k)],
+)
 def test_trajectory_backend_is_isolated_to_dev(overlay: str | None) -> None:
     env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
     result = _run_compose_config(
