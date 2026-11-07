@@ -12,12 +12,16 @@ against one lease directory, and hold the critical section to one winner.
 
 from __future__ import annotations
 
+import atexit
 import datetime as dt
+import functools
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -45,6 +49,26 @@ ROUNDS = 25
 ACQUIRERS = 8
 
 
+@functools.cache
+def _exclusive_mkdir_path() -> str:
+    """PATH whose ``mkdir`` is one whose create is exclusive, as the pool hosts' is.
+
+    The lease takes a host with ``mkdir`` and breaks an expired one under a
+    ``mkdir`` guard, so it needs a ``mkdir`` that fails for every racer but one.
+    The Rust ``mkdir`` that Ubuntu 26.04 ships (the hosted CI image since
+    2026-11-06) reports success to a racer that finds the directory already made,
+    so on that image these races found two holders. Ubuntu 26.04 keeps the GNU
+    one as ``gnumkdir``; a host without it is checked by the probe test below.
+    """
+    gnu = shutil.which("gnumkdir")
+    if gnu is None:
+        return os.environ["PATH"]
+    scratch = tempfile.TemporaryDirectory(prefix="gnu-mkdir-")
+    atexit.register(scratch.cleanup)
+    (Path(scratch.name) / "mkdir").symlink_to(gnu)
+    return f"{scratch.name}{os.pathsep}{os.environ['PATH']}"
+
+
 class ShellTransport:
     """Runs each remote command in a real bash whose $HOME is a scratch directory."""
 
@@ -54,7 +78,11 @@ class ShellTransport:
     def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
         done = subprocess.run(
             ["bash", "-c", command],
-            env={**os.environ, "HOME": str(self.home)},
+            env={
+                **os.environ,
+                "HOME": str(self.home),
+                "PATH": _exclusive_mkdir_path(),
+            },
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -80,6 +108,40 @@ def _plant(home: Path, holder: str, until: dt.datetime) -> Path:
         encoding="utf-8",
     )
     return lease
+
+
+def _mkdir_race(tp: ShellTransport, target: Path) -> int:
+    """How many of ACQUIRERS simultaneous ``mkdir <target>`` calls reported success."""
+    gate = threading.Barrier(ACQUIRERS)
+    wins: list[bool] = []
+    lock = threading.Lock()
+
+    def attempt() -> None:
+        gate.wait()
+        rc, _ = tp.run(SLOT, f"mkdir {target} 2>/dev/null", 30)
+        with lock:
+            wins.append(rc == 0)
+
+    threads = [threading.Thread(target=attempt) for _ in range(ACQUIRERS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=120)
+        assert not t.is_alive()
+    return sum(wins)
+
+
+def test_the_hosts_mkdir_admits_one_winner_under_a_race(tmp_path: Path) -> None:
+    # The precondition every race below stands on, named so a host whose mkdir is
+    # not exclusive fails here with its cause instead of as two lease holders.
+    tp = ShellTransport(tmp_path)
+    for n in range(ROUNDS):
+        made = _mkdir_race(tp, tmp_path / f"probe-{n}")
+        assert made == 1, (
+            f"round {n}: {made} racers each made the directory; this host's mkdir "
+            f"({shutil.which('mkdir')}) is not exclusive, so the lease commands "
+            "cannot hold one holder here"
+        )
 
 
 def test_renew_own_lease_rewrites_until_and_removes_guard(tmp_path: Path) -> None:
