@@ -38,7 +38,7 @@ dod_evidence:
       - check_type: command
         check_value: grep -c 'ONEX_BOOT_UNIVERSE_PROVISION' docker/docker-compose.infra.yml
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn22815-per-contract-confirm-carries-owned-topics
+  - id: dod-omn22815-per-contract-confirm
     description: With the universe warm off, the per-contract confirm provisions the DLQ topics and the projection topics of the contracts a boot wires, and the missing-topic auto-create follows the warm switch.
     source: manual
     binds_ac: [AC2]
