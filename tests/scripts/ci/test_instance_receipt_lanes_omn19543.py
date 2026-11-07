@@ -112,7 +112,7 @@ def test_the_release_train_refuses_a_lane_the_receipt_enum_does_not_declare(
 def test_the_release_train_reads_compose_dev_then_the_table_lanes() -> None:
     rt = _release_train()
     lanes = rt.lab_pass_receipt.EnumLabLane
-    assert rt.lab_evidence_lanes(
+    read = rt.lab_evidence_lanes(
         rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE, "omnimarket"
     ) == (
         lanes.COMPOSE_DEV,

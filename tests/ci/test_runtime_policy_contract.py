@@ -560,6 +560,8 @@ def test_trajectory_backend_does_not_leak_to_other_compose_lanes() -> None:
                 "ONEX_BOUNDARY_DLQ_ENABLED:"
             )
     # Borrowed dev profiles must override all four kernel environments.
-    for name in ("dev-200", "dev-202", "dev-105"):
-        text = (ROOT / f"docker/docker-compose.{name}.yml").read_text()
+    borrowers = sorted((ROOT / "docker").glob("docker-compose.dev-[0-9]*.yml"))
+    assert borrowers, "positive control: the dev overlays were found"
+    for path in borrowers:
+        text = path.read_text()
         assert text.count('ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"') == 4

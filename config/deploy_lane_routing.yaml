@@ -52,10 +52,8 @@
 # instance on .202 and are proven there under the compose-dev-202 receipt; every
 # other requester, omnibase_infra included, stays on the default .201 instance
 # (operator RULING 2026-09-25T00:56:45Z: omnimarket may be proven on .202,
-# omnibase_infra stays .201-only). dev-200 (the .200 host, OMN-19543) carries no
-# route and is retired (OMN-21909): its agent no longer runs, and a route may
-# name it only after the instance is brought back and a runner exists to verify
-# a merge routed there.
+# omnibase_infra stays on the default instance). The instance of the Docker-free
+# Mac left this table with its Docker (OMN-22704).
 #
 # verify: (OMN-19507 AC2) is how the per-merge verify job reads the instance a
 # merge was routed to: the lab-pass lane its receipt is emitted under, the
