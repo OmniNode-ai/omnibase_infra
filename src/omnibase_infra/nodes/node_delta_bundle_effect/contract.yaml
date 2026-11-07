@@ -27,6 +27,10 @@ node_version:
   patch: 0
 # Node type
 node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on
+# it. The handler descriptor model defaults the rest.
+descriptor:
+  node_archetype: effect
 # Description
 description: >
   Effect node for delta bundle lifecycle tracking. Receives merge-gate-decision events (idempotent INSERT ON CONFLICT DO NOTHING) and pr-outcome events (UPDATE with outcome, merged_at, bundle_completed_at). Detects fix-PRs via the stabilizes:<pr_ref> label convention and populates is_fix_pr and stabilizes_pr_ref fields accordingly.
@@ -43,6 +47,8 @@ output_model:
 # =============================================================================
 # HANDLER ROUTING (Declarative Handler Dispatch)
 # =============================================================================
+# OMN-21536: handlers take the typed payload alone.
+# The payload carries correlation_id for database operations and tracing.
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:

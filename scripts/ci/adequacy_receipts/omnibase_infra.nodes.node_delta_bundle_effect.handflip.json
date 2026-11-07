@@ -1,0 +1,32 @@
+{
+  "base_ref": "a9ffea9a3321b7944278557dbb00079accf5eec4",
+  "canonical_handler_module": "omnibase_infra.nodes.node_delta_bundle_effect.handlers.handler_write_bundle",
+  "legacy_handler_module": "omnibase_infra.nodes.node_delta_bundle_effect.handlers.handler_write_bundle",
+  "node_id": "omnibase_infra.nodes.node_delta_bundle_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:8cc9353c3bf77d820d05e3fd0baae9afd94e1aa847151a43aa5685a4383da681",
+      "sha256:8fc70dc8813572d41081a3b6197480f675ad4ac10221f49ec62b8d326c32bfd0",
+      "sha256:bbb676e2bc358f734a3bc08e5313f43f0c7c0855206093a53b5079f7963bc6d5"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestWriteBundleHandleTypedRequest::test_quarantine_inserts_serialized_violations",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestWriteBundleHandleTypedRequest::test_padded_stabilization_label_sets_fix_fields",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestWriteBundleHandleTypedRequest::test_duplicate_insert_and_empty_label_succeed",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestWriteBundleHandleTypedRequest::test_first_nonempty_stabilization_label_wins",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestWriteBundleHandleTypedRequest::test_insert_timeout_returns_timeout_error",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestWriteBundleHandleTypedRequest::test_insert_connection_failure_returns_connection_error",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestUpdateOutcomeHandleTypedRequest::test_merged_outcome_passes_merge_timestamp",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestUpdateOutcomeHandleTypedRequest::test_reverted_outcome_has_no_merge_timestamp",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestUpdateOutcomeHandleTypedRequest::test_already_completed_closed_bundle_succeeds",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestUpdateOutcomeHandleTypedRequest::test_update_timeout_returns_timeout_error",
+      "tests/unit/nodes/node_delta_bundle_effect/test_handle_typed_request_omn21536.py::TestUpdateOutcomeHandleTypedRequest::test_update_connection_failure_returns_connection_error"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerWriteBundle._execute_insert",
+    "parse_stabilizes_label"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

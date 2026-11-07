@@ -318,7 +318,7 @@ class HandlerWriteDecision(MixinPostgresOpExecutor):
     Example:
         >>> pool = await asyncpg.create_pool(dsn="...")
         >>> handler = HandlerWriteDecision(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
     """
@@ -344,7 +344,6 @@ class HandlerWriteDecision(MixinPostgresOpExecutor):
     async def handle(
         self,
         payload: ModelPayloadWriteDecision,
-        correlation_id: UUID,
     ) -> ModelBackendResult:
         """Execute the two-stage decision write.
 
@@ -353,13 +352,13 @@ class HandlerWriteDecision(MixinPostgresOpExecutor):
         success semantics.
 
         Args:
-            payload: Decision write payload.
-            correlation_id: Request correlation ID for distributed tracing.
+            payload: Decision write payload containing the correlation ID.
 
         Returns:
             ModelBackendResult with success=True when Stage 1 committed.
             Stage 2 errors are logged but do not cause success=False.
         """
+        correlation_id = payload.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             correlation_id=correlation_id,

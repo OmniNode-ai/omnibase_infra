@@ -7,6 +7,10 @@
 #
 name: "node_chain_retrieval_effect"
 node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on
+# it. The handler descriptor model defaults the rest.
+descriptor:
+  node_archetype: effect
 runtime_profiles: [main]
 contract_version:
   major: 1
@@ -33,6 +37,8 @@ event_bus:
     - "onex.cmd.omnibase-infra.chain-learn.v1"
   publish_topics:
     - "onex.evt.omnibase-infra.chain-retrieval-result.v1"
+# OMN-21536: HandlerChainRetrieval.handle takes one ModelChainRetrievalRequest
+# (prompt_text, correlation_id, similarity_threshold, limit).
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
