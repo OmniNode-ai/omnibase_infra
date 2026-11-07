@@ -172,9 +172,12 @@ def test_ac1_deploy_agent_accepts_the_variable_in_a_lane_env_fragment() -> None:
 # -- AC2: the binding -------------------------------------------------------
 
 
-def test_ac2_dev_lane_publishes_3080_on_the_declared_bind_address_only() -> None:
+def test_ac2_dev_lane_publishes_3080_on_the_declared_bind_address_and_loopback() -> (
+    None
+):
+    # OMN-22692: loopback beside the declared address, for the tailnet https front's loopback upstream.
     ports = _document(_DEV_LANE)["services"][_SERVICE]["ports"]
-    assert ports == [f"${{{_BIND_VAR}:-127.0.0.1}}:3080:3000"]
+    assert ports == [f"${{{_BIND_VAR}:-127.0.0.1}}:3080:3000", "127.0.0.1:3080:3000"]
     assert _ALL_INTERFACES not in _dev_lane_service_text()
     assert '"3080:3000"' not in _dev_lane_service_text()
 
@@ -182,7 +185,8 @@ def test_ac2_dev_lane_publishes_3080_on_the_declared_bind_address_only() -> None
 def test_ac2_rendered_binding_is_the_lane_variables_address(tmp_path: Path) -> None:
     published = _dev_lane_page(tmp_path, {_BIND_VAR: _DOC_ADDR})["ports"]
     assert [(p["host_ip"], p["published"], p["target"]) for p in published] == [
-        (_DOC_ADDR, "3080", 3000)
+        (_DOC_ADDR, "3080", 3000),
+        ("127.0.0.1", "3080", 3000),
     ]
 
 
