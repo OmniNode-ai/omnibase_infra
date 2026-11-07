@@ -378,6 +378,27 @@ x-dev-lane-identity-env: &dev_lane_identity_env
 x-dev-lane-placement-identity-env: &dev_lane_placement_identity_env
   ONEX_RUNTIME_LANE: "compose-dev"
   ONEX_RUNTIME_LANE_HEALTH_SPEAKER: "false"
+# ---------------------------------------------------------------------------
+# OMN-23011: the lane variable that tells the estimator page which sources open
+# it without its gate password.
+# ---------------------------------------------------------------------------
+# The page's gate (OMN-22190) opens, with no password, for a source address inside
+# a CIDR block named here: a comma-separated list, read by the page image from
+# ESTIMATOR_GATE_OPEN_SOURCES. An unset, empty or invalid value opens nothing, and
+# every other source stays gated.
+#
+# The variable is declared HERE, once, and the service merges the declaration; the
+# value is the lane's own and is never written in this repository, which is public
+# and whose hygiene gate refuses a network range in any file. The value reaches the
+# page from the lane env fragment (one of the keys that fragment accepts) or from
+# the operator env file on the host, and a fragment value wins, as it does for every
+# lane variable. Unset, nothing opens and the gate stands for every source.
+#
+# It is only the gate's source list: whether a source can reach the page at all is
+# the port binding on the service (COST_ESTIMATOR_BIND_ADDR, below), which keeps
+# the published port off every interface but the host's tailnet address.
+x-dev-lane-estimator-gate-env: &dev_lane_estimator_gate_env
+  ESTIMATOR_GATE_OPEN_SOURCES: ${ESTIMATOR_GATE_OPEN_SOURCES:-}
 services:
   # ===========================================================================
   # (7) DECLARED POSTGRES CAPACITY -- OMN-19415
@@ -1388,7 +1409,7 @@ services:
   projection-delegation-writer:
     build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-delegation-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${DEV_RUNTIME_MAIN_PROJECTION_DELEGATION_WRITER_RUNTIME_PROFILE:-runtime}", "${DEV_RUNTIME_MAIN_PROJECTION_DELEGATION_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -2203,9 +2224,16 @@ services:
     # migration one-shots, and only onex-api may sit behind that gate
     # (OMN-18496). The page needs no ordering -- with onex-api down its upload
     # route answers 503 and every page still renders.
+    # OMN-23011: the page is published on the host's tailnet address only and
+    # never on every interface, which also exposed it to the LAN. The address is
+    # the host's own, read from the host at deploy time into the operator env
+    # file, and never a literal in this repository (this one is public). Unset, it
+    # binds loopback, so a host that has no tailnet address publishes the page to
+    # nobody rather than to everybody.
     ports:
-      - "3080:3000"
+      - "${COST_ESTIMATOR_BIND_ADDR:-127.0.0.1}:3080:3000"
     environment:
+      !!merge <<: [*dev_lane_estimator_gate_env]
       FEATURE_ESTIMATOR_ENABLED: "true"
       # Infisical's materialized host env -> DEPLOY_AGENT_ENV_FILE -> the
       # agent's _compose_env() re-read -> compose -> the page's runtime gate.
