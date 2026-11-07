@@ -52,6 +52,13 @@ COMMAND_TYPE = "receipt-mode.requested"
 # only caps a hang. Tests that exercise the deadline itself keep their short one.
 SUCCESS_DEADLINE_MS = 60_000
 
+# The tests that expect progress collected before the deadline expires cannot use
+# the success bound, because they only return when it runs out. They still count
+# bus start, subscribes and publish inside it, so their bound outlasts a start of
+# 1.2 s, the slowest one measured on a loaded runner, and stays far under the
+# ten-second hangs those tests inject.
+COLLECT_DEADLINE_MS = 2000
+
 
 def _respond(
     bus: EventBusInmemory,
@@ -253,7 +260,7 @@ def test_deadline_returns_collected_progress_and_ignores_malformed_messages() ->
         )
 
     _respond(bus, responder)
-    assert _call(bus, deadline_ms=200) == (
+    assert _call(bus, deadline_ms=COLLECT_DEADLINE_MS) == (
         ModelReceiptModeEvent(topic=PROGRESS_TOPIC, payload={"status": "ready"}),
     )
 
@@ -387,8 +394,8 @@ def test_deadline_cleans_up_and_returns_only_collected_progress(
     monkeypatch.setattr(bus, "publish", publish_then_wait)
     monkeypatch.setattr(bus, "close", close)
     started = time.monotonic()
-    events = _call(bus, deadline_ms=200)
-    assert time.monotonic() - started < 2
+    events = _call(bus, deadline_ms=COLLECT_DEADLINE_MS)
+    assert time.monotonic() - started < COLLECT_DEADLINE_MS / 1000 + 2
     assert events == (
         ()
         if stage == "subscribe"
