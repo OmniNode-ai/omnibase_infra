@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22756
+title: The lane overlay accepts typed media capabilities (tts, stt, embed, decide, video) and a node asks for a capability, never a host or port
+summary: A lane overlay binding declares one typed media capability, the binding checks that the capability and its endpoint path agree, the overlay keeps one serving backend per capability, and the overlay resolves a capability to its serving binding and URL.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22756-typed-capability
+    statement: A node asks the lane overlay for a typed media capability and receives the declared binding and URL; each failure raises a typed error naming the backend.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a golden test per capability (tts, stt, embed, decide, video) resolves the declared binding and its URL from a lane overlay by capability alone -- falsifier: uv run pytest tests/unit/runtime/test_bifrost_lane_overlay_media_capabilities_omn22478.py -q -k golden"
+      - id: AC2
+        statement: "AC2: an error test per failure (capability and endpoint shape disagree, two serving backends for one capability, unknown capability, capability asked with none serving) raises a typed error naming the backend -- falsifier: uv run pytest tests/unit/runtime/test_bifrost_lane_overlay_media_capabilities_omn22478.py -q -k error"
+      - id: AC3
+        statement: "AC3: the shape check removed by an injected break turns the disagreement error test red -- falsifier: uv run pytest tests/unit/runtime/test_bifrost_lane_overlay_media_capabilities_omn22478.py -q -k shape_check_break"
+evidence_requirements:
+  - kind: tests
+    description: The media capability tests of this change.
+    command: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_media_capabilities_omn22478.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22756-ac1-golden-per-capability
+    description: Each of tts, stt, embed, decide and video resolves its declared binding and URL from a lane overlay by capability alone. At the merge base none of these tests pass.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_media_capabilities_omn22478.py -q -n 0 --no-cov -k golden
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22756-ac2-typed-errors
+    description: A capability and endpoint shape that disagree, two serving backends for one capability, an unknown capability and a capability with none serving each raise a typed error naming the backend or the capability.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_media_capabilities_omn22478.py -q -n 0 --no-cov -k error
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22756-ac3-shape-check-break
+    description: With the shape check replaced by a no-op the disagreement test fails, so the check is what the test pins.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_media_capabilities_omn22478.py -q -n 0 --no-cov -k shape_check_break
+        cwd: ${OMNI_HOME}/omnibase_infra
