@@ -1,7 +1,7 @@
 schema_version: '1.0.0'
 ticket_id: OMN-22821
 title: 'The Delegation Health Check treats a cancelled or skipped newest verdict run as no verdict instead of a failure'
-summary: 'The workflow-verdict reader gains an opt-in no_verdict_conclusions list; the Delegation Health Check config sets cancelled and skipped, so the newest completed verdict run decides, while callers that do not opt in still block on a cancelled newest run.'
+summary: 'The workflow-verdict reader of the Delegation Health Check gains an opt-in no_verdict_conclusions list; the Delegation Health Check config sets cancelled and skipped, so the newest completed verdict run decides, while callers that do not opt in still block on a cancelled newest run.'
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
