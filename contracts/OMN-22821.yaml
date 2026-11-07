@@ -1,0 +1,38 @@
+schema_version: '1.0.0'
+ticket_id: OMN-22821
+title: 'The Delegation Health Check treats a cancelled or skipped newest verdict run as no verdict instead of a failure'
+summary: 'The workflow-verdict reader of the Delegation Health Check gains an opt-in no_verdict_conclusions list; the Delegation Health Check config sets cancelled and skipped, so the newest completed verdict run decides, while callers that do not opt in still block on a cancelled newest run.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-22821-1
+    statement: A cancelled or skipped newest verdict run is no verdict for the Delegation Health Check, and every other caller keeps its current reading.
+    acceptance:
+      - id: AC22821001
+        statement: With a cancelled newest run and a completed passing one before it, the check reads the completed verdict; with a completed failing run it still fails.
+      - id: AC22821002
+        statement: Callers that do not opt in still block on a cancelled newest run.
+evidence_requirements:
+  - kind: tests
+    description: The delegation health no-verdict tests pass
+    command: uv run --frozen pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: A cancelled newest run reads the completed verdict before it, and a completed failure still fails
+    source: generated
+    binds_ac: [AC22821001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q
+  - id: dod-002
+    description: A caller that does not opt in still reads a cancelled newest run as a failure
+    source: generated
+    binds_ac: [AC22821002]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q
