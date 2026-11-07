@@ -19,7 +19,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The replay of the recorded unknown-tenant event is acknowledged after one dead letter, the unconfirmed-dead-letter and look-alike controls still withhold, and the alarm binds the runtime's eight delegation groups with the growth rule unchanged.
-    command: uv run pytest tests/unit/runtime/auto_wiring/test_omn23024_unknown_tenant_is_poison.py tests/ci/test_lab_alarm_delegation_groups_omn23024.py -q --no-cov
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_omn23024_unknown_tenant_is_poison.py tests/integration/runtime/test_omn23024_unknown_tenant_dead_letter_integration.py tests/ci/test_lab_alarm_delegation_groups_omn23024.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -32,7 +32,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_omn23024_unknown_tenant_is_poison.py tests/unit/runtime/auto_wiring/test_omn17862_quarantine_publish_confirmed.py -q --no-cov --tb=line
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_omn23024_unknown_tenant_is_poison.py tests/integration/runtime/test_omn23024_unknown_tenant_dead_letter_integration.py tests/unit/runtime/auto_wiring/test_omn17862_quarantine_publish_confirmed.py -q --no-cov --tb=line
         cwd: .
   - id: dod-omn23024-ac2-alarm-binds-runtime-groups
     description: At the merge base the alarm config declares the standalone delegation-writer group and the binding tests fail; with the change the eight runtime groups are declared and a planted growth on delegate-skill-completed alarms.
@@ -43,7 +43,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_lab_alarm_delegation_groups_omn23024.py tests/ci/test_lab_alarm_omn18867.py -q --no-cov --tb=line
         cwd: .
-  - id: dod-deploy-omn23024-runtime-classifies-unknown-tenant
+  - id: dod-deploy-omn23024-classifies-unknown-tenant
     description: The deployed runtime classifies the unknown-tenant refusal as the event's defect, a probe against the live container that fails before this change deploys; without the container it reads the source.
     source: manual
     binds_ac:
