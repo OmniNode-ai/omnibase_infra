@@ -63,11 +63,6 @@ LANE_STACKS: dict[str, tuple[str, ...]] = {
         "docker-compose.dev-lane.yml",
         "docker-compose.dev-105.yml",
     ),
-    "dev-200": (
-        BASE_COMPOSE,
-        "docker-compose.dev-lane.yml",
-        "docker-compose.dev-200.yml",
-    ),
     "prepr": (
         BASE_COMPOSE,
         "docker-compose.dev-lane.yml",
