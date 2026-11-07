@@ -1,0 +1,40 @@
+schema_version: '1.0.0'
+ticket_id: OMN-22815
+title: 'The dev runtime provisions only the topics its deployed nodes declare, not the whole topic universe on every boot'
+summary: 'The dev compose runtime-env anchor sets ONEX_BOOT_UNIVERSE_PROVISION to 0 by default, so a boot creates the topics of the contracts it wires instead of every topic any installed contract or skill manifest declares; a host can set it to 1 to bring the full warm back.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22815-dev-boot-provisions-wired-topics-only
+    statement: The dev compose anchor turns the universe warm off, and a runtime booted with it still has every topic its wired nodes subscribe to or publish; the lab read from the branch is in the pull request body.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev compose sets universe provisioning off and a test fails with dev''s compose -- falsifier: uv run --frozen pytest tests/ci/test_boot_universe_provision_omn22815.py -q --no-cov, with docker/docker-compose.infra.yml taken from origin/dev it shows 4 failed'
+      - id: AC2
+        statement: 'AC2: a dev-like runtime booted with the change still has every topic its deployed nodes subscribe to or publish -- falsifier: the declared subscribe and publish topics of the wired nodes compared with the topics on a booted runtime broker on a lab host, none missing'
+evidence_requirements:
+  - kind: tests
+    description: The compose provisioning tests pass at the head, and four of them fail on the origin/dev compose file.
+    command: uv run --frozen pytest tests/ci/test_boot_universe_provision_omn22815.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22815-compose-provisioning-test
+    description: The compose provisioning tests pass at the head.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_boot_universe_provision_omn22815.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22815-anchor-sets-switch
+    description: The dev compose anchor carries the switch with a default of 0.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: grep -c 'ONEX_BOOT_UNIVERSE_PROVISION' docker/docker-compose.infra.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
