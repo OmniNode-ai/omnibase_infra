@@ -268,6 +268,8 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
     assert process.foldable_services == {
         "tenant-projection": SERVICE,
         **RUNTIME_WRITERS,
+        # OMN-22930: the effects role folds the same way, by the same mapping.
+        "effects": "runtime-effects",
     }
     # The hook-events writer has no runtime profile: the policy retires it by name.
     assert process.retired_services == ("projection-claude-hook-events-writer",)

@@ -1,0 +1,65 @@
+schema_version: 1.0.0
+ticket_id: OMN-22930
+title: The dev effects fold moves the secret resolver, the health target and the overlay into the one runtime and removes the separate effects service
+summary: Primary dev's effects role runs as nodes inside the main runtime. The runtime policy contract folds effects into dev main with a fold-wide last_ran consumer-group handover from the retired runtime-effects instance, main takes the store-backed secret resolver config and the read-only Infisical identity the retired service used, the effects health port is published by main and the deploy agent and dev refresh gate read main for it, and the runtime-effects service is gated off every primary-dev bring-up by the rendered policy (the shared dev overlay still defines it for the other dev instances, and the pre-fold revision restores it). Dev and the stability lane only; the stability lane's own fold and prod are untouched. Live delivery through the deploy agent and the consumer group lag read before and after are pending the merge.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22930-effects-role-folded-into-dev-main
+    statement: Primary dev's main runtime carries the effects role, with its secrets, health port and consumer groups, and the separate runtime-effects service is absent from the dev compose.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the runtime resolves every secret name the retired effects service resolved, through the declared secret resolver and from the same sources, with no value in a log -- falsifier: uv run pytest of a resolver test that compares the runtime resolved names with the retired service declared names and fails on a missing one'
+      - id: AC2
+        statement: 'AC2: the dev health target reads the runtime with the effects role registered, and reports unhealthy when an effects handler is missing -- falsifier: uv run pytest of the health target test with one handler removed, plus a curl of the health target on the dev host'
+      - id: AC3
+        statement: 'AC3: the effects overlay is retired and nothing in the dev stack, installers or deploy agent refers to it -- falsifier: the dev-stack check pytest over the real dev compose and installers, which refuses a reference to the retired overlay'
+      - id: AC4
+        statement: 'AC4: the separate effects service is absent from the dev compose, the consumer groups resume from its commits with no reset, and a rollback to the pre-fold revision restores it -- falsifier: the dev-stack check pytest over the real dev compose file, plus the consumer group lag read on dev before and after the removal'
+evidence_requirements:
+  - kind: tests
+    description: The resolver name comparison with its dropped-name control and the log check, the policy fold and handover, the dev stack check over the real compose files with the gate removed as its control, the health monitor with one effects handler missing and the unfolded control, the deploy agent health target with its unfolded control, the refresh gate with the folded core services, and the real docker compose render of primary dev folded and pre-fold.
+    command: uv run pytest tests/unit/docker/test_dev_effects_fold_omn22930.py tests/unit/services/test_runtime_health_monitor_folded_effects_omn22930.py scripts/runtime_build/tests/test_dev_folded_effects_gate_omn22930.py tests/integration/infra/test_dev_runtime_compose_render.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22930-runtime-resolves-retired-names
+    description: Every logical name and namespace rule the retired effects service declared resolves in the folded main's rendered config from the same source; the comparison names a dropped name; resolving the declared names logs no value.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_effects_fold_omn22930.py -q --no-cov --tb=line -k "retired_service_declared or comparison_names or store_backed or logs_no_value"
+        cwd: .
+  - id: dod-omn22930-health-reads-folded-role
+    description: With effects folded, the monitor behind the runtime health reports unhealthy when one effects handler is missing, and reports healthy when the role is not folded (control); the deploy agent reads the effects port from main's container and the refresh gate drops only the retired container and still fails when the effects port does not answer.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/services/test_runtime_health_monitor_folded_effects_omn22930.py scripts/runtime_build/tests/test_dev_folded_effects_gate_omn22930.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn22930-effects-overlay-retired
+    description: Over the real dev compose files the effects service is in no primary-dev bring-up, and the same check goes red when the policy gate is removed; the dev refresh installer drops the retired container from its core services only when the rendered policy folds the role.
+    source: manual
+    binds_ac:
+      - AC3
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_effects_fold_omn22930.py -q --no-cov --tb=line -k "dev_stack or installers or gated or fold_overlay"
+        cwd: .
+  - id: dod-omn22930-real-compose-render-and-rollback-shape
+    description: A real docker compose render of primary dev has no runtime-effects service and gives main the store-backed resolver config, the effects port mapped to 8085 and the retired service's volumes; the pre-fold profiles render the service again with its own resolver config; the committed policy hands the groups over with last_ran from the retired instance.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py tests/unit/docker/test_dev_effects_fold_omn22930.py -q --no-cov --tb=line -k "effects"
+        cwd: .

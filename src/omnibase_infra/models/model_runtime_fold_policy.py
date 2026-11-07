@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from omnibase_core.constants.constants_runtime_profiles import (
     REGISTERED_RUNTIME_PROFILES,
 )
+from omnibase_infra.models.model_fold_handover import ModelFoldHandover
 
 
 class ModelRuntimeFoldPolicy(BaseModel):
@@ -35,6 +36,21 @@ class ModelRuntimeFoldPolicy(BaseModel):
     # agent and deploy handler retire a container of the previous revision from
     # this one list when main takes over.
     retired_services: tuple[str, ...] = ()
+
+    # OMN-22714: profile -> the retired process whose consumer groups the
+    # runtime's own groups resume (one declaration per folded profile, in place
+    # of one in every contract the profile owns). Rendered as
+    # `{PROFILE}_RUNTIME_{PROCESS}_FOLD_HANDOVERS`; the runtime reads it as
+    # ONEX_RUNTIME_FOLD_HANDOVERS.
+    fold_handovers: dict[str, ModelFoldHandover] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _fold_handovers_name_folded_profiles(self) -> Self:
+        if unfolded := sorted(set(self.fold_handovers) - set(self.folded_profiles)):
+            raise ValueError(
+                f"fold_handovers {unfolded} name profiles this runtime does not fold"
+            )
+        return self
 
     @field_validator("retired_services")
     @classmethod
@@ -93,6 +109,15 @@ class ModelRuntimeFoldPolicy(BaseModel):
         if self.foldable_services:
             env[f"{prefix}_FOLDABLE_SERVICES"] = json.dumps(
                 self.foldable_services, sort_keys=True, separators=(",", ":")
+            )
+        if self.fold_handovers:
+            env[f"{prefix}_FOLD_HANDOVERS"] = json.dumps(
+                {
+                    profile: handover.model_dump(mode="json")
+                    for profile, handover in self.fold_handovers.items()
+                },
+                sort_keys=True,
+                separators=(",", ":"),
             )
         if self.retired_services:
             env[f"{prefix}_RETIRED_SERVICES"] = ",".join(self.retired_services)
