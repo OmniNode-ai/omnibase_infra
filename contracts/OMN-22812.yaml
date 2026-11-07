@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22812
+title: "omnibase_infra tests pass on the Ubuntu 26.04 hosted image: the wedge payload uses shell builtins and the lease test transport uses an exclusive mkdir"
+summary: "The detached-entrypoint wedge payload emits its bytes with shell builtins, the pre-PR lease race transport puts an exclusive mkdir first on PATH, and a probe test names the cause when a host's mkdir admits more than one winner."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22812-tests-pass-on-ubuntu-26-04
+    statement: The wedge and lease race tests pass on an Ubuntu 26.04 image and fail on dev there; a probe test names a non-exclusive mkdir. The container run is in the pull request body.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the wedge and lease race tests pass on an Ubuntu 26.04 image and fail on dev there, shown by a container run -- falsifier: uv run pytest of the two test modules inside an ubuntu:26.04 container on a lab host'
+      - id: AC2
+        statement: 'AC2: a probe test names the cause when a host''s mkdir is not exclusive -- falsifier: uv run pytest of the new probe test with a non-exclusive mkdir shim'
+evidence_requirements:
+  - kind: tests
+    description: The two test modules pass at the head on the 24.04 host and in an ubuntu:26.04 container; the same modules fail on origin/dev in that container.
+    command: uv run --frozen pytest tests/ci/test_gate_runner_detached_entrypoint.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22812-two-modules-pass
+    description: The wedge module and the lease race module pass at the head.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_gate_runner_detached_entrypoint.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22812-probe-names-nonexclusive-mkdir
+    description: The probe test passes on an exclusive mkdir and fails with the cause when mkdir is a non-exclusive shim.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q --no-cov -k test_the_hosts_mkdir_admits_one_winner_under_a_race
+        cwd: ${OMNI_HOME}/omnibase_infra
