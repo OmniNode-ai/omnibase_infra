@@ -51,3 +51,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_media_capabilities_omn22478.py -q -n 0 --no-cov -k shape_check_break
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22756-deploy-scope-probe
+    description: Deploy-scope probe the hosted runner can run, a read of the changed overlay model at the pushed branch. The overlay model exposes resolve_media_capability, so a node asks a lane overlay for a capability and reads the URL from the binding it gets back.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: grep -c 'def resolve_media_capability' src/omnibase_infra/runtime/models/model_bifrost_lane_overlay.py && gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/models/model_bifrost_lane_overlay.py?ref=omn-22756-lane-overlay-media-capabilities --jq '.content' | base64 -d | grep -c 'def resolve_media_capability'
