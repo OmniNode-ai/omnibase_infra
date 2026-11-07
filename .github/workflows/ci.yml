@@ -2580,13 +2580,15 @@ jobs:
     # `unvalidated_push` selection even when the docs-only tier skipped the
     # lint-class needs.
     if: ((success() && needs.zone-filter.outputs.docs_only != 'true') || (!cancelled() && !failure() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.full_suite_reason == 'unvalidated_push')) && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest; public forks default to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-24.04 for this job, not ubuntu-latest; public forks default to ubuntu-24.04
+    # OMN-22812: ubuntu-latest became Ubuntu 26.04 on 2026-11-06, which has no PostgreSQL 16 binaries, so the ephemeral-PostgreSQL
+    # tests skip there and Skip Count Ratchet (OMN-18776) reads the new skips as growth. The variables stay unset; only the fallback is pinned.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-24.04"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-24.04"]')
       }}
     # OMN-18542. Raised 15 -> 20 ALONGSIDE the sizing fix above, never instead of
     # it: a budget raised on its own would have let #3652's 25-minute shard keep
