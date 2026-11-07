@@ -106,6 +106,8 @@ requirements:
     statement: The dev effects carrier consumes every declared boot bound and resource limit from the rendered runtime policy.
   - id: req-omn19998-canary-hosted-exception
     statement: The runner routing audit admits exactly one hosted job in a private repository, the outside canary, and refuses every other hosted job there.
+  - id: req-omn19998-dispatch-derived-machine-grants
+    statement: The lab machine profile must derive the serialized lane dispatch node's caller and local runtime topic access from wire bindings, with canonical consumer groups, without granting dispatch to the shared developer profile.
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -1411,3 +1413,17 @@ dod_evidence:
       - AC1
       - AC2
       - AC3
+  - id: dod-omn19998-ac40-dispatch-derived-machine-grants
+    description: AC49 drives HandlerBrokerGrantDerive with the shipped machine bindings, compares its serialized output byte for byte, resolves the issuer's real trusted overlay selection for machine and developer principals, and checks group names with RuntimeLocal's derivation. It exercises issuance, apply and audit with the focused module's fake broker and makes no live ACL or credential change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn19998-ac40-dispatch-grants-deploy-probe
+    description: Hosted-runner artifact probe loads the shipped grant policy and derived machine JSON through the actual issuer, exercises apply-grants and audit-grants against a fake broker, and requires exact node output and denial for an ordinary developer row. This checks the deployable grant documents without asserting live broker convergence.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 --no-cov
+        cwd: .
