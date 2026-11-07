@@ -46,3 +46,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn15330_contract_dlq_topics_provisioned.py tests/unit/runtime/auto_wiring/test_omn15832_projection_topics_provisioned.py tests/unit/runtime/test_topic_provisioner_integration.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22815-dev-runtime-switch-off
+    description: After the deploy agent installs this change, the dev runtime container carries ONEX_BOOT_UNIVERSE_PROVISION at 0. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" docker exec omninode-runtime printenv ONEX_BOOT_UNIVERSE_PROVISION | grep -qx 0
+        cwd: ${OMNI_HOME}/omnibase_infra
