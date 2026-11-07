@@ -155,7 +155,7 @@ def check_one_serving_backend_per_capability(
 
 
 def resolve_media_capability[B: ProtocolMediaCapabilityBackend](
-    lane: str, backends: Sequence[B], capability: EnumBifrostLaneMediaCapability | str
+    lane: str, backends: Sequence[B], capability: str
 ) -> B:
     """Return the one serving backend that declares ``capability``.
 

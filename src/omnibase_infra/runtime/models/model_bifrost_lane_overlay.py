@@ -89,7 +89,7 @@ class ModelBifrostLaneOverlay(BaseModel):
         return self
 
     def resolve_media_capability(
-        self, capability: EnumBifrostLaneMediaCapability | str
+        self, capability: str
     ) -> ModelBifrostLaneBackendBinding:
         """Return the serving binding for a media capability (OMN-22756)."""
         return resolve_media_capability(self.lane, self.backends, capability)
