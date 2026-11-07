@@ -64,6 +64,20 @@ rule there so the runtime continues where the container would have.
 
 It is declared beside the other keys, as ``handover_rule: last_ran``.
 
+``from_instance_id`` (OMN-22714, T8 part 2) names a retired process that ran
+this same contract, by its ``KAFKA_INSTANCE_ID``::
+
+    consumer_group_handover:
+      from_instance_id: runtime-effects
+      from_auto_offset_reset: latest
+      handover_rule: last_ran
+
+The retired group is this contract's own group id carrying that instance
+discriminator and the per-topic scope, derived per topic by the bus
+(``resolve_retired_group``), so it stands alone and is exclusive with the other
+two forms. A lane's runtime policy contract declares it once per folded profile
+(``fold_handovers``) in place of once in every contract the profile owns.
+
 Under either rule the handover first fences the retired group: it proceeds only
 when that group has no members, waiting up to ``fence.wait_seconds``
 (``ModelConsumerGroupFence``), so no fold takes over a position its old
@@ -147,10 +161,35 @@ class ModelConsumerGroupHandover(BaseModel):
         ),
     )
 
+    from_instance_id: str | None = Field(
+        default=None,
+        min_length=1,
+        strict=True,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        description=(
+            "The retired process's KAFKA_INSTANCE_ID (OMN-22714, T8 part 2): the "
+            "retired group is this contract's own group id carrying that "
+            "instance discriminator and the per-topic scope, derived per topic "
+            "by the bus. Stands alone, for a retired container that ran this "
+            "same contract (the effects container), so one declaration serves "
+            "a contract the static forms cannot name for every topic."
+        ),
+    )
+
     @model_validator(mode="after")
     def _segments_complete_or_group_id(self) -> Self:
         """Service, node and version are all declared, or ``from_group_id`` is."""
         segments = (self.from_service, self.from_node, self.from_version)
+        if self.from_instance_id is not None:
+            if self.from_group_id is not None or any(
+                segment is not None for segment in segments
+            ):
+                raise ValueError(
+                    "from_instance_id stands alone: it is exclusive with "
+                    "from_group_id and with from_service, from_node and "
+                    "from_version"
+                )
+            return self
         if any(segment is None for segment in segments) and (
             self.from_group_id is None
             or any(segment is not None for segment in segments)
@@ -167,6 +206,11 @@ class ModelConsumerGroupHandover(BaseModel):
         ``from_group_id`` verbatim when declared, otherwise the group derived
         from the service, node and version segments.
         """
+        if self.from_instance_id is not None:
+            raise ValueError(
+                "a handover declared by from_instance_id has a retired group "
+                "per topic; resolve it through the bus with resolve_retired_group"
+            )
         if self.from_group_id is not None:
             return self.from_group_id
         if (

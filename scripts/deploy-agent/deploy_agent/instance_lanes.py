@@ -198,6 +198,7 @@ LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
             "ONEX_RUNTIME_LANE_CLASS_CONTRACTS",
             "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY",
             "COST_ESTIMATOR_WEB_SOURCE_URL",
+            "ESTIMATOR_GATE_OPEN_SOURCES",
         }
     ),
 }
@@ -274,8 +275,7 @@ def parse_lane_env_fragment(text: str, *, lane_id: str, source: str) -> dict[str
         )
     if fragment.lane_id != lane_id:
         raise LaneEnvFragmentError(
-            f"{source}: lane_id {fragment.lane_id!r} is not the lane it is read "
-            f"for, {lane_id!r}"
+            f"{source}: lane_id {fragment.lane_id!r} is not the lane it is read for, {lane_id!r}"
         )
     refused = sorted(set(fragment.env) - allowed)
     if refused:

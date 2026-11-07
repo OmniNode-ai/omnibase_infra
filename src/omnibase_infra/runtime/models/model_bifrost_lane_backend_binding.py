@@ -33,10 +33,15 @@ the target backend's tier from the base contract.
 from __future__ import annotations
 
 from typing import Self
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.enums.enum_bifrost_lane_media_capability import (
+    EnumBifrostLaneMediaCapability,
+)
+from omnibase_infra.models.delegation.model_bifrost_lane_media_capability_resolver import (
+    validate_binding_endpoint,
+)
 from omnibase_infra.runtime.models.enum_bifrost_lane_credential_kind import (
     EnumBifrostLaneCredentialKind,
 )
@@ -46,16 +51,6 @@ from omnibase_infra.runtime.models.model_bifrost_lane_backend_credential import 
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_placement import (
     ModelBifrostLaneBackendPlacement,
 )
-
-_CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
-#: OMN-17099: the embedding backend's real endpoint is OpenAI-embeddings-shaped,
-#: not chat-completions-shaped (live probe 2026-09-27: .201:8002/v1/chat/completions
-#: 404s; .201:8002/v1/embeddings returns real vectors). These are the only two
-#: complete endpoint shapes Bifrost backends are known to serve; a binding's path
-#: must be exactly one of them.
-_EMBEDDINGS_PATH = "/v1/embeddings"
-_COMPLETE_ENDPOINT_PATHS = frozenset({_CHAT_COMPLETIONS_PATH, _EMBEDDINGS_PATH})
-_ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 #: The fields an ADDED backend declares and a base-declared backend inherits
 #: from the base contract. All-or-none on one binding.
@@ -101,6 +96,11 @@ class ModelBifrostLaneBackendBinding(BaseModel):
     #: OMN-19215. Where an ADDED backend sits in the routing tier ladder; passed
     #: through to the rendered contract. None keeps it reachable by pin only.
     placement: ModelBifrostLaneBackendPlacement | None = None
+    #: OMN-22756. The one typed media capability this backend serves; a node asks
+    #: the overlay for a capability and gets this binding's URL, never a host or
+    #: port. The endpoint path must be the capability's. Declarative: the
+    #: renderer does not write it into the rendered contract.
+    media_capability: EnumBifrostLaneMediaCapability | None = None
 
     @property
     def declares_new_backend(self) -> bool:
@@ -149,32 +149,13 @@ class ModelBifrostLaneBackendBinding(BaseModel):
                     "(OMN-19215)"
                 )
 
-        parsed = urlsplit(self.endpoint_url)
-        try:
-            parsed.port  # noqa: B018 - raises ValueError on a malformed port
-        except ValueError as exc:
-            raise ValueError(
-                f"endpoint_url for {self.backend_key!r} has an invalid port"
-            ) from exc
-        if (
-            parsed.scheme not in _ALLOWED_SCHEMES
-            or not parsed.hostname
-            or parsed.path not in _COMPLETE_ENDPOINT_PATHS
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError(
-                f"endpoint_url for {self.backend_key!r} must be a complete "
-                f"http(s) endpoint ending in one of {sorted(_COMPLETE_ENDPOINT_PATHS)} "
-                "with a host; userinfo, query, and fragment are forbidden, got "
-                f"{self.endpoint_url!r}"
-            )
+        scheme = validate_binding_endpoint(
+            self.backend_key, self.endpoint_url, self.media_capability
+        )
         if (
             self.credential is not None
             and self.credential.kind is EnumBifrostLaneCredentialKind.SECRET_REF
-            and parsed.scheme != "https"
+            and scheme != "https"
         ):
             raise ValueError(
                 f"endpoint_url for {self.backend_key!r} authenticates with "
