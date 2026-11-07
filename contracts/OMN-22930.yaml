@@ -54,7 +54,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/docker/test_dev_effects_fold_omn22930.py -q --no-cov --tb=line -k "dev_stack or installers or gated or fold_overlay"
         cwd: .
-  - id: dod-omn22930-real-compose-render-and-rollback-shape
+  - id: dod-omn22930-compose-render-rollback-shape
     description: A real docker compose render of primary dev has no runtime-effects service and gives main the store-backed resolver config, the effects port mapped to 8085 and the retired service's volumes; the pre-fold profiles render the service again with its own resolver config; the committed policy hands the groups over with last_ran from the retired instance.
     source: manual
     binds_ac:
