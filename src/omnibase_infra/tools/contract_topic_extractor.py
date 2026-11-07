@@ -707,9 +707,10 @@ def read_projection_api_topics(contract_path: Path) -> tuple[str, ...]:
     mapping, or has no served exposures — mirrors the degrade-not-abort
     contract of ``_read_dlq_topics``.
     """
+    from omnibase_infra.contracts.contract_yaml import read_contract_yaml
+
     try:
-        with contract_path.open(encoding="utf-8") as fh:
-            raw_yaml = yaml.safe_load(fh)
+        raw_yaml = read_contract_yaml(contract_path)
     except Exception:  # noqa: BLE001 — boundary: degrade to no topics, never raise
         return ()
 

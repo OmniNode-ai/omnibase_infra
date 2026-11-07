@@ -16,19 +16,19 @@ from omnibase_core.models.event_bus.model_bus_binding import ModelBusBinding
 from omnibase_core.models.event_bus.model_bus_group_describe import (
     ModelBusGroupDescribe,
 )
-from omnibase_infra.handlers.handler_broker_grant_derive import (
+from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
     HandlerBrokerGrantDerive,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant import (
+from omnibase_infra.models.security.model_broker_grant import (
     ModelBrokerGrant,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+from omnibase_infra.models.security.model_broker_grant_bindings import (
     ModelBrokerGrantBindings,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_derivation import (
+from omnibase_infra.models.security.model_broker_grant_derivation import (
     ModelBrokerGrantDerivation,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_group_prefix import (
+from omnibase_infra.models.security.model_broker_group_prefix import (
     ModelBrokerGroupPrefix,
 )
 from omnibase_infra.runtime.gateway_forwarder import (
@@ -680,9 +680,9 @@ def test_committed_derived_grants_are_the_nodes_output() -> None:
     derivation = HandlerBrokerGrantDerive().handle(shipped_bindings())
     assert DERIVED.read_text() == derivation.model_dump_json(indent=2) + "\n", (
         "developer-principal-derived-grants.json is not the node's output; regenerate: "
-        'uv run python -c "import yaml; from omnibase_infra.handlers.handler_broker_grant_derive '
-        "import HandlerBrokerGrantDerive as H; from omnibase_infra.nodes."
-        "node_broker_grant_derive_compute.models.model_broker_grant_bindings import "
+        'uv run python -c "import yaml; from omnibase_infra.handlers.handler_broker_grant_derive.handler '
+        "import HandlerBrokerGrantDerive as H; from omnibase_infra.models.security."
+        "model_broker_grant_bindings import "
         "ModelBrokerGrantBindings as B; print(H().handle(B.model_validate(yaml.safe_load("
         "open('deploy/lab/developer-principal-bindings.yaml')))).model_dump_json(indent=2))\" "
         "> deploy/lab/developer-principal-derived-grants.json"

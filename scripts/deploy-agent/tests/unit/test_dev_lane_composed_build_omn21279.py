@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 import subprocess
 from collections.abc import Mapping
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -85,6 +86,10 @@ def test_dev_overlay_build_argv_names_every_composed_base_service() -> None:
 
     with (
         patch("deploy_agent.executor._run", side_effect=_fake_run),
+        patch(
+            "deploy_agent.executor._hold_build_context",
+            side_effect=lambda purpose: nullcontext(),
+        ),
         patch.object(DeployExecutor, "_compose_up", return_value=None),
     ):
         executor.rebuild_scope(

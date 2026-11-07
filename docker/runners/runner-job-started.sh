@@ -853,7 +853,7 @@ _C3_DISK_ADMISSION_MIN_FREE_GB="${RUNNER_DISK_ADMISSION_MIN_FREE_GB:-5}"
 # recreate, which is correct: a freshly recreated runner has observed no disk
 # pressure yet.
 _C3_DISK_ADMISSION_BACKOFF_N="${RUNNER_DISK_ADMISSION_BACKOFF_N:-3}"
-_C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME:-/home/runner/actions-runner}/.onex-disk-admission}"
+_C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME:-${HOME:-}/actions-runner}/.onex-disk-admission}"
 # Durable pause-marker directory. Bind-mounted host-side
 # (docker-compose.runners.yml) so a host-side companion
 # (scripts/runner-disk-admission-restore.sh) can see which runners this gate
@@ -861,7 +861,7 @@ _C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME:-
 # skipped, the per-job gate above still blocks each individual job) when the
 # mount is absent -- e.g. before the fleet is recreated to pick up the new
 # compose volume; see the rollout note in knowledge-base:runbooks/runner-disk-admission-gate.md.
-_C3_DISK_ADMISSION_PAUSE_DIR="${RUNNER_DISK_ADMISSION_PAUSE_DIR:-/home/runner/.onex-disk-admission-pause}"
+_C3_DISK_ADMISSION_PAUSE_DIR="${RUNNER_DISK_ADMISSION_PAUSE_DIR:-${HOME:-}/.onex-disk-admission-pause}"
 # An explicit mount is an additional write target, never a replacement for
 # runner home and workspace storage (which can be separate bind mounts).
 _C3_DISK_ADMISSION_MOUNT="${RUNNER_DISK_ADMISSION_MOUNT:-}"
@@ -894,7 +894,7 @@ _c3_disk_usage() {
 # never hide a known short filesystem. No workspace/cache writes precede this.
 disk_admission_gate() {
     local avail_kb avail_gb_frac min_free_kb runner="${RUNNER_NAME:-unknown}"
-    local runner_home="${RUNNER_HOME:-/home/runner/actions-runner}"
+    local runner_home="${RUNNER_HOME:-${HOME:-}/actions-runner}"
     local work_root="${runner_home}/_work"
     local mount filesystem usage shortest_mount="" minimum_kb=""
     local -a mounts=("${runner_home}" "${work_root}") unreadable=()
@@ -1275,6 +1275,22 @@ runner_tmp_headroom || true
 # gate is to fail fast, before any write-heavy step, when disk is critically
 # low. See the OMN-16363 comment block above disk_admission_gate() for why this
 # ordering is load-bearing.
+# >>> fork refusal (OMN-19998)
+# A pull request from a fork runs the fork's own workflow file, so nothing in the
+# base repository's routing can keep it off a lab runner: one approval click is
+# enough, and these runners hold the Docker socket and lab credentials. This runs
+# before any job step and reads only the payload the worker writes before this
+# hook, never a value the job sets. A deleted fork has no head repository and is
+# refused. A payload naming no head repository (push, schedule, merge group) passes,
+# and one that cannot be read refuses only on a pull-request ref, so a defect here
+# cannot fail any other job.
+fork_payload="${GITHUB_EVENT_PATH:-${RUNNER_TEMP:-${RUNNER_HOME:-${HOME:-}/actions-runner}/${RUNNER_WORK_DIR:-_work}/_temp}/_github_workflow/event.json}"
+fork_verdict="$(jq -r 'if .pull_request then [.pull_request.head.repo.full_name, .pull_request.base.repo.full_name] elif .workflow_run then [.workflow_run.head_repository.full_name, .repository.full_name] else [0, 0] end | if .[0] == .[1] then empty else "\(.[0] // "a deleted fork")" end' "${fork_payload}" 2>/dev/null)" || fork_verdict="unproven"
+if [[ -n "${fork_verdict}" && ("${fork_verdict}" != "unproven" || "${GITHUB_REF:-}" == refs/pull/*) ]]; then
+    echo "::error::OMN-19998: refused on this runner: the head repository (${fork_verdict}) is not the base repository. A fork's code does not run on a lab runner."
+    exit 1
+fi
+# <<< fork refusal (OMN-19998)
 disk_admission_gate || exit 1
 
 # Deliberately called before the workspace-reset logic below, and guarded with
@@ -1282,14 +1298,11 @@ disk_admission_gate || exit 1
 # can change whether the cache is wired, and a defect here can never fail a job.
 wire_pypi_cache || true
 
-RUNNER_HOME="${RUNNER_HOME:-/home/runner/actions-runner}"
-RUNNER_WORK_DIR="${RUNNER_WORK_DIR:-_work}"
-WORK_ROOT="${RUNNER_HOME}/${RUNNER_WORK_DIR}"
+WORK_ROOT="${RUNNER_HOME:-${HOME:-}/actions-runner}/${RUNNER_WORK_DIR:-_work}"
 
 workspace="${GITHUB_WORKSPACE:-}"
 if [[ -z "${workspace}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
-    repo_name="${GITHUB_REPOSITORY##*/}"
-    workspace="${WORK_ROOT}/${repo_name}/${repo_name}"
+    workspace="${WORK_ROOT}/${GITHUB_REPOSITORY##*/}/${GITHUB_REPOSITORY##*/}"
 fi
 
 if [[ -z "${workspace}" ]]; then
@@ -1318,47 +1331,42 @@ echo "[runner-job-started] Resetting workspace: ${canonical_workspace}"
 err_file="$(mktemp)"
 trap 'rm -f "${err_file}"' EXIT
 
-if rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
-    mkdir -p -- "${canonical_workspace}"
-    seed_workspace_from_mirror "${canonical_workspace}"
-    wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
-    wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
-    wire_git_transfer_stall_bound || true
-    _c2_rewrite_flush || true
-    exit 0
-fi
+if ! rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
 
-# Plain rm -rf failed. Fail loud FIRST: name the offending paths and the
-# owning uid so this is diagnosable from the job log, not just "exit 1".
-echo "[runner-job-started] ERROR: rm -rf failed on ${canonical_workspace}:" >&2
-cat "${err_file}" >&2
-echo "[runner-job-started] Non-runner-owned paths under ${canonical_workspace}:" >&2
-find "${canonical_workspace}" \! -user "$(id -u)" -printf '%u:%g %m %p\n' 2>/dev/null >&2 || true
-
-# Self-heal fallback (OMN-15134): a narrowly scoped NOPASSWD sudo rule
-# (Dockerfile, /etc/sudoers.d/runner-workspace-reset) allows exactly this one
-# rm -rf under this runner's own _work tree as root. Try it; if sudo itself
-# is unavailable or the rule doesn't match (defense in depth -- this must
-# never silently grant a broader escalation), fail the hook loudly rather
-# than let the job proceed against an unreset workspace.
-echo "[runner-job-started] Attempting scoped root cleanup fallback..." >&2
-: >"${err_file}"
-if ! command -v sudo >/dev/null 2>&1; then
-    echo "[runner-job-started] ERROR: sudo is not installed in this image; cannot self-heal." >&2
-elif sudo -n /bin/rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
-    echo "[runner-job-started] Root-owned debris removed via scoped sudo fallback." >&2
-    mkdir -p -- "${canonical_workspace}"
-    seed_workspace_from_mirror "${canonical_workspace}"
-    wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
-    wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
-    wire_git_transfer_stall_bound || true
-    _c2_rewrite_flush || true
-    exit 0
-else
-    echo "[runner-job-started] ERROR: scoped sudo fallback also failed:" >&2
+    # Plain rm -rf failed. Fail loud FIRST: name the offending paths and the
+    # owning uid so this is diagnosable from the job log, not just "exit 1".
+    echo "[runner-job-started] ERROR: rm -rf failed on ${canonical_workspace}:" >&2
     cat "${err_file}" >&2
-fi
+    echo "[runner-job-started] Non-runner-owned paths under ${canonical_workspace}:" >&2
+    find "${canonical_workspace}" \! -user "$(id -u)" -printf '%u:%g %m %p\n' 2>/dev/null >&2 || true
 
-echo "[runner-job-started] Refusing to run the job against an unreset workspace." >&2
-echo "[runner-job-started] Manual remediation: docker exec -u root omninode-deploy-runner rm -rf -- '${canonical_workspace}'" >&2
-exit 1
+    # Self-heal fallback (OMN-15134): a narrowly scoped NOPASSWD sudo rule
+    # (Dockerfile, /etc/sudoers.d/runner-workspace-reset) allows exactly this one
+    # rm -rf under this runner's own _work tree as root. Try it; if sudo itself
+    # is unavailable or the rule doesn't match (defense in depth -- this must
+    # never silently grant a broader escalation), fail the hook loudly rather
+    # than let the job proceed against an unreset workspace.
+    echo "[runner-job-started] Attempting scoped root cleanup fallback..." >&2
+    : >"${err_file}"
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "[runner-job-started] ERROR: sudo is not installed in this image; cannot self-heal." >&2
+    elif sudo -n /bin/rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
+        echo "[runner-job-started] Root-owned debris removed via scoped sudo fallback." >&2
+    else
+        echo "[runner-job-started] ERROR: scoped sudo fallback also failed:" >&2
+        cat "${err_file}" >&2
+    fi
+
+    if [[ -e "${canonical_workspace}" ]]; then
+        echo "[runner-job-started] Refusing to run the job against an unreset workspace." >&2
+        echo "[runner-job-started] Manual remediation: docker exec -u root omninode-deploy-runner rm -rf -- '${canonical_workspace}'" >&2
+        exit 1
+    fi
+fi
+mkdir -p -- "${canonical_workspace}"
+seed_workspace_from_mirror "${canonical_workspace}"
+wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
+wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
+wire_git_transfer_stall_bound || true
+_c2_rewrite_flush || true
+exit 0

@@ -8,9 +8,9 @@ before merging, so no omnimarket tree carries them yet. Until the omnimarket
 writer node does, these files are held here and the digests pin the reviewed
 bytes: any edit to a vendored file fails the pin, and the ledger checksum is
 checked against the file's live hash, not only the constant. These checks also
-cover the ledger's shape, migration classes, the absence of a FORCE fence, and
-the interim grant declaration that the topology derives the omninode_runtime
-grant from.
+cover the ledger's shape, migration classes and the absence of a FORCE fence.
+The interim grant declaration was retired by the pin advance to 3aa4e8b26af6,
+which carries the omnimarket contract the grant now derives from.
 """
 
 import hashlib
@@ -18,10 +18,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
-from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
-)
 
 pytestmark = pytest.mark.unit
 
@@ -107,21 +103,3 @@ def test_neither_receipts_migration_is_fenced() -> None:
     for path, _, _ in _VENDORED:
         node, name = path.split("/")
         assert f"node:{node}:{name}" not in ids
-
-
-def test_the_interim_grant_declaration_names_the_vendored_create() -> None:
-    matches = [
-        declaration
-        for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if declaration.table.name == "compaction_receipts"
-    ]
-    assert len(matches) == 1
-    table = matches[0].table
-    assert table.database_ref == "application"
-    assert table.schema == "omninode_internal"
-    assert table.access == "read_write"
-    assert table.role == "compaction_receipts"
-    assert table.migration == (
-        "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
-        "0000_create_compaction_receipts.sql"
-    )

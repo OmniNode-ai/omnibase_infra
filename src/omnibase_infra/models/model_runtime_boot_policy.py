@@ -21,7 +21,7 @@ class ModelRuntimeBootPolicy(BaseModel):
         max_concurrent_contract_attach: Contract attaches in flight at once
             during the boot interleave.
         priority_contracts: Contract names whose consumers subscribe before any
-            other contract's, in the listed order.
+            other contract's, in the listed order, even on empty topics.
         memory_limit: The container memory limit, a docker size such as ``3072M``.
     """
 

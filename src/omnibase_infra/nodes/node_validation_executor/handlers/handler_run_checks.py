@@ -22,8 +22,9 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.validation import (
     ModelCheckResult,
     ModelValidationChecksCompleted,
-    ModelValidationPlan,
+    ModelValidationExecutionRequested,
 )
+from omnibase_infra.runtime.dispatch_envelope_context import current_dispatch_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,7 @@ class HandlerRunChecks:
 
     async def handle(
         self,
-        plan: ModelValidationPlan,
-        correlation_id: UUID | None = None,
+        request: ModelValidationExecutionRequested,
     ) -> ModelValidationChecksCompleted:
         """Execute all checks in the validation plan.
 
@@ -86,19 +86,20 @@ class HandlerRunChecks:
         Actual subprocess execution (mypy, ruff, pytest) will be wired
         in a follow-up ticket.
 
-        The runtime hands the handler the typed request alone, so
-        ``correlation_id`` is optional; the dispatch envelope's correlation id
-        is carried onto the published event by the runtime applier.
+        The runtime binds the incoming envelope for each dispatch; its
+        correlation ID is used for log tracing. A standalone call with no
+        bound envelope logs no correlation ID.
 
         Args:
-            plan: Validation plan containing the checks to execute.
-            correlation_id: Correlation ID for log tracing, when the caller
-                has one.
+            request: Execution event containing the validation plan fields.
 
         Returns:
             Aggregated executor result with all check outcomes and the plan's
             score threshold, published as ``validation-checks-completed``.
         """
+        plan = request
+        envelope = current_dispatch_envelope()
+        correlation_id = envelope.correlation_id if envelope is not None else None
         logger.info(
             "Executing validation plan %s with %d checks (correlation_id=%s)",
             plan.plan_id,

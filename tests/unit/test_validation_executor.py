@@ -26,7 +26,7 @@ from omnibase_infra.models.validation import (
     ModelCheckResult,
     ModelExecutorResult,
     ModelPlannedCheck,
-    ModelValidationPlan,
+    ModelValidationExecutionRequested,
 )
 from omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks import (
     HandlerRunChecks,
@@ -58,9 +58,9 @@ def _make_planned_check(
 
 def _make_plan(
     checks: tuple[ModelPlannedCheck, ...] = (),
-) -> ModelValidationPlan:
+) -> ModelValidationExecutionRequested:
     """Create a validation plan for testing."""
-    return ModelValidationPlan(
+    return ModelValidationExecutionRequested(
         plan_id=uuid4(),
         candidate_id=uuid4(),
         checks=checks,
@@ -132,7 +132,7 @@ class TestHandlerRunChecksHandle:
         )
         plan = _make_plan(checks=checks)
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert len(result.check_results) == 3
         assert all(r.passed for r in result.check_results)
@@ -149,7 +149,7 @@ class TestHandlerRunChecksHandle:
         )
         plan = _make_plan(checks=checks)
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert len(result.check_results) == 3
         # First check: enabled -> passed
@@ -167,7 +167,7 @@ class TestHandlerRunChecksHandle:
         handler = HandlerRunChecks()
         plan = _make_plan(checks=())
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert len(result.check_results) == 0
         assert result.pass_count == 0
@@ -179,7 +179,7 @@ class TestHandlerRunChecksHandle:
         handler = HandlerRunChecks()
         plan = _make_plan(checks=())
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert result.plan_id == plan.plan_id
         assert result.candidate_id == plan.candidate_id
@@ -192,7 +192,7 @@ class TestHandlerRunChecksHandle:
             checks=(_make_planned_check(),),
         )
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert result.total_duration_ms >= 0.0
 

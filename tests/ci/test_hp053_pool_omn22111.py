@@ -27,7 +27,7 @@ POOLS = DOCKER / "runners" / "systemd" / "pools"
 FLEET = REPO_ROOT / "config" / "runner_fleet.yaml"
 H053 = "hp053-ci-runner"
 H051 = "hp051-ci-runner"
-COUNT = 8
+COUNT = 5
 # Hosts whose CPU lacks AVX2, read from /proc/cpuinfo (OMN-17232, 2026-11-02).
 NO_AVX2_PREFIXES = (H051,)
 # The runner image's home. h053 spells it as the primary compose file does, so no machine path is written.
@@ -131,7 +131,9 @@ def test_the_pool_slice_bounds_the_whole_pool() -> None:
     )
     assert limits["CPUWeight"] == "25"
     assert ram <= _bytes(limits["MemoryHigh"]) <= _bytes(limits["MemoryMax"])
-    assert 0 < _bytes(limits["MemorySwapMax"]) <= swap
+    # OMN-19998: the job directories are tmpfs, so nothing in the pool may swap to the rotational root volume.
+    assert swap == 0
+    assert limits["MemorySwapMax"] == "0"
 
 
 @pytest.mark.parametrize(
@@ -164,8 +166,14 @@ def test_the_h053_service_blocks_are_the_h051_blocks_with_the_h053_names() -> No
     """Everything but the label set, the host name, the GID comment and the count is h051's anchor, unchanged."""
     h051 = _compose(H051)["services"][f"{H051}-1"]
     h053 = _compose(H053)["services"][f"{H053}-1"]
-    for key in ("image", "restart", "mem_limit", "memswap_limit", "cpus", "pids_limit"):
+    for key in ("image", "restart", "pids_limit"):
         assert h053[key] == h051[key], key
+    # OMN-19998: the limits are h053's own, from the reads of 2026-11-04 (see the compose header).
+    assert (h053["mem_limit"], h053["memswap_limit"], h053["cpus"]) == (
+        "9g",
+        "9g",
+        "5.0",
+    )
     assert h053["group_add"] == h051["group_add"] == ["988"]
     assert h053["healthcheck"] == h051["healthcheck"]
     assert set(h053["environment"]) == set(h051["environment"])

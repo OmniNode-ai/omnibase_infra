@@ -1,0 +1,75 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22648
+title: omnibase_infra vendors omnimarket node migration 0065, the bounded quality-gate failure list
+summary: Vendors omnimarket node_projection_delegation migration 0065 from omnimarket#5170 head dbf39a1d5129 byte for byte (sha256 24366a4524d8f8d0fe26e246e4860720a21b5695f1a02d80289f183234a2d2ff). It replaces the view projection_delegation_quality_gate so failure_categories lists at most the 50 largest families of 120 characters plus one folded row, and keeps security_invoker. One ledger row (tenant domain) and a forward-only class declaration accompany it, so the next omnibase_infra dev tag and release vendor the file omnimarket#5170 adds.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22648-vendored-0065
+    statement: The bounded quality-gate failure list reaches the delegation projection through a migration this repository vendors byte-identical from omnimarket.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the vendored file's sha256 equals the omnimarket source's, it has exactly one tenant ledger row with that checksum and a forward-only class"
+      - id: AC2
+        statement: "AC2: on an isolated PostgreSQL 16 container the vendored 0065 replaces the view so a tenant with more than 50 distinct details lists at most 51 categories of at most 120 characters whose counts sum to the failed rows"
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0065 matches the omnimarket source's checksum, has its tenant ledger row and forward-only class, bounds the list, keeps invoker rights and rewrites no row.
+    command: uv run --frozen pytest tests/unit/migrations/test_omn22478_quality_gate_bounded_vendored.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22648-vendored-0065-test
+    description: The vendored 0065 matches the omnimarket#5170 source checksum, has its tenant ledger row and forward-only class, bounds the list at 50 families of 120 characters, keeps security_invoker and rewrites no row. At the merge base the file is absent and the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn22478_quality_gate_bounded_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22648-postgres-0065-readback
+    description: On an isolated PostgreSQL 16 container, apply every vendored node_projection_delegation migration before 0065 in the order of their ledger names, as the forward runner does (0031, the fenced tenant_id conversion, excluded as omnimarket's own test does; the roles the grants name and the omninode_internal schema that flat 098 provisions are created first), insert 300 failed rows with distinct details for one tenant, and show the 0045 view lists all 300 categories (the control). Apply the vendored 0065 and assert the list holds 51 entries, none longer than 120 characters, the last one the folded family, counts summing to the 300 failed rows, and the view still security_invoker. Readiness is checked over TCP. No credentials or remote database are used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |
+          bash -eu -o pipefail <<'PROBE'
+          migrations=docker/migrations/forward/nodes/node_projection_delegation
+          name="omn22648-readback-$$"
+          docker run --detach --name "$name" -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16-alpine >/dev/null
+          trap 'docker rm -f "$name" >/dev/null' EXIT
+          ready=0
+          for _ in $(seq 1 60); do
+            if docker exec "$name" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = 1
+          psql() { docker exec "$name" psql -X -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -qAt "$@" </dev/null; }
+          apply() { sed 's/CREATE INDEX CONCURRENTLY/CREATE INDEX/' "$migrations/$1" | docker exec -i "$name" psql -X -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -q >/dev/null; }
+          psql -c "CREATE ROLE app_dashboard" -c "CREATE ROLE tenant_projection_writer NOLOGIN" -c "CREATE ROLE omninode_runtime NOLOGIN" -c "CREATE SCHEMA omninode_internal"
+          for file in $(awk -F '\t' '$1 ~ /^nodes\/node_projection_delegation\// {sub(/.*\//, "", $1); print $1}' docker/migrations/forward/_ledger/application-migrations.tsv | sort); do
+            case "$file" in
+              0031_delegation_events_tenant_id_to_uuid.sql) continue ;;
+              0065_*) break ;;
+            esac
+            apply "$file"
+          done
+          tenant=11111111-1111-4111-8111-111111111111
+          psql -c "INSERT INTO delegation_events (correlation_id, tenant_id, task_type, delegated_to, model_name, quality_gate_passed, quality_gate_detail, timestamp, created_at) SELECT 'omn22648-' || g, '$tenant', 'code_review', 'local', 'qwen', false, 'family ' || lpad(g::text, 4, '0') || ' ' || repeat('x', 130) || ' run ' || g, NOW(), NOW() FROM generate_series(1, 300) AS g"
+          before=$(psql -c "SELECT jsonb_array_length(failure_categories) FROM projection_delegation_quality_gate WHERE tenant_id = '$tenant'")
+          echo "0045 view: $before categories"
+          test "$before" = 300
+          apply 0065_quality_gate_failure_categories_bounded.sql
+          read_back=$(psql -F ' ' -c "SELECT jsonb_array_length(failure_categories), (SELECT max(length(e->>'category')) FROM jsonb_array_elements(failure_categories) e), failure_categories->50->>'category', (SELECT sum((e->>'count')::int) FROM jsonb_array_elements(failure_categories) e), total_failed FROM projection_delegation_quality_gate WHERE tenant_id = '$tenant'")
+          echo "0065 view: $read_back"
+          test "$read_back" = "51 120 other failure categories 300 300"
+          test "$(psql -c "SELECT reloptions::text FROM pg_class WHERE relname = 'projection_delegation_quality_gate'")" = "{security_invoker=true}"
+          echo "READBACK PASS"
+          PROBE
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

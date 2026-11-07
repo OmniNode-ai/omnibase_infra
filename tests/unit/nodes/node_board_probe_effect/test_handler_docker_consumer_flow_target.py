@@ -20,12 +20,16 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_consumer_flow
 from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_docker_consumer_flow_target import (
     HandlerDockerConsumerFlowTarget,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_request import (
     ModelConsumerFlowRequest,
 )
 from scripts.ci import c28_consumer_flow_probe as script
 
 pytestmark = pytest.mark.unit
+RECORDED_LANE = ModelConsumerFlowLane.from_compose_project("omnibase-infra")
 
 
 class FakeIO:
@@ -140,14 +144,44 @@ def test_marker_count_uses_seam_dlq_when_generic_dlq_also_advances(
         return proc
 
     lane = ConsumerFlowLane(
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
         docker="fake-docker",
         base_url="http://projection.test",
         runner=run,
         urlopen=fake.http,
         sleep=lambda _: None,
     )
-    collect = observe_lane if collector == "node" else script.observe_lane
-    observed = collect(lane, samples=2, interval=0, settle_seconds=0, injection_wait=0)
+    if collector == "node":
+        observed = observe_lane(
+            lane, samples=2, interval=0, settle_seconds=0, injection_wait=0
+        )
+    else:
+
+        def node_runner(
+            argv: list[str], **kwargs: Any
+        ) -> subprocess.CompletedProcess[str]:
+            request = json.loads(Path(argv[argv.index("--input") + 1]).read_text())
+            observed = observe_lane(
+                lane,
+                samples=request["samples"],
+                interval=request["sample_interval"],
+                settle_seconds=request["settle_seconds"],
+                injection_wait=request["injection_wait"],
+            )
+            Path(request["record"]).write_text(
+                json.dumps({"observation": {"read_ok": True, **observed}})
+            )
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        observed = script._observe_node(
+            {
+                "samples": 2,
+                "sample_interval": 0,
+                "settle_seconds": 0,
+                "injection_wait": 0,
+            },
+            runner=node_runner,
+        )
 
     injection = observed["boot"]["injection"]
     assert watermarks[generic_dlq] == 102
@@ -183,6 +217,7 @@ def test_full_collection_uses_bounded_io_and_restores_mutations(tmp_path: Path) 
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         base_url="http://projection.test",
         samples=2,
@@ -225,7 +260,11 @@ def test_unreadable_io_never_raises(failure: str) -> None:
     )
     observation = asyncio.run(
         adapter.observe(
-            ModelConsumerFlowRequest(subject_lane="dev", docker_bin="fake-docker")
+            ModelConsumerFlowRequest(
+                subject_lane="dev",
+                compose_project="omnibase-infra",
+                docker_bin="fake-docker",
+            )
         )
     )
     assert not observation.read_ok
@@ -256,7 +295,10 @@ def test_cursor_walk_uses_since_and_stops_on_repeated_cursor() -> None:
         )
 
     lane = ConsumerFlowLane(
-        docker="unused", base_url="http://projection.test", urlopen=http
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        docker="unused",
+        base_url="http://projection.test",
+        urlopen=http,
     )
     observed = walk(lane)
     assert not observed["terminated"]
@@ -311,7 +353,10 @@ def test_cursor_walk_measures_the_full_final_page_end(
 
     observed = walk(
         ConsumerFlowLane(
-            docker="unused", base_url="http://projection.test", urlopen=http
+            containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+            docker="unused",
+            base_url="http://projection.test",
+            urlopen=http,
         )
     )
     assert observed["terminated"]
@@ -367,6 +412,7 @@ def test_boot_change_retries_the_whole_observation(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         samples=2,
         sample_interval=0,
@@ -433,6 +479,7 @@ def test_mid_run_redeploy_retries_after_connection_refused(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         samples=2,
         sample_interval=0,
@@ -448,7 +495,7 @@ def test_mid_run_redeploy_retries_after_connection_refused(
     assert grade_consumer_flow(request, observed).outcome == "PASS"
     assert sum(
         argv[1] == "logs" and "--since" not in argv for argv, _ in fake.calls
-    ) == (refused_gets + 1) * len(script.RUNTIME_CONTAINERS)
+    ) == (refused_gets + 1) * len(RECORDED_LANE.runtime_containers)
     assert any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
 
 
@@ -468,6 +515,7 @@ def test_connection_refused_with_unchanged_running_identity_stays_unreadable(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         settle_seconds=0,
         pytest_cmd="fake-pytest",
@@ -502,7 +550,7 @@ def test_repeated_mid_run_redeploy_exhausts_attempts(
         if argv[1] == "inspect":
             inspections += 1
             body = json.loads(proc.stdout)
-            revision = (inspections - 1) // len(script.BOOT_CONTAINERS)
+            revision = (inspections - 1) // len(RECORDED_LANE.boot_containers)
             body[0]["Id"] = str(revision)
             body[0]["State"]["StartedAt"] = f"2026-10-08T00:59:{revision:02d}Z"
             proc.stdout = json.dumps(body)
@@ -513,6 +561,7 @@ def test_repeated_mid_run_redeploy_exhausts_attempts(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         settle_seconds=0,
         attempts=attempts,
@@ -526,7 +575,7 @@ def test_repeated_mid_run_redeploy_exhausts_attempts(
     assert "Connection refused" in observed.read_error
     assert grade_consumer_flow(request, observed).outcome == "INDETERMINATE"
     assert gets == request.attempts
-    assert inspections == 2 * request.attempts * len(script.BOOT_CONTAINERS)
+    assert inspections == 2 * request.attempts * len(RECORDED_LANE.boot_containers)
     assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
 
 
@@ -599,6 +648,7 @@ def test_unhealthy_lane_waits_for_convergence_and_retries_once(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         samples=2,
         sample_interval=0,
@@ -665,6 +715,7 @@ def test_booting_lane_gets_a_bounded_boot_grace(
     )
     request = ModelConsumerFlowRequest(
         subject_lane="dev",
+        compose_project="omnibase-infra",
         docker_bin="fake-docker",
         samples=2,
         sample_interval=0,

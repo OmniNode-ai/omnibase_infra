@@ -33,7 +33,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.handlers.handler_registration_from_announcement import (
+from omnibase_infra.handlers.handler_registration_from_announcement.handler import (
     HandlerRegistrationFromAnnouncement,
 )
 from omnibase_infra.handlers.handler_runtime_introspection_startup import (

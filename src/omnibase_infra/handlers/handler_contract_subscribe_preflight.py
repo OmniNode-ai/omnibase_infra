@@ -73,11 +73,11 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-import yaml
 from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
 
 from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.kafka_transport import create_offset_consumer
@@ -100,7 +100,7 @@ from omnibase_infra.protocols.protocol_consumer_group_offset_handover import (
     ProtocolConsumerGroupOffsetHandover,
 )
 from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
-    load_consume_concurrency,
+    ModelConsumeConcurrency,
 )
 
 __all__ = [
@@ -132,7 +132,7 @@ def load_consumer_group_handover(
     """
     if not contract_path.exists():
         return None
-    raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    raw = read_contract_yaml(contract_path)
     if not isinstance(raw, dict):
         raise ValueError(f"{contract_path} must contain a mapping")
     if CONSUMER_GROUP_HANDOVER_KEY not in raw:
@@ -304,16 +304,18 @@ class HandlerContractSubscribePreflight:
         self,
         *,
         contract_name: str,
-        contract_path: Path,
+        concurrency: ModelConsumeConcurrency,
+        handover: ModelConsumerGroupHandover | None,
         event_bus: object,
         environment: str,
         consumer_group: str,
     ) -> None:
-        """Read both declarations and refuse a bus that cannot honour them.
+        """Validate injected declarations and refuse a bus that cannot honour them.
 
         Args:
             contract_name: The contract, for messages and logs.
-            contract_path: The contract YAML the declarations are read from.
+            concurrency: The contract's parsed consume-concurrency declaration.
+            handover: The contract's parsed consumer-group handover, if declared.
             event_bus: The bus the contract's topics will be subscribed on.
             environment: The runtime environment; the handover's retired group
                 is derived in it.
@@ -327,7 +329,7 @@ class HandlerContractSubscribePreflight:
         self._contract_name = contract_name
         self._event_bus = event_bus
         self._consumer_group = consumer_group
-        self._concurrency = load_consume_concurrency(contract_path)
+        self._concurrency = concurrency
         if not self._concurrency.is_serial and not isinstance(
             event_bus, ProtocolConsumeConcurrencyDeclarer
         ):
@@ -341,7 +343,7 @@ class HandlerContractSubscribePreflight:
                 "A declared bound that silently does "
                 "nothing is the defect OMN-18852 exists to remove"
             )
-        self._handover = load_consumer_group_handover(contract_path)
+        self._handover = handover
         if self._handover is not None and not supports_offset_handover(event_bus):
             raise TypeError(
                 f"contract '{contract_name}' declares consumer_group_handover, "

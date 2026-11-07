@@ -7,8 +7,8 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 1
-  patch: 1
-node_version: "1.1.1"
+  patch: 2
+node_version: "1.1.2"
 description: >
   EFFECT node that provisions, tears down, and checks status of local Docker Compose services defined in a ModelDeploymentTopology. Runs docker compose up -d (provision, with an optional build first), docker compose down (teardown, optionally with its volumes), and docker compose ps (status), either for the topology's services or for the whole compose project. Deduplicates --profile flags across services sharing the same profile. Async-polls ports at the local_host declared in models/network_binding/network_binding_settings.yaml until healthy or max_wait_seconds is exceeded.
 
@@ -48,6 +48,46 @@ handler_routing:
       handler:
         name: "HandlerLocalStatus"
         module: "omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_status"
+    - operation: "build_estimator"
+      handler:
+        name: "HandlerCostEstimatorBuild"
+        module: "omnibase_infra.handlers.handler_cost_estimator_build"
+      description: "Build the dev estimator image before the deploy agent recreates it (OMN-21487)."
+config:
+  cost_estimator_build:
+    input_model:
+      name: ModelCostEstimatorBuildRequest
+      module: omnibase_infra.models.model_cost_estimator_build_request
+    output_model:
+      name: ModelCostEstimatorBuildResult
+      module: omnibase_infra.models.model_cost_estimator_build_result
+    build:
+      repository_env: COST_ESTIMATOR_WEB_SOURCE_REPOSITORY
+      repository_url_env: COST_ESTIMATOR_WEB_SOURCE_URL
+      branch: dev
+      image: omnibase-infra-cost-estimator-web:dev-lane
+      clone_timeout_seconds: 120
+      read_timeout_seconds: 30
+      build_timeout_seconds: 1800
+    source_configuration:
+      home: deployment-overlay
+      fragment_schema: runtime_lane_env.v1
+      fragment_directory: deploy-overlays/runtime-lane-env/local
+      description: >-
+        The lane fragment owns COST_ESTIMATOR_WEB_SOURCE_REPOSITORY and COST_ESTIMATOR_WEB_SOURCE_URL. Neither is a secret; neither has a code default. The existing compose environment reads the fragment before builds. Missing settings are named before any image build.
+    gate:
+      enabled_env: FEATURE_ESTIMATOR_GATE_ENABLED
+      default_enabled: true
+      password_env: ESTIMATOR_GATE_PASSWORD
+    description: >-
+      Invoked synchronously by the host deploy agent while its lane lock is held, within its existing rebuild command consumer. No second consumer, runtime dependency or prod admission. The web repository owns its merge publisher.
+  overlay_home_lane_env:
+    clone_env: DEPLOY_AGENT_OVERLAY_HOME_CLONE
+    ref: origin/main
+    overlay_path: overlays/runtime_lane_env/overlay.yaml
+    read_timeout_seconds: 30
+    description: >-
+      The overlay home's runtime_lane_env overlay is a second source of the dev lane's compose environment beside the lane fragment (OMN-22634). The unit names the overlay home's clone in the variable above, which has no default; the overlay is read at the ref, never the working tree, through the fragment allowlist, and a key the two sources set differently is refused.
 capabilities:
   - "local_provision.start"
   - "local_provision.stop"

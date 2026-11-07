@@ -73,7 +73,8 @@ def test_audit_kind_passes_on_the_gateway_off_dev_lane() -> None:
 
 def test_audit_kind_is_an_audit_consumer_of_its_declared_topic() -> None:
     _kind, prefix, topic, counter = next(k for k in KINDS if k[0] == AUDIT_KIND)
-    node = prefix.removeprefix("local.omnibase_infra.").removesuffix(".consume.")
+    # The prefix follows the lane environment segment (OMN-21485).
+    node = prefix.removeprefix("omnibase_infra.").removesuffix(".consume.")
     contract = yaml.safe_load((NODES / node / "contract.yaml").read_text())
     event_bus = contract.get("event_bus")
     assert isinstance(event_bus, dict), f"{node} contract declares no event_bus"

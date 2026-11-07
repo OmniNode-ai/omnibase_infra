@@ -112,7 +112,7 @@ evidence_artifacts:
   - id: c28-consumer-flow
     workflow: .github/workflows/chain-canary-c28-consumer-flow.yml
     job: c28-consumer-flow
-    producer_step: "Re-measure C28 on the dev lane and grade it"
+    producer_step: "Re-measure C28 on the stability lane and grade it"
     artifact_name: c28-consumer-flow
     required_paths:
       - c28-consumer-flow.json

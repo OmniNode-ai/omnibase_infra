@@ -756,10 +756,15 @@ services:
   # the same operator-consent row: docker.sock (the VERIFY jobs read container
   # revision labels and health endpoints off the host daemon -- this is a read
   # usage, not a compose-lane mutation path), the host-gateway alias
-  # (LANE_PROBE_HOST=host.docker.internal), and the operator credentials
-  # directory mounted read-only via the identical root-phase copy-in pattern
-  # (none of the five moved jobs consumes it today, but the mount is present
-  # for parity with the deploy runner rather than gated on today's callers).
+  # (LANE_PROBE_HOST=host.docker.internal).
+  #
+  # THE OPERATOR ENV FILE IS NOT MOUNTED (OMN-22478). It was mounted for parity
+  # with the deploy runner while no verify job consumed it. The measured readers
+  # of $OMNIBASE_OPERATOR_ENV_FILE are the deploy handlers (refresh_dev_lane.sh,
+  # refresh_stability_lane.sh, handler_runtime_deploy.sh and the compose render
+  # scripts they call); only release-train-lab.yml, on the deploy runner, calls
+  # them. No workflow whose job runs on this class calls one, so the set of keys
+  # this class needs from that file is empty and the file is not given to it.
   #
   # REGISTRATION reuses the EXISTING `omnibase-deploy` GitHub runner group
   # (visibility already covers omnibase_infra + omnimarket) rather than
@@ -801,8 +806,7 @@ services:
         runner_gid="$$(id -g runner)"
         mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
-          /run/omnibase-operator.env ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
+        rm -f ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       # `host-201` is load-bearing, not decoration: `omnibase-verify` names a
@@ -824,12 +828,10 @@ services:
       # Same reasoning as omninode-deploy-runner: inside this container
       # `localhost` is the container itself, not the lab host.
       LANE_PROBE_HOST: host.docker.internal
-      OMNIBASE_OPERATOR_ENV_FILE: ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above.
-      - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
       - verify-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
@@ -946,8 +948,7 @@ services:
         runner_gid="$$(id -g runner)"
         mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
-          /run/omnibase-operator.env ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
+        rm -f ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
@@ -957,12 +958,10 @@ services:
       RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       LANE_PROBE_HOST: host.docker.internal
-      OMNIBASE_OPERATOR_ENV_FILE: ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above omninode-verify-runner-1.
-      - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
       - verify-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
@@ -998,8 +997,7 @@ services:
         runner_gid="$$(id -g runner)"
         mkdir -p ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
         chown "$${runner_uid}:$${runner_gid}" ${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-        install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
-          /run/omnibase-operator.env ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
+        rm -f ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
         exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
@@ -1009,12 +1007,10 @@ services:
       RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       LANE_PROBE_HOST: host.docker.internal
-      OMNIBASE_OPERATOR_ENV_FILE: ${RUNNER_USER_HOME:-/home/runner}/.runner-creds/operator.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above omninode-verify-runner-1.
-      - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
       - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
       - verify-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds

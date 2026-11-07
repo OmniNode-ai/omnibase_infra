@@ -79,6 +79,7 @@ def test_http_refusal_reaches_indeterminate_record(
             record = tmp_path / "c28-http-error.json"
             request = ModelConsumerFlowRequest(
                 subject_lane="landing-l15988-lab",
+                compose_project="omnibase-infra",
                 base_url=f"http://127.0.0.1:{server.server_port}",
                 settle_seconds=0,
                 scratch=tmp_path,

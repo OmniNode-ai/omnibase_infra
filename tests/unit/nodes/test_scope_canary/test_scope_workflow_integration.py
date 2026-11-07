@@ -17,8 +17,14 @@ from omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extract_
 from omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_file_read import (
     HandlerScopeFileRead,
 )
+from omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_request import (
+    ModelScopeFileReadRequest,
+)
 from omnibase_infra.nodes.node_scope_manifest_write_effect.handlers.handler_scope_manifest_write import (
     HandlerScopeManifestWrite,
+)
+from omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_write_request import (
+    ModelScopeManifestWriteRequest,
 )
 
 
@@ -55,9 +61,11 @@ The hooks system needs updating.
         # Step 1: File read (EFFECT)
         file_reader = HandlerScopeFileRead()
         read_result = await file_reader.handle(
-            file_path=str(plan_file),
-            correlation_id=cid,
-            output_path=str(manifest_path),
+            ModelScopeFileReadRequest(
+                file_path=str(plan_file),
+                correlation_id=cid,
+                output_path=str(manifest_path),
+            )
         )
         assert read_result.success is True
 
@@ -79,14 +87,16 @@ The hooks system needs updating.
         assert extracted.output_path == str(manifest_path)
         writer = HandlerScopeManifestWrite()
         written = await writer.handle(
-            output_path=extracted.output_path,
-            plan_file_path=str(plan_file),
-            files=extracted.files,
-            directories=extracted.directories,
-            repos=extracted.repos,
-            systems=extracted.systems,
-            adjacent_files=extracted.adjacent_files,
-            correlation_id=cid,
+            ModelScopeManifestWriteRequest(
+                output_path=str(manifest_path),
+                plan_file_path=str(plan_file),
+                files=extracted.files,
+                directories=extracted.directories,
+                repos=extracted.repos,
+                systems=extracted.systems,
+                adjacent_files=extracted.adjacent_files,
+                correlation_id=cid,
+            )
         )
         assert written.success is True
         assert manifest_path.exists()

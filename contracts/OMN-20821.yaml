@@ -103,5 +103,5 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: >-
-          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_developer_principal_plan.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerDeveloperPrincipalPlan:" > /dev/null'
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_developer_principal_plan/handler.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerDeveloperPrincipalPlan:" > /dev/null'
         cwd: "${OMNI_HOME}/omnibase_infra"

@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# The shape contracts/OMN-17292.yaml has on dev: the pin criterion AC1 beside the
+# criteria AC2 to AC4 the live ticket also carries, one retirement carrier item, and
+# the pin sha (here all f) named in the title, AC1 and the pin evidence.
+# tests/ci/test_render_bot_refresh_contract.py (OMN-19998) refreshes this file's pin
+# the way the pin-refresh workflow does and requires every other line unchanged.
+schema_version: "1.0.0"
+ticket_id: OMN-17292
+title: "The omnimarket contract pin advances to ffffffffffffffffffffffffffffffffffffffff"
+summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn17292
+    statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry ffffffffffffffffffffffffffffffffffffffff -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - id: req-omn17292-second
+    statement: A second requirement the refresh must leave alone.
+    acceptance:
+      - id: AC2
+        statement: "AC2: a second criterion -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/second_omn17292.py -q"
+      - id: AC3
+        statement: "AC3: a third criterion -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/third_omn17292.py -q"
+  - id: req-omn17292-fourth
+    statement: A fourth requirement the refresh must leave alone.
+    acceptance:
+      - id: AC4
+        statement: "AC4: a fourth criterion -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/fourth_omn17292.py -q"
+evidence_requirements:
+  - kind: tests
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ffffffffffffffffffffffffffffffffffffffff.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - kind: tests
+    description: The second criterion's test passes.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/second_omn17292.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-17292-ac1
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ffffffffffffffffffffffffffffffffffffffff.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn-17292-ac2
+    description: The second criterion's test passes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/second_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2, AC3]
+  - id: dod-omn-17292-ac4
+    description: The fourth criterion's test passes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/fourth_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn-17292-retirement
+    description: A retirement carrier the refresh must leave alone.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/second_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    supersedes_ac_binding:
+      - item: dod-omn-17292-ac5
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: The live ticket never carried AC5.
+        retired_by: fixture
+        retired_at: '2026-11-05T22:17:00Z'

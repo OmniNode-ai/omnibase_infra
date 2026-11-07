@@ -24,6 +24,8 @@ node_version:
   patch: 0
 # Node type
 node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: effect
 # Description
 description: >
   Effect node for running validation checks against a candidate. Receives a ModelValidationPlan and executes each planned check (typecheck, lint, unit tests, integration tests, risk assessment, cost measurement). Each check produces a ModelCheckResult. Results are aggregated into a ModelExecutorResult.
@@ -51,6 +53,7 @@ event_bus:
     - "onex.evt.platform.validation-execution-requested.v1"
   publish_topics:
     - "onex.evt.platform.validation-checks-completed.v1"
+terminal_event: "onex.evt.platform.validation-checks-completed.v1"
 # The key is the returned event class name with its `Model` prefix stripped.
 published_events:
   - topic: "onex.evt.platform.validation-checks-completed.v1"
@@ -73,7 +76,7 @@ handler_routing:
       handler:
         name: "HandlerRunChecks"
         module: "omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks"
-      description: "Execute all checks in a validation plan"
+      description: "Execute the typed validation request, tracing each dispatch with its incoming envelope correlation ID."
       event_model:
         name: "ModelValidationExecutionRequested"
         module: "omnibase_infra.models.validation.model_validation_execution_requested"

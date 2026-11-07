@@ -28,6 +28,7 @@ class EnumPlatformTopic(str, Enum):
     CMD_LEDGER_QUERY_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_QUERY_V1')  # onex.cmd.platform.ledger-query.v1
     CMD_NODE_REGISTRATION_ACKED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'CMD_NODE_REGISTRATION_ACKED_V1')  # onex.cmd.platform.node-registration-acked.v1
     CMD_REQUEST_INTROSPECTION_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'CMD_REQUEST_INTROSPECTION_V1')  # onex.cmd.platform.request-introspection.v1
+    CMD_RUNNER_TMP_PREPARE_V1 = contract_topic_value('nodes/node_deploy_runners/contract.yaml', 'platform', 'CMD_RUNNER_TMP_PREPARE_V1')  # onex.cmd.platform.runner-tmp-prepare.v1
     CMD_TICKET_CONTRACT_COMPOSE_V1 = contract_topic_value('nodes/node_ticket_contract_compose_effect/contract.yaml', 'platform', 'CMD_TICKET_CONTRACT_COMPOSE_V1')  # onex.cmd.platform.ticket-contract-compose.v1
     CMD_TOPIC_CATALOG_QUERY_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'CMD_TOPIC_CATALOG_QUERY_V1')  # onex.cmd.platform.topic-catalog-query.v1
     EVT_API_FIXTURE_RECORDED_V1 = contract_topic_value('nodes/node_api_fixture_record_effect/contract.yaml', 'platform', 'EVT_API_FIXTURE_RECORDED_V1')  # onex.evt.platform.api-fixture-recorded.v1
@@ -56,6 +57,7 @@ class EnumPlatformTopic(str, Enum):
     EVT_REGISTRATION_SNAPSHOTS_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'EVT_REGISTRATION_SNAPSHOTS_V1')  # onex.evt.platform.registration-snapshots.v1
     EVT_REGISTRY_REQUEST_INTROSPECTION_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_REGISTRY_REQUEST_INTROSPECTION_V1')  # onex.evt.platform.registry-request-introspection.v1
     EVT_RESOLUTION_DECIDED_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_RESOLUTION_DECIDED_V1')  # onex.evt.platform.resolution-decided.v1
+    EVT_RUNNER_TMP_PREPARED_V1 = contract_topic_value('nodes/node_deploy_runners/contract.yaml', 'platform', 'EVT_RUNNER_TMP_PREPARED_V1')  # onex.evt.platform.runner-tmp-prepared.v1
     EVT_SERVICE_HEARTBEAT_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_SERVICE_HEARTBEAT_V1')  # onex.evt.platform.service-heartbeat.v1
     EVT_TICKET_CONTRACT_COMPOSED_V1 = contract_topic_value('nodes/node_ticket_contract_compose_effect/contract.yaml', 'platform', 'EVT_TICKET_CONTRACT_COMPOSED_V1')  # onex.evt.platform.ticket-contract-composed.v1
     EVT_TOPIC_CATALOG_CHANGED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_TOPIC_CATALOG_CHANGED_V1')  # onex.evt.platform.topic-catalog-changed.v1
