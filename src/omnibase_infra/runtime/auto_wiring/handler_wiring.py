@@ -7982,7 +7982,9 @@ def _make_event_bus_callback(
                 error=exc,
                 correlation_id=correlation_id,
                 failure_type="handler_exception",
-                consumer_group="auto-wiring",
+                # OMN-22822: the subscription's own group, so a replay of this
+                # record returns to the subscriber that raised.
+                consumer_group=consumer_group or "auto-wiring",
                 dlq_topic=resolved_dlq_topic,
                 **declared_dlq_options,
             )

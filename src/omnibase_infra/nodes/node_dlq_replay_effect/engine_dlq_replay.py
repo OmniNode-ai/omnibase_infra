@@ -36,6 +36,9 @@ from omnibase_infra.errors import DlqTopicFixedPointError
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.mixin_kafka_dlq import DLQ_UNREADABLE_VALUE_MARKER
 from omnibase_infra.event_bus.topic_constants import build_dlq_topic, is_dlq_topic
+from omnibase_infra.models.event_bus.model_dlq_replay_headers import (
+    REPLAY_TARGET_GROUP_HEADER,
+)
 from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_type import (
     EnumDlqReplayFilterType,
 )
@@ -871,6 +874,17 @@ class DLQProducer:
             if message.original_message_id is not None:
                 headers.append(
                     ("message_id", str(message.original_message_id).encode("utf-8"))
+                )
+            # OMN-22822: return the record to the subscriber that failed it,
+            # not to every subscriber of the topic. A dead letter that does
+            # not name a group (written before the publisher recorded it)
+            # carries no target and replays to everyone, as before.
+            if message.consumer_group is not None:
+                headers.append(
+                    (
+                        REPLAY_TARGET_GROUP_HEADER,
+                        message.consumer_group.encode("utf-8"),
+                    )
                 )
 
         # OMN-17896: last-resort refusal. ``should_replay`` already refuses an
