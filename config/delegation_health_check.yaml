@@ -19,6 +19,13 @@
 # walk against the staging plane at dev.api.omninode.ai, is not a source here: a
 # staging outage no runtime PR can repair would otherwise block every runtime PR.
 # It returns to this list with M4.5.
+#
+# `no_verdict_conclusions` (OMN-22821) names the conclusions that carry no
+# verdict. A run that was cancelled or skipped measured nothing, so it is not a
+# red: the newest COMPLETED verdict of the source decides. A run that completed
+# with `failure` (or timed_out, startup_failure ...) still decides and still
+# fails the check, and a source whose every admitted run is cancelled or skipped
+# is refused as an absent measurement, never read as a pass.
 sources:
   - name: delegation-regression-nightly
     repo: OmniNode-ai/omnimarket
@@ -27,9 +34,11 @@ sources:
     max_age_hours: 26
     events: [schedule, workflow_dispatch]
     dispatch_title_contains: "lane=stability-test"
+    no_verdict_conclusions: [cancelled, skipped]
   - name: m4-c17-customer-surface-verdict
     repo: OmniNode-ai/omninode_infra
     workflow: m4-c17-customer-surface-verdict.yml
     branch: dev
     max_age_hours: 8
     events: [schedule]
+    no_verdict_conclusions: [cancelled, skipped]
