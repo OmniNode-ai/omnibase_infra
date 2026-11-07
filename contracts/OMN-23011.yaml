@@ -1,0 +1,57 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23011
+title: The estimator's tailnet gate source reaches the lab container from the dev-lane compose's declared lane variables, and port 3080 binds to the tailnet address only
+summary: The lab page's gate opens, with no password, for a source inside the CIDR blocks the page image reads from ESTIMATOR_GATE_OPEN_SOURCES. This change declares that variable in the dev-lane compose's declared lane variables (the declaration, merged by the service; its value is the lane's own and is not written in this public repository), passes it from the report-host compose too, names it among the lane env fragment keys the deploy agent accepts, and publishes port 3080 on the host's tailnet address (named by the lane variable COST_ESTIMATOR_BIND_ADDR, whose value the host's own env file carries) instead of every interface. The live reads against port 3080 follow the dev-lane follower's rebuild after the merge.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23011-passthrough
+    statement: The dev-lane compose and the report-host compose pass ESTIMATOR_GATE_OPEN_SOURCES to the estimator container, the dev lane from a top-level declaration, and the deploy agent accepts the variable in a lane env fragment.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev-lane compose and the report-host compose pass ESTIMATOR_GATE_OPEN_SOURCES to the estimator container from a declared lane variable, and the deploy agent accepts the variable -- falsifier: uv run pytest tests/unit/docker -q over both compose files and the deploy agent's accepted-variable list, red with the passthrough removed from either file"
+  - id: req-omn23011-binding
+    statement: The dev lane publishes port 3080 on the address the lane variable COST_ESTIMATOR_BIND_ADDR names, loopback when it is unset, never on every interface.
+    acceptance:
+      - id: AC2
+        statement: "AC2: port 3080 is bound to the tailnet address declared for the host and not to all interfaces -- falsifier: uv run pytest tests/unit/docker -q over the rendered compose, red with the binding put back to 0.0.0.0"
+  - id: req-omn23011-live
+    statement: After the deploy agent's follower rebuilds from dev, the lab page opens with no password from a tailnet host and stays gated from a non-tailnet source.
+    acceptance:
+      - id: AC3
+        statement: "AC3: after the deploy agent's follower rebuilds from dev, a read of the lab page from a tailnet host opens with no password and a read from a non-tailnet source stays gated -- falsifier: two live curl reads against port 3080, one from a tailnet host (page body, upload route past the gate) and one from a non-tailnet source (gate page, upload route 401)"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23011-ac1-passthrough
+    description: The page container receives ESTIMATOR_GATE_OPEN_SOURCES in both compose files (the dev lane's from its declaration and the report host's from its env file, each empty when unset and carrying the lane value when set) and the deploy agent's accepted lane env fragment keys name it. With the passthrough removed from either file, or the key from the agent's list, these tests fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_cost_estimator_tailnet_gate_omn23011.py tests/unit/docker/test_cost_estimator_web_report_host_compose.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn23011-ac2-binding
+    description: The rendered dev-lane page service publishes 3080 on the bind-address lane variable's value and on loopback when it is unset; no address is written in the repository. With the mapping put back to every interface these tests fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_cost_estimator_tailnet_gate_omn23011.py tests/unit/docker/test_cost_estimator_dev_lane_omn21481.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn23011-deploy-probe
+    description: Hosted-runner probe reads the dev-lane compose from GitHub at the checked-out commit and requires the gate variable declaration, the page's use of it, and the bind-address port mapping. The live curl reads of AC3 run on the lab after the follower rebuilds from dev and are recorded in the lane's terminal row.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import re, sys, yaml; d = yaml.safe_load(re.sub(r"!(?:override|reset|merge)(?=\s)", "", sys.stdin.read())); assert "ESTIMATOR_GATE_OPEN_SOURCES" in d["x-dev-lane-estimator-gate-env"]; s = d["services"]["cost-estimator-web"]; assert s["ports"] == ["${COST_ESTIMATOR_BIND_ADDR:-127.0.0.1}:3080:3000"]; assert "ESTIMATOR_GATE_OPEN_SOURCES" in s["environment"]'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+      - AC3
