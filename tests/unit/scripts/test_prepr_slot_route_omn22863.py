@@ -389,3 +389,13 @@ def test_a_present_gateway_is_still_offboarded_even_with_an_old_proof(
     assert td.revoke_tenant(staging) is False
     assert any("revoke" in c for c in td.commands), "the live gateway is asked"
     assert td.errors
+
+
+def test_the_reaper_snapshot_carries_the_migrations_its_database_drop_scans(
+    reaper: Any, tmp_path: Path
+) -> None:
+    out = reaper.install_reaper(tmp_path / "prefix", tmp_path / "units", enable=False)
+    release = Path(out["helper"]).parents[2]
+    shipped = {p.name for p in (release / "docker/migrations/forward").glob("*.sql")}
+    tracked = {p.name for p in (ROOT / "docker/migrations/forward").glob("*.sql")}
+    assert shipped and shipped == tracked

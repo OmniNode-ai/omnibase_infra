@@ -674,19 +674,15 @@ def run_teardown(
 
 LEASE_DESCRIPTION = """Heartbeat and reap the two pre-PR slots (OMN-18896).
 
-The host-local resource lease outlives a killed pool driver. It is separate
-from the pool's admission lease: acquiring an expired admission lease cannot
-erase evidence of resources still awaiting cleanup. All resource-lease writes
-and the entire reap share a kernel lock. Reaping also takes the bring-up's
-compose-project lock and delegates every deletion to prepr_teardown_slot.sh.
-Missing or unreadable evidence is never permission to delete resources.
+The host-local resource lease outlives a killed pool driver. It is separate from the pool's admission lease: acquiring
+an expired admission lease cannot erase evidence of resources still awaiting cleanup. All resource-lease writes and
+the entire reap share a kernel lock. Reaping also takes the bring-up's compose-project lock and delegates every
+deletion to prepr_teardown_slot.sh. Missing or unreadable evidence is never permission to delete resources.
 
-The default heartbeat interval is 30 seconds and expiry is five minutes after
-the last heartbeat. Keep a complete manual proof (bring-up, exercises and
-teardown) inside one `run --slot N --holder LANE -- bash proof.sh` command.
-The numbered pool does this per phase using one token for the whole run.
-Standalone bring-up alone leaves a five-minute exercise window after exit.
-Only canonical /var/tmp/onex-prepr/slot-N staging roots are admitted.
+The default heartbeat interval is 30 seconds and expiry is five minutes after the last heartbeat. Keep a complete
+manual proof (bring-up, exercises and teardown) inside one `run --slot N --holder LANE -- bash proof.sh` command. The
+numbered pool does this per phase using one token for the whole run. Standalone bring-up alone leaves a five-minute
+exercise window after exit. Only canonical /var/tmp/onex-prepr/slot-N staging roots are admitted.
 
 `reap --plan-only` reports eligibility without deleting resources. A normal
 tick persists ~/.omnibase/state/prepr-slots/last-reap.json; UNKNOWN and
@@ -697,6 +693,7 @@ the installer uses the same default state and locks as the slot entrypoints.
 """
 
 RUNTIME = "scripts/runtime_build/"
+MIGRATIONS = "docker/migrations/forward"
 FILES = tuple(
     RUNTIME + name
     for name in (
@@ -721,9 +718,9 @@ def _unit_quote(value: str) -> str:
 def install_reaper(prefix: Path, unit_dir: Path, *, enable: bool) -> dict[str, object]:
     """Install an immutable pre-PR slot reaper and its systemd user timer.
 
-    Run on a Linux host offering the numbered shared-service slots. No sudo and
-    no credentials are installed. --no-enable prepares the same artifacts without
-    contacting systemd, for review and hosted-runner smoke tests.
+    Run on a Linux host offering the numbered shared-service slots. No sudo and no credentials are installed.
+    --no-enable prepares the same artifacts without contacting systemd, for review and hosted-runner smoke
+    tests.
 
     On the slot host, with the operator's existing ~/.omnibase/.env and Docker:
         python3 scripts/runtime_build/prepr_teardown_slot.py install-reaper
@@ -748,6 +745,8 @@ def install_reaper(prefix: Path, unit_dir: Path, *, enable: bool) -> dict[str, o
                 target = staging / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO_ROOT / name, target)
+            # OMN-22863: provision_db_slot.sh --drop scans the forward migrations, so the snapshot carries them
+            shutil.copytree(REPO_ROOT / MIGRATIONS, staging / MIGRATIONS)
             staging.rename(release)
         finally:
             if staging.exists():
