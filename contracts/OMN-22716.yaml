@@ -1,0 +1,40 @@
+schema_version: '1.0.0'
+ticket_id: OMN-22716
+title: 'omnibase_infra drops the retired compose deploy lane of the Docker-free Mac, its routing instance and the tests that required it'
+summary: 'The deploy lane routing instance and the tests of the retired compose deploy lane of the Docker-free Mac leave omnibase_infra, so the private lane census can drop the lane without a test failing on its absence. The compose overlay file, the receipt lane and its settle budget stay until the census has dropped the lane, because census-driven tests render the overlay.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22716-drop-lane
+    statement: The retired compose deploy lane of the Docker-free Mac leaves the deploy lane routing table and the tests that required it.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the deploy agent routing table names the default instance and one compose instance, and the deploy agent unit tests pass at the head -- falsifier: the focused deploy agent tests fail on the base routing table that still carries the lane'
+      - id: AC2
+        statement: 'AC2: the settle budget and instance receipt lane tests pass at the head without the lane -- falsifier: the focused tests fail on the base that still carries the lane'
+evidence_requirements:
+  - kind: tests
+    description: The deploy agent unit tests pass with the lane removed
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_instances_as_data_omn19543.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_load_gate_omn19507.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: The deploy agent unit tests pass with the lane removed from the routing table
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        cwd: ${OMNI_HOME}/omnibase_infra
+        check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_instances_as_data_omn19543.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_load_gate_omn19507.py -q'
+  - id: dod-002
+    description: The lane census parity, settle budget and instance receipt lane tests pass without the lane
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        cwd: ${OMNI_HOME}/omnibase_infra
+        check_value: 'uv run pytest tests/ci/test_lab_pass_settle_budget.py tests/scripts/ci/test_instance_receipt_lanes_omn19543.py -q'
