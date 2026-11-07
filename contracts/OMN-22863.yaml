@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22863
+title: The lab proof pool's slot route builds the composed image, so an omnimarket-only pull request can earn a PASS lab-proof receipt
+summary: The slot route layers omnimarket's Dockerfile.runtime over the slot's runtime image before the slot starts and the pool reads the slot containers that run it, and the slot reaper reclaims a dead holder's lease when the slot's tenant offboard was already proven and no container is left to re-prove it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22863-slot-composed-image
+    statement: A proof with omnimarket in it on a pre-PR slot runs every slot service on the composed omnimarket image, so the identity check reads the omnimarket package in the slot's own containers.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the slot route builds the composed image for the pull request's head before the identity check, and an omnimarket-only pull request's run reads image_identity pass, with a failing control at dev -- falsifier: uv run pytest of the pool driver's slot route tests plus one driver run for omnimarket#5243 on h201"
+  - id: req-omn22863-dead-holder-lease
+    statement: A slot lease whose owner is dead is reclaimed by the reaper and the next run takes the slot.
+    acceptance:
+      - id: AC2
+        statement: "AC2: a slot lease whose holder pid is dead is reclaimed by the pool's own rule and the next run takes the slot -- falsifier: uv run pytest of the lease reclaim test with a planted dead holder"
+evidence_requirements:
+  - kind: tests
+    description: The slot route and lease reclaim tests of this change.
+    command: uv run --frozen pytest tests/unit/scripts/test_prepr_slot_route_omn22863.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22863-ac1-slot-route-composed-image
+    description: The slot route layers omnimarket over the slot runtime image and tags every slot service with it before the slot starts, refuses a dirty tree and a service with no built image, and the pool reads the slot containers on the composed image and fails when a kernel is not on it. At the merge base none of these tests pass.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_slot_route_omn22863.py -q -n 0 --no-cov -k "composed or omnimarket or slot_route or kernel"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22863-ac2-dead-holder-lease-reclaimed
+    description: With a planted dead-holder lease the claim of a next run is refused, the reaper's teardown completes when the offboard proof exists and no container is left, the lease is reaped and the next claim succeeds; without the proof, or with a gateway still present, the teardown stays incomplete or still asks the gateway.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_slot_route_omn22863.py -q -n 0 --no-cov -k "dead_holder or offboard or gateway"
+        cwd: ${OMNI_HOME}/omnibase_infra
