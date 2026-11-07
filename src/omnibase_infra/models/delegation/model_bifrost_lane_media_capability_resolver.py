@@ -18,7 +18,7 @@ binding and the overlay call:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from omnibase_infra.enums.enum_bifrost_lane_media_capability import (
@@ -31,6 +31,11 @@ from omnibase_infra.models.delegation.model_bifrost_lane_media_capability_error 
     BifrostLaneMediaCapabilityUnknownError,
 )
 
+if TYPE_CHECKING:
+    from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+        ModelBifrostLaneBackendBinding,
+    )
+
 _CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
 #: OMN-17099: the embedding backend's real endpoint is OpenAI-embeddings-shaped,
 #: not chat-completions-shaped (a live probe on 2026-09-27 found the chat path
@@ -41,25 +46,6 @@ COMPLETE_ENDPOINT_PATHS = frozenset(
     {_CHAT_COMPLETIONS_PATH, *(c.endpoint_path for c in EnumBifrostLaneMediaCapability)}
 )
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
-
-
-class ProtocolMediaCapabilityBackend(Protocol):
-    """The part of a lane overlay binding the resolver reads."""
-
-    @property
-    def backend_key(self) -> str:
-        """The backend's id on the lane."""
-        ...
-
-    @property
-    def serving(self) -> bool:
-        """Whether the backend is live or declared dark."""
-        ...
-
-    @property
-    def media_capability(self) -> EnumBifrostLaneMediaCapability | None:
-        """The typed capability the backend declares, if any."""
-        ...
 
 
 def check_media_capability_endpoint_shape(
@@ -131,7 +117,7 @@ def validate_binding_endpoint(
 
 
 def check_one_serving_backend_per_capability(
-    lane: str, backends: Sequence[ProtocolMediaCapabilityBackend]
+    lane: str, backends: Sequence[ModelBifrostLaneBackendBinding]
 ) -> None:
     """Refuse a lane where two serving backends declare the same capability.
 
@@ -154,7 +140,7 @@ def check_one_serving_backend_per_capability(
             )
 
 
-def resolve_media_capability[B: ProtocolMediaCapabilityBackend](
+def resolve_media_capability[B: ModelBifrostLaneBackendBinding](
     lane: str, backends: Sequence[B], capability: str
 ) -> B:
     """Return the one serving backend that declares ``capability``.
@@ -191,7 +177,6 @@ def resolve_media_capability[B: ProtocolMediaCapabilityBackend](
 
 __all__ = [
     "COMPLETE_ENDPOINT_PATHS",
-    "ProtocolMediaCapabilityBackend",
     "check_media_capability_endpoint_shape",
     "check_one_serving_backend_per_capability",
     "resolve_media_capability",
