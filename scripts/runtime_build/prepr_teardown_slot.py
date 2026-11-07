@@ -7,16 +7,13 @@ Shared-service cleanup, resource leases and abandoned-slot reaping.
 
 Why this exists
 ---------------
-``prepr_verify_lane.sh`` brings a slot up and leaves it running, because a
-slot's job is to be exercised. Until this module existed every slot on the lab
-host was then torn down BY HAND, five times on 2026-09-24, each lane working
-out again what a slot leaves on the SHARED dev-lane servers: the compose
-project's containers, volumes and images, the slot's prefixed topics and
-consumer groups on the dev broker, its Valkey logical index, and its databases
-and principals on the dev Postgres. A hand teardown that deletes by a loose
-pattern can take the dev lane's own topics, groups or keys with it. So the
-selection lives here, as functions a test runs against listings that carry the
-dev lane's names beside the slot's.
+``prepr_verify_lane.sh`` brings a slot up and leaves it running, because a slot's job is to be exercised. Until this
+module existed every slot on the lab host was then torn down BY HAND, five times on 2026-09-24, each lane working out
+again what a slot leaves on the SHARED dev-lane servers: the compose project's containers, volumes and images, the
+slot's prefixed topics and consumer groups on the dev broker, its Valkey logical index, and its databases and principals
+on the dev Postgres. A hand teardown that deletes by a loose pattern can take the dev lane's own topics, groups or keys
+with it. So the selection lives here, as functions a test runs against listings that carry the dev lane's names beside
+the slot's.
 
 What it touches, and the fence on each
 --------------------------------------
@@ -547,8 +544,15 @@ class _Teardown:
 
     def revoke_tenant(self, staging_root: Path) -> bool:
         credential = staging_root / "tenant-state" / "credential.env"
-        if not credential.exists():
-            # A slot without a gateway, or a bring-up that failed before mint.
+        # A slot without a gateway, or a bring-up that failed before mint. OMN-22863: or the
+        # offboard was proven by an earlier run (credential.env.revoked.json is written only
+        # after the refusal was seen) and no container is left to re-prove it, so insisting
+        # on a live gateway kept a dead holder's lease for ever. The proof is 0600 and the
+        # gateway user's: this reader checks that it exists, not what it says.
+        proof = credential.with_name(credential.name + ".revoked.json")
+        if not credential.exists() or (
+            proof.is_file() and not self.containers(self.sel.compose_project)
+        ):
             return True
         env = dict(self.env)
         env["COMPOSE_PROJECT"] = self.sel.compose_project
