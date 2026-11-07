@@ -1,0 +1,550 @@
+{
+ "_provenance": {
+  "source": "onex scm run-view OmniNode-ai/omnibase_infra --run-id 42139619077 --limit 100 (jobs of the ci.yml pull_request run for the omnibase_infra head read by lane infra-ci-order, OMN-22545)",
+  "captured_utc": "2026-11-06T02:31:00Z",
+  "run_id": 42139619077,
+  "job_count": 90
+ },
+ "jobs": [
+  {
+   "name": "Canonical Handler-Shape Gate (OMN-20298)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:28Z",
+   "completed_at": "2026-11-06T00:50:52Z"
+  },
+  {
+   "name": "Shape-Gate Independence (OMN-20298)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:12Z",
+   "completed_at": "2026-11-06T00:50:28Z"
+  },
+  {
+   "name": "No Plugin Daemon Classes Gate (OMN-20298)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:28Z",
+   "completed_at": "2026-11-06T00:50:58Z"
+  },
+  {
+   "name": "Infra Node Handler Ownership",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:33Z",
+   "completed_at": "2026-11-06T00:50:42Z"
+  },
+  {
+   "name": "Migration Freeze Check",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:38Z",
+   "completed_at": "2026-11-06T00:50:56Z"
+  },
+  {
+   "name": "Arch Invariants (OMN-3343)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:32Z",
+   "completed_at": "2026-11-06T00:51:05Z"
+  },
+  {
+   "name": "CI Evidence Policy (OMN-18247)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:28Z",
+   "completed_at": "2026-11-06T00:51:35Z"
+  },
+  {
+   "name": "Exposed Identifier Gate (OMN-17320)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:36Z",
+   "completed_at": "2026-11-06T00:52:25Z"
+  },
+  {
+   "name": "Lab Probe Windows (OMN-19412)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:21Z",
+   "completed_at": "2026-11-06T00:50:42Z"
+  },
+  {
+   "name": "Topic Naming Lint",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:34Z",
+   "completed_at": "2026-11-06T00:52:06Z"
+  },
+  {
+   "name": "Topic Enum Drift Check",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:43Z",
+   "completed_at": "2026-11-06T00:51:17Z"
+  },
+  {
+   "name": "Lockfile Registry Allowlist (OMN-16516)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:44Z",
+   "completed_at": "2026-11-06T00:51:02Z"
+  },
+  {
+   "name": "Runner Route (OMN-18031) / route",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:31Z",
+   "completed_at": "2026-11-06T00:51:09Z"
+  },
+  {
+   "name": "ONEX Validators",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:38Z",
+   "completed_at": "2026-11-06T00:53:54Z"
+  },
+  {
+   "name": "Plugin ENV->Service Completeness (OMN-4313)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:49Z",
+   "completed_at": "2026-11-06T00:51:13Z"
+  },
+  {
+   "name": "Lockfile CVE Scan (OMN-16228)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:38Z",
+   "completed_at": "2026-11-06T00:50:55Z"
+  },
+  {
+   "name": "Topic Drift Check",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:33Z",
+   "completed_at": "2026-11-06T00:51:02Z"
+  },
+  {
+   "name": "Pin Reachability (OMN-15538)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:49Z",
+   "completed_at": "2026-11-06T00:51:18Z"
+  },
+  {
+   "name": "Dep Provenance Lineage Gate (OMN-15604)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:49Z",
+   "completed_at": "2026-11-06T00:51:33Z"
+  },
+  {
+   "name": "Trivyignore Expiry Check (OMN-16229)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:43Z",
+   "completed_at": "2026-11-06T00:50:49Z"
+  },
+  {
+   "name": "Fingerprint Check",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:09Z",
+   "completed_at": "2026-11-06T00:51:44Z"
+  },
+  {
+   "name": "zone-filter / Zone Filter (docs-only check)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:23Z",
+   "completed_at": "2026-11-06T00:50:40Z"
+  },
+  {
+   "name": "no-noncanonical-lifecycle-classes",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:21Z",
+   "completed_at": "2026-11-06T00:50:38Z"
+  },
+  {
+   "name": "CI Summary",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:14Z",
+   "completed_at": "2026-11-06T01:16:14Z"
+  },
+  {
+   "name": "Contract Compliance",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:48Z",
+   "completed_at": "2026-11-06T00:51:06Z"
+  },
+  {
+   "name": "Customer Path Boundary (OMN-18012)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:49Z",
+   "completed_at": "2026-11-06T00:52:13Z"
+  },
+  {
+   "name": "Stack Shape (OMN-21891)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:09Z",
+   "completed_at": "2026-11-06T00:52:43Z"
+  },
+  {
+   "name": "Bus ACL Boundary (OMN-19928)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:14Z",
+   "completed_at": "2026-11-06T00:52:32Z"
+  },
+  {
+   "name": "Laptop profile paths changed (OMN-19498)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:15Z",
+   "completed_at": "2026-11-06T00:51:24Z"
+  },
+  {
+   "name": "Compose Required-Env Coverage (OMN-5439)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:49Z",
+   "completed_at": "2026-11-06T00:51:33Z"
+  },
+  {
+   "name": "Reconcilers prove movement by readback (OMN-17307)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:16Z",
+   "completed_at": "2026-11-06T00:51:26Z"
+  },
+  {
+   "name": "Version Pin Compliance",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:36Z",
+   "completed_at": "2026-11-06T00:51:56Z"
+  },
+  {
+   "name": "Subscribe Wiring Health",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:16Z",
+   "completed_at": "2026-11-06T00:51:51Z"
+  },
+  {
+   "name": "Event Chain Gate",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:47Z",
+   "completed_at": "2026-11-06T00:51:06Z"
+  },
+  {
+   "name": "Node Boundary Imports (OMN-20703)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:14Z",
+   "completed_at": "2026-11-06T00:52:25Z"
+  },
+  {
+   "name": "Enforce validator-requirements.yaml (OMN-13291)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:16Z",
+   "completed_at": "2026-11-06T00:51:35Z"
+  },
+  {
+   "name": "delegation-seam-gate",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:42Z",
+   "completed_at": "2026-11-06T00:52:31Z"
+  },
+  {
+   "name": "Contract Path Pre-Flight",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:50Z",
+   "completed_at": "2026-11-06T00:52:00Z"
+  },
+  {
+   "name": "AI-Slop Pattern Check (strict, PR diff)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:39Z",
+   "completed_at": "2026-11-06T00:52:18Z"
+  },
+  {
+   "name": "Public Runner Placement (OMN-19998)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:48Z",
+   "completed_at": "2026-11-06T00:52:09Z"
+  },
+  {
+   "name": "Topic Naming Baseline One-way (OMN-19677) / anti-growth-baseline",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:25Z",
+   "completed_at": "2026-11-06T00:50:39Z"
+  },
+  {
+   "name": "Canonical File Shape (OMN-20304)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:23Z",
+   "completed_at": "2026-11-06T00:50:56Z"
+  },
+  {
+   "name": "Cross-Repo Migration Conflicts",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:47Z",
+   "completed_at": "2026-11-06T00:52:05Z"
+  },
+  {
+   "name": "Writer-Migration Coupling Check",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:15Z",
+   "completed_at": "2026-11-06T00:51:49Z"
+  },
+  {
+   "name": "Node Migration Declaration Check",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:44Z",
+   "completed_at": "2026-11-06T00:52:13Z"
+  },
+  {
+   "name": "Core Validators (OMN-21538)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:39Z",
+   "completed_at": "2026-11-06T00:52:46Z"
+  },
+  {
+   "name": "Contract Sync Gate (Wave C) [OMN-8915]",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:48Z",
+   "completed_at": "2026-11-06T00:51:55Z"
+  },
+  {
+   "name": "Runtime Profiles / validate",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:34Z",
+   "completed_at": "2026-11-06T00:51:53Z"
+  },
+  {
+   "name": "Noncanonical Class Allowlist One-way (OMN-19677) / anti-growth-baseline",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:31Z",
+   "completed_at": "2026-11-06T00:50:48Z"
+  },
+  {
+   "name": "node-migration-sync / deployed-migration-tree-sync-logic",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:23Z",
+   "completed_at": "2026-11-06T00:51:01Z"
+  },
+  {
+   "name": "merge-hold-gate / evaluate",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:21Z",
+   "completed_at": "2026-11-06T00:50:39Z"
+  },
+  {
+   "name": "Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:24Z",
+   "completed_at": "2026-11-06T00:50:40Z"
+  },
+  {
+   "name": "dependency-pins / Dependency Pins",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:33Z",
+   "completed_at": "2026-11-06T00:51:00Z"
+  },
+  {
+   "name": "node-migration-sync / node-migration-sync",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:23Z",
+   "completed_at": "2026-11-06T00:50:35Z"
+  },
+  {
+   "name": "Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:25Z",
+   "completed_at": "2026-11-06T00:50:37Z"
+  },
+  {
+   "name": "Deploy Agent Tests (OMN-15378) / deploy-agent-tests",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:21Z",
+   "completed_at": "2026-11-06T00:55:53Z"
+  },
+  {
+   "name": "runner-routing-audit / Runner Routing Audit",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:19Z",
+   "completed_at": "2026-11-06T00:51:29Z"
+  },
+  {
+   "name": "Sanitized Legacy RDS Fixture Proof / PostgreSQL 16 Fresh + Legacy Fixture",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:50:32Z",
+   "completed_at": "2026-11-06T00:52:09Z"
+  },
+  {
+   "name": "Kafka Boundary Compat (OMN-3256)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:50Z",
+   "completed_at": "2026-11-06T00:52:35Z"
+  },
+  {
+   "name": "Effect-Assertion Gate (RT-5)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:52Z",
+   "completed_at": "2026-11-06T00:52:11Z"
+  },
+  {
+   "name": "Integration Silent-Skip Guard (OMN-14172)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:52Z",
+   "completed_at": "2026-11-06T00:52:46Z"
+  },
+  {
+   "name": "Demo Loop Gate",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:53Z",
+   "completed_at": "2026-11-06T00:52:13Z"
+  },
+  {
+   "name": "Migration Integration Test",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:27Z",
+   "completed_at": "2026-11-06T00:58:53Z"
+  },
+  {
+   "name": "Service-Backed Integration Suites (OMN-18781)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:52Z",
+   "completed_at": "2026-11-06T01:00:14Z"
+  },
+  {
+   "name": "Kafka Schema Handshake (OMN-3411)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:52Z",
+   "completed_at": "2026-11-06T00:52:25Z"
+  },
+  {
+   "name": "Application Database Domain Enforcement (OMN-15361)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:52Z",
+   "completed_at": "2026-11-06T00:56:27Z"
+  },
+  {
+   "name": "Docs-Only Marker (OMN-16661)",
+   "conclusion": "skipped",
+   "started_at": "2026-11-06T00:50:40Z",
+   "completed_at": "2026-11-06T00:50:40Z"
+  },
+  {
+   "name": "Lint",
+   "conclusion": "success",
+   "started_at": "2026-11-06T00:51:53Z",
+   "completed_at": "2026-11-06T01:01:41Z"
+  },
+  {
+   "name": "Runtime Boot Laptop Profile (catalog local)",
+   "conclusion": "skipped",
+   "started_at": "2026-11-06T00:51:25Z",
+   "completed_at": "2026-11-06T00:51:25Z"
+  },
+  {
+   "name": "Detect Changes",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:01:50Z",
+   "completed_at": "2026-11-06T01:02:51Z"
+  },
+  {
+   "name": "Tests (Split 3/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:18Z",
+   "completed_at": "2026-11-06T01:14:35Z"
+  },
+  {
+   "name": "Tests (Split 10/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:28Z",
+   "completed_at": "2026-11-06T01:08:04Z"
+  },
+  {
+   "name": "Tests (Split 6/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:18Z",
+   "completed_at": "2026-11-06T01:09:00Z"
+  },
+  {
+   "name": "Tests (Split 5/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:18Z",
+   "completed_at": "2026-11-06T01:13:09Z"
+  },
+  {
+   "name": "Tests (Split 12/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:28Z",
+   "completed_at": "2026-11-06T01:10:11Z"
+  },
+  {
+   "name": "Tests (Split 9/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:28Z",
+   "completed_at": "2026-11-06T01:08:06Z"
+  },
+  {
+   "name": "Tests (Split 15/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:28Z",
+   "completed_at": "2026-11-06T01:08:51Z"
+  },
+  {
+   "name": "Tests (Split 11/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:18Z",
+   "completed_at": "2026-11-06T01:07:48Z"
+  },
+  {
+   "name": "Tests (Split 14/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:28Z",
+   "completed_at": "2026-11-06T01:07:32Z"
+  },
+  {
+   "name": "Tests (Split 13/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:54Z",
+   "completed_at": "2026-11-06T01:11:33Z"
+  },
+  {
+   "name": "Tests (Split 2/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:54Z",
+   "completed_at": "2026-11-06T01:09:12Z"
+  },
+  {
+   "name": "Tests (Split 8/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:54Z",
+   "completed_at": "2026-11-06T01:09:19Z"
+  },
+  {
+   "name": "Tests (Split 1/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:28Z",
+   "completed_at": "2026-11-06T01:12:03Z"
+  },
+  {
+   "name": "Tests (Split 7/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:03:54Z",
+   "completed_at": "2026-11-06T01:12:15Z"
+  },
+  {
+   "name": "Tests (Split 4/15)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:04:02Z",
+   "completed_at": "2026-11-06T01:14:41Z"
+  },
+  {
+   "name": "CI Tests Gate",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:14:59Z",
+   "completed_at": "2026-11-06T01:15:01Z"
+  },
+  {
+   "name": "Test-Failure Ratchet Gate",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:14:59Z",
+   "completed_at": "2026-11-06T01:15:14Z"
+  },
+  {
+   "name": "Skip Count Ratchet (OMN-18776)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:15:26Z",
+   "completed_at": "2026-11-06T01:15:55Z"
+  },
+  {
+   "name": "Runtime Boot Smoke (compose)",
+   "conclusion": "skipped",
+   "started_at": "2026-11-06T01:15:02Z",
+   "completed_at": "2026-11-06T01:15:01Z"
+  },
+  {
+   "name": "CI cascade reason-graph (report-only)",
+   "conclusion": "success",
+   "started_at": "2026-11-06T01:16:43Z",
+   "completed_at": "2026-11-06T01:16:58Z"
+  }
+ ]
+}

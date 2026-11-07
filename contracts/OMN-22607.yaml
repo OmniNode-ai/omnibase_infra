@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-22607
+title: A runtime start scans the contract topics once, not once per provisioner and validator
+summary: The topic provisioners and the startup validator of one runtime start read one stored contract-topic scan instead of re-parsing every contract each time.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22607-topic-scan-once
+    statement: One runtime start runs the contract-topic scan once for the same request, and a provisioner built for a contract written after the start scans again.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: provisioners and the validator sharing the runtime start scan run the extractor once, provisioners with no shared scan still run it once each, a refresh and a new runtime start scan again -- falsifier: uv run pytest tests/unit/event_bus/test_contract_topic_scan_once_omn22607.py -q fails with the per-constructor scan restored'
+evidence_requirements:
+  - kind: tests
+    description: The scan-once tests
+    command: uv run pytest tests/unit/event_bus/test_contract_topic_scan_once_omn22607.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22607-ac1-scan-once
+    description: The real extractor's calls are counted across four provisioners, a validator, the Pattern B and live-contract builders, a refresh and a new runtime start.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_contract_topic_scan_once_omn22607.py -q
+        cwd: .
+    binds_ac:
+      - AC1

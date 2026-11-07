@@ -603,3 +603,55 @@ def test_reporting_outage_keeps_status_and_exception_pending_for_retry(
     calls = run.call_count
     executor_mod.deliver_dev_boot_reports(root)
     assert run.call_count == calls
+
+
+def test_second_failed_job_leaves_a_family_the_first_recovery_restored_running(
+    tmp_path: Path, docker: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # OMN-22478, dev jobs 209869f7 then 54914064 on 2026-11-06. The first job
+    # failed after replacing the runtime and recovered from the retained images:
+    # same images, new container ids, and a config hash that the regular compose
+    # model never reproduces (the image is the retained tag), so `prepare` cannot
+    # re-capture the recovered family. The second job failed before any roll (the
+    # candidate probe timed out, running containers kept); it read the healthy
+    # recovered family as changed and force-recreated all three services, and on
+    # that host the recreate hung and left the lane without a runtime.
+    executor = DeployExecutor()
+    executor.verify = Mock(return_value=[])
+    original = executor_mod._run
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        done = original(argv, **kwargs)
+        if "up" in argv:
+            for container in docker["containers"]:
+                container["Id"] = "recovered-" + container["Id"]
+                container["Config"]["Labels"]["com.docker.compose.config-hash"] = (
+                    "recovery-compose-hash"
+                )
+        return done
+
+    monkeypatch.setattr(executor_mod, "_run", run)
+    first = executor_mod.DevBootGuard(executor, tmp_path)
+    first.prepare()
+    with pytest.raises(guard_mod.DevBootRecoveryError, match="verified=True"):
+        with first.protect("209869f7", BAD_COMMIT, Mock()):
+            docker["containers"] = _containers(healthy=False)
+            raise RuntimeError("runtime roll stopped at omninode-runtime")
+    assert sum("up" in argv for argv in docker["commands"]) == 1
+    recovered_ids = sorted(c["Id"] for c in docker["containers"])
+    assert recovered_ids[0].startswith("recovered-")
+
+    # The next job, in a fresh agent process, starts from the snapshot on disk.
+    second = executor_mod.DevBootGuard(executor, tmp_path)
+    second.prepare()
+    point = second.point.current
+    assert point is not None and sorted(point.container_ids) == recovered_ids
+    with pytest.raises(guard_mod.DevBootRecoveryError, match="verified=True"):
+        with second.protect("54914064", BAD_COMMIT, Mock()):
+            raise RuntimeError(
+                "candidate boot probe timed out; running containers kept"
+            )
+    assert sum("up" in argv for argv in docker["commands"]) == 1
+    incident = json.loads((second.root / "incident-54914064.json").read_text())
+    assert incident["recovery_skipped_healthy"] is True
+    assert sorted(c["Id"] for c in docker["containers"]) == recovered_ids

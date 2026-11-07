@@ -64,7 +64,7 @@ from omnibase_infra.models.model_retry_error_classification import (
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
 
-    from omnibase_infra.handlers.models import ModelOperationContext, ModelRetryState
+    from omnibase_infra.models.resilience import ModelOperationContext, ModelRetryState
 
 T = TypeVar("T")
 

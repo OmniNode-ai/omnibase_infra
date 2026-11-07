@@ -36,7 +36,8 @@
 #   runtime containers' logs, broker and analytics database through the docker
 #   daemon that runs them. So the job is two: `resolve-lane` runs on any runner
 #   of the overlay's pool (vars.LAB_PROBE_RUNS_ON_JSON) and picks the first
-#   lane of the overlay's ordered list (vars.LAB_LANES_JSON) whose
+#   lane of the stability overlay's ordered list (vars.LAB_PROOF_LANES_JSON,
+#   OMN-21485; an entry carrying lane_role=stability) whose
 #   projection-api answers and which declares `docker_runs_on`, the runner
 #   labels beside that lane's docker daemon; `c28-consumer-flow` runs there
 #   against that lane's declared projection_url. No host label or address is
@@ -87,7 +88,7 @@ on:
         required: false
         default: ''
       deploy_wait_seconds:
-        description: 'Total seconds the lane resolution may wait for a dev-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
+        description: 'Total seconds the lane resolution may wait for a stability-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
         required: false
         default: '2400'
 
@@ -134,9 +135,11 @@ jobs:
         id: lane
         uses: ./.github/actions/resolve-lab-lane
         with:
-          lanes-json: ${{ vars.LAB_LANES_JSON }}
-          require: projection_url docker_runs_on
-          match: compose_project=omnibase-infra
+          lanes-json: ${{ vars.LAB_PROOF_LANES_JSON }}
+          # OMN-21485: a stability lane only. Its compose project names the
+          # containers node_board_probe_effect reads, so it is required.
+          require: projection_url docker_runs_on compose_project
+          match: lane_role=stability
           # OMN-19811: a lane that does not answer while its deploy agent reports
           # a deploy in progress is waited for, not graded. Idle, unreadable or
           # undeclared agents and an exhausted budget are still RED. The
@@ -144,7 +147,7 @@ jobs:
           deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
 
   c28-consumer-flow:
-    name: C28 consumer flow (dev lane)
+    name: C28 consumer flow (stability lane)
     needs: resolve-lane
     # The runner beside the resolved lane's docker daemon, as that lane's
     # overlay entry declares it. Data, never a literal here.
@@ -180,10 +183,12 @@ jobs:
         env:
           C28_BASE_URL: ${{ github.event.inputs.base_url || fromJSON(needs.resolve-lane.outputs.lane_json).projection_url }}
           LANE_NAME: ${{ needs.resolve-lane.outputs.lane }}
+          LANE_COMPOSE_PROJECT: ${{ fromJSON(needs.resolve-lane.outputs.lane_json).compose_project }}
         run: |
           jq -n --arg subject_lane "$LANE_NAME" --arg base_url "$C28_BASE_URL" \
+            --arg compose_project "$LANE_COMPOSE_PROJECT" \
             --arg scratch "$RUNNER_TEMP" \
-            '{subject_lane: $subject_lane, base_url: $base_url, scratch: $scratch, pytest_cmd: "uv run --frozen pytest", record: "c28-consumer-flow.json"}' \
+            '{subject_lane: $subject_lane, compose_project: $compose_project, base_url: $base_url, scratch: $scratch, pytest_cmd: "uv run --frozen pytest", record: "c28-consumer-flow.json"}' \
             > c28-request.json
           # RuntimeLocal single-shot dispatch uses the top-level handler.
           # Select it from the node's declared C28 route, retaining its contract.
@@ -203,13 +208,13 @@ jobs:
           Path("c28-contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False))
           PYCODE
 
-      - name: Re-measure C28 on the dev lane and grade it
+      - name: Re-measure C28 on the stability lane and grade it
         run: >-
           uv run --frozen onex node node_board_probe_effect
           --contract c28-contract.yaml --input c28-request.json
           --timeout 1700 --output receipt
 
-      - name: Compare the script and node on the measured dev-lane observation
+      - name: Compare the script and node on the measured stability-lane observation
         run: |
           uv run --frozen python - <<'PYCODE'
           import json

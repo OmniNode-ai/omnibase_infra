@@ -15,7 +15,7 @@ Two recordings, both read through ``onex scm`` on the dev bus:
    this fix would have required a check that could not fail.
 2. The thread gate's check-runs on the 20 latest merged dev heads: the
    admission record for registering it in CI Summary's
-   EXPECTED_EXTERNAL_CONTEXTS (present and green on every one, including the
+   EXPECTED_EXTERNAL_CONTEXTS until OMN-22478 removed it (present and green on every one, including the
    bot PRs the reviewer skips), so requiring it cannot wedge dev.
 """
 
@@ -33,10 +33,7 @@ from typing import Any, cast
 import pytest
 
 from scripts.ci.ci_summary_gate import (
-    DEV_BASE_ONLY_CONTEXTS,
-    EXPECTED_EXTERNAL_CONTEXTS,
     evaluate_external_contexts,
-    scoped_to_base,
 )
 
 pytestmark = pytest.mark.unit
@@ -138,9 +135,6 @@ def test_every_recent_merged_dev_head_carried_a_green_thread_gate(
         cast("dict[str, Any]", recorded_response["response"])["heads"],
     )
     assert len(heads) == 20
-    assert frozenset({THREAD_GATE}) == DEV_BASE_ONLY_CONTEXTS
-    dev_contexts = scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "dev")
-    assert THREAD_GATE in dev_contexts
     for head in heads:
         runs = head["thread_gate_check_runs"]
         assert runs, f"#{head['pr']} has no {THREAD_GATE} check-run"

@@ -26,6 +26,13 @@
 # silently, and scripts/ci/check_omnimarket_contract_pin_advance.py keeps it
 # forward-only.
 #
+# The bot PR edits the pin and nothing else in contracts/OMN-17292.yaml (OMN-19998).
+# That contract carries every criterion the live ticket does, and the omnimarket
+# drift check reads the contract against the ticket, so a refresh that re-rendered
+# the file from a template claiming AC1 only read AC2 to AC4 as added and held every
+# bot PR. tests/ci/test_render_bot_refresh_contract.py runs the edit and runs the
+# old whole-file template as a failing control.
+#
 # Modelled on the sanctioned in-repo precedent for exactly this problem class:
 # .github/workflows/sibling-lock-refresh.yml (OMN-13902), which solved stale
 # cross-repo sibling pins the same way.
@@ -242,39 +249,34 @@ jobs:
           # expects every omnimarket pin to carry (OMN-17292, OMN-20068).
           omnimarket_contract_ref: ${TARGET_PIN}
           EOF_FIXTURE
-          CHECK="env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
-          cat > contracts/OMN-17292.yaml <<EOF_CONTRACT
-          schema_version: "1.0.0"
-          ticket_id: OMN-17292
-          title: "The omnimarket contract pin advances to ${TARGET_PIN}"
-          summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
-          is_seam_ticket: false
-          interface_change: false
-          interfaces_touched: []
-          requirements:
-            - id: req-omn17292
-              statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
-              acceptance:
-                - id: AC1
-                  statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN} -- falsifier: $CHECK"
-          evidence_requirements:
-            - kind: tests
-              description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN}.
-              command: "$CHECK"
-          emergency_bypass:
-            enabled: false
-            justification: ''
-            follow_up_ticket_id: ''
-          dod_evidence:
-            - id: dod-omn-17292-ac1
-              description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN}.
-              source: manual
-              checks:
-                - check_type: test_passes
-                  check_value: "$CHECK"
-                  cwd: \${OMNI_HOME}/omnibase_infra
-              binds_ac: [AC1]
-          EOF_CONTRACT
+          # OMN-19998: edit the pin in the contract and nothing else. The contract is
+          # the ticket's own record, and the live ticket carries more than the pin
+          # criterion (the omnimarket drift check reads every label the contract
+          # claims against the ticket). Re-rendering the file from a template that
+          # claims AC1 only dropped every other criterion, so each bot pull request
+          # read them as deleted or added and was held. The pin appears in the title,
+          # the pin criterion and the evidence descriptions: each carries the sha
+          # the title names, so replacing that one value everywhere moves the pin
+          # and leaves every criterion, check and retirement as dev has it.
+          python3 - "${TARGET_PIN}" <<'PY_CONTRACT'
+          import re
+          import sys
+          from pathlib import Path
+
+          target = sys.argv[1]
+          path = Path("contracts/OMN-17292.yaml")
+          original = path.read_text(encoding="utf-8")
+          titles = re.findall(
+              r'^title: "The omnimarket contract pin advances to ([0-9a-f]{40})"$',
+              original,
+              flags=re.MULTILINE,
+          )
+          if len(titles) != 1:
+              raise SystemExit("::error::contracts/OMN-17292.yaml does not name its pin in exactly one title line")
+          if titles[0] == target:
+              raise SystemExit("::error::contracts/OMN-17292.yaml already names the target pin; the refresh would carry unchanged evidence")
+          path.write_text(original.replace(titles[0], target), encoding="utf-8")
+          PY_CONTRACT
           # .proof-dependencies is a CI-only checkout; never let it into a commit.
           git add -- .github/omnimarket-contract-pin.yaml \
                      contracts/OMN-17292.yaml \

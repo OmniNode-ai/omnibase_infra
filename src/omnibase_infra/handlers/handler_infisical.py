@@ -54,9 +54,9 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 from omnibase_infra.models.handlers.model_secret_cache import ModelSecretCache
+from omnibase_infra.models.security import ModelInfisicalConfig
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class HandlerInfisical(
         """
         self._container = container
         self._adapter: AdapterInfisical | None = None
-        self._config: ModelInfisicalHandlerConfig | None = None
+        self._config: ModelInfisicalConfig | None = None
         self._initialized: bool = False
         self._circuit_breaker_initialized: bool = False
         # Handler-owned cache and metrics, guarded by the handler's lock
@@ -154,7 +154,7 @@ class HandlerInfisical(
 
         # Phase 1: Parse and validate configuration
         try:
-            self._config = ModelInfisicalHandlerConfig(**config)
+            self._config = ModelInfisicalConfig(**config)
         except Exception as e:
             ctx = ModelInfraErrorContext.with_correlation(
                 correlation_id=init_correlation_id,

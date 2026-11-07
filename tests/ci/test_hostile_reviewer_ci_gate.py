@@ -43,14 +43,14 @@ def test_hostile_reviewer_workflow_exists() -> None:
     )
 
 
-def test_hostile_reviewer_triggers_on_dev_and_main_prs() -> None:
+def test_hostile_reviewer_starts_no_run_on_a_pull_request() -> None:
+    """OMN-22478, operator RULING 2026-11-05T20:27:56Z: the trigger names no real branch."""
     workflow = _load_yaml(HOSTILE_REVIEWER_WORKFLOW)
     # PyYAML parses the bare `on:` key as boolean True.
     on_block = workflow.get("on") or workflow.get(True)
     assert on_block is not None, "workflow has no trigger block"
     pr_trigger = on_block["pull_request"]
-    assert "dev" in pr_trigger["branches"]
-    assert "main" in pr_trigger["branches"]
+    assert pr_trigger["branches"] == ["review-stopped-omn-22478"]
     assert "opened" in pr_trigger["types"]
     assert "synchronize" in pr_trigger["types"]
 

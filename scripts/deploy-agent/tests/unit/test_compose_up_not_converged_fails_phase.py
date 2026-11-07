@@ -219,13 +219,14 @@ def test_nonzero_up_with_every_service_converged_passes(
     )
 
 
-def _runtime_up(phases: list[tuple[Phase, PhaseStatus]]) -> None:
+def _runtime_up(phases: list[tuple[Phase, PhaseStatus]], *, build: bool = True) -> None:
     DeployExecutor()._compose_up(
         Phase.RUNTIME,
         Scope.RUNTIME,
         ["omninode-runtime"],
         lambda phase, status: phases.append((phase, status)),
         lane=EnumRuntimeLane.DEV,
+        build=build,
     )
 
 
@@ -233,13 +234,13 @@ def _runtime_up(phases: list[tuple[Phase, PhaseStatus]]) -> None:
 def test_ceiling_kill_with_scope_converged_passes(
     patched: pytest.MonkeyPatch,
 ) -> None:
-    """OMN-18057 kept: a killed up whose services all converged passes with its warning."""
+    """A killed rollback up retains its convergence recovery and warning."""
     declared = {"omninode-runtime": HASH_B}
     docker = _Docker(declared=declared, labels=dict(declared), up_timeout=True)
     _install(patched, docker)
     phases: list[tuple[Phase, PhaseStatus]] = []
 
-    _runtime_up(phases)
+    _runtime_up(phases, build=False)
 
     assert (Phase.RUNTIME, PhaseStatus.SUCCESS) in phases
     (hash_call,) = docker.hash_calls()
@@ -259,7 +260,7 @@ def test_ceiling_kill_with_one_unconverged_service_fails(
     phases: list[tuple[Phase, PhaseStatus]] = []
 
     with pytest.raises(RuntimeError) as excinfo:
-        _runtime_up(phases)
+        _runtime_up(phases, build=False)
 
     message = str(excinfo.value)
     assert message.startswith("Docker compose up failed:")

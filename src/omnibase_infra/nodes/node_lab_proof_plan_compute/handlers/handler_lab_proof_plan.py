@@ -45,7 +45,7 @@ from typing import overload
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.lab_proof.enum_lab_proof_attribution import (
@@ -317,14 +317,17 @@ class HandlerLabProofPlan:
         self, request: ModelLabDesiredStateRenderRequest
     ) -> ModelLabDesiredStateRenderResult:
         manifest = yaml.safe_load(request.manifest_yaml)
-        if request.host not in manifest["hosts"]:
+        registry = yaml.safe_load(request.registry_yaml)["registry"]
+        host_row = next((r for r in registry if r["name"] == request.host), None)
+        if host_row is None:
             raise ValueError(f"undeclared host {request.host}")
         target = request.target_ref.model_dump(mode="json")
         target["composition"] = sorted(target["composition"], key=lambda r: r["repo"])
         compose = json.loads(request.compose_json)
-        services = TypeAdapter(dict[str, ModelLabComposeContainer]).validate_python(
-            compose["services"]
-        )
+        services = {
+            name: ModelLabComposeContainer.model_validate(spec)
+            for name, spec in compose["services"].items()
+        }
         hashes = _hashes(request.compose_hashes)
         containers: list[dict[str, object]] = []
         document: dict[str, object] = {
@@ -349,7 +352,7 @@ class HandlerLabProofPlan:
             document["runners"] = self._runners(request, services, hashes)
         else:
             lane = manifest["lanes"][request.lane]
-            if request.host not in lane["hosts"]:
+            if request.lane not in host_row["lanes"]:
                 raise ValueError(
                     f"lane {request.lane} is not declared on {request.host}"
                 )

@@ -1,0 +1,26 @@
+{
+  "chain": "E4",
+  "kind": "error",
+  "title": "unauthorized sender",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "unmapped-sender",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "7e7cfbb9-20e5-53cf-b519-56be0932f67a",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x",
+      "result": "refused_by_broker",
+      "note": "no request topic for this principal, or a write to the shared or control topics"
+    }
+  ],
+  "ends_in": "the broker refuses; the CLI exits 1 with the broker's error"
+}

@@ -1,0 +1,151 @@
+{
+  "chain": "G1",
+  "kind": "golden",
+  "title": "load",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "cli",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "0fea8021-7313-5674-9ccf-b5a573d34563",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "registry",
+      "action": "commit",
+      "note": "checks sender, request, precondition, installed file and prefix; commits row v1 with its outbox entry"
+    },
+    {
+      "step": 3,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "revisions",
+      "model": "ModelContractRevision",
+      "record": {
+        "entity_id": "node_x@699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "contract_yaml": "name: node_x\nnode_version: 1.0.0\n",
+        "registry_version": 1
+      },
+      "key": "node_x@699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87"
+    },
+    {
+      "step": 4,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 1,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "register",
+        "owner": "lab-deploy",
+        "registration_request_id": "0fea8021-7313-5674-9ccf-b5a573d34563",
+        "contract_yaml": "name: node_x\nnode_version: 1.0.0\n"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 5,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:0fea8021-7313-5674-9ccf-b5a573d34563",
+        "outcome": "accepted",
+        "reason": null,
+        "registry_version": 1
+      },
+      "key": "lab-deploy:0fea8021-7313-5674-9ccf-b5a573d34563"
+    },
+    {
+      "step": 6,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "watermark",
+      "model": "ModelRegistryWatermark",
+      "record": {
+        "entity_id": "registry-watermark",
+        "committed_sequence": 1,
+        "published_sequence": 1,
+        "observed_at": "2026-11-03T06:00:00Z"
+      },
+      "key": "registry-watermark"
+    },
+    {
+      "step": 7,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 1,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "register",
+        "status": "materialized",
+        "reason": null,
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 8,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "state",
+      "model": "ModelRuntimeHotloadState",
+      "record": {
+        "entity_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f",
+        "bootstrap_ready": true,
+        "serving_ready": true,
+        "names": {
+          "node_x": {
+            "observed": {
+              "registry_version": 1,
+              "status": "materialized",
+              "reason": null
+            },
+            "served": {
+              "registry_version": 1,
+              "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87"
+            }
+          }
+        }
+      },
+      "key": "8c242722-5f7b-5b52-86f1-0961206fa958"
+    },
+    {
+      "step": 9,
+      "actor": "cli",
+      "action": "observe",
+      "note": "the cohort serves v1; exit 0"
+    },
+    {
+      "step": 10,
+      "actor": "client",
+      "action": "observe",
+      "note": "a command on node_x's topic is answered"
+    }
+  ],
+  "ends_in": "the CLI exits 0 once the state snapshot shows every owning instance serving v1"
+}

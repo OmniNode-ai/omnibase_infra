@@ -117,15 +117,6 @@ hosts:
       - runner_name_prefix: omninode-customer-plane-runner
         expected_count: 2
         classes: [customer-plane]
-  # .101 — Mac mini, M2 Pro, 12 cores. Docker Desktop, data root on an external
-  # volume. Deploy/verify class first: those jobs are cloud-touching
-  # (kubectl/aws/gh) and architecture-neutral, so they are the class that can
-  # move to arm64 without any workflow carrying an architecture assumption.
-  - host: stickybeatz-2.tail75df5e.ts.net
-    arch: arm64
-    runner_name_prefix: omninode-mini-runner
-    expected_count: 1
-    classes: [verify]
   # .105 was removed from the lab mix by the operator on 2026-10-01.
   # OMN-17427 readback on 2026-10-06 found no omninode-air-runner registered;
   # retired capacity is not part of the declared verify fleet.
@@ -199,10 +190,11 @@ hosts:
   # (cp312), the wheel that dies with SIGILL on h051, imports and runs, and the
   # 119 unit tests of the private repository that imports it pass. So the pool
   # carries `omnibase-ci` beside the opt-in `omnibase-ci-multiarch`, no
-  # workflow changes, and the router's `action` floor counts it. Eight runners
-  # at 6 GiB are 48 GiB of the 66 GiB available there with the lab-work units
-  # running, inside the pool's own slice and git mirror
-  # (docker/runners/systemd/pools/hp053-ci-runner/). The primary host's share
+  # workflow changes, and the router's `action` floor counts it. OMN-19998
+  # (2026-11-04) resized the pool from eight to FIVE runners at 9 GiB with five
+  # CPUs each and the job directories in memory: 49 to 55 GiB were available
+  # there that morning with the lab-work units running, and the pool's slice
+  # (docker/runners/systemd/pools/hp053-ci-runner/) caps all five at 46 GiB. The primary host's share
   # is lowered AFTER one passing job per repository is read from this pool
   # (`deploy-runners.sh --retire-surplus`), not by this declaration. The host
   # is an ssh alias, h053, that each operator's ssh config resolves. Deployed
@@ -210,7 +202,7 @@ hosts:
   - host: h053
     arch: amd64
     runner_name_prefix: hp053-ci-runner
-    expected_count: 8
+    expected_count: 5
     classes: [action, action-multiarch]
     # OMN-22123 -- the reserved merge-queue pool. A merge_group job of a private repository asks for the label
     # `omnibase-ci-mq`; the runners that carried it lived on another lab host that is in repair and the fleet declared none, so each job

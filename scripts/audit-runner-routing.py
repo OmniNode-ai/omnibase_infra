@@ -51,6 +51,7 @@ DEV_BASE_SHORTCUT = "github.event_name=='pull_request'&&github.base_ref=='dev'"
 PULL_REQUEST_TARGET_TRIGGER = "pull_request_target"
 PULL_REQUEST_TARGET_EXCEPTION_KEY = "pull_request_target_exception"
 EXCEPTION_PATH_RE = re.compile(r"^\.github/workflows/[A-Za-z0-9._-]+\.ya?ml$")
+PRIVATE_HOSTED_EXCEPTION_KEY = "private_repo_hosted_exception"
 PINNED_REUSABLE_RE = re.compile(r"^[^@\s]+/\.github/workflows/[^@\s]+@[0-9a-f]{40}$")
 READ_ONLY_PERMISSION_LEVELS = frozenset({"read", "none"})
 # OMN-18031: the per-run routing consumer shape. A job whose runs-on resolves
@@ -781,6 +782,30 @@ def _default_branch_workflow_texts_batch(
     return {name: _default_branch_workflow_texts(name, org) for name in repo_names}
 
 
+# OMN-18365 AC3: private repositories never run on GitHub-hosted runners.
+#
+# Authority: operator ruling 2026-09-14, firm, recorded at
+# ``docs/tracking/ROLLING_WORK_LEDGER.md:7777`` -- private repositories
+# never run on GitHub-hosted Actions runners; their CI runs on the lab
+# fleet. Hosted runners are for public repositories only, where minutes are
+# free.
+#
+# Deliberately does NOT consult ``hosted_runner_allowlist``: that allowlist
+# is scoped to this repository's own workflows and their pre-existing,
+# individually-justified hosted pins (ECR pushes, fork isolation, and so
+# on). Extending it across every other repository in the org is a separate
+# claim this check does not make -- a private repository with a
+# legitimately-hosted job reports here as advisory drift until it earns its
+# own exception, the same way this repository's own bare hosted pins did
+# before they were allowlisted.
+#
+# ADVISORY, like the rest of this script's ``--github-vars`` pass: it is
+# read by a scheduled workflow, not a merge gate (OMN-18365 AC5 -- this
+# layer only reports; it cannot itself stop a job from starting).
+#
+# OMN-22478: the one exception is the policy's private_repo_hosted_exception,
+# which names a single repository, workflow path and job, each exact, and cites
+# the rulings that admitted it (see audit_private_repo_hosted_exception below).
 def audit_private_repo_hosted_placement(
     visibility_fn: Callable[
         [str], list[tuple[str, bool]]
@@ -791,27 +816,7 @@ def audit_private_repo_hosted_placement(
         [list[str], str], dict[str, dict[str, str]]
     ] = _default_branch_workflow_texts_batch,
 ) -> list[Finding]:
-    """OMN-18365 AC3: private repositories never run on GitHub-hosted runners.
-
-    Authority: operator ruling 2026-09-14, firm, recorded at
-    ``docs/tracking/ROLLING_WORK_LEDGER.md:7777`` -- private repositories
-    never run on GitHub-hosted Actions runners; their CI runs on the lab
-    fleet. Hosted runners are for public repositories only, where minutes are
-    free.
-
-    Deliberately does NOT consult ``hosted_runner_allowlist``: that allowlist
-    is scoped to this repository's own workflows and their pre-existing,
-    individually-justified hosted pins (ECR pushes, fork isolation, and so
-    on). Extending it across every other repository in the org is a separate
-    claim this check does not make -- a private repository with a
-    legitimately-hosted job reports here as advisory drift until it earns its
-    own exception, the same way this repository's own bare hosted pins did
-    before they were allowlisted.
-
-    ADVISORY, like the rest of this script's ``--github-vars`` pass: it is
-    read by a scheduled workflow, not a merge gate (OMN-18365 AC5 -- this
-    layer only reports; it cannot itself stop a job from starting).
-    """
+    """OMN-18365 AC3: private repositories never run on GitHub-hosted runners."""
     findings: list[Finding] = []
     # OMN-19998: workflow content comes from sparse default-branch Git reads.
     private_repos = [name for name, is_private in visibility_fn(org) if is_private]
@@ -854,6 +859,17 @@ def audit_private_repo_hosted_placement(
                         )
                     )
     return findings
+
+
+def audit_private_repo_hosted_exception(policy: dict[str, Any]) -> list[Finding]:
+    """The private-placement findings, less the one job the policy excepts."""
+    entry = policy.get(PRIVATE_HOSTED_EXCEPTION_KEY)
+    fields = ("repository", "path", "job", "ruling", "reason")
+    valid = isinstance(entry, dict) and all(
+        isinstance(entry.get(k), str) and entry[k].strip() for k in fields
+    )
+    scope = ":".join(entry[k] for k in fields[:3]) if valid else None
+    return [f for f in audit_private_repo_hosted_placement() if f.scope != scope]
 
 
 def _pull_request_target_exception(
@@ -1335,7 +1351,7 @@ def main() -> int:
             # OMN-18365 AC3, additive and inside the same step for the same
             # reason: resolves its repository universe from live visibility
             # rather than the policy's hand-curated `repositories:` list.
-            audit_private_repo_hosted_placement,
+            lambda: audit_private_repo_hosted_exception(policy),
         ]
         for live_pass in live_passes:
             # OMN-19998: a failed live read is reported as infrastructure and

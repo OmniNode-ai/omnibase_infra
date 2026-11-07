@@ -22,6 +22,9 @@ from omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_fil
 from omnibase_infra.nodes.node_scope_manifest_write_effect.handlers.handler_scope_manifest_write import (
     HandlerScopeManifestWrite,
 )
+from omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_write_request import (
+    ModelScopeManifestWriteRequest,
+)
 from omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_check_initiate import (
     HandlerScopeCheckInitiate,
 )
@@ -47,11 +50,7 @@ async def test_deploy_scope_manifest_readback(tmp_path: Path, destination: str) 
 
     request = await HandlerScopeCheckInitiate().handle(command)
     assert request.output_path == command.output_path
-    read = await HandlerScopeFileRead().handle(
-        file_path=request.file_path,
-        correlation_id=request.correlation_id,
-        output_path=request.output_path,
-    )
+    read = await HandlerScopeFileRead().handle(request)
     assert read.success, read.error_message
     assert read.output_path == command.output_path
     extracted = await HandlerScopeExtract().handle(
@@ -64,14 +63,16 @@ async def test_deploy_scope_manifest_readback(tmp_path: Path, destination: str) 
     )
     assert extracted.output_path == command.output_path
     written = await HandlerScopeManifestWrite().handle(
-        output_path=extracted.output_path,
-        plan_file_path=extracted.plan_file_path,
-        files=extracted.files,
-        directories=extracted.directories,
-        repos=extracted.repos,
-        systems=extracted.systems,
-        adjacent_files=extracted.adjacent_files,
-        correlation_id=extracted.correlation_id,
+        ModelScopeManifestWriteRequest(
+            output_path=extracted.output_path,
+            plan_file_path=extracted.plan_file_path,
+            files=extracted.files,
+            directories=extracted.directories,
+            repos=extracted.repos,
+            systems=extracted.systems,
+            adjacent_files=extracted.adjacent_files,
+            correlation_id=extracted.correlation_id,
+        )
     )
 
     assert written.success, written.error_message

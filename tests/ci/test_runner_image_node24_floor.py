@@ -48,11 +48,12 @@ LOCK_FILE = REPO_ROOT / "docker" / "runners" / "runner-image.lock.json"
 # #3940). Below this, `actions/checkout@v7` (using: node24) fails at "Set up job".
 NODE24_FLOOR = (2, 327, 0)
 
-# The live self-hosted fleet runs 2.336.0 (verified 2026-08-10, OMN-15702 — the
-# GitHub-mandated 2.334.0 deprecation cutoff landed 2026-08-10). The baked image
-# must never downgrade the fleet's runner. Raise this floor whenever the fleet
-# is rolled forward to a newer runner.
-LIVE_FLEET_FLOOR = (2, 336, 0)
+# The live self-hosted fleet runs 2.338.2 (rolled 2026-11-05, OMN-19998 — GitHub
+# stopped accepting 2.336.0 at the listener, so every pool went offline; the
+# earlier 2.334.0 cutoff landed 2026-08-10, OMN-15702). The baked image must
+# never downgrade the fleet's runner. Raise this floor whenever the fleet is
+# rolled forward to a newer runner.
+LIVE_FLEET_FLOOR = (2, 338, 2)
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 

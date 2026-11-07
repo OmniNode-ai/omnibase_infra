@@ -200,6 +200,7 @@ import time
 from collections import OrderedDict, defaultdict
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Final, cast
 from uuid import UUID, uuid4
@@ -267,11 +268,7 @@ from omnibase_infra.event_bus.lane_client_transport_binding import (
     resolve_lane_client_transport,
 )
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
-from omnibase_infra.event_bus.mixin_kafka_dlq import (
-    _REPLAY_COUNT_HEADER,
-    _REPLAY_COUNT_PARSE_FAILURE_SENTINEL,
-    MixinKafkaDlq,
-)
+from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
 from omnibase_infra.event_bus.models import (
     ModelEventBusReadiness,
     ModelEventHeaders,
@@ -284,6 +281,9 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 )
 from omnibase_infra.event_bus.topic_constants import is_dlq_topic
 from omnibase_infra.event_bus.topic_violation_alerter import TopicViolationAlerter
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin.handler import (
+    HandlerConsumerCoordinatorRejoin,
+)
 from omnibase_infra.handlers.kafka_permanent_failure import (
     classify_permanent_kafka_failure,
     kafka_failure_types,
@@ -296,6 +296,12 @@ from omnibase_infra.handlers.kafka_transactional_producer import (
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import ModelReadCommittedTopics
+from omnibase_infra.models.event_bus.model_dlq_replay_headers import (
+    REPLAY_COUNT_HEADER,
+    REPLAY_TARGET_GROUP_HEADER,
+    ModelDlqReplayTarget,
+    resolve_replay_count,
+)
 from omnibase_infra.models.event_bus.model_kafka_ungrouped_reader import (
     UNGROUPED_AUTO_OFFSET_RESET,
 )
@@ -343,9 +349,6 @@ from omnibase_infra.observability.wiring_health import (
 )
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
-)
-from omnibase_infra.protocols.protocol_rejoinable_consumer import (
-    ProtocolRejoinableConsumer,
 )
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
@@ -3842,13 +3845,8 @@ class EventBusKafka(
         if existing is not None:
             return existing
 
-        async def _recreate() -> ProtocolRejoinableConsumer:
-            return cast(
-                "ProtocolRejoinableConsumer",
-                await self._rebuild_consumer_for_rejoin(topic, group_id),
-            )
-
         supervisor = ConsumerRejoinSupervisor(
+            coordinator_handler=HandlerConsumerCoordinatorRejoin(),
             topic=topic,
             group_id=group_id,
             policy=ModelConsumerRejoinPolicy(
@@ -3860,7 +3858,9 @@ class EventBusKafka(
                 sync_unready_seconds=self._config.consumer_sync_unready_seconds,
             ),
             poll_timeout_ms=self._config.consumer_poll_timeout_ms,
-            recreate_consumer=_recreate,
+            recreate_consumer=partial(
+                self._rebuild_consumer_for_rejoin, topic, group_id
+            ),
             emit_event=self._record_consumer_rejoin_event,
             clock=self._clock,
             broker=self._sanitize_bootstrap_servers(self._bootstrap_servers),
@@ -4191,6 +4191,20 @@ class EventBusKafka(
             partition's batch: those records sit past the rewind point and
             Kafka will redeliver them.
         """
+        # OMN-22822: a record the DLQ replay node addressed to one consumer
+        # group is that group's alone; any other group skips it and commits.
+        replay_target = ModelDlqReplayTarget.from_raw_msg(msg)
+        if replay_target.excludes(group_id):
+            logger.info(
+                "Skipping replayed record on %s: %s names consumer group '%s', "
+                "not '%s'",
+                topic,
+                REPLAY_TARGET_GROUP_HEADER,
+                replay_target.consumer_group,
+                group_id,
+            )
+            return False
+
         # Get subscribers snapshot early - needed for consumer group in DLQ
         async with self._lock:
             subscribers = [
@@ -5575,27 +5589,9 @@ class EventBusKafka(
         # drops the header, both paths reset replay lineage to 0 on every
         # republish and should_replay's guard never trips (the 2026-08-05
         # dev DLQ amplification incident).
-        replay_count_str = headers_dict.get(_REPLAY_COUNT_HEADER)
-        if replay_count_str is not None:
-            try:
-                parsed_replay_count = int(replay_count_str)
-            except (ValueError, TypeError):
-                logger.warning(
-                    "Malformed %s header %r, failing closed to stop replay",
-                    _REPLAY_COUNT_HEADER,
-                    replay_count_str,
-                )
-                retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-            else:
-                if parsed_replay_count < 0:
-                    logger.warning(
-                        "Negative %s header value %d, failing closed to stop replay",
-                        _REPLAY_COUNT_HEADER,
-                        parsed_replay_count,
-                    )
-                    retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-                else:
-                    retry_count = parsed_replay_count
+        retry_count = resolve_replay_count(
+            headers_dict.get(REPLAY_COUNT_HEADER), retry_count
+        )
 
         max_retries = self._parse_int_header(
             headers_dict.get("max_retries"), 3, "max_retries"

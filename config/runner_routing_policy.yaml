@@ -651,6 +651,16 @@ cloud_canary_runner_variable:
   #
   # Three capability gaps, none visible offline, all found by one real job of
   # one real class. That is the argument for a canary of exactly this shape.
+  # SUPERSEDED, 2026-11-06 (OMN-22665). No workflow reads this variable any more:
+  # `rebuilt-postgres16-proof` resolves through the public-PR, docker and trusted
+  # seams to a hosted runner, and the capacity request job is deleted. The
+  # revert condition below fired: no runner carrying omni-cloud-ci has
+  # registered since 2026-11-05T03:51Z (the last completed run of the job was
+  # 41928549324, success at 2026-11-04T22:51:49Z, and six runs sat queued while
+  # their request job reported success). The declaration stays, with the value
+  # the live variable still holds, so the hourly audit holds the repository to
+  # it until the variable is deleted; deleting the variable and this entry
+  # together is the follow-up, and the repository variable is not written here.
   expected_json: '["self-hosted","omni-cloud-ci"]'
   repositories:
     - omnibase_infra
@@ -784,9 +794,19 @@ pull_request_target_exception:
   path: .github/workflows/call-repo-evidence-gate.yml
   ruling: "RULING 2026-10-08T22:41:24Z lane=orchestrator-9f8a (OMN-20074), operator words \"1 yes\""
   reason: "GitHub reads the Repo Evidence Gate caller from dev, so a pull request cannot edit the workflow that judges it, which is what lets repo-evidence / dod-verify later be required on dev, as omnimarket and omnibase_core already do. Same-repository heads run on the trusted runners as they do under pull_request, and the pinned reusable refuses fork heads before any checkout."
+# OMN-22478: the single named exception to the refusal of hosted runners in
+# private repositories (operator ruling 2026-09-14, audit_private_repo_hosted_placement).
+# Exactly one repository, one workflow path and one job, each exact (a pattern or
+# a list is refused by scripts/audit-runner-routing.py, and an invalid entry
+# grants nothing). Every other job in that repository, and every job of any other
+# private repository, stays refused.
+private_repo_hosted_exception:
+  repository: floor-canary
+  path: .github/workflows/canary.yml
+  job: canary
+  ruling: "Operator ruling of 2026-11-05 (OMN-22478): the outside canary is a hosted job that emails the alerts address, every 15 minutes, with a one-job audit exception; operator words \"Sure, I'm fine with the canary. Can we do it in GitHub? Don't they have like VMs that you can use?\""
+  reason: "The outside canary reads the one status file the lab publishes and fails when the lab goes silent, so it must not share fate with the lab: on a lab runner it would go quiet at the moment it exists to report. It reads no secret, touches no lab host and reaches no tailnet address; a failed scheduled run is GitHub's own notice to the owner of the schedule. The job is pinned to a literal GitHub-hosted label so that no seam flip can relocate it onto the fleet."
 hosted_runner_allowlist:
-  - path: .github/workflows/application-acl-postgres16-proof.yml
-    reason: "OMN-18291: the `request-cloud-capacity` job is bare hosted BY NECESSITY -- it is the job that asks the scale-to-zero cloud fleet for the runner the routed job below it needs, so it cannot itself resolve through the routing variable it is serving. Pinning it by literal also means no future flip of any seam can relocate the requester onto the capacity it is trying to request. The workflow's other job, `rebuilt-postgres16-proof`, is NOT hosted -- it is the canary routed to the cloud fleet through cloud_canary_runner_variable."
   - path: .github/workflows/ci.yml
     reason: "OMN-14127: CI Summary is a lightweight hosted fail-closed aggregator so required status always posts during self-hosted saturation."
   - path: .github/workflows/build-and-push-runtime.yml
@@ -799,6 +819,8 @@ hosted_runner_allowlist:
     reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors."
   - path: .github/workflows/model-review-capability-canary.yml
     reason: "OMN-17876: capability contract evidence must stay on hosted compute until separately authorized live runner selection."
+  - path: .github/workflows/security-scan.yml
+    reason: "OMN-22896: the secret-scan job runs the TruffleHog action in a public repository. The repository is public, so the job is pinned to a literal ubuntu-latest and never follows a variable onto an internal runner; the action also cannot run on the self-hosted fleet, where its docker bind mount resolves on the host daemon (OMN-16045)."
   - path: .github/workflows/runner-broker-dispatch-wedge-rerun.yml
     reason: "OMN-15776: scheduled broker-dispatch-wedge rerun must not share fate with the self-hosted runner fleet it remediates -- same isolation rationale as runner-fleet-canary.yml above."
   - path: .github/workflows/pr-ci-zombie-detector.yml
@@ -1143,9 +1165,6 @@ route:
         # OMN-20413: the hook push rehearsal, enforced by the CI Summary poller
         # via EXPECTED_EXTERNAL_CONTEXTS and absent from branch protection.
         - hook-push-rehearsal / rehearse
-        # OMN-17427: the hostile-reviewer finding gate, enforced by the CI
-        # Summary poller on PRs into dev via EXPECTED_EXTERNAL_CONTEXTS.
-        - Hostile Review Thread Gate
         - imperative-contract-guard / Imperative Contract Guard
         - Infra Node Handler Ownership
         - Integration Silent-Skip Guard (OMN-14172)

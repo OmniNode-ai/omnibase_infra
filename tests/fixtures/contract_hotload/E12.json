@@ -1,0 +1,20 @@
+{
+  "chain": "E12",
+  "kind": "error",
+  "title": "gate off",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "runtime",
+      "action": "observe",
+      "note": "hot load disabled: no subscription to the accepted topic"
+    },
+    {
+      "step": 2,
+      "actor": "cli",
+      "action": "observe",
+      "note": "send --wait-serving times out"
+    }
+  ],
+  "ends_in": "no subscription; exit 2 on timeout"
+}

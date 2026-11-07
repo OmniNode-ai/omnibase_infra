@@ -15,10 +15,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from omnibase_infra.handlers.handler_broker_grant_derive import (
+from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
     HandlerBrokerGrantDerive,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+from omnibase_infra.models.security.model_broker_grant_bindings import (
     ModelBrokerGrantBindings,
 )
 from scripts import lab_principal_issuer as lpi

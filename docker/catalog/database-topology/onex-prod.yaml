@@ -106,6 +106,7 @@ databases:
               - log_entries
               - open_obligations
               - orchestration_style_outcomes
+              - overlay_store
               - pr_landing_state
               - pr_landing_transitions
               - pr_state
@@ -271,6 +272,7 @@ databases:
               - agent_status_events
               - agent_transformation_events
               - capability_scores
+              - context_audit_events
               - context_roi_scores
               - delegation_budget_applied_events
               - delegation_budget_state
@@ -303,6 +305,7 @@ databases:
               - tenant_inference_credentials
               - usage_by_model_day
               - usage_by_model_day_calls
+              - view_seam_readings
             privileges:
               - INSERT
               - SELECT
@@ -311,6 +314,7 @@ databases:
           - object_type: TABLE
             objects:
               - projection_cost_savings_overview
+              - projection_delegation_daily
               - projection_delegation_model_routing
               - projection_delegation_quality_gate
               - projection_delegation_savings
@@ -461,5 +465,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: a5a423736361ad7d675e33ed0f058857760eea1becc2667f7bf61fea8c899400
+  sha256: acab8feceee3d9e83c134496893066b237e72fc3cad6cc58e7dda71f5d3a3d12
 topology_instance: onex-prod

@@ -29,6 +29,9 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_
     ConsumerFlowInputError,
     ConsumerFlowLaneUnsettledError,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_observation import (
     ModelConsumerFlowObservation,
 )
@@ -91,6 +94,9 @@ class HandlerDockerConsumerFlowTarget(ProtocolConsumerFlowTarget):
         lane = ConsumerFlowLane(
             docker=request.docker_bin,
             base_url=request.base_url,
+            containers=ModelConsumerFlowLane.from_compose_project(
+                request.compose_project
+            ),
             runner=self._runner,
             urlopen=self._urlopen,
             sleep=self._sleep,

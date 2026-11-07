@@ -100,6 +100,12 @@ FAKE_DOCKER = textwrap.dedent(
         verb_at = next(i for i, a in enumerate(args) if a in ("config", "stop", "up"))
         verb, rest = args[verb_at], args[verb_at + 1 :]
         project = args[args.index("-p") + 1] if "-p" in args else "-"
+        if verb == "config" and "--format" in rest:
+            # Normalized mount discovery precedes secondary relabels. This
+            # world's pool uses tmpfs; disk bind behavior has its own fixture.
+            print(json.dumps({"services": {name: {"environment": {}, "volumes": []}
+                                         for name in state["containers"]}}))
+            sys.exit(0)
         name = rest[-1]
         c = state["containers"][name]
         if verb == "config":
@@ -165,6 +171,7 @@ class World:
                 "RELABEL_DRAIN_INTERVAL_SECONDS": "1",
                 "RELABEL_READBACK_INTERVAL_SECONDS": "0",
                 "HOME": str(self.root / "home"),
+                "ONEX_STATE_DIR": str(self.root / "node-state"),
             }
         )
         merged.pop("DEPLOY_RUNNER_TOKEN", None)
@@ -218,12 +225,12 @@ def _build_world(tmp_path: Path, prefix: str, count: int) -> World:
     bindir.mkdir()
     (tmp_path / "home").mkdir()
     ssh = bindir / "ssh"
-    # A remote mkdir is recorded, not run: the host path (/home/jonah/...) does
-    # not exist, and may not be created, on a hosted CI runner. docker and gh
+    # A remote mkdir is recorded, not run: the remote host's home directory
+    # does not exist on a hosted CI runner. docker and gh
     # are shell functions naming the stubs, because the secondary-host PATH
     # preamble puts /usr/local/bin and /opt/homebrew/bin ahead of the stub dir.
     ssh.write_text(
-        "#!/usr/bin/env bash\nset -euo pipefail\nshift\n"
+        "#!/usr/bin/env bash\nset -euo pipefail\nif [[ $1 == -- ]]; then shift; fi\nshift\n"
         f'docker() {{ "{bindir}/docker" "$@"; }}; gh() {{ "{bindir}/gh" "$@"; }}\n'
         "export -f docker gh\n"
         'exec bash -c \'mkdir() { echo "MKDIR $*" >> "$FAKE_CALLS"; }; \'"$1"\n'

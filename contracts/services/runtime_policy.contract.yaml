@@ -67,6 +67,15 @@ profiles:
         source:
           source_type: env
           source_path: GEMINI_API_KEY
+      # OMN-22650: the TypeSafe Jev typed-decision rung (cloud-typesafe-jev in
+      # omnimarket bifrost_delegation.yaml) declares secret_ref
+      # llm.typesafe.api_key. The value lives in the secret store at
+      # /shared/env/LLM_TYPESAFE_API_KEY (dev) and reaches the container through
+      # x-runtime-env; the value is never committed.
+      - logical_name: llm.typesafe.api_key
+        source:
+          source_type: env
+          source_path: LLM_TYPESAFE_API_KEY
       # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
       # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
       # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
@@ -187,13 +196,26 @@ profiles:
         source:
           source_type: env
           source_path: GITHUB_WEBHOOK_SECRET
+      # OMN-22685: the Linear key for node_create_ticket and node_linear_ticket_write_effect,
+      # which lab lanes reach over the bus (`onex ticket`). The handler resolves it through
+      # contract_secret_ref(_CONTRACT_PATH, "LINEAR_API_KEY"), the LITERAL name from the node's own
+      # contract.yaml secrets: block, the same shape as SLACK_BOT_TOKEN and ONEXBOT_OCC_* above.
+      # Unmapped, this lane's enable_convention_fallback: false made every lab ticket write
+      # terminate secret_unavailable (linear_api_key_unresolved) while the container env already
+      # held the key (docker-compose.infra.yml, x-runtime-env). Source of truth: secret store key
+      # dev:/shared/env/LINEAR_API_KEY. The value never appears here.
+      - logical_name: LINEAR_API_KEY
+        source:
+          source_type: env
+          source_path: LINEAR_API_KEY
     services:
       main:
         runtime_id: dev-main
-        # OMN-21288: tenant projection nodes and the five projection writers
+        # OMN-21288: tenant projection nodes and the six projection writers
         # that dispatch in-process (omnimarket handler_runtime_writer) share
-        # the main runtime. The delegation and hook-ledger writers still run a
-        # standalone consume loop and keep their containers.
+        # the main runtime. The delegation writer joined them in plan task T10
+        # (OMN-22664): its contract names the retired container's consumer
+        # group under consumer_group_handover, so main resumes its offsets.
         folded_profiles:
           - tenant-projection
           - projection-writer-live-events
@@ -201,6 +223,7 @@ profiles:
           - projection-writer-savings
           - projection-writer-tenant-credentials
           - projection-writer-tenant-registry
+          - projection-writer-delegation
         foldable_services:
           tenant-projection: tenant-projection-writer
           projection-writer-live-events: projection-live-events-writer
@@ -208,6 +231,7 @@ profiles:
           projection-writer-savings: projection-savings-writer
           projection-writer-tenant-credentials: projection-tenant-credentials-writer
           projection-writer-tenant-registry: projection-tenant-registry-writer
+          projection-writer-delegation: projection-delegation-writer
         # OMN-21288: the claude hook-events projection node runs in main with no
         # profile of its own; its writer container of the previous revision is
         # retired by name, from this list, by the deploy agent and handler.
@@ -238,6 +262,7 @@ profiles:
           # Delegation and hook-event consumers subscribe before every other
           # contract's, in this order.
           priority_contracts:
+            - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
             - node_delegation_chain_ledger_effect
             - projection_claude_hook_events
@@ -254,6 +279,14 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
+        # The client checks first-hop membership before publishing, including
+        # when this separate effects carrier has never received a request.
+        boot:
+          ready_bound_seconds: 600
+          max_concurrent_contract_attach: 4
+          priority_contracts:
+            - node_delegate_skill_orchestrator
+          memory_limit: 1536M
         # OMN-20533: the READ half of BYOK on the .201 dev lane. onex-api writes
         # a tenant's provider key to Infisical env dev, folder
         # /tenant-inference-credentials, under a ref minted per request

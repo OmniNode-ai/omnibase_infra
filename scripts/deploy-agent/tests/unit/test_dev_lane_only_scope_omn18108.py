@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -243,6 +244,10 @@ class TestTheBuildPhaseReachesThem:
 
         with (
             patch("deploy_agent.executor._run", side_effect=_fake_run),
+            patch(
+                "deploy_agent.executor._hold_build_context",
+                side_effect=lambda purpose: nullcontext(),
+            ),
             patch.object(DeployExecutor, "_compose_up", return_value=None),
         ):
             executor.rebuild_scope(

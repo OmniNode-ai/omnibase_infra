@@ -43,6 +43,46 @@ what the retired consumer did on a partition it never committed (the
 omnimarket projection runner uses ``earliest``); the handover applies the same
 rule there so the runtime continues where the container would have.
 
+``handover_rule`` says which offsets win when both groups hold a commit
+(one-runtime plan T8, the TLA+ model ``formal/consumer_group_handover``):
+
+* ``copy_if_uncommitted`` (the default, the writers' rule): a partition the
+  runtime group already committed keeps its commit. A projection writer UPSERTs
+  on a deterministic key, so the replay a rollback or a second fold causes is
+  absorbed.
+* ``last_ran`` (effects and the worker, whose handlers cannot take a repeat):
+  the destination takes the commit of the side that last ran, over whatever it
+  holds. Every cutover copies that commit onto the destination and only the
+  running side then advances, so on each partition the side that last ran holds
+  the later of the two commits; the planner reads it that way and needs no
+  record of which side was deployed. A second fold therefore never trusts the
+  runtime group's commit from before a rollback (the model's SecondFoldFresh),
+  and a retry after a crash copies from the side that ran last, not from the
+  side the fold started on (its mut_recopy_fixed). The rollback half, the
+  retired side taking the runtime group's commit before it starts, applies the
+  same rule from that side and is not wired by this key alone.
+
+It is declared beside the other keys, as ``handover_rule: last_ran``.
+
+``from_instance_id`` (OMN-22714, T8 part 2) names a retired process that ran
+this same contract, by its ``KAFKA_INSTANCE_ID``::
+
+    consumer_group_handover:
+      from_instance_id: runtime-effects
+      from_auto_offset_reset: latest
+      handover_rule: last_ran
+
+The retired group is this contract's own group id carrying that instance
+discriminator and the per-topic scope, derived per topic by the bus
+(``resolve_retired_group``), so it stands alone and is exclusive with the other
+two forms. A lane's runtime policy contract declares it once per folded profile
+(``fold_handovers``) in place of once in every contract the profile owns.
+
+Under either rule the handover first fences the retired group: it proceeds only
+when that group has no members, waiting up to ``fence.wait_seconds``
+(``ModelConsumerGroupFence``), so no fold takes over a position its old
+consumer is still moving.
+
 The key is read by ``handler_consumer_group_offset_handover`` and not by
 ``ModelEventBusSubcontract`` in ``omnibase_core``, for the reason
 ``model_consume_concurrency`` gives: it is a runtime-local concern, and
@@ -58,6 +98,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.event_bus.model_consumer_group_fence import (
+    ModelConsumerGroupFence,
+)
 from omnibase_infra.utils import compute_consumer_group_id
 
 __all__ = ["ModelConsumerGroupHandover"]
@@ -86,6 +129,24 @@ class ModelConsumerGroupHandover(BaseModel):
         ),
     )
 
+    handover_rule: Literal["copy_if_uncommitted", "last_ran"] = Field(
+        default="copy_if_uncommitted",
+        description=(
+            "Which commit wins on a partition both groups committed: the "
+            "runtime group's own (copy_if_uncommitted, projection writers) or "
+            "the later of the two, the side that last ran (last_ran, consumers "
+            "whose handler cannot take a repeat)."
+        ),
+    )
+
+    fence: ModelConsumerGroupFence = Field(
+        default_factory=ModelConsumerGroupFence,
+        description=(
+            "The wait for the retired group to have no members before its "
+            "commit is read; a group still consumed is refused (OMN-22714)."
+        ),
+    )
+
     from_group_id: str | None = Field(
         default=None,
         min_length=1,
@@ -100,10 +161,35 @@ class ModelConsumerGroupHandover(BaseModel):
         ),
     )
 
+    from_instance_id: str | None = Field(
+        default=None,
+        min_length=1,
+        strict=True,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        description=(
+            "The retired process's KAFKA_INSTANCE_ID (OMN-22714, T8 part 2): the "
+            "retired group is this contract's own group id carrying that "
+            "instance discriminator and the per-topic scope, derived per topic "
+            "by the bus. Stands alone, for a retired container that ran this "
+            "same contract (the effects container), so one declaration serves "
+            "a contract the static forms cannot name for every topic."
+        ),
+    )
+
     @model_validator(mode="after")
     def _segments_complete_or_group_id(self) -> Self:
         """Service, node and version are all declared, or ``from_group_id`` is."""
         segments = (self.from_service, self.from_node, self.from_version)
+        if self.from_instance_id is not None:
+            if self.from_group_id is not None or any(
+                segment is not None for segment in segments
+            ):
+                raise ValueError(
+                    "from_instance_id stands alone: it is exclusive with "
+                    "from_group_id and with from_service, from_node and "
+                    "from_version"
+                )
+            return self
         if any(segment is None for segment in segments) and (
             self.from_group_id is None
             or any(segment is not None for segment in segments)
@@ -120,6 +206,11 @@ class ModelConsumerGroupHandover(BaseModel):
         ``from_group_id`` verbatim when declared, otherwise the group derived
         from the service, node and version segments.
         """
+        if self.from_instance_id is not None:
+            raise ValueError(
+                "a handover declared by from_instance_id has a retired group "
+                "per topic; resolve it through the bus with resolve_retired_group"
+            )
         if self.from_group_id is not None:
             return self.from_group_id
         if (

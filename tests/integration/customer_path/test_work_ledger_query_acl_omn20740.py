@@ -23,12 +23,14 @@ from aiokafka.errors import GroupAuthorizationFailedError, TopicAuthorizationFai
 
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.handlers.handler_broker_grant_derive import HandlerBrokerGrantDerive
+from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
+    HandlerBrokerGrantDerive,
+)
 from omnibase_infra.handlers.handler_work_ledger_query import (
     HandlerWorkLedgerQuery,
     load_work_ledger_query_client_config,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+from omnibase_infra.models.security.model_broker_grant_bindings import (
     ModelBrokerGrantBindings,
 )
 

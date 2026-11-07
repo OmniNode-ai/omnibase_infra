@@ -52,7 +52,10 @@ LIVE_WINDOW_SQL: Final[str] = (
     "and w.window_start > now() - interval '10 minutes')"
 )
 
-#: (kind, consumer-group prefix, subscribed topic, the counter that must move)
+#: (kind, consumer-group prefix after the environment segment, subscribed
+#: topic, the counter that must move). A group is ``{env}.{service}.{node}.
+#: {purpose}.{version}`` and the environment is the graded lane's own, so the
+#: prefix is matched after it (OMN-21485).
 #: The audit kind is the event-ledger projection on the node heartbeat, a topic
 #: every lab runtime produces. It was the gateway link-health projection on the
 #: gateway heartbeat, which has no producer on a lane that runs no gateway: the
@@ -61,13 +64,13 @@ LIVE_WINDOW_SQL: Final[str] = (
 KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
     (
         "audit_projection_consumer",
-        "local.omnibase_infra.node_ledger_projection_compute.consume.",
+        "omnibase_infra.node_ledger_projection_compute.consume.",
         _contract_topic("audit_projection"),
         "messages_in",
     ),
     (
         "publishing_reducer",
-        "local.omnimarket.projection_consumer_flow.consume.",
+        "omnimarket.projection_consumer_flow.consume.",
         _contract_topic("publishing_reducer"),
         "messages_out",
     ),
@@ -76,20 +79,24 @@ KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
 APPLIED_TOPIC: Final[str] = _contract_topic("applied")
 SEAM_DLQ: Final[str] = _contract_topic("seam_dlq", "dlq")
 
-RUNTIME_CONTAINERS: Final[tuple[str, ...]] = (
-    "omninode-runtime",
-    "omninode-runtime-effects",
-)
-BOOT_CONTAINERS: Final[tuple[str, ...]] = (
-    *RUNTIME_CONTAINERS,
-    "omnimarket-projection-api",
-)
-BROKER_CONTAINER: Final[str] = "omnibase-infra-redpanda"
+# OMN-21485: the containers C28 reads are the graded lane's own, derived from
+# that lane's compose project (models/model_consumer_flow_lane.py), so no lane's
+# container name is written here. The runtime roles are what every lane shares.
+RUNTIME_ROLES: Final[tuple[str, ...]] = ("-runtime", "-runtime-effects")
+
+
+def runtime_role(container: str) -> str | None:
+    """The runtime role a container name carries, or None."""
+    for role in sorted(RUNTIME_ROLES, key=len, reverse=True):
+        if container.endswith(role):
+            return role
+    return None
+
+
 # The broker's internal listener. Every rpk call pins it: an offset-range consume
 # otherwise dials the external advertised listener, whose tailnet name does not
 # resolve inside the container while the tailnet is down (C28 run 37140168388).
 BROKER_INTERNAL_ADDRESS: Final[str] = "redpanda:9092"
-PG_CONTAINER: Final[str] = "omnibase-infra-postgres"
 ANALYTICS_DB: Final[str] = "omnidash_analytics"
 
 #: Both names the stall-alert seam's input model has carried.
