@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-22812
-title: "omnibase_infra tests pass on the Ubuntu 26.04 hosted image: the wedge payload uses shell builtins and the lease test transport uses an exclusive mkdir"
-summary: "The detached-entrypoint wedge payload emits its bytes with shell builtins, the pre-PR lease race transport puts an exclusive mkdir first on PATH, and a probe test names the cause when a host's mkdir admits more than one winner."
+title: "omnibase_infra tests pass on the Ubuntu 26.04 hosted image and the Tests (Split) job falls back to the Ubuntu 24.04 image: the wedge payload uses shell builtins, the lease test transport uses an exclusive mkdir, and the PostgreSQL 16 tests run again"
+summary: "The detached-entrypoint wedge payload emits its bytes with shell builtins, the pre-PR lease race transport puts an exclusive mkdir first on PATH, a probe test names the cause when a host's mkdir admits more than one winner, and the test-parallel job's selector fallbacks name ubuntu-24.04 instead of ubuntu-latest (which became Ubuntu 26.04 without PostgreSQL 16 binaries on 2026-11-06) with a guard test that refuses a floating fallback there."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -13,10 +13,20 @@ requirements:
         statement: 'AC1: the wedge and lease race tests pass on an Ubuntu 26.04 image and fail on dev there, shown by a container run -- falsifier: uv run pytest of the two test modules inside an ubuntu:26.04 container on a lab host'
       - id: AC2
         statement: 'AC2: a probe test names the cause when a host''s mkdir is not exclusive -- falsifier: uv run pytest of the new probe test with a non-exclusive mkdir shim'
+  - id: req-omn22812-test-parallel-pinned-image
+    statement: The Tests (Split) job runs on ubuntu-24.04 while the runner variables stay unset, and a test names a floating fallback.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the Tests (Split) selector fallbacks name ubuntu-24.04 and a guard test fails on the same selector with ubuntu-latest -- falsifier: uv run --frozen pytest tests/ci/test_test_parallel_hosted_image_pin_omn22812.py -q --no-cov'
+      - id: AC4
+        statement: 'AC4: the runner routing audit reads the workflows clean with the pinned fallback -- falsifier: uv run python scripts/audit-runner-routing.py --local-workflows'
 evidence_requirements:
   - kind: tests
     description: The two test modules pass at the head on the 24.04 host and in an ubuntu:26.04 container; the same modules fail on origin/dev in that container.
     command: uv run --frozen pytest tests/ci/test_gate_runner_detached_entrypoint.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q --no-cov
+  - kind: tests
+    description: The guard module passes at the head and its control names the dev selector; the routing audit reads clean.
+    command: uv run --frozen pytest tests/ci/test_test_parallel_hosted_image_pin_omn22812.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ""
@@ -37,4 +47,20 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q --no-cov -k test_the_hosts_mkdir_admits_one_winner_under_a_race
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22812-pin-guard-passes
+    description: The guard module passes at the head, including the control that names the dev selector.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_test_parallel_hosted_image_pin_omn22812.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22812-routing-audit-clean
+    description: The runner routing audit reads the local workflows with no finding.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: uv run python scripts/audit-runner-routing.py --local-workflows
         cwd: ${OMNI_HOME}/omnibase_infra
