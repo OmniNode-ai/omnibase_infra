@@ -11441,7 +11441,7 @@ async def _subscribe_contract_topics(
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
         HandlerContractSubscribePreflight,
-        load_consumer_group_handover,
+        load_contract_handover,
     )
     from omnibase_infra.models import ModelNodeIdentity
     from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request import (
@@ -11526,7 +11526,7 @@ async def _subscribe_contract_topics(
     preflight = HandlerContractSubscribePreflight(
         contract_name=contract.name,
         concurrency=load_consume_concurrency(contract.contract_path),
-        handover=load_consumer_group_handover(contract.contract_path),
+        handover=load_contract_handover(contract),
         event_bus=event_bus,
         environment=environment,
         consumer_group=consumer_group,
