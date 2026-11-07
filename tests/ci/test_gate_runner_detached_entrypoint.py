@@ -62,11 +62,16 @@ LAUNCHER = REPO_ROOT / "scripts" / "ci" / "run_on_gate_runner.sh"
 PAYLOAD_BYTES = 256 * 1024
 PIPE_BUFFER_CEILING = 64 * 1024
 
-# A payload that emits PAYLOAD_BYTES on stdout and then exits 0. `yes` + `head`
-# is used rather than a Python one-liner so the test does not depend on an
-# interpreter being resolvable inside whatever userland runs it.
+# A payload that emits PAYLOAD_BYTES on stdout and then exits 0. It uses only
+# shell builtins (`printf`, `[`), never `yes` or `head`: Ubuntu 26.04 ships a
+# `head` that writes the whole count into a full pipe without blocking, which
+# left the control below unable to wedge, so every assertion after it went
+# vacuous. Builtins also keep the test independent of any
+# interpreter or userland beyond a POSIX `sh`.
+_LINE_BYTES = 64
 _EMIT_PAYLOAD = (
-    f"yes 0123456789abcdefghijklmnopqrstuvwxyz | head -c {PAYLOAD_BYTES}; exit 0"
+    f'i=0; while [ "$i" -lt {PAYLOAD_BYTES // _LINE_BYTES} ]; do '
+    f"printf '%0{_LINE_BYTES - 1}d\\n' 0; i=$((i + 1)); done; exit 0"
 )
 
 pytestmark = pytest.mark.ci
