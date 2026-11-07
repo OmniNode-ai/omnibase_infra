@@ -53,7 +53,7 @@ def _effect() -> Any:
 
 
 def _follow() -> Any:
-    return _effect().CostEstimatorWebFollow(
+    return _effect().ModelCostEstimatorWebFollow(
         repository=WEB_REPOSITORY,
         repository_url=WEB_URL,
         branch="dev",

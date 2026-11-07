@@ -98,7 +98,7 @@ def dev_lane_build_settings(
     return parse_build_settings(execution, lane, _declaration(execution))
 
 
-class CostEstimatorWebFollow(BaseModel):
+class ModelCostEstimatorWebFollow(BaseModel):
     """The declared web source, with the two reads its idle follower decides on.
 
     Built from the build declaration: the repository, url and branch are the
@@ -181,7 +181,7 @@ def _sha(value: object) -> str | None:
 
 def dev_lane_web_follow(
     execution: ModuleType, lane: str
-) -> CostEstimatorWebFollow | None:
+) -> ModelCostEstimatorWebFollow | None:
     """The web source the idle follower tracks, from the declaration (OMN-22808).
 
     ``None`` when the lane is not dev, the estimator service is disabled, the
@@ -210,7 +210,7 @@ def dev_lane_web_follow(
         if not all(values.values()):
             return None
         validate_source(values["repository"], values["repository_url"])
-        return CostEstimatorWebFollow(
+        return ModelCostEstimatorWebFollow(
             **values,
             branch=str(build["branch"]),
             container=str(follow["container"]),

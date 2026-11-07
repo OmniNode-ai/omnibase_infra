@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from omnibase_infra.nodes.node_setup_local_provision_effect.runtime_cost_estimator_build import (
-    CostEstimatorWebFollow,
+    ModelCostEstimatorWebFollow,
 )
 
 pytestmark = pytest.mark.integration
@@ -26,7 +26,7 @@ def test_shipped_contract_follow_block_builds_the_follow_model() -> None:
         "cost_estimator_build"
     ]
     build = declaration["build"]
-    follow = CostEstimatorWebFollow(
+    follow = ModelCostEstimatorWebFollow(
         repository="web-front-end",
         repository_url="https://example.invalid/web-front-end.git",
         branch=str(build["branch"]),

@@ -64,3 +64,11 @@ dod_evidence:
       - check_type: command
         check_value: ssh "$DEPLOY_PROBE_HOST" docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' omninode-cost-estimator-web
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22808-follow-contract-builds
+    description: The shipped estimator contract's follow block builds the follow model; the test fails at the merge base, where the model does not exist.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_estimator_web_follow_contract_omn22808.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
