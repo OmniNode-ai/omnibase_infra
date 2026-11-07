@@ -12,18 +12,22 @@ commit and a second call are all covered without a broker.
 
 Only the consumer factory is replaced. The bus is a real ``EventBusKafka``
 (never started), so the group the offsets land on and the physical topic come
-from the bus's own resolution, exactly as in production.
+from the bus's own resolution, exactly as in production. The fake consumer's
+client answers the fence's DescribeGroups (OMN-22714) from the broker's member
+lists; a group not listed has no members.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
+from aiokafka.protocol.admin import DescribeGroupsRequest, DescribeGroupsRequest_v0
 from aiokafka.structs import TopicPartition
 
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -43,6 +47,7 @@ FACTORY = (
     "create_offset_consumer"
 )
 
+
 pytestmark = pytest.mark.unit
 
 
@@ -55,11 +60,27 @@ class _Cluster:
 
 
 class _Client:
-    def __init__(self, cluster: _Cluster) -> None:
-        self._cluster = cluster
+    def __init__(self, broker: _FakeBroker) -> None:
+        self._broker = broker
 
     async def fetch_all_metadata(self) -> _Cluster:
-        return self._cluster
+        return self._broker.cluster
+
+    async def coordinator_lookup(self, coordinator_type: int, group: str) -> int:
+        return 0
+
+    async def send(self, node_id: int, request: object) -> SimpleNamespace:
+        """DescribeGroups for one group, as the fence asks."""
+        assert isinstance(request, DescribeGroupsRequest)
+        (group,) = request.build(DescribeGroupsRequest_v0).groups
+        self._broker.describes.append(group)
+        answers = self._broker.members.get(group, [[]])
+        members = answers.pop(0) if len(answers) > 1 else answers[0]
+        state = "Stable" if members else "Empty"
+        error = self._broker.describe_error.get(group, 0)
+        return SimpleNamespace(
+            groups=[(error, group, state, "consumer", "", list(members))]
+        )
 
 
 class _FakeBroker:
@@ -80,13 +101,17 @@ class _FakeBroker:
         self.stopped: list[str] = []
         self.assigned: dict[str, list[TopicPartition]] = {}
         self.commit_calls: list[tuple[str, dict[TopicPartition, int]]] = []
+        # The fence's view: one member list per describe, the last one repeats.
+        self.members: dict[str, list[list[str]]] = {}
+        self.describe_error: dict[str, int] = {}
+        self.describes: list[str] = []
 
 
 class _FakeConsumer:
     def __init__(self, broker: _FakeBroker, group_id: str) -> None:
         self._broker = broker
         self._group = group_id
-        self._client = _Client(broker.cluster)
+        self._client = _Client(broker)
 
     async def start(self) -> None:
         self._broker.started.append(self._group)
