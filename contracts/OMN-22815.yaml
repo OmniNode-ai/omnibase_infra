@@ -44,7 +44,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn15330_contract_dlq_topics_provisioned.py tests/unit/runtime/auto_wiring/test_omn15832_projection_topics_provisioned.py tests/unit/runtime/test_topic_provisioner_integration.py -q --no-cov
+        check_value: uv run --frozen pytest tests/ci/test_boot_universe_provision_omn22815.py::test_dev_boot_does_not_run_the_universe_warm tests/unit/runtime/auto_wiring/test_omn15330_contract_dlq_topics_provisioned.py tests/unit/runtime/auto_wiring/test_omn15832_projection_topics_provisioned.py tests/unit/runtime/test_topic_provisioner_integration.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22815-dev-runtime-switch-off
     description: After the deploy agent installs this change, the dev runtime container carries ONEX_BOOT_UNIVERSE_PROVISION at 0. The probe prints no secret.
