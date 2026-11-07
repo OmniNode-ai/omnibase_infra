@@ -54,10 +54,10 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k http_status
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23027-ac4-still-fails-closed
-    description: Every deadline branch exits non-zero and the verdict case keeps its single exit 0, so the honesty fix is not a fail-open loosening.
+    description: >-
+      Every deadline branch exits non-zero and the verdict case keeps its single exit 0, so the honesty fix is not a fail-open loosening. This is an invariant guard, not evidence of a change, and it deliberately binds no AC: it passes at the merge base as well, because the merge base already fails closed. A control that FAILED here would mean the base had been fail-open, so there is no earlier behaviour to control and dod-verify's merge-base control cannot apply. AC4 is instead carried by its falsifier in the requirement and by the returncode assertion inside AC2's test, which does fail at the merge base.
     source: manual
-    binds_ac:
-      - AC4
+    execution_scope: local_done_gate
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k fails_closed
