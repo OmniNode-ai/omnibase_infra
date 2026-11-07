@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22808
+title: "The dev deploy agent follows the cost estimator's declared web repository, so a merge to its dev branch starts a dev rebuild"
+summary: "The estimator build declaration gains a follow block naming the running container. The agent's idle follower adds the declared web repository to its decisions: running revision from the container's image revision label, head from git ls-remote on the declared url and branch."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22808-web-source-is-followed
+    statement: A merge to the estimator web repository's dev branch starts one idle-converge dev rebuild, and the estimator image revision label then equals that merge's head; the lab read from the branch is in the pull request body.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: with the follow block declared and the running estimator revision older than the web dev head, the idle decision for the web repository is CONVERGE and one idle-converge job is started -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_web_followed_idle_converge_omn22478.py -k converge, run with the follow block removed from the declaration, must show no decision for the web repository'
+      - id: AC2
+        statement: 'AC2: with the running revision equal to the web dev head the verdict is UP_TO_DATE and no job starts -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_web_followed_idle_converge_omn22478.py -k up_to_date'
+      - id: AC3
+        statement: 'AC3: an unreadable running revision or an unreadable head refuses with RUNNING_UNREADABLE or HEAD_UNREADABLE and starts nothing -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_web_followed_idle_converge_omn22478.py -k unreadable'
+      - id: AC4
+        statement: "AC4: live on the dev lane host, after the next merge to the web repository's dev branch, one idle-converge job runs and the estimator container's image revision label equals that merge's head -- falsifier: docker inspect of the estimator container label org.opencontainers.image.revision older than the newest web dev commit one hour after the merge"
+evidence_requirements:
+  - kind: tests
+    description: The follower tests pass at the head, and the converge test fails with the follow block removed.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_web_followed_idle_converge_omn22478.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22808-follower-tests
+    description: The web follower tests and the estimator build and idle converge tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2, AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_web_followed_idle_converge_omn22478.py scripts/deploy-agent/tests/unit/test_idle_converge_omn19509.py scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22808-installed-on-dev
+    description: After the deploy agent installs this change, the dev host's runtime module carries the web follower. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" grep -c 'def dev_lane_web_follow' /data/omninode/omnibase_infra/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22808-estimator-on-web-head
+    description: The estimator container's image revision label equals the web repository's dev head. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' omninode-cost-estimator-web
+        cwd: ${OMNI_HOME}/omnibase_infra
