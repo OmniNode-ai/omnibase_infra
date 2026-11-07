@@ -51,5 +51,5 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          PROBE='import sys; sys.path.insert(0, "src"); from omnibase_infra.runtime.auto_wiring.handler_wiring import _is_projection_content_failure as f; E = type("TenantRegistryResolutionError", (ValueError,), {"__module__": "omnimarket.projection.tenant_registry_resolution"}); assert f(E("x")) is True; assert f(ValueError("x")) is False'; if docker inspect ${RUNTIME_CONTAINER:-omninode-runtime} >/dev/null 2>&1; then docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "$PROBE"; else grep -q 'tenant_registry_resolution' src/omnibase_infra/runtime/auto_wiring/handler_wiring.py; fi
+          PROBE='import sys; sys.path.insert(0, "src"); from omnibase_infra.runtime.auto_wiring.handler_wiring import _is_projection_content_failure as f; E = type("TenantRegistryResolutionError", (ValueError,), {"__module__": "omnimarket.projection.tenant_registry_resolution"}); assert f(E("x")) is True; assert f(ValueError("x")) is False'; if docker inspect ${RUNTIME_CONTAINER:-omninode-runtime} >/dev/null 2>&1; then docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "$PROBE"; else grep -q 'omnimarket.projection.tenant_registry_resolution' src/omnibase_infra/handlers/projection_failure_classification.py; fi
         cwd: ${OMNI_HOME}/omnibase_infra
