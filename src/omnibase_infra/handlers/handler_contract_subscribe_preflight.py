@@ -81,9 +81,10 @@ retired side's later commit. The rule holds for every fold, writers included.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -113,6 +114,7 @@ from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_result i
 from omnibase_infra.models.event_bus.model_offset_handover_result import (
     ModelOffsetHandoverResult,
 )
+from omnibase_infra.models.model_fold_handover import ModelFoldHandover
 from omnibase_infra.protocols.protocol_consume_concurrency_declarer import (
     ProtocolConsumeConcurrencyDeclarer,
 )
@@ -122,12 +124,19 @@ from omnibase_infra.protocols.protocol_consumer_group_offset_handover import (
 from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
     ModelConsumeConcurrency,
 )
+from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
+    ModelDiscoveredContract,
+)
+from omnibase_infra.runtime.runtime_profile import resolve_runtime_folded_profiles
 
 __all__ = [
     "CONSUMER_GROUP_HANDOVER_KEY",
     "ConsumerGroupFenceError",
     "HandlerContractSubscribePreflight",
     "hand_over_committed_offsets",
+    "load_contract_handover",
+    "resolve_fold_handover",
+    "resolve_retired_group",
     "load_consumer_group_handover",
     "plan_offset_handover",
     "supports_offset_handover",
@@ -180,6 +189,64 @@ def load_consumer_group_handover(
             "cannot be read must not be treated as absent"
         )
     return ModelConsumerGroupHandover.model_validate(declared)
+
+
+FOLD_HANDOVERS_ENV_VAR = "ONEX_RUNTIME_FOLD_HANDOVERS"
+
+
+def load_contract_handover(
+    contract: ModelDiscoveredContract,
+    environ: Mapping[str, str],
+) -> ModelConsumerGroupHandover | None:
+    """The handover a discovered contract is wired with (OMN-22714).
+
+    The contract's own ``consumer_group_handover`` wins; otherwise the
+    fold-wide declaration of the folded profile that owns the contract
+    (``ONEX_RUNTIME_FOLD_HANDOVERS``); otherwise none.
+    """
+    return load_consumer_group_handover(
+        contract.contract_path
+    ) or resolve_fold_handover(contract.runtime_profiles, environ)
+
+
+def resolve_fold_handover(
+    contract_profiles: Sequence[str],
+    environ: Mapping[str, str],
+) -> ModelConsumerGroupHandover | None:
+    """The fold-wide handover of the first folded profile a contract belongs to.
+
+    ``ONEX_RUNTIME_FOLD_HANDOVERS`` is a JSON object, profile to
+    ``ModelFoldHandover``, rendered from the lane's runtime policy contract
+    (OMN-22714). Unset or blank gives no profile a handover. A contract's own
+    ``consumer_group_handover`` is read first by the caller and always wins.
+
+    Raises:
+        ValueError: The variable is not a JSON object of valid declarations, or
+            names a profile this process does not fold; an unreadable fold
+            declaration must not read as absent, which would start the folded
+            groups at the bus default.
+    """
+    raw = environ.get(FOLD_HANDOVERS_ENV_VAR, "").strip()
+    if not raw:
+        return None
+    try:
+        declared = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{FOLD_HANDOVERS_ENV_VAR} is not valid JSON: {exc}") from exc
+    if not isinstance(declared, dict):
+        raise ValueError(f"{FOLD_HANDOVERS_ENV_VAR} must be a JSON object")
+    folded = set(resolve_runtime_folded_profiles(environ))
+    if unfolded := sorted(set(declared) - folded):
+        raise ValueError(
+            f"{FOLD_HANDOVERS_ENV_VAR} names {unfolded}, which "
+            "ONEX_RUNTIME_FOLDED_PROFILES does not fold"
+        )
+    for profile in contract_profiles:
+        if profile in declared:
+            return ModelFoldHandover.model_validate(
+                declared[profile]
+            ).to_contract_handover()
+    return None
 
 
 def plan_offset_handover(
@@ -364,6 +431,57 @@ async def _hand_over_on_kafka(
     )
 
 
+def resolve_retired_group(
+    event_bus: object,
+    handover: ModelConsumerGroupHandover,
+    *,
+    environment: str,
+    to_group: str,
+    topic: str,
+) -> str:
+    """The retired consumer group to read for ``topic`` (OMN-22714, T8 part 2).
+
+    A static declaration names one group for every topic. ``from_instance_id``
+    names a retired process that ran this same contract, whose group the bus
+    scopes per topic and discriminates by instance, so it is derived here by the
+    same resolution the successor's group goes through.
+
+    Raises:
+        ValueError: The declared instance is the bus's own, which would read
+            the successor's commits as the retired side's.
+        TypeError: The bus cannot derive a group for another instance.
+    """
+    if handover.from_instance_id is None:
+        return handover.source_group(environment)
+    if isinstance(event_bus, EventBusInmemory):
+        return to_group
+    if not isinstance(event_bus, EventBusKafka):
+        raise TypeError(
+            f"{type(event_bus).__name__} cannot derive the consumer group of "
+            f"retired instance {handover.from_instance_id!r} (OMN-22714)"
+        )
+    if handover.from_instance_id == event_bus.config.instance_id:
+        raise ValueError(
+            f"handover from instance {handover.from_instance_id!r} names this "
+            "bus's own instance; the retired group would be the successor's "
+            "group itself (OMN-22714)"
+        )
+    # The retired process's group goes through the same resolution as the
+    # successor's (topic scope, instance discriminator, length limit), by a bus
+    # object that holds this bus's configuration under the retired instance id
+    # and is never started.
+    retired_bus = EventBusKafka(
+        config=event_bus.config.model_copy(
+            update={"instance_id": handover.from_instance_id}
+        )
+    )
+    effective = retired_bus._resolve_effective_group_id(
+        to_group, topic, uuid4(), (topic, to_group)
+    )
+    binding = event_bus.resolve_bus_binding(topic, consumer_group=effective)
+    return binding.consumer_group or effective
+
+
 async def hand_over_committed_offsets(
     event_bus: object,
     *,
@@ -464,8 +582,13 @@ class HandlerContractSubscribePreflight:
                 "hand a retired group's committed offsets over; joining at the "
                 "bus default would drop the handover window (OMN-21753)"
             )
+        self._environment = environment
+        # A static declaration names one retired group for every topic; one by
+        # instance has a group per topic, resolved in ``handle`` (OMN-22714).
         self._retired_group = (
-            self._handover.source_group(environment) if self._handover else ""
+            self._handover.source_group(environment)
+            if self._handover and self._handover.from_instance_id is None
+            else ""
         )
 
     @property
@@ -507,10 +630,21 @@ class HandlerContractSubscribePreflight:
             )
         handover: ModelOffsetHandoverResult | None = None
         if self._handover is not None:
+            retired_group = (
+                resolve_retired_group(
+                    self._event_bus,
+                    self._handover,
+                    environment=self._environment,
+                    to_group=self._consumer_group,
+                    topic=topic,
+                )
+                if self._handover.from_instance_id is not None
+                else self._retired_group
+            )
             handover = await hand_over_committed_offsets(
                 self._event_bus,
                 topic=topic,
-                from_group=self._retired_group,
+                from_group=retired_group,
                 to_group=self._consumer_group,
                 from_auto_offset_reset=self._handover.from_auto_offset_reset,
                 handover_rule=self._handover.handover_rule,

@@ -1,0 +1,38 @@
+schema_version: '1.0.0'
+ticket_id: OMN-23003
+title: 'The receipt-mode publish tests measure their deadline with bus start inside the clock, so a loaded host no longer fails the Test-Failure Ratchet Gate'
+summary: 'The receipt-mode publish-and-await test module gives its success-path tests a bound that outlasts a slow bus start and gives its collect-progress tests a bound of two seconds, so a start of 1.2 s no longer decides the exchange. Test file only; no source, gate or baseline change.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-23003-1
+    statement: The receipt-mode publish-and-await tests count bus start inside the deadline only where the bound outlasts it.
+    acceptance:
+      - id: AC23003001
+        statement: The slow-start test passes with the success bound and fails with the old 1000 ms bound on the assertion CI printed, an empty tuple where the action event was expected.
+      - id: AC23003002
+        statement: The lane binding test module passes in full (35 tests) on a lab host, and the collect-progress tests pass with the bus start slowed to 1.2 s.
+evidence_requirements:
+  - kind: tests
+    description: The test module passes on the branch (35 passed on h053); with the success bound set back to 1000 the slow-start test fails with an empty tuple where the action event was expected (1 failed, 1 passed on h053).
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: The slow-start test and the rest of the receipt-mode publish-and-await module pass (35 passed on h053); the same test fails with the success bound set back to 1000 (1 failed, 1 passed on h053)
+    source: generated
+    binds_ac: [AC23003001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py -q --no-cov -k slow_start
+  - id: dod-002
+    description: The whole receipt-mode publish-and-await module passes (35 passed on h053); with the bus start slowed to 1.2 s the unchanged 200 ms collect-progress tests failed 4 and the changed ones passed
+    source: generated
+    binds_ac: [AC23003002]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py -q --no-cov

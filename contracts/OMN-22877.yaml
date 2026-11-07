@@ -1,0 +1,52 @@
+schema_version: 1.0.0
+ticket_id: OMN-22877
+title: T8 part 2a The one runtime's consumer groups resume from the retired effects container's commits through one declaration per folded profile
+summary: Part 2a of the one-runtime plan's T8 part 2 (fold the dev effects into the one runtime). A folded profile's consumer groups resume from the commits of the retired container that ran it, through one declaration in the lane's runtime policy contract (fold_handovers), derived per topic from the retired container's instance id and applied under the last_ran rule of OMN-22714. This part does not remove the separate effects service or move its secret resolver and health target; those are the remaining parts of the ticket, so the ticket's own criterion stays open.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22877-fold-wide-handover-from-instance
+    statement: A folded profile's consumer groups resume from the retired container's commits through one declaration in the lane's runtime policy contract, derived per topic from the retired container's instance id, with no declaration in the profile's contracts and none read as absent when unreadable.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a handover declared by from_instance_id derives the retired group per topic as the group the retired process joined, copies its commit under last_ran, and is refused when it names the bus''s own instance or the retired side still has a member -- falsifier: uv run pytest tests/unit/handlers/test_consumer_group_handover_from_instance_omn22714.py -q, red with the bus resolver''s instance override removed'
+      - id: AC2
+        statement: 'AC2: a runtime policy contract declares fold_handovers per folded profile, the renderer writes ONEX_RUNTIME_FOLD_HANDOVERS, and auto-wiring gives it to a contract of that profile that declares none, a contract''s own declaration winning, and fails the wiring on a declaration it cannot read -- falsifier: uv run pytest tests/unit/handlers/test_fold_handover_omn22714.py tests/unit/runtime/auto_wiring/test_fold_handover_wiring_omn22714.py -q, red with the auto-wiring default removed'
+evidence_requirements:
+  - kind: tests
+    description: The from_instance_id derivation with its refusals, the fold_handovers policy field and renderer variable, and the auto-wiring default with its unreadable-declaration failure.
+    command: uv run pytest tests/unit/handlers/test_consumer_group_handover_from_instance_omn22714.py tests/unit/handlers/test_fold_handover_omn22714.py tests/unit/runtime/auto_wiring/test_fold_handover_wiring_omn22714.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22877-from-instance-derives-retired-group
+    description: The retired group is the group the old effects container joined, per topic, and its commits reach the runtime group; with the bus resolver's instance override removed the derived group is the runtime's own and the golden test fails.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_consumer_group_handover_from_instance_omn22714.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn22877-fold-wide-declaration-wired
+    description: One policy declaration reaches every contract of the folded profile through the rendered environment and auto-wiring; an unreadable or unfolded declaration fails; with the auto-wiring default removed the folded contract is wired with no handover.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_fold_handover_omn22714.py tests/unit/runtime/auto_wiring/test_fold_handover_wiring_omn22714.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-deploy-omn22877-runtime-reads-fold-handover
+    description: The deployed runtime container builds the contract handover a fold-wide declaration stands for, a probe against the live container that fails before this change (the model module is absent there).
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          PROBE='from omnibase_infra.models.model_fold_handover import ModelFoldHandover as M; h = M(from_instance_id="runtime-effects", from_auto_offset_reset="earliest", handover_rule="last_ran").to_contract_handover(); assert h.handover_rule == "last_ran" and h.from_instance_id == "runtime-effects"'; if docker inspect ${RUNTIME_CONTAINER:-omninode-runtime} >/dev/null 2>&1; then docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "$PROBE"; else env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "$PROBE"; fi
+        cwd: ${OMNI_HOME}/omnibase_infra
