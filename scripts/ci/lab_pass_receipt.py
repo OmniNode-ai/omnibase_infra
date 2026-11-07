@@ -382,13 +382,9 @@ class EnumLabLane(StrEnum):
     reads OMN-19508 names (omnimarket's sibling read and its release-cut premise)
     may admit it.
 
-    ``COMPOSE_DEV_200`` (OMN-19543) is the third deployed dev lane, ``dev-200``
-    on the ``.200`` host (compose project ``omnibase-infra-dev-200``, ports
-    42085/42086), on exactly ``COMPOSE_DEV_202``'s terms: one emitter, omnimarket
-    changes only (operator ruling 2026-09-25T10:22:22Z, one deploy slot per lab
-    host), NOT in ``ANY_OF_DEFAULT_LANES``. Which repositories an instance lane
-    may prove is read from ``config/deploy_lane_routing.yaml``
-    (``scripts/ci/instance_receipt_lanes.py``), not from this enum.
+    Which repositories an instance lane may prove is read from
+    ``config/deploy_lane_routing.yaml`` (``scripts/ci/instance_receipt_lanes.py``),
+    not from this enum.
 
     ``PR_HEAD`` (OMN-19566) is the pre-merge proof lane. Its one emitter is the
     PR-head verifier, which mints a proof for one exact pull-request head and
@@ -408,7 +404,6 @@ class EnumLabLane(StrEnum):
     COMPOSE_DEV_CHAIN = "compose-dev-chain"
     COMPOSE_DEV_CORPUS = "compose-dev-corpus"
     COMPOSE_DEV_202 = "compose-dev-202"
-    COMPOSE_DEV_200 = "compose-dev-200"
     PR_HEAD = "pr-head"
 
 
@@ -416,9 +411,8 @@ class EnumLabLane(StrEnum):
 #: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
 #: lanes are deliberately absent -- a chain canary PASS is not evidence that the
 #: candidate booted, and must never be able to stand in for that premise.
-#: ``COMPOSE_DEV_202`` is absent too (OMN-19507), and ``COMPOSE_DEV_200``
-#: (OMN-19543): they prove omnimarket changes only, so no unqualified read may
-#: take either for the any-of premise.
+#: ``COMPOSE_DEV_202`` is absent too (OMN-19507): it proves omnimarket changes
+#: only, so no unqualified read may take it for the any-of premise.
 ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
     EnumLabLane.COMPOSE_DEV,
     EnumLabLane.ONEX_LAB_K3S,
@@ -5987,6 +5981,7 @@ def evaluate_workflow_verdict(
     dispatch_title_contains: str = "",
     drill_red_until: str = "",
     drill_ticket: str = "",
+    no_verdict_conclusions: Sequence[str] = (),
 ) -> int:
     """Fail closed unless the NEWEST completed measurement of a workflow is green.
 
@@ -6000,10 +5995,9 @@ def evaluate_workflow_verdict(
     must be an ``OMN-<n>`` id and ``drill_red_until`` a parseable UTC
     timestamp no more than :data:`DRILL_MAX_WINDOW_HOURS` in the future. Past
     its own expiry the drill has NO effect at all -- nobody has to turn it
-    off. There is deliberately no symmetric flag that forces a PASS: the drill
-    can only make delivery more conservative, never less. When active it does
-    not call the GitHub API at all -- it is a synthetic, clearly-labelled red,
-    not a spoofed real one.
+    off. There is deliberately no flag that forces a PASS: the drill can only
+    make delivery more conservative. When active it calls no GitHub API -- it is
+    a synthetic, clearly-labelled red, not a spoofed real one.
 
     Operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending the
     16:10:08Z every-check-blocks ruling) binds four chronically red checks to a
@@ -6162,6 +6156,11 @@ def evaluate_workflow_verdict(
         file=out,
     )
 
+    # OMN-22821: no_verdict_conclusions names conclusions that carry no verdict
+    # (the delegation-health config lists cancelled and skipped). Such a run
+    # measured nothing, so it is dropped here and the newest COMPLETED verdict
+    # decides; a failure still decides. The default is empty, so staging
+    # delivery and the lab alarm still block on a cancelled newest run.
     candidates = [
         r
         for r in runs
@@ -6169,6 +6168,7 @@ def evaluate_workflow_verdict(
         and r.get("status") == "completed"
         and r.get("head_branch") == branch
         and r.get("event") in admitted
+        and r.get("conclusion") not in no_verdict_conclusions
         and (
             not dispatch_title_contains
             or r.get("event") != "workflow_dispatch"
@@ -6177,8 +6177,7 @@ def evaluate_workflow_verdict(
     ]
     ignored = len(runs) - len(candidates)
     print(
-        f"  events read : {', '.join(admitted)} "
-        f"({len(candidates)} completed run(s) admitted, {ignored} other(s) ignored)",
+        f"  events read : {', '.join(admitted)} ({len(candidates)} completed run(s) admitted, {ignored} other(s) ignored)",
         file=out,
     )
     if dispatch_title_contains:

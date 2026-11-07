@@ -304,6 +304,7 @@ databases:
               - tenant_inference_credentials
               - usage_by_model_day
               - usage_by_model_day_calls
+              - view_seam_readings
             privileges:
               - INSERT
               - SELECT
@@ -463,5 +464,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 101c6d4c652f3b3f12a63b19cd964a39404f60127463887bde7aa898ebafef41
+  sha256: b4a2c1de386930518dbe0eba6d509ed7f9ca60cb1d4b7bfd08ce5d8afba2d1b4
 topology_instance: local

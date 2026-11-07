@@ -29,7 +29,7 @@ import uuid
 from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import patch
 
 import pytest
@@ -38,9 +38,13 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
+    ConsumerGroupFenceError,
     hand_over_committed_offsets,
 )
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.event_bus.model_consumer_group_fence import (
+    ModelConsumerGroupFence,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
@@ -343,3 +347,142 @@ async def test_literal_from_group_id_resumes_the_retired_offsets_on_redpanda(
     every = Counter(container + _projected)
     assert set(every.values()) == {1}, every
     assert len(every) == 8
+
+
+@pytest.mark.asyncio
+async def test_last_ran_second_fold_takes_the_later_commit_on_redpanda(
+    bootstrap: str, topic: str, bus: EventBusKafka
+) -> None:
+    """OMN-22714: the effects rule against the broker's group coordinator.
+
+    The runtime group takes the retired group's commits at the fold. The
+    retired side then runs on (a rollback), so at the second fold its commit on
+    partition 0 is later than the runtime group's and is copied over it; the
+    writers' rule keeps the runtime group's stale commit, which would run those
+    events' effects a second time.
+    """
+    environment = f"omn22714-{uuid.uuid4().hex[:8]}"
+    retired_group = f"{environment}.omninode-runtime.effects.consume.v1"
+    group = compute_consumer_group_id(
+        ModelNodeIdentity(
+            env=environment,
+            service="omnimarket",
+            node_name="effects_fixture",
+            version="1.0.0",
+        )
+    )
+
+    before = [(0, "before-0"), (0, "before-1"), (1, "before-2")]
+    await _publish(bootstrap, topic, before)
+    await _retired_container(bootstrap, topic, retired_group, len(before))
+
+    fold = await hand_over_committed_offsets(
+        bus,
+        topic=topic,
+        from_group=retired_group,
+        to_group=group,
+        from_auto_offset_reset="earliest",
+        handover_rule="last_ran",
+    )
+    assert fold.committed == {0: 2, 1: 1, 2: 0}
+
+    # Rolled back: the retired side runs two more events on partition 0.
+    await _publish(bootstrap, topic, [(0, "rollback-0"), (0, "rollback-1")])
+    await _retired_container(bootstrap, topic, retired_group, 2)
+
+    stale = await hand_over_committed_offsets(
+        bus,
+        topic=topic,
+        from_group=retired_group,
+        to_group=group,
+        from_auto_offset_reset="earliest",
+        handover_rule="copy_if_uncommitted",
+    )
+    assert stale.committed == {}, "the writers' rule keeps the stale commit"
+
+    second = await hand_over_committed_offsets(
+        bus,
+        topic=topic,
+        from_group=retired_group,
+        to_group=group,
+        from_auto_offset_reset="earliest",
+        handover_rule="last_ran",
+    )
+    assert second.committed == {0: 4}
+    assert second.kept == (1, 2)
+
+    again = await hand_over_committed_offsets(
+        bus,
+        topic=topic,
+        from_group=retired_group,
+        to_group=group,
+        from_auto_offset_reset="earliest",
+        handover_rule="last_ran",
+    )
+    assert again.committed == {}, "the broker holds the copied commit"
+
+
+@pytest.mark.asyncio
+async def test_the_fence_refuses_a_retired_group_still_consumed_on_redpanda(
+    bootstrap: str, topic: str, bus: EventBusKafka
+) -> None:
+    """OMN-22714: no fold takes over a position its old consumer still moves.
+
+    A consumer joined under the retired group (the container not yet retired)
+    makes the handover refuse before it reads an offset, under either rule.
+    Once that consumer leaves, the same handover runs and names the fenced
+    group.
+    """
+    environment = f"omn22714f-{uuid.uuid4().hex[:8]}"
+    retired_group = f"{environment}.omninode-runtime.effects.consume.v1"
+    group = compute_consumer_group_id(
+        ModelNodeIdentity(
+            env=environment,
+            service="omnimarket",
+            node_name="effects_fixture",
+            version="1.0.0",
+        )
+    )
+    await _publish(bootstrap, topic, [(0, "before-0"), (1, "before-1")])
+
+    running = AIOKafkaConsumer(
+        topic,
+        bootstrap_servers=bootstrap,
+        group_id=retired_group,
+        auto_offset_reset="earliest",
+        enable_auto_commit=False,
+    )
+    await running.start()
+    try:
+        async with asyncio.timeout(60):
+            while not running.assignment():
+                await running.getmany(timeout_ms=500)
+        rules: tuple[Literal["copy_if_uncommitted", "last_ran"], ...] = (
+            "copy_if_uncommitted",
+            "last_ran",
+        )
+        for rule in rules:
+            with pytest.raises(ConsumerGroupFenceError, match="still has 1 member"):
+                await hand_over_committed_offsets(
+                    bus,
+                    topic=topic,
+                    from_group=retired_group,
+                    to_group=group,
+                    from_auto_offset_reset="earliest",
+                    handover_rule=rule,
+                    fence=ModelConsumerGroupFence(wait_seconds=3, poll_seconds=1),
+                )
+    finally:
+        await running.stop()
+
+    result = await hand_over_committed_offsets(
+        bus,
+        topic=topic,
+        from_group=retired_group,
+        to_group=group,
+        from_auto_offset_reset="earliest",
+        handover_rule="last_ran",
+        fence=ModelConsumerGroupFence(wait_seconds=60, poll_seconds=1),
+    )
+    assert result.fenced_group == retired_group
+    assert result.committed == {0: 0, 1: 0, 2: 0}
