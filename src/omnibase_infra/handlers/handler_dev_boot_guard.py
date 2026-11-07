@@ -17,7 +17,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
@@ -368,6 +368,13 @@ def _refuse_cross_fold_pairing(point: ModelDevBootPoint, execution: ModuleType) 
         )
 
 
+def _dev_lane_services(disabled_services: Collection[str]) -> tuple[str, ...]:
+    """The DEV boot services a lane runs, given the services its policy disables."""
+    return tuple(
+        service for service in DEV_BOOT_SERVICES if service not in disabled_services
+    )
+
+
 class HandlerDevBootGuard:
     """Supervise only the selected DEV compose project under its caller's lock."""
 
@@ -385,11 +392,7 @@ class HandlerDevBootGuard:
         self.config_hashes = config_hashes
         self.verify_recovery = verify_recovery
         self.config = self.execution.lane_config_for(self.execution.EnumRuntimeLane.DEV)
-        self.services = tuple(
-            service
-            for service in DEV_BOOT_SERVICES
-            if service not in self.config.disabled_services
-        )
+        self.services = _dev_lane_services(self.config.disabled_services)
         self._retained_services = self.services
         self.root = state_dir / "dev-boot-guard" / self.config.compose_project
         self.snapshot_path = self.root / "last-healthy.json"
@@ -419,24 +422,6 @@ class HandlerDevBootGuard:
         else:
             deliver_reports(self.root, execution=self.execution, config=self.reporting)
         return ModelDevBootResult(operation=request.operation, status="pass")
-
-    def _adopt_deployed_generation(self) -> None:
-        """Re-read the services the lane runs once git_pull replaced the policy.
-
-        The guard is built before git_pull, from the previous generation's
-        policy, so recovery knows what that generation ran. A deploy that folds
-        a role (OMN-22930: runtime-effects into main) retires a service the
-        pre-pull list still names, and the post-roll health wait would fail on
-        "dev runtime containers absent: ['runtime-effects']" with the folded
-        runtime healthy. The retained list is kept for the recovery path.
-        """
-        self._retained_services = self.services
-        self.config = self.execution.lane_config_for(self.execution.EnumRuntimeLane.DEV)
-        self.services = tuple(
-            service
-            for service in DEV_BOOT_SERVICES
-            if service not in self.config.disabled_services
-        )
 
     def _containers(self) -> list[ModelDevBootContainer]:
         ids = _checked(
@@ -485,7 +470,17 @@ class HandlerDevBootGuard:
         service list of the generation just rolled before it reads containers.
         """
         if deployed_generation:
-            self._adopt_deployed_generation()
+            # The guard is built before git_pull, from the previous
+            # generation's policy, so recovery knows what that generation ran.
+            # A deploy that folds a role (OMN-22930: runtime-effects into main)
+            # retires a service the pre-pull list still names; re-read the
+            # list of the generation just rolled and retain the previous one
+            # for the recovery path.
+            self._retained_services = self.services
+            self.config = self.execution.lane_config_for(
+                self.execution.EnumRuntimeLane.DEV
+            )
+            self.services = _dev_lane_services(self.config.disabled_services)
         started = self.execution._dev_boot_clock()
         containers = self._containers()
         window = max(_window(c) for c in containers)
