@@ -45,6 +45,13 @@ PROGRESS_TOPIC = "onex.evt.receipt-mode.progress.v1"
 ACTION_TOPIC = "onex.evt.receipt-mode.action.v1"
 COMMAND_TYPE = "receipt-mode.requested"
 
+# The deadline covers lane resolution, bus start and both subscribes, so a bound
+# of one second left the success-path tests at the mercy of a loaded runner: a
+# split that ran 330 s returned no events from a test that only asks the action
+# to arrive. A success path returns the moment the action does, so this bound
+# only caps a hang. Tests that exercise the deadline itself keep their short one.
+SUCCESS_DEADLINE_MS = 60_000
+
 
 def _respond(
     bus: EventBusInmemory,
@@ -59,7 +66,7 @@ def _call(
     bus: EventBusInmemory,
     *,
     payload: dict[str, JsonValue] | None = None,
-    deadline_ms: int = 1000,
+    deadline_ms: int = SUCCESS_DEADLINE_MS,
 ) -> tuple[ModelReceiptModeEvent, ...]:
     return HandlerReceiptModePublishAwait(lambda: bus).publish_and_await(
         topic=COMMAND_TOPIC,
@@ -116,6 +123,41 @@ def test_action_is_last_after_progress_on_another_topic() -> None:
     assert commands[0].event_type == COMMAND_TYPE
     assert commands[0].payload == {"invocation_id": "invocation-1"}
     assert asyncio.run(bus.health_check())["started"] is False
+
+
+@pytest.mark.parametrize(
+    ("deadline_ms", "expected_actions"),
+    [(SUCCESS_DEADLINE_MS, 1), (1000, 0)],
+    ids=["success-bound-outlasts-a-slow-start", "one-second-bound-is-spent-by-it"],
+)
+def test_bus_start_is_inside_the_deadline_so_a_slow_start_decides_the_exchange(
+    monkeypatch: pytest.MonkeyPatch, deadline_ms: int, expected_actions: int
+) -> None:
+    # The cause of the Test-Failure Ratchet red on omnibase_infra#5743: bus start
+    # counts against the deadline. A start that takes 1.2 s (a loaded runner) used
+    # up a one-second bound and the exchange returned no events; the bound the
+    # success-path tests use now outlasts it. The 1000 ms case is the control that
+    # shows the old bound failing the same way.
+    bus = EventBusInmemory()
+    original_start = bus.start
+
+    async def slow_start() -> None:
+        await asyncio.sleep(1.2)
+        await original_start()
+
+    async def responder(message: ModelEventMessage) -> None:
+        command = ModelEventEnvelope[dict[str, object]].model_validate_json(
+            message.value
+        )
+        await _reply(
+            bus, ACTION_TOPIC, str(command.correlation_id), {"action": "allow"}
+        )
+
+    _respond(bus, responder)
+    monkeypatch.setattr(bus, "start", slow_start)
+    events = _call(bus, deadline_ms=deadline_ms)
+    action = ModelReceiptModeEvent(topic=ACTION_TOPIC, payload={"action": "allow"})
+    assert events == ((action,) if expected_actions else ())
 
 
 def test_uncorrelated_reply_is_ignored_until_deadline() -> None:
@@ -459,7 +501,7 @@ def test_default_lane_binding_covers_construction_through_cleanup(
         command_type=COMMAND_TYPE,
         payload={},
         awaited_events=(PROGRESS_TOPIC, ACTION_TOPIC),
-        deadline_ms=1000,
+        deadline_ms=SUCCESS_DEADLINE_MS,
     )
     assert events == (
         ModelReceiptModeEvent(topic=ACTION_TOPIC, payload={"action": "allow"}),
