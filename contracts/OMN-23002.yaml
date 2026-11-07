@@ -1,0 +1,73 @@
+schema_version: '1.0.0'
+ticket_id: OMN-23002
+title: 'floor_fill_state, the floor fill orchestrator state_io table, is created in omnibase_infra and granted to the runtime'
+summary: 'Forward migration 113 creates public.floor_fill_state keyed on scope with the StateStoreAdapter column shape of migrations 102 and 108, and STATE_IO_TABLE_DECLARATIONS declares it so every shipped topology instance and catalog grants it to the runtime role.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23002-floor-fill-state-table
+    statement: omnimarket's node_floor_fill_orchestrator declares state_io on table floor_fill_state keyed on scope in the omnibase_infra database; the table exists with the adapter's columns, the runtime role is granted it, the migration is idempotent, and the real StateStoreAdapter seeds, CAS-updates and reads a row of it. The lab read against a real Postgres is in the pull request body.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: migration 113 creates floor_fill_state keyed on scope with the adapter columns (tenant_id, state, in_flight, payload, version, pending_emissions, publish_attempts, created_at, updated_at), applied to a real Postgres -- falsifier: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac1_the_migration_creates_the_table_keyed_on_scope -q --no-cov, with the migration file removed the table is absent and the test fails'
+      - id: AC2
+        statement: 'AC2: the grant is derived for floor_fill_state in the omnibase_infra database for the runtime role in every shipped profile -- falsifier: uv run --frozen pytest tests/integration/topology/test_floor_fill_state_grant_omn23002.py -q --no-cov, with the floor_fill_state entry taken out of STATE_IO_TABLE_DECLARATIONS the derivation grants nothing and the test fails'
+      - id: AC3
+        statement: 'AC3: the migration is idempotent, applied twice to a real Postgres with no error and no change to the table, its indexes or its trigger -- falsifier: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac3_the_migration_applied_twice_is_a_no_op -q --no-cov, with CREATE TABLE written without IF NOT EXISTS the second apply raises and the test fails'
+      - id: AC4
+        statement: 'AC4: the StateStoreAdapter seed, CAS update and select of a floor_fill_state row work against the real table, and a conditional write against a stale version updates zero rows -- falsifier: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac4_seed_cas_update_and_load_work_on_the_real_table -q --no-cov, with a cas_update that does not gate on version the stale write updates one row and the test fails'
+      - id: AC5
+        statement: 'AC5: the same adapter proof run without the migration (table absent) fails red -- falsifier: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac5_the_same_proof_fails_without_the_migration -q --no-cov, with the table present the adapter does not raise and the test fails'
+evidence_requirements:
+  - kind: tests
+    description: The migration shape, grant and real-Postgres tests pass at the head; the real-Postgres read and the failing control (table absent, adapter raises UndefinedTableError) are in the pull request body.
+    command: uv run --frozen pytest tests/unit/db/test_migration_113_floor_fill_state_omn23002.py tests/integration/topology/test_floor_fill_state_grant_omn23002.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23002-migration-table
+    description: Migration 113 applied to a real Postgres creates floor_fill_state keyed on scope with the adapter columns, the two partial indexes and the updated_at trigger.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac1_the_migration_creates_the_table_keyed_on_scope tests/unit/db/test_migration_113_floor_fill_state_omn23002.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23002-runtime-grant
+    description: The grant is derived for floor_fill_state in the omnibase_infra database for the runtime role, and every shipped instance and rendered catalog carries it.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/topology/test_floor_fill_state_grant_omn23002.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -rlq floor_fill_state src/omnibase_infra/topology/instances docker/catalog/database-topology
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23002-idempotent
+    description: Applied twice to a real Postgres the migration raises nothing and leaves the table, indexes and trigger unchanged.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac3_the_migration_applied_twice_is_a_no_op -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23002-adapter-cas
+    description: The real StateStoreAdapter seeds a floor_fill_state row, CAS-updates it on the stored version, updates zero rows on the stale version, and loads the winner's payload and version.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac4_seed_cas_update_and_load_work_on_the_real_table -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23002-failing-control
+    description: With the migration not applied the same adapter proof raises UndefinedTableError, so the proof is not vacuous.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac5_the_same_proof_fails_without_the_migration -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

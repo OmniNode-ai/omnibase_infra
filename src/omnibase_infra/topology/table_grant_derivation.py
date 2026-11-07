@@ -87,10 +87,7 @@ WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
 # it by hand on the one relation it prunes (OMN-17427,
 # node_projection_consumer_flow/0006 for omninode_internal.consumer_flow_windows).
 PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
-    {
-        EnumDatabasePrivilege.SELECT,
-        EnumDatabasePrivilege.DELETE,
-    }
+    {EnumDatabasePrivilege.SELECT, EnumDatabasePrivilege.DELETE}
 )
 
 # Mirrors ``_projection_operation_bindings``. PLATFORM_CATALOG is absent by
@@ -162,6 +159,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("delegation_workflow_state", "090_create_delegation_workflow_state.sql"),
         ("session_phase_state", "102_create_session_phase_state.sql"),
         ("pr_landing_workflow_state", "108_create_pr_landing_workflow_state.sql"),
+        ("floor_fill_state", "113_create_floor_fill_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )
 )

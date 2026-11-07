@@ -397,6 +397,7 @@ databases:
           - object_type: TABLE
             objects:
               - delegation_workflow_state
+              - floor_fill_state
               - infra_routing_decisions
               - pr_landing_workflow_state
               - session_phase_state
@@ -464,5 +465,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 64cad2cf7d3502d09c2b01d183cb9c5b9a3c3b8deb536cd6fd682825e7156ea1
+  sha256: db99325fee61ac1f48e3aff6be6fab5ea62ca1c44a48d54b311d3cd28fede8e1
 topology_instance: onex-dev
