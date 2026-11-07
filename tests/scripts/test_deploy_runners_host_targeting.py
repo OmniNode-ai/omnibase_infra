@@ -21,9 +21,20 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "deploy-runners.sh"
 FLEET_CONFIG = REPO_ROOT / "config" / "runner_fleet.yaml"
+
+
+def _arm64_host_row() -> dict[str, str]:
+    """The declared arm64 host, read from the inventory so no address is spelled here."""
+    rows = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))["hosts"]
+    arm = [row for row in rows if row.get("arch") == "arm64"]
+    assert len(arm) == 1, f"expected one declared arm64 host, found {len(arm)}"
+    return arm[0]
+
 
 # Sourcing the script would run a deploy. Extract the host-row reader and drive
 # it directly, so the test exercises the real parser rather than a copy of it.
@@ -61,9 +72,9 @@ def test_reads_the_named_hosts_own_row_not_the_first_one() -> None:
     assert primary.returncode == 0, primary.stderr
     assert primary.stdout.strip() == "omninode-runner"
 
-    second = _field("stickybeatz-2.tail75df5e.ts.net", "runner_name_prefix")
+    second = _field(_arm64_host_row()["host"], "runner_name_prefix")
     assert second.returncode == 0, second.stderr
-    assert second.stdout.strip() == "omninode-mini-runner", (
+    assert second.stdout.strip() == "omninode-studio-runner", (
         "the reader returned the wrong host's prefix; it is matching a key "
         "rather than anchoring on the host row"
     )
@@ -71,7 +82,7 @@ def test_reads_the_named_hosts_own_row_not_the_first_one() -> None:
 
 def test_reads_the_architecture_of_each_host() -> None:
     assert _field("omninode-pc.tail75df5e.ts.net", "arch").stdout.strip() == "amd64"
-    assert _field("stickybeatz-2.tail75df5e.ts.net", "arch").stdout.strip() == "arm64"
+    assert _field(_arm64_host_row()["host"], "arch").stdout.strip() == "arm64"
 
 
 def test_an_undeclared_host_fails_instead_of_falling_through() -> None:

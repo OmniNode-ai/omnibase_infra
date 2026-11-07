@@ -268,11 +268,7 @@ from omnibase_infra.event_bus.lane_client_transport_binding import (
     resolve_lane_client_transport,
 )
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
-from omnibase_infra.event_bus.mixin_kafka_dlq import (
-    _REPLAY_COUNT_HEADER,
-    _REPLAY_COUNT_PARSE_FAILURE_SENTINEL,
-    MixinKafkaDlq,
-)
+from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
 from omnibase_infra.event_bus.models import (
     ModelEventBusReadiness,
     ModelEventHeaders,
@@ -300,6 +296,12 @@ from omnibase_infra.handlers.kafka_transactional_producer import (
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import ModelReadCommittedTopics
+from omnibase_infra.models.event_bus.model_dlq_replay_headers import (
+    REPLAY_COUNT_HEADER,
+    REPLAY_TARGET_GROUP_HEADER,
+    ModelDlqReplayTarget,
+    resolve_replay_count,
+)
 from omnibase_infra.models.event_bus.model_kafka_ungrouped_reader import (
     UNGROUPED_AUTO_OFFSET_RESET,
 )
@@ -4189,6 +4191,20 @@ class EventBusKafka(
             partition's batch: those records sit past the rewind point and
             Kafka will redeliver them.
         """
+        # OMN-22822: a record the DLQ replay node addressed to one consumer
+        # group is that group's alone; any other group skips it and commits.
+        replay_target = ModelDlqReplayTarget.from_raw_msg(msg)
+        if replay_target.excludes(group_id):
+            logger.info(
+                "Skipping replayed record on %s: %s names consumer group '%s', "
+                "not '%s'",
+                topic,
+                REPLAY_TARGET_GROUP_HEADER,
+                replay_target.consumer_group,
+                group_id,
+            )
+            return False
+
         # Get subscribers snapshot early - needed for consumer group in DLQ
         async with self._lock:
             subscribers = [
@@ -5573,27 +5589,9 @@ class EventBusKafka(
         # drops the header, both paths reset replay lineage to 0 on every
         # republish and should_replay's guard never trips (the 2026-08-05
         # dev DLQ amplification incident).
-        replay_count_str = headers_dict.get(_REPLAY_COUNT_HEADER)
-        if replay_count_str is not None:
-            try:
-                parsed_replay_count = int(replay_count_str)
-            except (ValueError, TypeError):
-                logger.warning(
-                    "Malformed %s header %r, failing closed to stop replay",
-                    _REPLAY_COUNT_HEADER,
-                    replay_count_str,
-                )
-                retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-            else:
-                if parsed_replay_count < 0:
-                    logger.warning(
-                        "Negative %s header value %d, failing closed to stop replay",
-                        _REPLAY_COUNT_HEADER,
-                        parsed_replay_count,
-                    )
-                    retry_count = _REPLAY_COUNT_PARSE_FAILURE_SENTINEL
-                else:
-                    retry_count = parsed_replay_count
+        retry_count = resolve_replay_count(
+            headers_dict.get(REPLAY_COUNT_HEADER), retry_count
+        )
 
         max_retries = self._parse_int_header(
             headers_dict.get("max_retries"), 3, "max_retries"

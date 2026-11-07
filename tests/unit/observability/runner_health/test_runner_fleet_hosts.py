@@ -49,7 +49,6 @@ def _config() -> ModelRunnerFleetConfig:
 _PRIMARY = "<runner_host>"
 EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
     (_PRIMARY, "amd64", 10),
-    ("stickybeatz-2.tail75df5e.ts.net", "arm64", 1),
     ("192.168.86.202", "amd64", 1),
     ("stickybeatz-studio.tail75df5e.ts.net", "arm64", 1),
     # OMN-17232: the HP DL560 Gen8 (h051) pool, four `omnibase-ci-multiarch` runners.
@@ -135,7 +134,8 @@ def test_declared_total_sums_only_the_hosts_carrying_that_class() -> None:
     # OMN-19998 sizes it to 5 from the host's measured memory, so 10 + 16 + 5.
     assert config.declared_total("action") == 31
     assert config.declared_total("customer-plane") == 3
-    assert config.declared_total("verify") == 6
+    # The h101 mini host's one verify runner was retired with Docker on the Macs: 6 - 1.
+    assert config.declared_total("verify") == 5
     # A class nothing declares is zero, not an error and not the whole fleet.
     assert config.declared_total("no-such-class") == 0
 
