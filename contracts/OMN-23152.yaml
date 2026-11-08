@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-23152
 title: Ledger rows reach the bus only after the judge accepts them, the emitter of the rows without a sequence is found, and ledger_seq 190463 is deduplicated under a unique index
-summary: 'omnibase_infra half of OMN-23152: vendors the work-ledger sequence migrations 0007 (creates work_ledger_seq_conflicts, copies duplicate sequences into it and adds the unique ledger_seq index) and 0008 (grants the runtime SELECT, INSERT, UPDATE, never DELETE) ahead of the omnimarket change, and bridges the relation in the table-grant derivation until the contract pin advances. The behavioural proof of every criterion is in the omnimarket contract for this ticket; this change makes that code wireable.'
+summary: 'omnibase_infra half of OMN-23152: vendors the work-ledger sequence migrations 0009 (creates work_ledger_seq_conflicts, copies duplicate sequences into it and adds the unique ledger_seq index) and 0010 (grants the runtime SELECT, INSERT, UPDATE, never DELETE) ahead of the omnimarket change, and bridges the relation in the table-grant derivation until the contract pin advances. The behavioural proof of every criterion is in the omnimarket contract for this ticket; this change makes that code wireable.'
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -25,7 +25,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn23152-infra-ac2
-    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC2: the vendored work-ledger migrations 0007 and 0008 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. The proof of the unique index and the dedupe is in the omnimarket contract for this ticket.'
+    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC2: the vendored work-ledger migrations 0009 and 0010 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. The proof of the unique index and the dedupe is in the omnimarket contract for this ticket.'
     source: manual
     binds_ac:
       - AC2
@@ -33,7 +33,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/topology/test_omn23152_work_ledger_seq_conflicts_grant.py -q -n 0 --no-cov -p no:cacheprovider
   - id: dod-omn23152-infra-ac1
-    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC1: the vendored work-ledger migrations 0007 and 0008 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. It adds no code for the emit gate and the naming of the emitter; the proof is in the omnimarket contract for this ticket.'
+    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC1: the vendored work-ledger migrations 0009 and 0010 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. It adds no code for the emit gate and the naming of the emitter; the proof is in the omnimarket contract for this ticket.'
     source: manual
     binds_ac:
       - AC1
@@ -41,7 +41,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/topology/test_omn23152_work_ledger_seq_conflicts_grant.py -q -n 0 --no-cov -p no:cacheprovider
   - id: dod-omn23152-infra-ac3
-    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC3: the vendored work-ledger migrations 0007 and 0008 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. It adds no code for the 24-hour unjudged-row reading; the proof is in the omnimarket contract for this ticket.'
+    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC3: the vendored work-ledger migrations 0009 and 0010 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. It adds no code for the 24-hour unjudged-row reading; the proof is in the omnimarket contract for this ticket.'
     source: manual
     binds_ac:
       - AC3

@@ -547,7 +547,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         _vendored_read_write(t, "node_projection_work_ledger", f, access="write")
         for t, f in (
             ("ledger_line_citation", "0007_work_ledger_history_import.sql"),
-            ("work_ledger_seq_conflicts", "0007_work_ledger_seq_unique.sql"),
+            ("work_ledger_seq_conflicts", "0009_work_ledger_seq_unique.sql"),
         )
     ),
 )

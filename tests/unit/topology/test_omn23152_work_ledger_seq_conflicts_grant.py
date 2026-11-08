@@ -64,7 +64,7 @@ def test_runtime_can_write_work_ledger_seq_conflicts(instance: str) -> None:
 @pytest.mark.unit
 def test_vendored_grant_migration_matches_the_declared_set_and_omits_delete() -> None:
     grant = (
-        _NODE_MIGRATION_DIR / "0008_grant_work_ledger_seq_conflicts.sql"
+        _NODE_MIGRATION_DIR / "0010_grant_work_ledger_seq_conflicts.sql"
     ).read_text(encoding="utf-8")
     granted = grant.split("GRANT SELECT", 1)[1].split("TO", 1)[0]
     assert "INSERT, UPDATE" in granted
@@ -74,7 +74,7 @@ def test_vendored_grant_migration_matches_the_declared_set_and_omits_delete() ->
 
 @pytest.mark.unit
 def test_vendored_unique_index_migration_dedupes_before_it_indexes() -> None:
-    sql = (_NODE_MIGRATION_DIR / "0007_work_ledger_seq_unique.sql").read_text(
+    sql = (_NODE_MIGRATION_DIR / "0009_work_ledger_seq_unique.sql").read_text(
         encoding="utf-8"
     )
     assert sql.index("rank_in_seq > 1") < sql.index("CREATE UNIQUE INDEX")

@@ -481,9 +481,9 @@ migrations:
   forward/nodes/node_projection_work_ledger/0005_grant_role_omnidash_work_ledger_rows_select.sql: expand-only
   forward/nodes/node_projection_work_ledger/0006_work_ledger_ingested_at.sql: forward-only # ALTER TABLE ADD COLUMN IF NOT EXISTS nullable ingested_at (additive); ALTER COLUMN SET DEFAULT on the existing table (omninode_internal.work_ledger_rows), declared forward-only per the checker's rule
   forward/nodes/node_projection_work_ledger/0007_work_ledger_history_import.sql: forward-only # ADD COLUMN IF NOT EXISTS nullable legacy_ordinal and CREATE UNIQUE INDEX on the existing omninode_internal.work_ledger_rows; DROP TRIGGER IF EXISTS on the new ledger_line_citation, declared forward-only per the checker's rule
-  forward/nodes/node_projection_work_ledger/0007_work_ledger_seq_unique.sql: forward-only # CREATE TABLE IF NOT EXISTS work_ledger_seq_conflicts, UPDATE of duplicate ledger_seq on omninode_internal.work_ledger_rows to NULL after copying them whole into the conflicts table, then CREATE UNIQUE INDEX IF NOT EXISTS, declared forward-only per the checker's rule
+  forward/nodes/node_projection_work_ledger/0009_work_ledger_seq_unique.sql: forward-only # CREATE TABLE IF NOT EXISTS work_ledger_seq_conflicts, UPDATE of duplicate ledger_seq on omninode_internal.work_ledger_rows to NULL after copying them whole into the conflicts table, then CREATE UNIQUE INDEX IF NOT EXISTS, declared forward-only per the checker's rule
   forward/nodes/node_projection_work_ledger/0008_grant_omninode_runtime_ledger_line_citation.sql: expand-only # additive GRANT
-  forward/nodes/node_projection_work_ledger/0008_grant_work_ledger_seq_conflicts.sql: expand-only # additive GRANT
+  forward/nodes/node_projection_work_ledger/0010_grant_work_ledger_seq_conflicts.sql: expand-only # additive GRANT
   forward/nodes/node_projection_overlay_store/0000_create_overlay_store.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the overlay store table
   forward/nodes/node_projection_overlay_store/0001_grant_omninode_runtime_overlay_store.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the overlay store table
   forward/nodes/node_view_seam_reading_reducer/0001_create_view_seam_readings.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the view seam readings table
