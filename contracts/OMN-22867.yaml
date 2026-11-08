@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-22867
+title: omnibase_infra's scheduled, dispatched and reusable workflows run on a hosted runner
+summary: Family 2 of the hosted-runner migration of this public repository. The 18 scheduled, dispatched and reusable workflows that touch no lab service select the literal ubuntu-latest in every job and are listed in the routing policy's hosted_runner_allowlist, so omnibase_core's check-public-runner-placement reports none of them.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22867-family2-hosted
+    statement: Each scheduled, dispatched or reusable workflow of the family selects only the GitHub-hosted label and is allowlisted with a reason.
+    acceptance:
+      - id: AC3
+        statement: Every job of the 18 family workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason.
+      - id: AC4
+        statement: The runner-routing audit and the workflow tests that read the family stay green with the family hosted.
+evidence_requirements:
+  - kind: tests
+    description: Workflow shape test of the family and the routing audit tests.
+    command: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22867-ac3-family-hosted
+    description: Every job of each family workflow selects ubuntu-latest and each file is allowlisted with a reason.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac4-routing-audit
+    description: The routing audit controls and the lockfile autobump workflow test pass.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py tests/ci/test_lockfile_cve_autobump.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
