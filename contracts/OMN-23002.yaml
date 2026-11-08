@@ -64,10 +64,10 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac4_seed_cas_update_and_load_work_on_the_real_table -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23002-failing-control
-    description: With the migration not applied the same adapter proof raises UndefinedTableError, so the proof is not vacuous.
+    description: With the migration not applied the same adapter proof raises UndefinedTableError, so the proof is not vacuous. The check selects the adapter proof and its failing control together. At the merge base the migration file does not exist, so the adapter proof test (AC4) fails there, which the base run of the adapter-cas check recorded as exit code 1, while the control test alone passes there by construction (it asserts the proof fails without the migration). At the head both pass.
     source: manual
     binds_ac: [AC5]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac5_the_same_proof_fails_without_the_migration -q --no-cov
+        check_value: uv run --frozen pytest tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac4_seed_cas_update_and_load_work_on_the_real_table tests/integration/migrations/test_113_floor_fill_state_omn23002.py::test_ac5_the_same_proof_fails_without_the_migration -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
