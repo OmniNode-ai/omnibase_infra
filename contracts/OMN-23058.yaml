@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: AC2
         statement: "AC2: omnibase_infra#5707 reads green at its head -- falsifier: uv run pytest of tests/ci/test_runner_routing_audit.py and tests/unit/scripts/test_trigger_learns_secret_namespaces.py on a lab host, red on the base files and green on this head"
+  - id: req-omn23058-gateway-read-replay
+    statement: A GitHub gateway read that failed is answered once with its failure terminal and is not replayed from the dead-letter topic, so replays stop queueing behind live reads on the one-partition gateway topic and the read-only principal's github channel is not starved.
+    acceptance:
+      - id: AC3
+        statement: "AC3: a failed gateway read is not replayed and its terminal states retryable false -- falsifier: uv run pytest of tests/unit/runtime/auto_wiring/test_omn23058_gateway_read_failure_not_replayed.py and tests/integration/runtime/test_omn23058_gateway_read_boundary_dlq_replay.py on a lab host, red on the base enum and green on this head"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -29,3 +34,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn23058-ac3-tests
+    description: The gateway read failure tests pass on this head and fail (7 failed, 1 control passed) with the enum read from origin/dev; 235 passed across the new file and the dead-letter replay and boundary failure terminal test files on lab host h202.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23058_gateway_read_failure_not_replayed.py tests/integration/runtime/test_omn23058_gateway_read_boundary_dlq_replay.py -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
