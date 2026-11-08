@@ -1,0 +1,35 @@
+{
+  "sweep_non_pr_events": [
+    "create",
+    "delete",
+    "deployment",
+    "deployment_status",
+    "fork",
+    "merge_group",
+    "page_build",
+    "public",
+    "push",
+    "registry_package",
+    "release",
+    "repository_dispatch",
+    "schedule",
+    "watch",
+    "workflow_dispatch"
+  ],
+  "soft_allowlist": [
+    "AI-Slop Pattern Check (strict, PR diff)",
+    "CI cascade reason-graph (report-only)",
+    "Cross-Repo Migration Conflicts",
+    "Kafka Boundary Compat (OMN-3256)",
+    "Runtime Boot Smoke (compose)",
+    "Test-Failure Ratchet Gate",
+    "Version Pin Compliance",
+    "zone-filter"
+  ],
+  "docs_only_skippable": [
+    "Application Database Domain Enforcement (OMN-15361)",
+    "Kafka Schema Handshake (OMN-3411)",
+    "Effect-Assertion Gate (RT-5)",
+    "Demo Loop Gate"
+  ]
+}

@@ -244,6 +244,18 @@ class ModelCiBusLaneSecretMapping(BaseModel):
     source: ModelCiBusLaneSecretSource
 
 
+class ModelCiBusLaneSecretNamespace(BaseModel):
+    """A pattern-scoped secret source of a lane, shape only."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    namespace: str
+    ref_pattern: str
+    source_type: str
+    source_path_template: str
+    ttl_seconds: int | None = None
+
+
 class ModelCiBusLaneSecretResolver(BaseModel):
     """A lane's injected secret resolver declaration (OMN-20275), shape only.
 
@@ -256,6 +268,7 @@ class ModelCiBusLaneSecretResolver(BaseModel):
 
     enable_convention_fallback: bool = False
     mappings: tuple[ModelCiBusLaneSecretMapping, ...] = ()
+    namespaces: tuple[ModelCiBusLaneSecretNamespace, ...] = ()
 
 
 class ModelCiBusLane(BaseModel):
@@ -423,29 +436,19 @@ class ModelCiBusOverlay(BaseModel):
 # The script is also loaded directly from its file path by hermetic tests. Give
 # Pydantic the explicit namespace so postponed annotations resolve without
 # depending on the module having first been inserted into sys.modules.
-ModelCiBusOverlay.model_rebuild(
-    _types_namespace={
-        "ModelCiBusLane": ModelCiBusLane,
-        "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
-        "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
-        "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
-        "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
-        "ModelCiBusLaneSecretResolver": ModelCiBusLaneSecretResolver,
-        "ModelCiBusLaneSecretMapping": ModelCiBusLaneSecretMapping,
-        "ModelCiBusLaneSecretSource": ModelCiBusLaneSecretSource,
-    }
-)
-ModelCiBusLane.model_rebuild(
-    _types_namespace={
-        "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
-        "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
-        "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
-        "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
-        "ModelCiBusLaneSecretResolver": ModelCiBusLaneSecretResolver,
-        "ModelCiBusLaneSecretMapping": ModelCiBusLaneSecretMapping,
-        "ModelCiBusLaneSecretSource": ModelCiBusLaneSecretSource,
-    }
-)
+_CI_BUS_TYPES_NAMESPACE = {
+    "ModelCiBusLane": ModelCiBusLane,
+    "ModelCiBusLaneDsnReference": ModelCiBusLaneDsnReference,
+    "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
+    "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
+    "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
+    "ModelCiBusLaneSecretResolver": ModelCiBusLaneSecretResolver,
+    "ModelCiBusLaneSecretMapping": ModelCiBusLaneSecretMapping,
+    "ModelCiBusLaneSecretNamespace": ModelCiBusLaneSecretNamespace,
+    "ModelCiBusLaneSecretSource": ModelCiBusLaneSecretSource,
+}
+ModelCiBusOverlay.model_rebuild(_types_namespace=_CI_BUS_TYPES_NAMESPACE)
+ModelCiBusLane.model_rebuild(_types_namespace=_CI_BUS_TYPES_NAMESPACE)
 
 
 class ModelRedeployStartCommandWire(BaseModel):

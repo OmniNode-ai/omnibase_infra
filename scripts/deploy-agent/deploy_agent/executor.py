@@ -31,7 +31,6 @@ from pydantic import BaseModel, ConfigDict
 
 from deploy_agent import recreate_supervisor
 from deploy_agent.build_budget import (
-    HARD_UPPER_BOUND_SECONDS,
     EnumBuildOutcome,
     LaneBuilderError,
     ModelBuildBudget,
@@ -182,6 +181,8 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
+        "models/model_dev_lane_code_ref_pin.py",
+        "handlers/handler_dev_lane_code_ref_pin.py",
         "models/model_cost_estimator_build_config.py",
         "models/model_cost_estimator_build_request.py",
         "models/model_cost_estimator_build_result.py",
@@ -1002,15 +1003,17 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
             config = config.model_copy(
                 update={"disabled_services": config.disabled_services | retired}
             )
-        return config
-    config = _LANE_CONFIGS[lane]
+    else:
+        config = _LANE_CONFIGS[lane]
     if "effects" in lane_folded_profiles(lane):
+        # The effects port is published by main once the role is folded, so the
+        # effects health target reads main's container (OMN-22930 on primary dev).
         targets = list(config.runtime_health_targets)
         index = SERVICE_HEALTH_TARGET_INDEX["runtime-effects"]
         _, port = targets[index]
         main, _ = targets[SERVICE_HEALTH_TARGET_INDEX["omninode-runtime"]]
         targets[index] = (main, port)
-        return config.model_copy(update={"runtime_health_targets": tuple(targets)})
+        config = config.model_copy(update={"runtime_health_targets": tuple(targets)})
     return config
 
 
@@ -2168,11 +2171,6 @@ def _runtime_health_reason(result: subprocess.CompletedProcess[str]) -> str:
         f"health response is not ready: status={status!r} "
         f"is_running={is_running!r} config_prefetch_status={prefetch!r}"
     )
-
-
-def _runtime_health_passed(result: subprocess.CompletedProcess[str]) -> bool:
-    """Return whether a runtime /health response proves deploy readiness."""
-    return not _runtime_health_reason(result)
 
 
 class ModelAnsweringDegraded(BaseModel):
@@ -3721,7 +3719,10 @@ class DeployExecutor:
             )
             return
 
-        branch = load_tracking_ref_from_env()
+        # OMN-23039: a live code-ref pin names the branch whose code this agent loads.
+        branch = load_dev_boot_guard("handler_dev_lane_code_ref_pin").followed_branch(
+            load_tracking_ref_from_env(), os.environ, boundary.value
+        )
 
         # The identity of the code THIS process imported, recorded at startup
         # before anything could move the clone underneath it. Read before any

@@ -113,9 +113,9 @@ from deploy_agent.idle_converge import (
     probe_blocking,
     read_dev_head,
     read_dev_tags,
+    read_lane_presence,
     read_running_image,
     read_running_ref,
-    read_runtime_presence,
     restore_command,
     stability_follow_command,
 )
@@ -559,9 +559,7 @@ class DeployAgent:
         self._idle_restore_last_verdict: EnumIdleRestoreVerdict | None = None
         self._idle_read_runtime_presence: Callable[
             [], tuple[EnumRuntimePresence, str]
-        ] = lambda: read_runtime_presence(
-            _runtime_container_for_lane(EnumRuntimeLane.DEV)
-        )
+        ] = lambda: read_lane_presence(lane_config_for(EnumRuntimeLane.DEV))
         self._idle_probe_blocker: Callable[[datetime], str | None] = lambda now: (
             probe_blocking(now, load_probe_windows(AGENT_CLONE_ROOT))
         )
@@ -1530,7 +1528,7 @@ class DeployAgent:
                     "idle restore: %s (%s)", decision.verdict.value, decision.detail
                 )
             self._idle_restore_last_verdict = decision.verdict
-        if presence is not EnumRuntimePresence.DOWN:
+        if not presence.restorable:
             return False
         if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
             return True
@@ -2062,7 +2060,7 @@ class DeployAgent:
                     )
 
                     if dev_guard is not None:
-                        dev_guard.wait()
+                        dev_guard.wait(deployed_generation=True)
 
                     # prod must serve exactly the pinned digest: verify the running
                     # container image digest equals the requested digest BEFORE any
