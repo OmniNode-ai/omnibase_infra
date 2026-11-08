@@ -18,7 +18,6 @@ from typing import Any
 
 import pytest
 
-from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.handlers import handler_c16_pinned_backend as probe
 from omnibase_infra.models.model_c16_pinned_backend_request import (
     ModelC16PinnedBackendRequest,
@@ -211,7 +210,7 @@ def test_the_handler_succeeds_on_a_pass_and_fails_with_a_missing_backend(
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps(_payload(drop_paid)), encoding="utf-8")
     record = tmp_path / "record.json"
-    handler = probe.HandlerC16PinnedBackend(ModelONEXContainer())
+    handler = probe.HandlerC16PinnedBackend()
 
     def run(replay: Path) -> Any:
         request = ModelC16PinnedBackendRequest(
@@ -238,9 +237,7 @@ def test_an_unreadable_config_is_could_not_run_and_never_success(
     request = ModelC16PinnedBackendRequest(
         config_path=str(tmp_path / "absent.yaml"), timeout_seconds=1.0
     )
-    result = asyncio.run(
-        probe.HandlerC16PinnedBackend(ModelONEXContainer()).handle(request)
-    )
+    result = asyncio.run(probe.HandlerC16PinnedBackend().handle(request))
     assert result.success is False
     assert result.outcome == "COULD_NOT_RUN"
 

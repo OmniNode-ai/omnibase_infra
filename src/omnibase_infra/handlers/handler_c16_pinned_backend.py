@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import Any, Final
 
 import yaml
 
@@ -29,9 +29,6 @@ from omnibase_infra.models.model_c16_pinned_backend_request import (
 from omnibase_infra.models.model_c16_pinned_backend_result import (
     ModelC16PinnedBackendResult,
 )
-
-if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
 
 PASS: Final[str] = "PASS"
 FAIL: Final[str] = "FAIL"
@@ -359,9 +356,6 @@ def run_command(argv: list[str], timeout: float) -> tuple[int, str]:
 
 class HandlerC16PinnedBackend:
     """Grade the pinned-backend probe; only a PASS reads success."""
-
-    def __init__(self, container: ModelONEXContainer) -> None:
-        self._container = container
 
     @property
     def handler_type(self) -> EnumHandlerType:
