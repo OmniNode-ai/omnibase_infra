@@ -2079,8 +2079,8 @@ run_repair() {
       # layer beneath, which this install exists NOT to re-resolve (hence its own
       # --no-deps). The workspace root carries no uv configuration on any host,
       # so this changes where the child stands without changing what it installs.
-      if ! (cd "$OMNI_HOME" && as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
-          ONEX_ATOMIC_INSTALL="$atomic" PATH="$(dirname "$UV_BIN"):$PATH" \
+      if ! (cd "$OMNI_HOME" && as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" ONEX_ATOMIC_INSTALL="$atomic" \
+          PATH="$(dirname "$UV_BIN"):$PATH" \
           bash "$INSTALL_SCRIPT" --execute "$target_python"); then
         fail "provider co-install did not complete; omnimarket is not installed." \
           "Every \`onex skill\`/\`onex node\`/\`onex delegate\` dispatch will refuse" \
