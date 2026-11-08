@@ -30,6 +30,11 @@ requirements:
     statement: The Hostile Reviewer job's trusted fallback runner set requires arch-amd64, a label the LAN amd64 action pools carry and the off-LAN h203-light runners do not, so the job cannot land where the review voters are unreachable.
   - id: req-omn17292-runtime-image-cve-floors
     statement: The runtime image upgrades filelock and npm's bundled undici past their HIGH CVEs, so the Trivy scan in Build runtime stability-candidate no longer fails on dev.
+  - id: req-omn17292-integration-coverage-pin-advance
+    statement: The Integration Test Coverage check exempts the omnimarket pin-advance bot branch, whose regenerated grant code under src/ is derived and adds no feature.
+    acceptance:
+      - id: AC7
+        statement: "AC7: the check step exits 0 for a same-repo bot/omnimarket-contract-pin-* branch and still evaluates any other branch or a fork -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_integration_test_check_pin_advance_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry f3a5bdd8113eb381ce9392635709fcc9d60f4df5.
@@ -52,6 +57,9 @@ evidence_requirements:
   - kind: tests
     description: The runtime image upgrades filelock past CVE-2026-112940 and npm's bundled undici past CVE-2026-109869.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
+  - kind: tests
+    description: The Integration Test Coverage step exempts the pin-advance bot branch and no other.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_integration_test_check_pin_advance_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -171,3 +179,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_contract_retired_labels_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2, AC3, AC4]
+  - id: dod-omn-17292-ac7-integration-coverage-pin-advance
+    description: The Integration Test Coverage step exits 0 for a same-repo omnimarket pin-advance bot branch and still evaluates another branch or a fork; the merge base has no exemption.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_integration_test_check_pin_advance_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]

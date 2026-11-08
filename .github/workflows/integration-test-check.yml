@@ -51,8 +51,20 @@ jobs:
           fetch-depth: 0
 
       - name: Check for integration tests in PR
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
+
+          # The omnimarket contract-pin advance bot regenerates derived grant
+          # code under src/ from an upstream pin; it adds no feature, so the
+          # integration-test requirement does not apply to it. Same-repo
+          # branches only: a fork cannot claim this exemption.
+          if [[ "$PR_HEAD_REPO" == "$GITHUB_REPOSITORY" && "$PR_HEAD_REF" == bot/omnimarket-contract-pin-* ]]; then
+            echo "Omnimarket contract-pin advance PR — integration test not required"
+            exit 0
+          fi
 
           # Get changed files in this PR
           BASE_REF="${GITHUB_BASE_REF:-main}"
