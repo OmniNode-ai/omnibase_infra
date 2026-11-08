@@ -49,8 +49,6 @@ dod_evidence:
     description: After an install of this branch on the h201 dev deploy agent, the agent's clone holds the companion state and the unit is active. The probe prints no secret.
     source: manual
     execution_scope: local_done_gate
-    binds_ac:
-      - AC2
     checks:
       - check_type: command
         check_value: ssh "$DEPLOY_PROBE_HOST" "grep -c COMPANION_DOWN /data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/idle_converge.py && systemctl --user is-active deploy-agent-dev"
