@@ -272,6 +272,8 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
     assert process.foldable_services == {
         "tenant-projection": SERVICE,
         **RUNTIME_WRITERS,
+        # OMN-21288 (T17): the projection API, served by main as a mounted node.
+        "projection-api": "projection-api",
     }
     # The hook-events writer has no runtime profile: the policy retires it by name.
     # OMN-23066 (T13): the context audit consumer is retired by name the same way.

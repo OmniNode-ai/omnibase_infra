@@ -1120,7 +1120,10 @@ def test_dev_lane_read_binding_reads_as_the_projection_api_does() -> None:
     effects_dsn = services["runtime-effects"]["environment"][
         "OMNIDASH_ANALYTICS_DB_URL"
     ]
-    api_dsn = services["projection-api"]["environment"]["OMNIDASH_ANALYTICS_DB_URL"]
+    # OMN-21288 (T17): main serves the projection API as a mounted node, so the DSN the
+    # API reads through is main's; the retired projection-api service renders nowhere.
+    assert "projection-api" not in services
+    api_dsn = services["omninode-runtime"]["environment"]["OMNIDASH_ANALYTICS_DB_URL"]
     assert effects_dsn == api_dsn
     assert urlsplit(effects_dsn).username == "role_omnidash"
 

@@ -393,7 +393,9 @@ jobs:
           CONVERGE_GENERATION: ${{ steps.converge.outputs.generation }}
           DEV_LANE_MAIN_URL: http://host.docker.internal:8085
           DEV_LANE_EFFECTS_URL: http://host.docker.internal:8086
-          DEV_LANE_PROJECTION_URL: http://host.docker.internal:3002
+          # OMN-21288 (T17): the projection API is the query node main serves under its
+          # http_mount prefix; the separate projection-api container is retired on dev.
+          DEV_LANE_PROJECTION_URL: http://host.docker.internal:8085/projection-api
         run: |
           set -euo pipefail
           mkdir -p "${LAB_PASS_DIR}"

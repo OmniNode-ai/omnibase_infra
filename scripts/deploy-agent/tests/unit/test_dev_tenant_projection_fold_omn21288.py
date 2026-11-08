@@ -97,6 +97,8 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             *RUNTIME_WRITERS.values(),
             HOOK_EVENTS_WRITER,
             CONTEXT_AUDIT_CONSUMER,
+            # OMN-21288 (T17): the projection API is served by main as a mounted node.
+            "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
         }
     )
@@ -275,6 +277,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         *RUNTIME_WRITERS.values(),
         HOOK_EVENTS_WRITER,
         CONTEXT_AUDIT_CONSUMER,
+        "projection-api",  # OMN-21288 (T17)
     }
     census = len(retired)
     compose_calls = calls[census + 2 :]

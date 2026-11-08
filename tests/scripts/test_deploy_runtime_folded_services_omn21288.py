@@ -308,7 +308,7 @@ _DEV_RUNTIME_WRITERS = (
 def test_committed_dev_fold_retires_every_writer_before_main_and_keeps_the_rest() -> (
     None
 ):
-    """The committed dev policy retires the six writers, the tenant carrier and the hook-events writer."""
+    """The committed dev policy retires the six writers, the tenant carrier, the hook-events writer and the projection API."""
     harness = (
         _harness(
             "effects",
@@ -348,6 +348,8 @@ restart_services /tmp "$PROJECT"
         *_DEV_RUNTIME_WRITERS,
         "tenant-projection-writer",
         "projection-claude-hook-events-writer",
+        # OMN-21288 (T17): the projection API is served by main as a mounted node.
+        "projection-api",
     ):
         assert (
             lines.index(f"stop --time 30 {service}-id")

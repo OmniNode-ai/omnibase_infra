@@ -135,7 +135,9 @@ instances:
       deploy_agent_url: http://host.docker.internal:8098
       main_url: http://host.docker.internal:8085
       effects_url: http://host.docker.internal:8086
-      projection_url: http://host.docker.internal:3002
+      # OMN-21288 (T17): the projection API is the query node main serves under its
+      # http_mount prefix, on main's port; the separate projection-api service is retired here.
+      projection_url: http://host.docker.internal:8085/projection-api
       compose_project: omnibase-infra
       runtime_container: omninode-runtime
       effects_container: omninode-runtime-effects
