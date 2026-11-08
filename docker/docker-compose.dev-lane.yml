@@ -2241,8 +2241,14 @@ services:
     # file, and never a literal in this repository (this one is public). Unset, it
     # binds loopback, so a host that has no tailnet address publishes the page to
     # nobody rather than to everybody.
+    # OMN-22692: the tailnet https front (node_tailnet_https_serve_effect) fronts
+    # a loopback upstream only, and its overlay names loopback 3080. The same port
+    # is therefore also published on loopback, which only the host itself reaches;
+    # with the bind address unset the two entries are the same binding and
+    # Compose keeps one.
     ports:
       - "${COST_ESTIMATOR_BIND_ADDR:-127.0.0.1}:3080:3000"
+      - "127.0.0.1:3080:3000"
     environment:
       !!merge <<: [*dev_lane_estimator_gate_env]
       FEATURE_ESTIMATOR_ENABLED: "true"

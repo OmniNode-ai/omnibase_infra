@@ -53,6 +53,7 @@ class EnumNonRetryableErrorCategory(str, Enum):
             run on a platform-owned one)
         JSON_DECODE_ERROR: The message body is not JSON at all (OMN-17896)
         SECRET_RESOLUTION_ERROR: Secret/credential resolution failures (missing secrets)
+        GITHUB_TRANSPORT_ERROR: A GitHub gateway read that failed (OMN-23058)
         VALIDATION_ERROR: Input/schema validation errors (malformed data)
 
     Why These Are Non-Retryable:
@@ -199,6 +200,26 @@ class EnumNonRetryableErrorCategory(str, Enum):
     MESSAGE_SIZE_TOO_LARGE_ERROR = "MessageSizeTooLargeError"
     """aiokafka's own name for the same refusal, raised by a producer that does
     not go through the event bus's publish wrapper."""
+
+    GITHUB_TRANSPORT_ERROR = "GitHubTransportError"
+    """A GitHub read the gateway could not answer (OMN-23058).
+
+    Raised by omnimarket's GitHub repo gateway when GitHub answers a read with a
+    refusal or an error status (an expired job log's 404, a rate limit, a 5xx
+    page) or the request itself fails.
+
+    Why non-retryable:
+        A read has a caller that is handed the failure terminal and issues a
+        new request if it still wants the answer. A dead-letter replay answers a
+        request nobody waits for, behind whatever the topic holds by then, and
+        spends the GitHub quota live readers need. Measured on the lab dev lane
+        2026-11-08 03:33Z to 03:46Z: 1,256 failure terminals for 133 commands
+        (10 to 15 each) on a one-partition topic, in the minutes ``onex scm``
+        reads from lab hosts timed out. Named by class name, as
+        ``CUSTOMER_KEY_REFUSED_ERROR`` is: omnibase_infra may not import the
+        omnimarket class, and the name is what survives the dispatch engine
+        flattening the exception into text.
+    """
 
     VALIDATION_ERROR = "ValidationError"
     """Input/schema validation errors from Pydantic or custom validators.
