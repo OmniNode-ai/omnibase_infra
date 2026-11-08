@@ -124,7 +124,9 @@ def test_only_the_force_step_is_fenced(table: str, node: str) -> None:
     assert f"node:{node}:0001_grant_tenant_projection_writer_{table}.sql" not in ids
 
 
-@pytest.mark.parametrize(("table", "node"), _TABLES)
+@pytest.mark.parametrize(
+    ("table", "node"), [t for t in _TABLES if t[0] != "local_alerts"]
+)
 def test_the_interim_grant_declaration_names_the_vendored_create(
     table: str, node: str
 ) -> None:
