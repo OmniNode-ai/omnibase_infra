@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23075
+title: The gateway runtime on dev carries the replay stop for failed github reads and stops replaying them
+summary: omnibase_infra#5795 classifies a failed GitHub gateway read as non-retryable so the dead-letter replay stops re-issuing it. This ticket redeploys the gateway runtime on dev through the deploy agent and reads the gateway terminal topic for one hour afterwards, counted per command id.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23075-gateway-redeploy
+    statement: The gateway runtime on dev is redeployed through the deploy agent after omnibase_infra#5795 merges, and the failed-read replay stop is read in the running container.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the gateway runtime on dev carries omnibase_infra#5795 after a deploy-agent run -- falsifier: the deploy-agent job for the redeploy reaches status success and the container revision contains the merge commit"
+      - id: AC2
+        statement: "AC2: in one hour after the redeploy the gateway topic carries no retryable failure terminal for a job-log 404 replayed more than once -- falsifier: onex bus read of the gateway terminal topic over that hour counted per command id"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+evidence_requirements:
+  - kind: tests
+    description: The recorded readings of the redeployed gateway runtime hold, and the count goes red on the pre-fix burst of one command answered ten times with a retryable job-log 404.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23075_gateway_redeploy_readings.py -q --no-cov -p no:randomly
+dod_evidence:
+  - id: dod-omn23075-ac1-deploy-agent-run
+    description: The deploy-agent job for the redeploy reads success, the three dev runtime containers report image revision f87ae5813ff8 and the merge commit f84141dbd is an ancestor of it (read on lab host h202 against the dev containers and the canonical clone).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23075_gateway_redeploy_readings.py::TestAc1DeployAgentRun -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn23075-ac2-gateway-terminals
+    description: The gateway terminal topic read over one hour after the redeploy, counted per command id, holds no command answered more than once with a retryable job-log 404; the same count over the pre-fix burst reports ten replays of one command.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23075_gateway_redeploy_readings.py::TestAc2GatewayTerminals -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

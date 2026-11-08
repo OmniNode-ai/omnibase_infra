@@ -115,9 +115,11 @@ def test_rendered_fold_matches_separate_roles_on_real_contracts(
     raw = yaml.safe_load(
         (_ROOT / "contracts/services/runtime_policy.contract.yaml").read_text()
     )
-    raw["profiles"]["dev"]["services"]["main"]["folded_profiles"] = (
-        list(_ROLES) if folded else []
-    )
+    main_service = raw["profiles"]["dev"]["services"]["main"]
+    main_service["folded_profiles"] = list(_ROLES) if folded else []
+    if not folded:
+        # A fold handover names a folded profile; the unfolded case folds none.
+        main_service["fold_handovers"] = {}
     rendered = render_env(ModelRuntimePolicyContract.model_validate(raw))
     environment = {"ONEX_RUNTIME_LANE": lane}
     if "DEV_RUNTIME_MAIN_FOLDED_PROFILES" in rendered:
