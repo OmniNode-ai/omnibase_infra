@@ -28,6 +28,13 @@ _INSTANCES = _ROOT / "src" / "omnibase_infra" / "topology" / "instances"
 _CATALOGS = _ROOT / "docker" / "catalog" / "database-topology"
 _CREATE = "0001_create_skill_executions.sql"
 _GRANT = "0002_grant_tenant_projection_writer_skill_executions.sql"
+_READER = "0003_grant_app_dashboard_select_skill_executions.sql"
+# sha256 of the omnimarket copies of 0002 and 0003 (node_projection_skill_lifecycle/
+# migrations); the vendored bytes here must stay identical to them.
+_NODE_COPY_DIGESTS = {
+    _GRANT: "78ccf5105e09623f0d9b10ce4df5b68fc4d40b191392c598de7c01fe76314dbd",
+    _READER: "bcd27f24374ad95fe45ebede339bb6424e29426387c3024731508450fe23c863",
+}
 _TABLE = "skill_executions"
 
 
@@ -45,7 +52,7 @@ def _writer_tables(topology_file: Path) -> set[str]:
     }
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _READER])
 def test_vendor_manifest_binding_matches_the_bytes(filename: str) -> None:
     artifact_path = f"nodes/{_NODE}/{filename}"
     digest = hashlib.sha256((_VENDOR / filename).read_bytes()).hexdigest()
@@ -64,10 +71,18 @@ def test_vendor_manifest_binding_matches_the_bytes(filename: str) -> None:
     ]
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _READER])
 def test_migration_classes_are_declared(filename: str) -> None:
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
     assert classes[f"forward/nodes/{_NODE}/{filename}"] == "forward-only"
+
+
+@pytest.mark.parametrize("filename", sorted(_NODE_COPY_DIGESTS))
+def test_vendored_migrations_are_byte_identical_to_the_node_copies(
+    filename: str,
+) -> None:
+    digest = hashlib.sha256((_VENDOR / filename).read_bytes()).hexdigest()
+    assert digest == _NODE_COPY_DIGESTS[filename]
 
 
 def test_supplemental_declaration_derives_the_writer_privileges() -> None:

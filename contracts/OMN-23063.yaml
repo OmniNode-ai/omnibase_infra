@@ -1,0 +1,55 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23063
+title: The skill_lifecycle vendoring branch on omnibase_infra reaches a pull request with its contract
+summary: >-
+  Vendors node_projection_skill_lifecycle migration 0003 (the app_dashboard SELECT grant on skill_executions) with its checksum-bound ledger row and migration class, next to the already vendored 0001 and 0002, and extends the vendoring test to bind 0003 and to pin 0002 and 0003 to the digests of the omnimarket node copies.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23063-vendor
+    statement: >-
+      The omnibase_infra vendored copies of node_projection_skill_lifecycle migrations 0002 and 0003 are byte-identical to the omnimarket node copies, and 0003 is bound by a ledger row and a migration class.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the branch is opened as a pull request with this ticket in the title and a contracts file, and handed to the landing controller -- falsifier: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -q --no-cov fails at the merge base for the 0003 binding cases
+      - id: AC2
+        statement: >-
+          AC2: the vendored migrations 0002 and 0003 are byte-identical to the omnimarket copies -- falsifier: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -k byte_identical -q --no-cov fails when a vendored byte changes
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0003 bytes, ledger row and class, and the 0002 and 0003 digests pinned to the omnimarket copies.
+    command: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23063-ac1-vendor-binding
+    description: The vendoring test binds the 0003 bytes to the ledger row and the forward-only class; with one byte appended to the vendored 0003 it fails, restored it passes.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -q --no-cov
+        cwd: .
+  - id: dod-omn23063-ac1-contract-present
+    description: The pull request carries its own contracts file.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: test -f contracts/OMN-23063.yaml
+        cwd: .
+  - id: dod-omn23063-ac2-byte-identity
+    description: The vendored 0002 and 0003 hash to the digests of the omnimarket node copies.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -k byte_identical -q --no-cov
+        cwd: .
