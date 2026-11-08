@@ -93,6 +93,8 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             "tenant-projection-writer",
             *RUNTIME_WRITERS.values(),
             HOOK_EVENTS_WRITER,
+            # OMN-22930: the effects role runs in main; its service is disabled too.
+            "runtime-effects",
             *DEV_LANE_GATEWAY_SERVICES,
         }
     )
@@ -267,6 +269,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         "tenant-projection-writer",
         *RUNTIME_WRITERS.values(),
         HOOK_EVENTS_WRITER,
+        "runtime-effects",  # OMN-22930: the effects role runs in main
     }
     census = len(retired)
     compose_calls = calls[census + 2 :]

@@ -191,7 +191,11 @@ readonly COMPOSE_PROJECT="${DEV_COMPOSE_PROJECT}"
 # correct home for them, out of scope for this config-duplication kill.
 readonly REDPANDA_CONTAINER="omnibase-infra-redpanda"
 readonly POSTGRES_CONTAINER="omnibase-infra-postgres"
-readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
+# OMN-22930 (T8): a lane whose rendered policy folds the effects role into main has no
+# runtime-effects container, so it is left out of the services this refresh builds,
+# gates, snapshots and rolls back. The verifier reads the same set from --container-ids.
+# shellcheck disable=SC2046,SC2207
+readonly CORE_SERVICES=(omninode-runtime $([[ ",${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}," == *,effects,* ]] || echo runtime-effects) runtime-worker projection-api)
 # OMN-18496: must equal CLOUD_MIGRATION_FAILED_EXIT_CODE in
 # src/omnibase_infra/handlers/handler_runtime_deploy.sh.
 readonly CLOUD_MIGRATION_FAILED_DEPLOY_EXIT=3
@@ -1081,7 +1085,6 @@ GATE1_JSON="${WORKDIR}/gate1.json"
 GATE_EXIT=0
 BOOT_WINDOW_SECONDS="$(runtime_boot_window_seconds "${NEW_CONTAINER_IDS[omninode-runtime]:-}")"
 log "runtime boot window: ${BOOT_WINDOW_SECONDS}s left of omninode-runtime's declared start budget"
-# shellcheck disable=SC2086
 run_verify \
     --lane "${LANE}" \
     --expected-revision "${NEW_INFRA_SHA_SHORT}" \
@@ -1093,7 +1096,7 @@ run_verify \
     --broker-container "${REDPANDA_CONTAINER}" \
     --min-contracts "${MIN_CONTRACTS}" \
     --boot-window-seconds "${BOOT_WINDOW_SECONDS}" \
-    ${REQUIRE_DIGEST_CHANGE} \
+    ${REQUIRE_DIGEST_CHANGE:+"${REQUIRE_DIGEST_CHANGE}"} \
     --json > "${GATE1_JSON}" || GATE_EXIT=$?
 
 if ! jq -e . "${GATE1_JSON}" >/dev/null 2>&1; then

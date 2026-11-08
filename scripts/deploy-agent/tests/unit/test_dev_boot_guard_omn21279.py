@@ -655,3 +655,49 @@ def test_second_failed_job_leaves_a_family_the_first_recovery_restored_running(
     incident = json.loads((second.root / "incident-54914064.json").read_text())
     assert incident["recovery_skipped_healthy"] is True
     assert sorted(c["Id"] for c in docker["containers"]) == recovered_ids
+
+
+_REPO_POLICY = Path(__file__).resolve().parents[4] / "docker" / "runtime-policy.env"
+
+
+def _policy_files(tmp_path: Path) -> tuple[Path, Path]:
+    """The previous generation's policy (effects unfolded) and the repo's current one."""
+    current_text = _REPO_POLICY.read_text()
+    lines = []
+    for line in current_text.splitlines():
+        if line.startswith("DEV_RUNTIME_MAIN_FOLDED_PROFILES="):
+            assert line.endswith(",effects")
+            line = line.removesuffix(",effects")
+        lines.append(line)
+    previous = tmp_path / "previous-runtime-policy.env"
+    previous.write_text("\n".join(lines) + "\n")
+    current = tmp_path / "current-runtime-policy.env"
+    current.write_text(current_text)
+    return previous, current
+
+
+def test_a_deploy_that_folds_effects_waits_for_the_services_of_the_new_generation(
+    tmp_path: Path, docker: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-22930 on the dev lane, 2026-11-07: the guard is built before git_pull.
+
+    Job 3715d9e9 rolled the folded runtime, which came up healthy and served 8085
+    and 8086, then failed boot recovery with "dev runtime containers absent:
+    ['runtime-effects']": the guard still named the service the fold retires.
+    """
+    previous, current = _policy_files(tmp_path)
+    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", previous)
+    guard = executor_mod.DevBootGuard(DeployExecutor(), tmp_path)
+    assert "runtime-effects" in guard.services
+    # git_pull replaces the policy; the rolled family has no runtime-effects.
+    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", current)
+    docker["containers"] = [
+        c
+        for c in docker["containers"]
+        if c["Config"]["Labels"]["com.docker.compose.service"] != "runtime-effects"
+    ]
+    # Failing control: the pre-pull service list refuses the healthy folded family.
+    with pytest.raises(guard_mod.DevBootFailedError, match="runtime-effects"):
+        guard.wait()
+    guard.wait(deployed_generation=True)
+    assert "runtime-effects" not in guard.services
