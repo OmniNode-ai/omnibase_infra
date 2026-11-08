@@ -660,14 +660,17 @@ def test_second_failed_job_leaves_a_family_the_first_recovery_restored_running(
 _REPO_POLICY = Path(__file__).resolve().parents[4] / "docker" / "runtime-policy.env"
 
 
-def _policy_files(tmp_path: Path) -> tuple[Path, Path]:
-    """The previous generation's policy (effects unfolded) and the repo's current one."""
+def _policy_files(
+    tmp_path: Path, unfolded: tuple[str, ...] = ("effects", "workers")
+) -> tuple[Path, Path]:
+    """The previous generation's policy (``unfolded`` roles not folded) and the repo's current one."""
     current_text = _REPO_POLICY.read_text()
     lines = []
     for line in current_text.splitlines():
         if line.startswith("DEV_RUNTIME_MAIN_FOLDED_PROFILES="):
-            assert line.endswith(",effects")
-            line = line.removesuffix(",effects")
+            kept = [p for p in line.split("=", 1)[1].split(",") if p not in unfolded]
+            assert len(kept) == len(line.split("=", 1)[1].split(",")) - len(unfolded)
+            line = "DEV_RUNTIME_MAIN_FOLDED_PROFILES=" + ",".join(kept)
         lines.append(line)
     previous = tmp_path / "previous-runtime-policy.env"
     previous.write_text("\n".join(lines) + "\n")
@@ -694,10 +697,39 @@ def test_a_deploy_that_folds_effects_waits_for_the_services_of_the_new_generatio
     docker["containers"] = [
         c
         for c in docker["containers"]
-        if c["Config"]["Labels"]["com.docker.compose.service"] != "runtime-effects"
+        if c["Config"]["Labels"]["com.docker.compose.service"]
+        not in {"runtime-effects", "runtime-worker"}
     ]
     # Failing control: the pre-pull service list refuses the healthy folded family.
     with pytest.raises(guard_mod.DevBootFailedError, match="runtime-effects"):
         guard.wait()
     guard.wait(deployed_generation=True)
     assert "runtime-effects" not in guard.services
+
+
+def test_a_deploy_that_folds_the_worker_waits_for_the_services_of_the_new_generation(
+    tmp_path: Path, docker: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-21288 (T9): the same pre-pull guard, for the worker the fold retires.
+
+    The previous generation folds effects and still runs runtime-worker; the
+    deploy rolls main with the workers role and no runtime-worker container.
+    """
+    previous, current = _policy_files(tmp_path, unfolded=("workers",))
+    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", previous)
+    guard = executor_mod.DevBootGuard(DeployExecutor(), tmp_path)
+    assert "runtime-worker" in guard.services
+    assert "runtime-effects" not in guard.services
+    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", current)
+    docker["containers"] = [
+        c
+        for c in docker["containers"]
+        if c["Config"]["Labels"]["com.docker.compose.service"]
+        not in {"runtime-effects", "runtime-worker"}
+    ]
+    # Failing control: the pre-pull list still names runtime-worker and refuses.
+    with pytest.raises(guard_mod.DevBootFailedError, match="runtime-worker"):
+        guard.wait()
+    guard.wait(deployed_generation=True)
+    assert "runtime-worker" not in guard.services
+    assert guard.services == ("omninode-runtime",)

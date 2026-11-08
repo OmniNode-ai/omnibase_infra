@@ -229,7 +229,20 @@ profiles:
           # contract mapping as the writers; its consumer groups resume from
           # the committed offsets through the fold handover (OMN-22877).
           - effects
+          # OMN-21288 (T9): the worker role runs as nodes inside main. The
+          # separate runtime-worker service is retired through the same
+          # contract mapping; its consumer groups resume from the committed
+          # offsets through the same handover as effects, so a queued workflow
+          # event is neither skipped nor run twice across the fold.
+          - workers
         fold_handovers:
+          workers:
+            # KAFKA_INSTANCE_ID the retired runtime-worker service set
+            # (docker-compose.infra.yml). A repeat of a workflow event is not
+            # tolerated, so the rule is last_ran, never copy_if_uncommitted.
+            from_instance_id: runtime-worker
+            from_auto_offset_reset: latest
+            handover_rule: last_ran
           effects:
             # KAFKA_INSTANCE_ID the retired runtime-effects service set
             # (docker-compose.infra.yml), and the event bus default it ran
@@ -240,6 +253,7 @@ profiles:
             handover_rule: last_ran
         foldable_services:
           effects: runtime-effects
+          workers: runtime-worker
           tenant-projection: tenant-projection-writer
           projection-writer-live-events: projection-live-events-writer
           projection-writer-registration: projection-registration-writer
@@ -257,6 +271,11 @@ profiles:
           - market.skill-proof
           - workflow.orchestration
           - runtime.main
+          # OMN-21288 (T9): the capabilities the retired runtime-worker declared,
+          # so the workflow capabilities resolve on main once the role is folded.
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
         bifrost_verify_endpoints: true
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""

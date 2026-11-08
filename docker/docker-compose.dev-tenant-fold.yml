@@ -47,6 +47,9 @@ services:
       # never removed; a rollback restores the service on the same volumes.
       - effects_data:/app/effects-data
       - effects_logs:/app/effects-logs:ro
+      # OMN-21288 (T9): the retired worker's logs stay in place and are never
+      # removed; a rollback restores the service on the same volume.
+      - worker_logs:/app/worker-logs:ro
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
       - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro

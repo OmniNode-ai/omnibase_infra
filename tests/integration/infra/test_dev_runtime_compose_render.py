@@ -234,6 +234,11 @@ _UNFOLDED_WRITER_PROFILES |= {
     f"DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_{kind}_PROFILE": kind.lower()
     for kind in ("RUNTIME", "FULL")
 }
+# OMN-21288 (T9) folds the workers role the same way, under `folded-workers-*`.
+_UNFOLDED_WRITER_PROFILES |= {
+    f"DEV_RUNTIME_MAIN_RUNTIME_WORKER_{kind}_PROFILE": kind.lower()
+    for kind in ("RUNTIME", "FULL")
+}
 
 
 def _render_env(**overrides: str) -> dict[str, str]:
@@ -1061,13 +1066,18 @@ def _binding_mount_source(service: dict[str, Any]) -> Path | None:
     return None
 
 
-def _primary_dev_services(*, effects_folded: bool) -> dict[str, Any]:
-    """Primary dev's layered render; ``effects_folded=False`` is the pre-fold shape."""
+def _primary_dev_services(
+    *, effects_folded: bool, workers_folded: bool = True
+) -> dict[str, Any]:
+    """Primary dev's layered render; ``*_folded=False`` is that role's pre-fold shape."""
     env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
     if effects_folded:
         # The committed policy env, as the deploy agent renders primary dev.
         for kind in ("RUNTIME", "FULL"):
             env.pop(f"DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_{kind}_PROFILE")
+    if workers_folded:
+        for kind in ("RUNTIME", "FULL"):
+            env.pop(f"DEV_RUNTIME_MAIN_RUNTIME_WORKER_{kind}_PROFILE")
     result = _run_compose_config(
         env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
     )
@@ -1113,6 +1123,26 @@ def test_failing_control_pre_fold_render_still_has_the_effects_service() -> None
     ].replace("$$", "$")
     assert resolver.startswith('{"enable_convention_fallback":false')
     assert '"namespace":"tenant_inference_credentials"' in resolver
+
+
+@pytest.mark.integration
+def test_primary_dev_worker_fold_removes_the_service_in_real_compose() -> None:
+    """OMN-21288 (T9): no runtime-worker service; main carries the role and its logs."""
+    services = _primary_dev_services(effects_folded=True, workers_folded=True)
+    assert "runtime-worker" not in services
+    main = services["omninode-runtime"]
+    folded = main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")
+    assert {"effects", "workers"} <= set(folded)
+    assert "/app/worker-logs" in {volume["target"] for volume in main["volumes"]}
+
+
+@pytest.mark.integration
+def test_failing_control_pre_fold_render_still_has_the_worker_service() -> None:
+    """The pre-fold profiles restore the service, with its one replica and its profile."""
+    services = _primary_dev_services(effects_folded=True, workers_folded=False)
+    worker = services["runtime-worker"]
+    assert worker["environment"]["RUNTIME_PROFILE"] == "workers"
+    assert worker["deploy"]["replicas"] == 1
 
 
 def _render_dev_lane_services() -> dict[str, Any]:
