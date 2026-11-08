@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-23106
+title: A dev lane whose effects container is gone while its main runtime runs is restored by the deploy agent
+summary: The dev deploy agent restored a lane only when its main runtime container was absent or stopped. The runtime-effects container is the only consumer of the delegate-skill command topic, so a lane with main running and effects absent read NOT_DOWN and every delegation request waited in the topic. After deploy job 3715d9e9 left the effects container absent, 45 requests published 20:01Z to 02:48Z waited until 03:04Z, when an idle converge fired for another reason. The restore now reads every container the lane needs (main, and effects unless the lane folds or disables it) and restores a lane missing its effects container after the converge's own idle bound.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23106-restore-missing-effects
+    statement: A dev lane whose effects container is absent while its main runtime runs is restored by one runtime rebuild, once per restore retry bound, and never while frozen, while a job runs, or when docker cannot be read.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra#5798 is titled with OMN-23106 and carries contracts/OMN-23106.yaml, and a regression test built from the recorded case (effects consumer absent while main runs and requests wait) fails on dev and passes on the branch -- falsifier: uv run pytest of the added tests in omnibase_infra'
+      - id: AC2
+        statement: 'AC2: a dev lane with omninode-runtime running and omninode-runtime-effects absent is restored by one agent/idle-restore job after the converge idle bound and by no second job inside the retry bound; a lane with both containers running, a lane that folds or disables the effects service, a frozen lane, a lane with a job in flight, and a lane whose effects container cannot be read are not restored -- falsifier: uv run pytest of the companion restore tests'
+evidence_requirements:
+  - kind: tests
+    description: The container set a lane needs, the presence read over faked docker, the restore decision with its idle, freeze, job and retry bounds, and the agent replay of the 2026-11-07 outage
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23106-regression-test
+    description: The recorded outage (main running, effects absent) reads companion_down through the handler's lane presence read and restores through one agent/idle-restore job; both-running, folded, retired, frozen, busy and unreadable lanes are not restored. With the three changed source files taken from dev the agent replay test and the frozen-lane test fail.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_lane_presence_omn23106.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py scripts/deploy-agent/tests/unit/test_idle_converge_omn19509.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23106-deploy
+    description: Hosted-runner probe that reads the committed handler from GitHub at the checked-out commit and requires the lane container list and the lane presence read, which the dev deploy agent calls for its restore decision. The live read on the h201 dev agent follows an install of this branch.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def lane_runtime_containers" in src; assert "def read_lane_presence" in src; assert "companion_down" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23106-agent-loads-the-change
+    description: After an install of this branch on the h201 dev deploy agent, the agent's clone holds the companion state and the unit is active. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" "grep -c COMPANION_DOWN /data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/idle_converge.py && systemctl --user is-active deploy-agent-dev"
+        cwd: ${OMNI_HOME}/omnibase_infra
