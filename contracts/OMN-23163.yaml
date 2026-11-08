@@ -1,0 +1,53 @@
+schema_version: 1.0.0
+ticket_id: OMN-23163
+title: A probe or experiment can mark its delegation as not a user's run with a traffic class and a source surface on the command line
+summary: onex delegate had a --source flag and no way to state a traffic class or a source surface, while the core provenance model refuses synthetic provenance without a source surface. The flags --traffic-class and --source-surface are now stamped on the request's typed provenance field, and synthetic traffic with no source surface is refused before anything is dispatched.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23163-traffic-class-flags
+    statement: onex delegate accepts --traffic-class and --source-surface, stamps them on the request provenance, and refuses synthetic traffic with no source surface before dispatch.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the flag values reach the request provenance -- falsifier: uv run pytest tests/unit/cli -q -k traffic_class'
+      - id: AC2
+        statement: 'AC2: --traffic-class synthetic without --source-surface is refused before dispatch -- falsifier: uv run pytest tests/unit/cli -q -k synthetic_without_surface'
+evidence_requirements:
+  - kind: tests
+    description: The payload builder stamps provenance from the flags, omits it when neither flag is given, and the command refuses synthetic traffic with no source surface before writing anything
+    command: uv run --frozen pytest tests/unit/cli/test_cli_delegate_traffic_class_omn23163.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23163-traffic-class-provenance
+    description: The traffic class and source surface flags reach the request provenance, which is omitted when neither is given.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli -q --no-cov -k traffic_class
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23163-synthetic-without-surface
+    description: Synthetic traffic with no source surface exits with a usage error before the delegation payload is written or dispatched.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli -q --no-cov -k synthetic_without_surface
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23163-deploy
+    description: Hosted-runner probe that reads the committed delegate command from GitHub at the checked-out commit and requires both flags and the provenance builder that stamps them.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/delegation/delegate_request_payload.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def build_delegate_provenance" in src; assert "provenance" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
