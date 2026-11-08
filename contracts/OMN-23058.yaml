@@ -15,7 +15,7 @@ requirements:
     statement: A GitHub gateway read that failed is answered once with its failure terminal and is not replayed from the dead-letter topic, so replays stop queueing behind live reads on the one-partition gateway topic and the read-only principal's github channel is not starved.
     acceptance:
       - id: AC3
-        statement: "AC3: a failed gateway read is not replayed and its terminal states retryable false -- falsifier: uv run pytest of tests/unit/runtime/auto_wiring/test_omn23058_gateway_read_failure_not_replayed.py on a lab host, red on the base enum and green on this head"
+        statement: "AC3: a failed gateway read is not replayed and its terminal states retryable false -- falsifier: uv run pytest of tests/unit/runtime/auto_wiring/test_omn23058_gateway_read_failure_not_replayed.py and tests/integration/runtime/test_omn23058_gateway_read_boundary_dlq_replay.py on a lab host, red on the base enum and green on this head"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -39,7 +39,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23058_gateway_read_failure_not_replayed.py -q --no-cov -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23058_gateway_read_failure_not_replayed.py tests/integration/runtime/test_omn23058_gateway_read_boundary_dlq_replay.py -q --no-cov -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
