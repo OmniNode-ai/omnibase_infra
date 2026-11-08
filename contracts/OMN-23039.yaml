@@ -61,7 +61,7 @@ dod_evidence:
       - check_type: command
         check_value: grep -c "pr=omnibase_infra#5772 .*installed=h201:" "$ONEX_LEDGER_PATH"
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn23039-registered-pin-reaches-the-agent-journal
+  - id: dod-omn23039-registered-pin-is-followed
     description: The register command writes the record the agent reads, and self_update follows the registered branch and holds it at the next heartbeat, which is what puts the branch head in the agent journal as the clone's code (AC2). The live read is the journal probe above.
     source: manual
     binds_ac: [AC2]
@@ -75,7 +75,7 @@ dod_evidence:
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py -q
+        check_value: uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py tests/integration/handlers/test_handler_dev_lane_code_ref_pin_omn23039.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23039-installed-row-names-a-head
     description: A pin records the head it was registered at, the pull request and the ticket, which is what the installed=<host>:<revision> row of AC4 cites. The live read is the ledger probe above.
