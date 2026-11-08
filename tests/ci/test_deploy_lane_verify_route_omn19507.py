@@ -69,7 +69,9 @@ PRE_CHANGE_201 = {
     "deploy_agent_url": "http://host.docker.internal:8098",
     "main_url": "http://host.docker.internal:8085",
     "effects_url": "http://host.docker.internal:8086",
-    "projection_url": "http://host.docker.internal:3002",
+    # OMN-21288 (T17): the projection API is main's mounted query node, so the dev lane
+    # reads it on main's port under the contract's http_mount prefix, not on 3002.
+    "projection_url": "http://host.docker.internal:8085/projection-api",
     "compose_project": "omnibase-infra",
     "runtime_container": "omninode-runtime",
     "effects_container": "omninode-runtime-effects",

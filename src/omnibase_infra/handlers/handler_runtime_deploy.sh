@@ -356,7 +356,7 @@ resolve_lane_folded_services() {
         [projection-writer-savings]=projection-savings-writer
         [projection-writer-tenant-credentials]=projection-tenant-credentials-writer
         [projection-writer-tenant-registry]=projection-tenant-registry-writer
-        [projection-writer-delegation]=projection-delegation-writer
+        [projection-writer-delegation]=projection-delegation-writer [projection-api]=projection-api
     )
     LANE_FOLDED_SERVICES=()
     # Each folding lane is selected by its declared project and policy.
