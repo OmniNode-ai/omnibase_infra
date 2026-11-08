@@ -642,9 +642,12 @@ def test_stability_lane_volumes_do_not_reuse_production_names() -> None:
 @pytest.mark.unit
 def test_stability_lane_main_carries_effects_environment_and_networks() -> None:
     main = _load_overlay()["services"]["omninode-runtime"]
-    assert main["environment"]["CODING_AGENT_CRED_HOME"] == "/home/omniinfra"
+    assert (
+        main["environment"]["CODING_AGENT_CRED_HOME"]
+        == "/home/${RUNTIME_USER_NAME:-omniinfra}"
+    )
     assert main["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"] == (
-        "/home/omniinfra/agent-workspaces"
+        "/home/${RUNTIME_USER_NAME:-omniinfra}/agent-workspaces"
     )
     assert main["environment"]["OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS"] == (
         "redpanda:9092"

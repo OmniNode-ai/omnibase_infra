@@ -494,12 +494,50 @@ profiles:
       main:
         runtime_id: stability-test-main
         # OMN-21288: effects run as nodes inside the main runtime.
-        folded_profiles: [effects]
+        # OMN-22032 (T19): the stability lane takes the same list dev folds, so
+        # every application service but the runtime is retired through the
+        # contract mapping below. The handover of each retired consumer group
+        # is the one dev declares.
+        folded_profiles:
+          - tenant-projection
+          - projection-writer-live-events
+          - projection-writer-registration
+          - projection-writer-savings
+          - projection-writer-tenant-credentials
+          - projection-writer-tenant-registry
+          - projection-writer-delegation
+          - effects
+          - workers
+          - projection-api
+        fold_handovers:
+          workers:
+            from_instance_id: runtime-worker
+            from_auto_offset_reset: latest
+            handover_rule: last_ran
+          effects:
+            from_instance_id: runtime-effects
+            from_auto_offset_reset: latest
+            handover_rule: last_ran
+        foldable_services:
+          effects: runtime-effects
+          workers: runtime-worker
+          tenant-projection: tenant-projection-writer
+          projection-writer-live-events: projection-live-events-writer
+          projection-writer-registration: projection-registration-writer
+          projection-writer-savings: projection-savings-writer
+          projection-writer-tenant-credentials: projection-tenant-credentials-writer
+          projection-writer-tenant-registry: projection-tenant-registry-writer
+          projection-writer-delegation: projection-delegation-writer
+          projection-api: projection-api
         runtime_address: runtime://omninode-pc/stability-test/main
         capabilities:
           - market.skill-proof
           - workflow.orchestration
           - runtime.main
+          # The capabilities the retired runtime-worker declared.
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
         bifrost_verify_endpoints: false
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""

@@ -23,11 +23,14 @@ Static YAML parse only — no docker daemon required, so it runs in unit CI.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 import pytest
 import yaml
+
+from scripts.render_runtime_policy_env import load_contract, render_env
 
 
 def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
@@ -293,6 +296,15 @@ def test_expected_lane_container_name_overrides(
     )
 
 
+def _policy_folded_services(lane: str) -> set[str]:
+    """Compose services the lane's runtime policy folds into its main runtime."""
+    prefix = f"{lane.upper().replace('-', '_')}_RUNTIME_MAIN"
+    rendered = render_env(load_contract())
+    folded = set(rendered.get(f"{prefix}_FOLDED_PROFILES", "").split(","))
+    mapping = json.loads(rendered.get(f"{prefix}_FOLDABLE_SERVICES", "{}"))
+    return {service for role, service in mapping.items() if role in folded}
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("lane", sorted(LAYERED_OVERLAYS))
 def test_disabled_uninstantiated_services_are_not_renamed(lane: str) -> None:
@@ -307,10 +319,16 @@ def test_disabled_uninstantiated_services_are_not_renamed(lane: str) -> None:
     overlay_names = _container_names(_load_services(overlay_file))
     base_services = _load_services(BASE_FILE)
 
+    # OMN-22032 (T19): a service the lane's policy folds into main starts under
+    # no bring-up, and keeps its lane-scoped name as the identity a rollback of
+    # the fold restores it under; it is not a phantom entry.
+    folded = _policy_folded_services(lane)
     phantom = [
         service
         for service in overlay_names
-        if service in base_services and service not in instantiated
+        if service in base_services
+        and service not in instantiated
+        and service not in folded
     ]
     assert not phantom, (
         f"{lane}: overlay names non-instantiated base services {phantom}; either "
