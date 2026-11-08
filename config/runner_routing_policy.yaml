@@ -877,6 +877,24 @@ hosted_runner_allowlist:
     reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
   - path: .github/workflows/dependabot-runner-image-lock-refresh.yml
     reason: "OMN-22867: a scheduled, dispatched and reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/compose-config-lint.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/delegation-consumer-kwarg-parity.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dispatch-parity-gate.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dispatcher-route-coverage.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/duplication-sweep.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/governed-helper-primitive-gate.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/no-bare-compose-teardown.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/s6-runtime-seam-gate.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/shellcheck-gate.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
   - path: .github/workflows/shared-env-runner-parity.yml
     reason: "OMN-16555: the hosted half of the shared-env two-runner-class parity gate must be pinned to a literal ubuntu-latest -- routing it through OMNI_RUNNER_SELECTOR_V1 would let a var change move it back onto the fleet and void the ephemeral-runner proof. Its self-hosted half does use the standard selector."
   - path: .github/workflows/runner-pool-spread.yml
