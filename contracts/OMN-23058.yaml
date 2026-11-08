@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23058
+title: Step 0 rows 2 and 10 read true, row 10 part carried on the core bump head in omnibase_infra
+summary: The core bump head (omnibase_infra#5707) is red on the bus binding check and CI Summary because two armed pull requests each hold the other's fix (#5790 fixes the first and is red on the second; #5694 fixes the second and is red on the first). This change carries the net diff of both so the head can go green; each carried change is identical to its source pull request.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23058-row10-infra
+    statement: The omnibase_infra core bump head reads green on the bus binding check and the runner routing audit, so rebuild step 0 row 10 can read true once the omnimarket generator is out of draft.
+    acceptance:
+      - id: AC2
+        statement: "AC2: omnibase_infra#5707 reads green at its head -- falsifier: uv run pytest of tests/ci/test_runner_routing_audit.py and tests/unit/scripts/test_trigger_learns_secret_namespaces.py on a lab host, red on the base files and green on this head"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+evidence_requirements:
+  - kind: tests
+    description: The two focused test files pass on this head (149 passed on lab host h053); with scripts/trigger_rebuild_on_merge.py, config/runner_routing_policy.yaml and tests/ci/test_runner_routing_audit.py read from origin/dev the new tests fail.
+    command: uv run --frozen pytest tests/ci/test_runner_routing_audit.py tests/unit/scripts/test_trigger_learns_secret_namespaces.py -q --no-cov -p no:randomly
+dod_evidence:
+  - id: dod-omn23058-ac2-tests
+    description: The focused tests pass on this head (149 passed on lab host h053).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_routing_audit.py tests/unit/scripts/test_trigger_learns_secret_namespaces.py -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
