@@ -92,6 +92,13 @@ WRITER_SERVICES = frozenset(_WRITER_MODULES)
 # is what moves it into `runtime`. Cross-lane parity is held by
 # tests/ci/test_lane_runtime_profile_carriage_omn18114.py.
 PROFILE_CARRIER_SERVICES = frozenset({"tenant-projection-writer"})
+# OMN-22032 (T19): the runtime policy folds these into the main runtime, so a
+# `--profile runtime` render starts none of them. Their declarations stay in the
+# overlay under the folded-<role> profiles the policy renders; the tests below
+# that read their shape enable those profiles explicitly.
+FOLDED_SERVICES = frozenset(
+    {"projection-api", *WRITER_SERVICES, *PROFILE_CARRIER_SERVICES}
+)
 EXPECTED_RENDERED_SERVICES = {
     "postgres",
     "redpanda",
@@ -101,12 +108,10 @@ EXPECTED_RENDERED_SERVICES = {
     "intelligence-migration",
     "migration-gate",
     "keycloak",
-    "projection-api",
     *REQUIRED_RUNTIME_SERVICES,
-    *WRITER_SERVICES,
-    *PROFILE_CARRIER_SERVICES,
 }
 OUT_OF_LANE_SERVICES = {
+    *FOLDED_SERVICES,
     "runtime-effects",
     "agent-actions-consumer",
     "skill-lifecycle-consumer",
@@ -331,6 +336,46 @@ def _run_compose_config(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _policy_value(key: str) -> str:
+    for line in (REPO_ROOT / "docker" / "runtime-policy.env").read_text().splitlines():
+        name, _, value = line.partition("=")
+        if name == key:
+            return value
+    raise AssertionError(key)
+
+
+def _folded_runtime_profiles() -> list[str]:
+    """The compose profiles the runtime policy renders for the folded services."""
+    return sorted(
+        _policy_value(line.partition("=")[0])
+        for line in (REPO_ROOT / "docker" / "runtime-policy.env")
+        .read_text()
+        .splitlines()
+        if line.startswith("STABILITY_TEST_RUNTIME_MAIN_")
+        and line.partition("=")[0].endswith("_RUNTIME_PROFILE")
+    )
+
+
+def _folded_config_json() -> dict[str, Any]:
+    """Render the lane with the folded services' profiles enabled (OMN-22032)."""
+    command = _docker_compose_command("config", "--format", "json")
+    insert = command.index("config")
+    for profile in _folded_runtime_profiles():
+        command[insert:insert] = ["--profile", profile]
+        insert += 2
+    result = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        env=_compose_render_env(),
+        text=True,
+    )
+    rendered_config = json.loads(result.stdout)
+    assert isinstance(rendered_config, dict)
+    return cast("dict[str, Any]", rendered_config)
+
+
 def _compose_config_json() -> dict[str, Any]:
     result = _run_compose_config("--format", "json")
 
@@ -396,7 +441,7 @@ def test_stability_lane_renders_the_standalone_projection_writers() -> None:
     different relations, so each would silently drop whatever the other was
     assigned, and it would look like it was working.
     """
-    services = cast("dict[str, Any]", _compose_config_json()["services"])
+    services = cast("dict[str, Any]", _folded_config_json()["services"])
 
     groups: list[str] = []
     for name, module in sorted(_WRITER_MODULES.items()):
@@ -434,7 +479,7 @@ def test_stability_writers_bind_the_declared_database_principals() -> None:
     contract and physical-schema cutovers. The new variables are already
     required by the base runtime env; this test checks the rendered principals.
     """
-    services = cast("dict[str, Any]", _compose_config_json()["services"])
+    services = cast("dict[str, Any]", _folded_config_json()["services"])
     split = {
         "projection-delegation-writer",
         "projection-savings-writer",
@@ -531,7 +576,10 @@ def test_stability_lane_render_contains_isolated_runtime_identity(
     )
     assert "runtime-effects" not in services
     main_env = services["omninode-runtime"]["environment"]
-    assert main_env["ONEX_RUNTIME_FOLDED_PROFILES"] == "effects"
+    assert main_env["ONEX_RUNTIME_FOLDED_PROFILES"] == _policy_value(
+        "STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES"
+    )
+    assert main_env["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")[0] == "effects"
     assert (
         main_env["ONEX_DEAD_LETTER_ARCHIVE_DIR"]
         == "/app/effects-data/dead-letter-archive"
@@ -730,7 +778,7 @@ def test_stability_lane_runtime_socket_uses_owned_tmpfs() -> None:
 
 @pytest.mark.integration
 def test_stability_projection_api_has_separate_infra_and_analytics_dsns() -> None:
-    rendered_config = _compose_config_json()
+    rendered_config = _folded_config_json()
     environment = rendered_config["services"]["projection-api"]["environment"]
 
     assert environment["ONEX_ENVIRONMENT"] == "stability-test"
@@ -805,9 +853,12 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
     )
     main = services["omninode-runtime"]
     assert set(main["networks"]) == {"omnibase-infra-network", "omnimemory-network"}
-    assert main["environment"]["CODING_AGENT_CRED_HOME"] == "/home/omniinfra"
+    # The workspace root sits under the credential home, both from the runtime
+    # user the base compose names (OMN-22032: no literal home path in the overlay).
+    cred_home = main["environment"]["CODING_AGENT_CRED_HOME"]
+    assert cred_home.startswith("/home/")
     assert main["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"] == (
-        "/home/omniinfra/agent-workspaces"
+        f"{cred_home}/agent-workspaces"
     )
     assert main["environment"]["OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS"] == (
         "redpanda:9092"
@@ -952,3 +1003,14 @@ def test_stability_lane_render_exposes_session_health_contract() -> None:
         assert environment["ONEX_INFRA_USER"] == "jonah"
         assert environment["OMNI_HOME"] == "/data/omninode/omni_home"
         assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == "accept-new"
+
+
+@pytest.mark.integration
+def test_a_runtime_render_starts_none_of_the_folded_services() -> None:
+    """OMN-22032: main runs the folded roles; the render shows no container for them."""
+    rendered = set(_run_compose_config("--services").stdout.splitlines())
+    assert rendered.isdisjoint(FOLDED_SERVICES)
+    # Positive control: with the policy's folded profiles enabled the same files
+    # render every one of them, so the zero above is the gate and not a typo.
+    folded = set(cast("dict[str, Any]", _folded_config_json()["services"]))
+    assert folded >= FOLDED_SERVICES
