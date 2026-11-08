@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# The omnidash sibling pin this advance produced: the sha
+# tests/ci/test_omnidash_sibling_pin_advance_omn19991.py expects every omnidash
+# pin to carry (OMN-19991, OMN-20331). Nothing writes this file automatically --
+# the omnimarket refresh bot advances only the omnimarket contract pin, and the
+# omnidash line is moved by hand, so this fixture is edited in the same PR that
+# moves it. It is a test-side path, which is what lets the Repo Evidence Gate
+# overlay it at the merge base, where the pins still carry the old sha.
+omnidash_ref: 42e51834d00067d325686a404f6391dd1fe0b9fd
