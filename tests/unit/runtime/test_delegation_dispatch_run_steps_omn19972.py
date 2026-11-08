@@ -10,6 +10,7 @@ numbered from one counter in the order the chain took the steps.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -112,6 +113,7 @@ class _RecordingBus:
 
     def __init__(self) -> None:
         self.published: list[tuple[str, bytes | None, bytes]] = []
+        self.port: RuntimeDelegationDispatchPort | None = None
 
     async def publish(
         self,
@@ -132,6 +134,8 @@ async def _dispatch(
     tenant_id: str | None = "tenant-a",
     run_step_event: str | None = _RUN_STEP_TOPIC,
     wait: bool = True,
+    bus: _RecordingBus | None = None,
+    drain: bool = True,
 ) -> tuple[_RecordingBus, UUID, dict[str, object]]:
     engine = _engine_route()
 
@@ -157,7 +161,7 @@ async def _dispatch(
         "omnibase_infra.runtime.service_delegation_dispatch_port.resolve_bounded_delegation_route",
         lambda **_kwargs: None,
     )
-    bus = _RecordingBus()
+    bus = bus or _RecordingBus()
     port = RuntimeDelegationDispatchPort(
         cast("ProtocolPatternBBrokerTransport", bus),
         routes={
@@ -178,6 +182,9 @@ async def _dispatch(
         wait=wait,
         tenant_id=tenant_id,
     )
+    bus.port = port
+    if drain:
+        await port.drain_run_step_publications()
     return bus, correlation_id, result
 
 
@@ -434,3 +441,89 @@ def test_two_different_declared_topics_publish_nothing(tmp_path: Path) -> None:
     }
 
     assert _run_step_topic(routes, "omnimarket") is None
+
+
+class _SlowBus(_RecordingBus):
+    """A bus whose acknowledgements stay out until the test lets them through."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+        self.attempts = 0
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: object = None,
+    ) -> None:
+        self.attempts += 1
+        await self.release.wait()
+        await super().publish(topic, key, value, headers)
+
+
+@pytest.mark.asyncio
+async def test_a_completed_result_is_not_held_back_by_slow_trace_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Review finding of OMN-19972: the result returns before the steps are acknowledged."""
+    bus = _SlowBus()
+    _, _, result = await asyncio.wait_for(
+        _dispatch(
+            monkeypatch,
+            tmp_path,
+            status="completed",
+            payload={"routing_disposition": "routed", "backend_ref": "backend-a"},
+            bus=bus,
+            drain=False,
+        ),
+        timeout=5,
+    )
+
+    assert result["status"] == "completed"
+    assert bus.published == []
+    bus.release.set()
+    assert bus.port is not None
+    await bus.port.drain_run_step_publications()
+    steps = _steps(bus)
+    assert [s.step_sequence for s in steps] == list(range(1, len(steps) + 1))
+    assert steps[-1].step_kind == "terminal"
+
+
+@pytest.mark.asyncio
+async def test_a_slow_trace_publication_still_publishes_steps_in_order_and_survives_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Control: a failing step does not stop the ones after it."""
+    bus = _SlowBus()
+    failures = {"left": 1}
+    publish = _SlowBus.publish
+
+    async def flaky(
+        self: _SlowBus,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: object = None,
+    ) -> None:
+        if failures["left"]:
+            failures["left"] -= 1
+            raise ConnectionError("broker down")
+        await publish(self, topic, key, value, headers)
+
+    monkeypatch.setattr(_SlowBus, "publish", flaky)
+    bus.release.set()
+    await _dispatch(
+        monkeypatch,
+        tmp_path,
+        status="completed",
+        payload={"routing_disposition": "routed", "backend_ref": "backend-a"},
+        bus=bus,
+    )
+    sequences = [s.step_sequence for s in _steps(bus)]
+    assert sequences == sorted(sequences)
+    assert 1 not in sequences
+    assert sequences

@@ -214,6 +214,14 @@ class RunStepSequence:
             reason=reason,
         )
 
+    def _backdate_pending_routing(self, call_started_at: datetime) -> None:
+        """The decision came before the call it chose: it is not stamped after the call ran."""
+        if not self.steps or self.steps[-1].step_kind != "routing_decision":
+            return
+        decision = self.steps[-1]
+        if decision.started_at > call_started_at:
+            self.steps[-1] = decision.model_copy(update={"started_at": call_started_at})
+
     def provider_call(
         self,
         *,
@@ -231,6 +239,7 @@ class RunStepSequence:
             if duration_ms is not None
             else finished
         )
+        self._backdate_pending_routing(call_started_at)
         self._record(
             "provider_call",
             started_at=call_started_at,
@@ -248,7 +257,6 @@ class RunStepSequence:
         self._record(
             "quality_gate",
             started_at=datetime.now(UTC),
-            duration_ms=0,
             failure_cause=failure_cause,
             backend_id=backend_id,
             attempt_number=self._calls or None,

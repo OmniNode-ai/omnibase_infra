@@ -27,6 +27,9 @@ from omnibase_infra.handlers.handler_delegation_dispatch_terminal import (
 from omnibase_infra.models.delegation.model_delegation_dispatch_terminal_request import (
     ModelDelegationDispatchTerminalRequest,
 )
+from omnibase_infra.models.delegation.model_delegation_run_step_event import (
+    ModelDelegationRunStepEvent,
+)
 from omnibase_infra.models.delegation.model_dispatch_budget import ModelDispatchBudget
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
@@ -172,6 +175,46 @@ class RuntimeDelegationDispatchPort:
             | None
         ) = None
         self._route_cache_lock = threading.Lock()
+        # The trace is published after the result is known and off the result's
+        # path: a slow acknowledgement must not delay a completed delegation.
+        self._run_step_publications: set[asyncio.Task[None]] = set()
+
+    async def _publish_run_steps(
+        self,
+        correlation_id: UUID,
+        topic: str,
+        run_steps: Sequence[ModelDelegationRunStepEvent],
+    ) -> None:
+        key = str(correlation_id).encode("utf-8")
+        for step in run_steps:
+            try:
+                envelope = ModelEventEnvelope[dict[str, object]](
+                    payload=step.model_dump(mode="json"),
+                    correlation_id=correlation_id,
+                    envelope_timestamp=datetime.now(UTC),
+                    event_type=_RUN_STEP_EVENT_TYPE,
+                    source_tool=_RUN_STEP_SOURCE_TOOL,
+                    tenant_id=step.tenant_id,
+                )
+                await self._event_bus.publish(
+                    topic,
+                    key,
+                    envelope.model_dump_json(exclude_none=True).encode("utf-8"),
+                    None,
+                )
+            except Exception:  # a trace gap, never a failed delegation
+                logger.exception(
+                    "run step %d of %s was not published",
+                    step.step_sequence,
+                    correlation_id,
+                )
+
+    async def drain_run_step_publications(self) -> None:
+        """Wait for the run-step publications still in flight (shutdown, tests)."""
+        while self._run_step_publications:
+            await asyncio.gather(
+                *tuple(self._run_step_publications), return_exceptions=True
+            )
 
     async def _resolved_routes(self) -> dict[str, ModelRuntimeLocalIngressRoute]:
         if self._routes is not None:
@@ -470,29 +513,13 @@ class RuntimeDelegationDispatchPort:
             ),
             routes=routes,
         )
-        key = str(correlation_id).encode("utf-8")
-        for step in finished.run_steps:
-            try:
-                envelope = ModelEventEnvelope[dict[str, object]](
-                    payload=step.model_dump(mode="json"),
-                    correlation_id=correlation_id,
-                    envelope_timestamp=datetime.now(UTC),
-                    event_type=_RUN_STEP_EVENT_TYPE,
-                    source_tool=_RUN_STEP_SOURCE_TOOL,
-                    tenant_id=step.tenant_id,
-                )
-                await self._event_bus.publish(
-                    finished.run_step_topic or "",
-                    key,
-                    envelope.model_dump_json(exclude_none=True).encode("utf-8"),
-                    None,
-                )
-            except Exception:  # a trace gap, never a failed delegation
-                logger.exception(
-                    "run step %d of %s was not published",
-                    step.step_sequence,
-                    correlation_id,
-                )
+        publication = asyncio.create_task(
+            self._publish_run_steps(
+                correlation_id, finished.run_step_topic or "", finished.run_steps
+            )
+        )
+        self._run_step_publications.add(publication)
+        publication.add_done_callback(self._run_step_publications.discard)
         return dict(finished.result)
 
 
