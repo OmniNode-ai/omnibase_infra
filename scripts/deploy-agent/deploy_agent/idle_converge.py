@@ -163,6 +163,7 @@ from deploy_agent.events import (
     ModelRebuildRequested,
     Scope,
 )
+from deploy_agent.executor import ModelLaneConfig, load_dev_boot_guard
 
 logger = logging.getLogger(__name__)
 
@@ -188,11 +189,14 @@ RESTORE_AFTER: Final = timedelta(minutes=5)
 #: costs one rebuild an hour instead of one every idle interval.
 RESTORE_RETRY_AFTER: Final = timedelta(minutes=60)
 
-#: ``docker inspect`` states of the main runtime that mean the lane is down.
-DOWN_STATES: Final = frozenset({"created", "exited", "dead"})
-
 #: OMN-19509 AC1: no job for this long.
 IDLE_AFTER: Final = timedelta(minutes=16)
+
+#: OMN-22845: how long a lane whose effects container is gone while main runs
+#: must have run no job before a restore starts: the converge's own idle bound,
+#: so a branch build installed for proof is not replaced sooner than an idle
+#: converge would replace it. A lane with no main runtime keeps RESTORE_AFTER.
+COMPANION_RESTORE_AFTER: Final = IDLE_AFTER
 
 #: OMN-19509 AC2: the margin before a scheduled C15 or C16 run.
 PROBE_MARGIN: Final = timedelta(minutes=10)
@@ -547,11 +551,17 @@ def read_running_ref(
 
 
 class EnumRuntimePresence(StrEnum):
-    """Whether the lane's main runtime container is running (OMN-20864)."""
+    """Whether the lane's runtime containers are running (OMN-20864, OMN-22845)."""
 
     RUNNING = "running"
     DOWN = "down"
+    #: Main runs while the effects container beside it does not.
+    COMPANION_DOWN = "companion_down"
     UNKNOWN = "unknown"
+
+    @property
+    def restorable(self) -> bool:
+        return self in (EnumRuntimePresence.DOWN, EnumRuntimePresence.COMPANION_DOWN)
 
 
 class EnumIdleRestoreVerdict(StrEnum):
@@ -610,11 +620,14 @@ def decide_restore(inputs: ModelIdleRestoreInputs) -> ModelIdleRestoreDecision:
     if inputs.job_active:
         return refuse(EnumIdleRestoreVerdict.JOB_ACTIVE, "a job is in flight")
     idle = inputs.now - inputs.last_activity
-    if idle < RESTORE_AFTER:
+    required = RESTORE_AFTER
+    if inputs.presence is EnumRuntimePresence.COMPANION_DOWN:
+        required = COMPANION_RESTORE_AFTER
+    if idle < required:
         return refuse(
             EnumIdleRestoreVerdict.RECENTLY_ACTIVE,
             f"lane down ({inputs.presence_detail}); idle "
-            f"{int(idle.total_seconds())}s of {int(RESTORE_AFTER.total_seconds())}s",
+            f"{int(idle.total_seconds())}s of {int(required.total_seconds())}s",
         )
     if (
         inputs.last_attempt is not None
@@ -647,35 +660,24 @@ def restore_command() -> ModelRebuildRequested:
     )
 
 
-def read_runtime_presence(
-    container: str, *, run: Runner = _default_run
+def read_lane_presence(
+    lane: ModelLaneConfig, *, run: Runner = _default_run
 ) -> tuple[EnumRuntimePresence, str]:
-    """Whether ``container`` is running, down, or could not be read.
+    """Whether the lane's runtime containers are running (OMN-20864, OMN-22845).
 
-    DOWN covers both shapes of 2026-10-11: no container under the name at all
-    (docker answers "No such object"), and one there but created, exited or
-    dead. Any other failure -- docker not answering, a timeout -- is UNKNOWN,
-    which never restores.
+    The read lives in the dev boot guard handler, loaded from the agent's own
+    checkout, with docker injected here. DOWN is a missing, created, exited or
+    dead main runtime; COMPANION_DOWN is main running with its effects
+    container gone, which leaves every delegation request unanswered. Anything
+    docker does not answer is UNKNOWN, which never restores.
     """
-    try:
-        result = run(
-            ["docker", "inspect", "--format", "{{.State.Status}}", container],
-            timeout=READ_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return EnumRuntimePresence.UNKNOWN, f"docker inspect {container}: {exc}"
-    if result.returncode != 0:
-        said = (result.stderr or result.stdout).strip()
-        if "no such object" in said.lower() or "no such container" in said.lower():
-            return EnumRuntimePresence.DOWN, f"no container named {container}"
-        return (
-            EnumRuntimePresence.UNKNOWN,
-            f"docker inspect {container} exited {result.returncode}: {said[:200]}",
-        )
-    state = result.stdout.strip().lower()
-    if state in DOWN_STATES:
-        return EnumRuntimePresence.DOWN, f"{container} is {state}"
-    return EnumRuntimePresence.RUNNING, f"{container} is {state}"
+    state, detail = load_dev_boot_guard().read_lane_presence(
+        lane.runtime_health_targets,
+        lane.disabled_services,
+        run=run,
+        unreadable=(OSError, subprocess.TimeoutExpired),
+    )
+    return EnumRuntimePresence(state), detail
 
 
 def read_running_image(container: str, *, run: Runner = _default_run) -> str:

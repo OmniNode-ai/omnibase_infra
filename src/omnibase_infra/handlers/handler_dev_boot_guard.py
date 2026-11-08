@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import JsonValue, RootModel
@@ -324,6 +324,80 @@ def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> se
     if any(not re.fullmatch(r"[a-z][a-z0-9-]*", service) for service in retired):
         raise RuntimeError("invalid dev retired service list")
     return {*(mapping[profile] for profile in folded), *retired}
+
+
+#: ``docker inspect`` states of a lane container that mean it is down.
+DOWN_STATES = frozenset({"created", "exited", "dead"})
+
+
+def lane_runtime_containers(
+    health_targets: Sequence[tuple[str, int]], disabled_services: frozenset[str]
+) -> tuple[str, ...]:
+    """The containers a dev lane needs running to serve delegation, main first (OMN-22845).
+
+    The runtime-effects container is the only consumer of the delegate-skill
+    command topic, so a lane with main running and effects absent accepts every
+    request and answers none. The effects container is ``<main>-effects`` on
+    every lane. A lane that folds effects into main (its effects health target
+    then names the main container) or retires the service expects main alone.
+    """
+    main = health_targets[0][0]
+    effects_target = health_targets[1][0] if len(health_targets) > 1 else main
+    if effects_target == main or "runtime-effects" in disabled_services:
+        return (main,)
+    return (main, f"{main}-effects")
+
+
+def read_lane_presence(
+    health_targets: Sequence[tuple[str, int]],
+    disabled_services: frozenset[str],
+    *,
+    run: Callable[..., Any],
+    unreadable: tuple[type[Exception], ...],
+) -> tuple[str, str]:
+    """``(state, detail)`` of the lane's containers: running, down, companion_down or unknown.
+
+    Main reads on its own: absent, created, exited or dead is ``down``. With
+    main running, a down container beside it is ``companion_down`` and one that
+    cannot be read is ``unknown``, which never restores. ``unreadable`` is what
+    ``run`` raises when docker does not answer.
+    """
+    states: list[tuple[str, str]] = []
+    for container in lane_runtime_containers(health_targets, disabled_services):
+        try:
+            result = run(
+                ["docker", "inspect", "--format", "{{.State.Status}}", container],
+                timeout=DOCKER_READ_SECONDS,
+            )
+        except unreadable as exc:
+            states.append(("unknown", f"docker inspect {container}: {exc}"))
+            continue
+        said = (result.stderr or result.stdout).strip()
+        if result.returncode != 0:
+            if "no such object" in said.lower() or "no such container" in said.lower():
+                states.append(("down", f"no container named {container}"))
+            else:
+                states.append(
+                    (
+                        "unknown",
+                        f"docker inspect {container} exited {result.returncode}: {said[:200]}",
+                    )
+                )
+        else:
+            state = result.stdout.strip().lower()
+            states.append(
+                (
+                    "down" if state in DOWN_STATES else "running",
+                    f"{container} is {state}",
+                )
+            )
+    if states[0][0] != "running":
+        return states[0]
+    for wanted in ("down", "unknown"):
+        named = [detail for state, detail in states[1:] if state == wanted]
+        if named:
+            return ("companion_down" if wanted == "down" else wanted), "; ".join(named)
+    return "running", "; ".join(detail for _, detail in states)
 
 
 def fold_compose_env(policy: Mapping[str, str], primary: bool) -> dict[str, str]:
