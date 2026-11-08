@@ -111,6 +111,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 # The poller's own job — excluded to avoid self-deadlock.
 SELF_JOB_NAME = "CI Summary"
@@ -1349,107 +1350,74 @@ class SweepExclusion:
 # where the numbers are recorded, not here.
 SWEEP_EXCLUSION_MAX_DAYS: int = 90
 
-# The remaining live entries cover names the measurement found non-green on
-# ANY head over the 16-PR window recorded above. OMN-18960 shipped this dict EMPTY
-# beside a weaker conclusion set; OMN-18979 replaced that pairing with the strict bar
-# and these entries, so every tolerance is now a named, dated, owned decision
-# rather than a silent one buried in a frozenset.
-#
-# Those initial entries all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
-# mechanism looks structural — a fork-only job, a main-branch-only job, a
-# manual-dispatch entrypoint. The cap is not a prediction that the mechanism
-# will change. It is what forces a premise that has held for a quarter to be
-# re-read by a person, which is the whole difference between this list and an
-# allowlist.
-_REVIEW_HOLDS_NO_MERGE = SweepExclusion(
-    reason="The operator ruled on 2026-11-05 that the automated review holds no merge.",
-    ticket="OMN-22478",
-    added="2026-11-05",
-    expires="2027-02-03",
+# The registry is data, in ci_summary_sweep_exclusions.json beside this file (stdlib
+# json: the poller runs with no third-party packages). Each entry names its reason,
+# ticket, added date and expiry. The first entries cover names the measurement found
+# non-green on ANY head over the 16-PR window recorded above (OMN-18979); every one
+# is a named, dated, owned decision, and an entry nobody renews re-arms the sweep.
+SWEEP_EXCLUSIONS_FILE = Path(__file__).with_name("ci_summary_sweep_exclusions.json")
+
+
+def load_sweep_exclusions(path: Path) -> dict[str, SweepExclusion]:
+    """Read the exclusion registry; a malformed file raises and fails the gate."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {name: SweepExclusion(**fields) for name, fields in raw.items()}
+
+
+EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = load_sweep_exclusions(
+    SWEEP_EXCLUSIONS_FILE
 )
-EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
-    "verify": SweepExclusion(
-        reason=(
-            "The check run verify was skipped on all sixteen measured heads and never "
-            "concluded success. The job configuration includes a condition that "
-            "requires the pull request head repository to be a fork. Because the "
-            "internal pull requests do not satisfy this fork condition, the job skips "
-            "execution without producing a result. Excluding this name prevents the "
-            "gate from failing on a check that is logically inapplicable to internal "
-            "merges."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Docker Integration Tests": SweepExclusion(
-        reason=(
-            "The check run Docker Integration Tests was skipped on the seven heads "
-            "where it appeared and never concluded success. The job carries a "
-            "condition requiring the event to not be a pull request. Since the gate "
-            "judges pull request heads specifically the condition is false and the "
-            "job skips. Excluding this entry prevents the gate from treating the "
-            "inapplicable integration test suite as a blocking failure."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Security Scan (Trivy)": SweepExclusion(
-        reason=(
-            "The check run Security Scan (Trivy) was skipped on the seven heads where "
-            "it appeared and never concluded success. The job configuration requires "
-            "the git reference to be the main branch for execution. On a pull request "
-            "head this reference condition is not met so the job skips. This "
-            "exclusion ensures the gate does not block merges due to a security scan "
-            "that is restricted to the main branch."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Image Size Analysis": SweepExclusion(
-        reason=(
-            "The check run Image Size Analysis was skipped on the seven heads where "
-            "it appeared and never concluded success. The job shares the same "
-            "mechanism as the security scan and requires the git reference to be the "
-            "main branch. It therefore skips on pull request heads where the "
-            "reference does not match the main branch. The gate excludes this name to "
-            "avoid failing on an analysis job that only runs on the main branch."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    # OMN-22478: the automated review holds no merge, so the sweep judges none of
-    # its rows. A red copy can still sit on a head from before its trigger stopped.
-    "Hostile Reviewer (adversarial gate)": _REVIEW_HOLDS_NO_MERGE,
-    "Hostile Review Gate": _REVIEW_HOLDS_NO_MERGE,
-    "Hostile Review Thread Gate": _REVIEW_HOLDS_NO_MERGE,
-    "Hostile Review Judge": _REVIEW_HOLDS_NO_MERGE,
-    # OMN-19218 — the eleventh name, missed by the 16-PR window because none of
-    # those heads touched prod-promotion-lineage.yml's path filter.
-    "Enforce clean + promoted build source": SweepExclusion(
-        reason=(
-            "The check run Enforce clean + promoted build source is the lineage-check "
-            "job of prod-promotion-lineage.yml, which carries the condition "
-            "github.event_name == 'workflow_call' && inputs.enforce_lineage. The "
-            "workflow runs on pull_request for a path filter that includes the "
-            "deploy-agent executor and onex-runtime-deploy, so on every such pull "
-            "request the job skips without producing a verdict. Measured on "
-            "omnibase_infra#3980 at head ba61dc95: every producer green, CI Summary "
-            "red on this skipped row alone. The job does its real work only when the "
-            "prod image build calls the workflow, which this exclusion does not touch."
-        ),
-        ticket="OMN-19218",
-        added="2026-09-22",
-        expires="2026-12-20",
-    ),
-}
 
 
 _SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")
 _SWEEP_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Per-check advisory or blocking mode is data (ruling 2026-11-08): the contract names
+# each mode and the conclusions it adds to success, the overlay declares each check's
+# mode. A neutral passes only for a declared-advisory check; undeclared stays denied.
+CHECK_MODES_CONTRACT_FILE = Path(__file__).with_name(
+    "ci_summary_external_check_modes.contract.json"
+)
+CHECK_MODES_OVERLAY_FILE = Path(__file__).with_name(
+    "ci_summary_external_check_modes.json"
+)
+
+
+def load_check_modes(
+    contract_path: Path, overlay_path: Path
+) -> tuple[dict[str, frozenset[str]], list[str]]:
+    """Return ``(conclusions each declared check adds to success, refusals)``.
+
+    A missing, unparsable or malformed file refuses and admits nothing: fail closed.
+    """
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        overlay = json.loads(overlay_path.read_text(encoding="utf-8"))
+        modes, fields = contract["modes"], contract["entry_fields"]
+        if not (isinstance(overlay, dict) and isinstance(modes, dict)):
+            raise TypeError("modes and the overlay must be objects")
+        modes = {m: frozenset(c) for m, c in modes.items()}
+        fields = tuple(fields)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return {}, [f"check-mode registry unreadable or malformed: {exc!r}"]
+    admitted: dict[str, frozenset[str]] = {}
+    refusals: list[str] = []
+    for name, entry in sorted(overlay.items()):
+        bad = [
+            f
+            for f in fields
+            if not isinstance(entry, dict)
+            or not isinstance(entry.get(f), str)
+            or not entry[f].strip()
+        ]
+        if bad:
+            refusals.append(f"{name}: missing or non-text {', '.join(bad)}")
+        elif entry.get("mode") not in modes:
+            refusals.append(f"{name}: mode {entry.get('mode')!r} is not declared")
+        else:
+            admitted[name] = modes[entry["mode"]]
+    return admitted, refusals
+
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -2455,6 +2423,7 @@ def evaluate_external_sweep(
     now: datetime | None,
     own_run_ids: frozenset[int] = frozenset(),
     workflow_runs: list[dict[str, object]] | None = None,
+    check_modes: Mapping[str, frozenset[str]] | None = None,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     """Layer 5 — default-deny over every check-run nothing else accounts for.
 
@@ -2467,7 +2436,10 @@ def evaluate_external_sweep(
     * ``swept`` — every name this layer judged, so a clean run records what it
       looked at instead of printing nothing (rule 16).
     * ``excluded`` — swept-population names an active registry entry admitted,
-      regardless of their conclusion.
+      regardless of their conclusion, and (as ``name (conclusion, declared
+      advisory)``) rows a declared-advisory check admitted by its mode, so the
+      finding still shows. ``check_modes`` is :func:`load_check_modes`'s admitted
+      map; ``None`` admits nothing.
     * ``provisional`` — swept names whose replacement is demonstrably due
       inside the re-run grace. These hold the verdict at PENDING; they are
       NOT a quiet pass, and they red as soon as the grace closes.
@@ -2519,6 +2491,11 @@ def evaluate_external_sweep(
             in_flight.append(name)
             continue
         if state.status == "completed" and state.conclusion in SWEEP_GOOD_CONCLUSIONS:
+            continue
+        if state.status == "completed" and state.conclusion in (check_modes or {}).get(
+            name, ()
+        ):
+            excluded.append(f"{name} ({state.conclusion}, declared advisory)")
             continue
         if verdict_is_provisional(state, now) or replacement_run_in_flight(
             raw, workflow_runs
@@ -2701,6 +2678,11 @@ def evaluate(
         if sweep_external
         else (frozenset(), ())
     )
+    check_modes, mode_refusals = (
+        load_check_modes(CHECK_MODES_CONTRACT_FILE, CHECK_MODES_OVERLAY_FILE)
+        if sweep_external
+        else ({}, [])
+    )
     (
         ext_sweep_failures,
         ext_sweep_in_flight,
@@ -2718,6 +2700,7 @@ def evaluate(
             now=now,
             own_run_ids=own_workflow_run_ids(jobs, current_run_id),
             workflow_runs=workflow_runs,
+            check_modes=check_modes,
         )
         if sweep_external
         else ([], [], [], [], [])
@@ -2733,6 +2716,7 @@ def evaluate(
         # A malformed exclusion entry fails the gate outright. An unreviewable
         # exception is worse than none: it reads as a considered decision.
         + [f"malformed sweep exclusion: {f}" for f in exclusion_findings]
+        + [f"malformed check-mode registry: {f}" for f in mode_refusals]
     )
     # OMN-18991: a swept row inside its re-run grace holds the verdict at
     # PENDING rather than passing quietly. Bounded by the grace, after which
@@ -2772,6 +2756,7 @@ def evaluate(
                 sweep_excluded=ext_sweep_excluded,
                 sweep_expired=list(expired_exclusions),
                 sweep_findings=exclusion_findings,
+                sweep_mode_refusals=mode_refusals,
                 sweep_external=sweep_external,
                 sweep_provisional=ext_sweep_provisional,
             )
@@ -2807,6 +2792,7 @@ def _report(
     sweep_excluded: list[str] | None = None,
     sweep_expired: list[str] | None = None,
     sweep_findings: list[str] | None = None,
+    sweep_mode_refusals: list[str] | None = None,
     sweep_external: bool = True,
     sweep_provisional: list[str] | None = None,
 ) -> str:
@@ -2923,6 +2909,10 @@ def _report(
     if sweep_findings:
         lines.append(
             "  external sweep exclusion registry REFUSED: " + "; ".join(sweep_findings)
+        )
+    if sweep_mode_refusals:
+        lines.append(
+            "  external check-mode registry REFUSED: " + "; ".join(sweep_mode_refusals)
         )
     return "\n".join(lines)
 
