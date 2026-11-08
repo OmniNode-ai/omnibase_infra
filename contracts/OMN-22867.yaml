@@ -50,7 +50,7 @@ dod_evidence:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_runner_routing_audit.py tests/ci/test_public_runner_placement_omn19998.py -q -o addopts=''
+        check_value: uv run pytest tests/ci/test_public_runner_family_gates_omn22867.py tests/ci/test_runner_routing_audit.py tests/ci/test_public_runner_placement_omn19998.py -q -o addopts=''
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22867-ac3-family-hosted
     description: Every job of each family workflow selects ubuntu-latest and each file is allowlisted with a reason.
