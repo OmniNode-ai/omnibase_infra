@@ -32,6 +32,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/scripts/test_c16_pinned_backends.py tests/ci/test_c16_pinned_backends_live_contact_omn23176.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23176-dispatch-run
+    description: One workflow_dispatch run of the C16 workflow on this branch (head 7e71d5856b4359b232e890d3d9a839bedf67f3a8) with check_pinned_backends=true and the paid role overridden to a backend the lane lacks concluded failure; its pinned-backend record names the missing backend.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: gh run view 42500808408 --repo OmniNode-ai/omnibase_infra --json conclusion --jq .conclusion | grep -qx failure
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23176-deploy
     description: Hosted-runner probe that reads the committed probe from GitHub at the checked-out commit and requires the pinned grader and the config reader the workflow step calls.
     source: manual
