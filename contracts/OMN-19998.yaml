@@ -106,6 +106,8 @@ requirements:
     statement: The dev effects carrier consumes every declared boot bound and resource limit from the rendered runtime policy.
   - id: req-omn19998-canary-hosted-exception
     statement: The runner routing audit admits exactly one hosted job in a private repository, the outside canary, and refuses every other hosted job there.
+  - id: req-omn19998-api-fixture-record-test-timeout
+    statement: The recorder contract test gives each loopback request the handler's default timeout, so a CI worker that stalls one answer for a second no longer turns the capture into capture_failed and reds Tests, CI Tests Gate, Test-Failure Ratchet Gate and CI Summary on the pull request.
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -194,6 +196,9 @@ evidence_requirements:
   - kind: tests
     description: The warm-up tests run the step body against a stand-in installer and read the test-parallel job's steps for the warm step and its place before both pytest steps.
     command: uv run pytest tests/ci/test_dod_verifier_warm_step_omn19998.py -q -n 0
+  - kind: tests
+    description: The stall case answers route 14 after one second and expects the recorder to capture all 63 pairs; it fails on a 0.75 second request timeout.
+    command: uv run pytest tests/integration/handlers/test_api_fixture_record_contract.py -q -n 0 --no-cov -k stall
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1411,3 +1416,12 @@ dod_evidence:
       - AC1
       - AC2
       - AC3
+  - id: dod-omn19998-api-fixture-record-test-timeout
+    description: The recorder contract test has a stall case, in which route 14 answers after one second, and expects success with 63 pairs. It fails on the merge base, whose overlay gives each request 0.75 seconds, with capture_failed after 14 pairs.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/handlers/test_api_fixture_record_contract.py -q -n 0 --no-cov -k stall
+        cwd: .
+    binds_ac:
+      - AC1

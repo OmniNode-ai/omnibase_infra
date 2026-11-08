@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -30,7 +31,7 @@ _CONTRACT = Path(__file__).resolve().parents[3] / (
 _RESOURCES = ("tenants", "accounts", "keycloak_users")
 
 
-@pytest.mark.parametrize("failure", ["", "route", "leak"])
+@pytest.mark.parametrize("failure", ["", "route", "leak", "stall"])
 def test_contract_records_http_pairs_and_reads_back_cleanup(
     httpserver: HTTPServer, tmp_path: Path, failure: str
 ) -> None:
@@ -41,6 +42,9 @@ def test_contract_records_http_pairs_and_reads_back_cleanup(
 
     def respond(request: Request) -> Response:
         calls.append((request.method, request.path))
+        if failure == "stall" and request.path == "/route/14":
+            # A loaded CI worker stalls a loopback answer for about this long.
+            time.sleep(1.0)
         assert request.headers.get("x-api-key") == credential
         assert request.args.get("scope") == scope
         if request.path.startswith("/counts/"):
@@ -85,7 +89,7 @@ def test_contract_records_http_pairs_and_reads_back_cleanup(
         "targets": {"api": httpserver.url_for("/")},
         "scope_prefix": scope,
         "private_output_directory": str(tmp_path),
-        "timeout_seconds": 0.75,
+        "timeout_seconds": 20,
         "routes": [
             {
                 "path": route["path"],
@@ -165,7 +169,7 @@ def test_contract_records_http_pairs_and_reads_back_cleanup(
     ]
     assert len([path for _, path in calls if path.startswith("/counts/")]) == 6
     assert "pairs" not in readback["terminal_payload"]
-    if failure:
+    if failure in ("route", "leak"):
         assert not result.success
         assert result.error_code == (
             "capture_failed" if failure == "route" else "resource_count_delta"
