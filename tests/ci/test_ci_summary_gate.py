@@ -2622,18 +2622,13 @@ class TestExternalSweepExclusions:
             "Hostile Review Gate",
             "Hostile Review Thread Gate",
             "Hostile Review Judge",
-            "Tessl Reviewer",
             "Enforce clean + promoted build source",
         }
 
     def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
         added_late = {"Enforce clean + promoted build source": "2026-09-22"}
         # OMN-22478, operator RULING 2026-11-05T20:27:56Z: the automated review.
-        review = {
-            n
-            for n in EXTERNAL_SWEEP_EXCLUSIONS
-            if "Hostile Review" in n or n == "Tessl Reviewer"
-        }
+        review = {n for n in EXTERNAL_SWEEP_EXCLUSIONS if "Hostile Review" in n}
         for name, entry in EXTERNAL_SWEEP_EXCLUSIONS.items():
             if name in review:
                 assert entry.ticket == "OMN-22478", name
