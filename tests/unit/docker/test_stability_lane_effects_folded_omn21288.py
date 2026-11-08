@@ -50,7 +50,13 @@ def test_exactly_one_lane_folds_effects() -> None:
     assert len(folding) == 1, sorted(folding)
     (profile,) = folding.values()
     assert profile.compose_project == _lane_project()
-    assert profile.processes["main"].folded_profiles == ("effects",)
+    # OMN-22032 (T19): effects first, then the roles dev folds, in dev's order.
+    dev_roles = tuple(
+        role
+        for role in contract.profiles["dev"].processes["main"].folded_profiles
+        if role != "effects"
+    )
+    assert profile.processes["main"].folded_profiles == ("effects", *dev_roles)
     # effects stays a declared process: it is a required process name.
     assert "effects" in profile.processes
 
@@ -61,7 +67,10 @@ def test_rendered_env_carries_the_fold_for_that_lane_only() -> None:
     # Primary dev folds its own roles (OMN-21288 tenant and writer folds), never effects.
     dev_folds = folds.pop("DEV_RUNTIME_MAIN_FOLDED_PROFILES").split(",")
     assert "effects" not in dev_folds
-    assert folds == {FOLDED_KEY: "effects"}
+    stability_folds = folds.pop(FOLDED_KEY).split(",")
+    assert stability_folds[0] == "effects"
+    assert stability_folds[1:] == dev_folds
+    assert folds == {}
     committed = (ROOT / "docker" / "runtime-policy.env").read_text(encoding="utf-8")
     assert committed == format_dotenv(rendered)
 

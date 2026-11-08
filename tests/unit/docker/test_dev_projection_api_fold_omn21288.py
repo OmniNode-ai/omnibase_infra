@@ -51,15 +51,25 @@ def _routing_verify(instance: str) -> dict[str, str]:
     return verify
 
 
-def test_policy_folds_the_projection_api_into_primary_dev_main_only() -> None:
+def test_policy_folds_the_projection_api_into_dev_and_stability_main_only() -> None:
     policy = load_contract()
     main = policy.profiles["dev"].processes["main"]
     assert PROFILE in main.folded_profiles
     assert main.foldable_services[PROFILE] == SERVICE
     # An HTTP query service holds no consumer group, so there is nothing to hand over.
     assert PROFILE not in main.fold_handovers
+    project = render_env(policy)["STABILITY_TEST_COMPOSE_PROJECT"]
+    folding = {
+        name
+        for name, profile in policy.profiles.items()
+        if profile.compose_project == project
+    }
+    (stability_lane,) = folding
+    stability = policy.profiles[stability_lane].processes["main"]
+    assert PROFILE in stability.folded_profiles
+    assert stability.foldable_services[PROFILE] == SERVICE
     for name, profile in policy.profiles.items():
-        if name != "dev":
+        if name not in ("dev", stability_lane):
             assert PROFILE not in profile.processes["main"].folded_profiles, name
     rendered = render_env(policy)
     assert PROFILE in rendered["DEV_RUNTIME_MAIN_FOLDED_PROFILES"].split(",")

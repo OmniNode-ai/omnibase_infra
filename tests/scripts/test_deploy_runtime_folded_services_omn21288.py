@@ -359,3 +359,54 @@ restart_services /tmp "$PROJECT"
         assert f" {service}" not in lines[up]
     assert "omninode-runtime" in lines[up]
     assert " -v" not in result.stdout
+
+
+def test_committed_stability_fold_retires_every_folded_service_before_main() -> None:
+    """OMN-22032 (T19): the stability lane retires effects, the carrier, six writers and the projection API."""
+    harness = (
+        _harness(
+            _policy("STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES"), FOLDING_PROJECT
+        )
+        + "\n"
+        + _function("restart_services")
+        + r"""
+log_step() { :; }
+log_info() { :; }
+log_cmd() { :; }
+resolve_compose_file_args() { local -n out="$1"; out=(); }
+exclude_cloud_database_services() { :; }
+COMPOSE_PROFILE=runtime
+RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=60
+docker() {
+    case "$1" in
+        ps)
+            [[ "$*" == *"label=com.docker.compose.project=$PROJECT"* ]] || return 9
+            local last="${!#}"
+            printf '%s-id\n' "${last##*service=}" ;;
+        stop | rm) printf '%s\n' "$*" ;;
+        *) return 9 ;;
+    esac
+}
+compose_up_bounded() { shift; printf 'UP %s\n' "$*"; }
+restart_services /tmp "$PROJECT"
+"""
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness], capture_output=True, text=True, check=True
+    )
+    lines = result.stdout.splitlines()
+    up = next(i for i, line in enumerate(lines) if line.startswith("UP "))
+    for service in (
+        "runtime-effects",
+        *_DEV_RUNTIME_WRITERS,
+        "tenant-projection-writer",
+        "projection-api",
+    ):
+        assert (
+            lines.index(f"stop --time 30 {service}-id")
+            < lines.index(f"rm {service}-id")
+            < up
+        )
+        assert f" {service}" not in lines[up]
+    assert "omninode-runtime" in lines[up]
+    assert " -v" not in result.stdout

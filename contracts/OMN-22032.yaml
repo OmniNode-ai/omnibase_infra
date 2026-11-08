@@ -1,0 +1,37 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22032
+title: T19 Stability takes the fold (cloud owner's rebuild on .51, omnibase_infra)
+summary: The stability lane's main runtime takes the projection roles dev folds. The runtime policy folds tenant-projection, the six projection writers and the projection API into stability main from dev's own list, the stability overlay gates each of those eight services from the policy so a runtime or full bring-up starts none of them, main carries the tenant carrier's state and logs, and the deploy handler retires each previous container before main is recreated. Acceptance criteria AC1 (the offset-handover ancestry check before a refresh) and AC3 (the storage gate reading) stay open on the ticket and are not part of this contract; this change moves no database and adds no refresh guard. The worker stays outside main on this lane for a later step, so the lane's running containers drop from fifteen to seven here, not to six.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22032-retire
+    statement: The application services of the stability lane that main can carry are retired by declared overlay entries.
+    acceptance:
+      - id: AC2
+        statement: "AC2: every application service but the runtime on the stability lane is retired by a declared overlay entry, and its 16 containers become 6 -- falsifier: T1's validator over the stability file set, then T2's count"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22032-ac2-fold
+    description: The policy folds effects and then dev's projection roles into stability main in dev's order, with the same foldable service map; the committed policy env equals its render; the stability stack, merged from the base and the overlay and read under the policy, starts none of the eight folded services and keeps seven containers (postgres, redpanda, valkey, keycloak, migration-gate, the runtime and its worker) where the same files without the policy start fifteen; main carries the tenant carrier's volumes; the carriage gate counts a profile folded into main as carried by main; and the deploy handler stops and removes each previous container before main is recreated. The worker is not folded here, so seven and not six remain. T1's stack-shape validator still judges every folded service in the overlay and T2's count is not available to this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_lane_projection_fold_omn22032.py tests/unit/docker/test_stability_lane_effects_folded_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_projection_api_fold_omn21288.py tests/scripts/test_deploy_runtime_folded_services_omn21288.py tests/ci/test_runtime_policy_contract.py tests/ci/test_lane_runtime_profile_carriage_omn18114.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn22032-deploy-probe
+    description: Hosted-runner probe reads the committed policy env from GitHub at the checked-out commit and requires the projection roles among the stability lane's folded profiles, with the projection API gated to a folded profile. The live fold on the stability lane follows a release cut after the offset handover and the cloud owner's refresh.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/runtime-policy.env?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; lines = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l); folded = lines["STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES"].split(","); assert folded[0] == "effects"; assert "projection-api" in folded and "tenant-projection" in folded; assert lines["STABILITY_TEST_RUNTIME_MAIN_PROJECTION_API_RUNTIME_PROFILE"] == "folded-projection-api-runtime"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

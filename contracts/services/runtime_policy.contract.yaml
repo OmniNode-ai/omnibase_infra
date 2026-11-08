@@ -448,7 +448,28 @@ profiles:
       main:
         runtime_id: stability-test-main
         # OMN-21288: effects run as nodes inside the main runtime.
-        folded_profiles: [effects]
+        # OMN-22032 (T19): the stability lane takes the same projection roles
+        # dev folds, from the same list, so the writer and API containers of the
+        # previous revision are retired by name and their nodes run in main.
+        folded_profiles:
+          - effects
+          - tenant-projection
+          - projection-writer-live-events
+          - projection-writer-registration
+          - projection-writer-savings
+          - projection-writer-tenant-credentials
+          - projection-writer-tenant-registry
+          - projection-writer-delegation
+          - projection-api
+        foldable_services:
+          tenant-projection: tenant-projection-writer
+          projection-writer-live-events: projection-live-events-writer
+          projection-writer-registration: projection-registration-writer
+          projection-writer-savings: projection-savings-writer
+          projection-writer-tenant-credentials: projection-tenant-credentials-writer
+          projection-writer-tenant-registry: projection-tenant-registry-writer
+          projection-writer-delegation: projection-delegation-writer
+          projection-api: projection-api
         runtime_address: runtime://omninode-pc/stability-test/main
         capabilities:
           - market.skill-proof

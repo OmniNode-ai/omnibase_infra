@@ -32,6 +32,16 @@ DEV_COMPOSE_FILES = (
     OVERLAY,
 )
 FOLDED_KEY = "DEV_RUNTIME_MAIN_FOLDED_PROFILES"
+# OMN-22032 (T19): the stability lane takes the same roles, in its own overlay.
+FOLDING_LANES = (
+    "dev",
+    next(
+        name
+        for name, profile in load_contract().profiles.items()
+        if profile.compose_project
+        == render_env(load_contract())["STABILITY_TEST_COMPOSE_PROJECT"]
+    ),
+)
 SERVICE = "tenant-projection-writer"
 
 
@@ -81,7 +91,7 @@ def dev_stack_services() -> dict[str, dict]:
     }
 
 
-def test_policy_folds_tenant_projections_on_primary_dev_only() -> None:
+def test_policy_folds_tenant_projections_on_dev_and_stability_only() -> None:
     policy = load_contract()
     assert (
         "tenant-projection" in policy.profiles["dev"].processes["main"].folded_profiles
@@ -89,7 +99,7 @@ def test_policy_folds_tenant_projections_on_primary_dev_only() -> None:
     assert all(
         "tenant-projection" not in profile.processes["main"].folded_profiles
         for name, profile in policy.profiles.items()
-        if name != "dev"
+        if name not in FOLDING_LANES
     )
     rendered = render_env(policy)
     assert "tenant-projection" in rendered[FOLDED_KEY].split(",")
@@ -252,12 +262,14 @@ def _handler_profile_map() -> dict[str, str]:
     return dict(re.findall(r"\[([\w-]+)\]=([\w-]+)", body.group(1)))
 
 
-def test_policy_folds_the_runtime_writers_on_primary_dev_only() -> None:
+def test_policy_folds_the_runtime_writers_on_dev_and_stability_only() -> None:
     policy = load_contract()
     folded = policy.profiles["dev"].processes["main"].folded_profiles
     assert set(RUNTIME_WRITERS) <= set(folded)
+    stability = policy.profiles[FOLDING_LANES[1]].processes["main"].folded_profiles
+    assert set(RUNTIME_WRITERS) <= set(stability)
     for name, profile in policy.profiles.items():
-        if name == "dev":
+        if name in FOLDING_LANES:
             continue
         for process in profile.processes.values():
             assert not set(RUNTIME_WRITERS) & set(process.folded_profiles), name

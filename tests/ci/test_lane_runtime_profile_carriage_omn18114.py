@@ -97,6 +97,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import pytest
 
 from omnibase_infra.runtime.runtime_profile import load_runtime_profile
+from scripts.render_runtime_policy_env import load_contract
 from tests.ci.test_lane_projection_writer_coverage_omn17562 import (
     BASE_COMPOSE,
     DOCKER_DIR,
@@ -258,6 +259,17 @@ def _literal_runtime_profile(body: dict[str, Any]) -> str | None:
     return stripped or None
 
 
+def _profiles_folded_into_main(lane: str) -> tuple[str, ...]:
+    """The profiles the lane's runtime policy folds into its main runtime (OMN-22032).
+
+    A folded profile's contracts are owned by ``omninode-runtime`` itself, so main
+    is the process that carries them even when the lane's overlay starts no
+    service that binds the profile.
+    """
+    policy = load_contract().profiles.get(lane)
+    return policy.processes["main"].folded_profiles if policy else ()
+
+
 def _carried_profiles_on_lane(lane: str) -> dict[str, str]:
     """Map ``runtime profile -> service name`` for the services a lane STARTS."""
     carried: dict[str, str] = {}
@@ -267,6 +279,8 @@ def _carried_profiles_on_lane(lane: str) -> dict[str, str]:
         profile = _literal_runtime_profile(body)
         if profile is not None:
             carried.setdefault(profile, service)
+    for profile in _profiles_folded_into_main(lane):
+        carried.setdefault(profile, "omninode-runtime")
     return carried
 
 
@@ -473,3 +487,15 @@ def test_carrier_profile_contracts_match_the_omnimarket_manifest() -> None:
             "the same change that moves a contract, so the carrier's workload is "
             "always the set the ownership filter actually hands it."
         )
+
+
+def test_a_profile_folded_into_main_is_carried_by_main_and_only_where_folded() -> None:
+    """OMN-22032: stability folds tenant-projection into main, so main carries it there."""
+    (folding_lane,) = [lane for lane in CARRIER_REQUIRED_LANES if lane != "dev"]
+    assert "tenant-projection" in _profiles_folded_into_main(folding_lane)
+    assert _carried_profiles_on_lane(folding_lane)["tenant-projection"] == (
+        "omninode-runtime"
+    )
+    # Control: a lane whose policy folds nothing keeps the profile uncarried.
+    assert _profiles_folded_into_main("dogfood") == ()
+    assert "tenant-projection" in _uncarried_profiles_on_lane("dogfood")
