@@ -12,7 +12,6 @@ and are applied as one decorator.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
 
 import click
 
@@ -47,4 +46,4 @@ def traffic_options[F: Callable[..., object]](command: F) -> F:
             "--source-surface; omit to leave the run unclassified."
         ),
     )
-    return cast("F", traffic(surface(command)))
+    return traffic(surface(command))
