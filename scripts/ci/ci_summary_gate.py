@@ -111,6 +111,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 # The poller's own job — excluded to avoid self-deadlock.
 SELF_JOB_NAME = "CI Summary"
@@ -1361,91 +1362,24 @@ SWEEP_EXCLUSION_MAX_DAYS: int = 90
 # will change. It is what forces a premise that has held for a quarter to be
 # re-read by a person, which is the whole difference between this list and an
 # allowlist.
-_REVIEW_HOLDS_NO_MERGE = SweepExclusion(
-    reason="The operator ruled on 2026-11-05 that the automated review holds no merge.",
-    ticket="OMN-22478",
-    added="2026-11-05",
-    expires="2027-02-03",
+# The registry is data, in ci_summary_sweep_exclusions.json beside this file
+# (stdlib json: the poller runs with no third-party packages). Each entry names
+# its reason, ticket, added date and expiry. The Tessl Reviewer entry is
+# RULING 2026-11-05T20:27:56Z (OMN-22478): the automated reviewer app posts a
+# neutral row on every pull request and holds no merge. Moved out of code
+# because the canonical-file-shape ratchet refuses growth of this file.
+SWEEP_EXCLUSIONS_FILE = Path(__file__).with_name("ci_summary_sweep_exclusions.json")
+
+
+def load_sweep_exclusions(path: Path) -> dict[str, SweepExclusion]:
+    """Read the exclusion registry; a malformed file raises and fails the gate."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {name: SweepExclusion(**fields) for name, fields in raw.items()}
+
+
+EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = load_sweep_exclusions(
+    SWEEP_EXCLUSIONS_FILE
 )
-EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
-    "verify": SweepExclusion(
-        reason=(
-            "The check run verify was skipped on all sixteen measured heads and never "
-            "concluded success. The job configuration includes a condition that "
-            "requires the pull request head repository to be a fork. Because the "
-            "internal pull requests do not satisfy this fork condition, the job skips "
-            "execution without producing a result. Excluding this name prevents the "
-            "gate from failing on a check that is logically inapplicable to internal "
-            "merges."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Docker Integration Tests": SweepExclusion(
-        reason=(
-            "The check run Docker Integration Tests was skipped on the seven heads "
-            "where it appeared and never concluded success. The job carries a "
-            "condition requiring the event to not be a pull request. Since the gate "
-            "judges pull request heads specifically the condition is false and the "
-            "job skips. Excluding this entry prevents the gate from treating the "
-            "inapplicable integration test suite as a blocking failure."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Security Scan (Trivy)": SweepExclusion(
-        reason=(
-            "The check run Security Scan (Trivy) was skipped on the seven heads where "
-            "it appeared and never concluded success. The job configuration requires "
-            "the git reference to be the main branch for execution. On a pull request "
-            "head this reference condition is not met so the job skips. This "
-            "exclusion ensures the gate does not block merges due to a security scan "
-            "that is restricted to the main branch."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Image Size Analysis": SweepExclusion(
-        reason=(
-            "The check run Image Size Analysis was skipped on the seven heads where "
-            "it appeared and never concluded success. The job shares the same "
-            "mechanism as the security scan and requires the git reference to be the "
-            "main branch. It therefore skips on pull request heads where the "
-            "reference does not match the main branch. The gate excludes this name to "
-            "avoid failing on an analysis job that only runs on the main branch."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    # OMN-22478: the automated review holds no merge, so the sweep judges none of
-    # its rows. A red copy can still sit on a head from before its trigger stopped.
-    "Hostile Reviewer (adversarial gate)": _REVIEW_HOLDS_NO_MERGE,
-    "Hostile Review Gate": _REVIEW_HOLDS_NO_MERGE,
-    "Hostile Review Thread Gate": _REVIEW_HOLDS_NO_MERGE,
-    "Hostile Review Judge": _REVIEW_HOLDS_NO_MERGE,
-    # OMN-19218 — the eleventh name, missed by the 16-PR window because none of
-    # those heads touched prod-promotion-lineage.yml's path filter.
-    "Enforce clean + promoted build source": SweepExclusion(
-        reason=(
-            "The check run Enforce clean + promoted build source is the lineage-check "
-            "job of prod-promotion-lineage.yml, which carries the condition "
-            "github.event_name == 'workflow_call' && inputs.enforce_lineage. The "
-            "workflow runs on pull_request for a path filter that includes the "
-            "deploy-agent executor and onex-runtime-deploy, so on every such pull "
-            "request the job skips without producing a verdict. Measured on "
-            "omnibase_infra#3980 at head ba61dc95: every producer green, CI Summary "
-            "red on this skipped row alone. The job does its real work only when the "
-            "prod image build calls the workflow, which this exclusion does not touch."
-        ),
-        ticket="OMN-19218",
-        added="2026-09-22",
-        expires="2026-12-20",
-    ),
-}
 
 
 _SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")

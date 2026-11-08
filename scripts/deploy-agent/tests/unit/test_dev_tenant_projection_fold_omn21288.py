@@ -51,6 +51,9 @@ RUNTIME_WRITERS = {
 # The hook-events writer has no runtime profile of its own: main runs its node by
 # default, so the policy retires it by service name (``retired_services``).
 HOOK_EVENTS_WRITER = "projection-claude-hook-events-writer"
+# OMN-23066 (plan T13): the context audit projection runs in main as a node, so the
+# policy retires its consumer container by name as well.
+CONTEXT_AUDIT_CONSUMER = "context-audit-consumer"
 
 
 def test_primary_dev_disables_the_tenant_carrier_only(
@@ -93,6 +96,9 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             "tenant-projection-writer",
             *RUNTIME_WRITERS.values(),
             HOOK_EVENTS_WRITER,
+            CONTEXT_AUDIT_CONSUMER,
+            # OMN-21288 (T17): the projection API is served by main as a mounted node.
+            "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
         }
     )
@@ -156,12 +162,15 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         return
     censused = [c[-1] for c in calls if c[1] == "ps"]
     assert censused == [
+        f"label=com.docker.compose.service={CONTEXT_AUDIT_CONSUMER}",
         f"label=com.docker.compose.service={HOOK_EVENTS_WRITER}",
         "label=com.docker.compose.service=projection-savings-writer",
         "label=com.docker.compose.service=tenant-projection-writer",
     ]
     if failure is None:
         ids = [
+            f"{CONTEXT_AUDIT_CONSUMER}-a",
+            f"{CONTEXT_AUDIT_CONSUMER}-b",
             f"{HOOK_EVENTS_WRITER}-a",
             f"{HOOK_EVENTS_WRITER}-b",
             "projection-savings-writer-a",
@@ -169,8 +178,8 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
             "tenant-projection-writer-a",
             "tenant-projection-writer-b",
         ]
-        assert calls[3] == ["docker", "stop", "--time", "30", *ids]
-        assert calls[4] == ["docker", "rm", *ids]
+        assert calls[4] == ["docker", "stop", "--time", "30", *ids]
+        assert calls[5] == ["docker", "rm", *ids]
 
 
 def test_retirement_is_inert_on_other_lanes() -> None:
@@ -267,6 +276,8 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         "tenant-projection-writer",
         *RUNTIME_WRITERS.values(),
         HOOK_EVENTS_WRITER,
+        CONTEXT_AUDIT_CONSUMER,
+        "projection-api",  # OMN-21288 (T17)
     }
     census = len(retired)
     compose_calls = calls[census + 2 :]

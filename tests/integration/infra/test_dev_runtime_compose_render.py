@@ -324,6 +324,44 @@ def test_primary_dev_tenant_fold_removes_the_carrier_in_real_compose() -> None:
 
 
 @pytest.mark.integration
+def test_dev_hook_events_fold_keeps_the_consumer_group_id_in_real_compose() -> None:
+    """OMN-22027: the claude hook-events projection runs in main, group id unchanged.
+
+    The consumer group name embeds ``KAFKA_INSTANCE_ID``. The retired writer set
+    ``runtime-main``, the value main sets, so after the fold main resumes the
+    group from its committed offsets and no handover is needed. The real render
+    shows the writer is not started by a dev bring-up, main no longer excludes
+    the node, and the retired writer's declaration still names main's id.
+    """
+    writer = "projection-claude-hook-events-writer"
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    started = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert started.returncode == 0, started.stderr
+    services = yaml.safe_load(started.stdout)["services"]
+    main = services["omninode-runtime"]  # positive control: the render really parsed
+    assert writer not in services
+    for name, service in services.items():
+        assert "ONEX_RUNTIME_NODE_EXCLUSION" not in service.get("environment", {}), name
+    assert main["environment"]["KAFKA_INSTANCE_ID"] == "runtime-main"
+
+    # The retired declaration, rendered only under the profile no bring-up asks for.
+    retired = _run_compose_config(
+        {**env, "COMPOSE_PROFILES": "runtime,folded-hook-events"},
+        with_dev_lane_overlay=True,
+        with_tenant_fold=True,
+    )
+    assert retired.returncode == 0, retired.stderr
+    declared = yaml.safe_load(retired.stdout)["services"][writer]
+    assert (
+        declared["environment"]["KAFKA_INSTANCE_ID"]
+        == main["environment"]["KAFKA_INSTANCE_ID"]
+    ), "the fold must not change the consumer group id the projection resumes from"
+
+
+@pytest.mark.integration
 def test_dev_redpanda_advertise_host_fails_fast_when_unset() -> None:
     """Unset DEV_REDPANDA_ADVERTISE_HOST must fail the compose render, never
     silently render a localhost advertise address."""
@@ -1120,7 +1158,10 @@ def test_dev_lane_read_binding_reads_as_the_projection_api_does() -> None:
     effects_dsn = services["runtime-effects"]["environment"][
         "OMNIDASH_ANALYTICS_DB_URL"
     ]
-    api_dsn = services["projection-api"]["environment"]["OMNIDASH_ANALYTICS_DB_URL"]
+    # OMN-21288 (T17): main serves the projection API as a mounted node, so the DSN the
+    # API reads through is main's; the retired projection-api service renders nowhere.
+    assert "projection-api" not in services
+    api_dsn = services["omninode-runtime"]["environment"]["OMNIDASH_ANALYTICS_DB_URL"]
     assert effects_dsn == api_dsn
     assert urlsplit(effects_dsn).username == "role_omnidash"
 

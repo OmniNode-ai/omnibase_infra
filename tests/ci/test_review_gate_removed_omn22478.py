@@ -19,6 +19,7 @@ import yaml
 
 from scripts.ci.ci_summary_gate import (
     DEV_BASE_ONLY_CONTEXTS,
+    EXIT_FAILURE,
     EXIT_SUCCESS,
     EXPECTED_EXTERNAL_CONTEXTS,
     SKIPPABLE_GATE_JOBS,
@@ -36,6 +37,7 @@ REVIEW_CONTEXTS = (
     "Hostile Review Gate",
     "Hostile Review Thread Gate",
     "Hostile Review Judge",
+    "Tessl Reviewer",
 )
 
 
@@ -71,7 +73,9 @@ def _triggers(workflow: str) -> dict[str, Any]:
     return triggers
 
 
-@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", None])
+@pytest.mark.parametrize(
+    "conclusion", ["failure", "cancelled", "timed_out", "neutral", None]
+)
 def test_ci_summary_passes_with_the_reviewer_rows_red_or_absent(
     conclusion: str | None,
 ) -> None:
@@ -85,6 +89,24 @@ def test_ci_summary_passes_with_the_reviewer_rows_red_or_absent(
         now=NOW,
     )
     assert code == EXIT_SUCCESS, report
+
+
+@pytest.mark.parametrize("review_conclusion", ["neutral", "failure"])
+def test_control_a_red_test_row_still_fails_beside_the_reviewer_rows(
+    review_conclusion: str,
+) -> None:
+    """Only the named reviewer rows are excluded; a red test row still blocks."""
+    rows = [_row(context, "success") for context in EXPECTED_EXTERNAL_CONTEXTS]
+    rows += [_row(context, review_conclusion) for context in REVIEW_CONTEXTS]
+    rows += [_row("Unit Tests (shard 3)", "failure")]
+    code, report = evaluate(
+        _gates(),
+        check_runs=rows,
+        external_contexts=scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "dev"),
+        now=NOW,
+    )
+    assert code == EXIT_FAILURE, report
+    assert "Unit Tests (shard 3)" in report
 
 
 def test_no_review_context_is_asserted_on_any_base() -> None:
