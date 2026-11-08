@@ -97,6 +97,8 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             "runtime-effects",
             # OMN-21288 (T9): the workers role runs in main; its service is disabled too.
             "runtime-worker",
+            # OMN-21288 (T17): the projection API is served by main as a mounted node.
+            "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
         }
     )
@@ -273,6 +275,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         HOOK_EVENTS_WRITER,
         "runtime-effects",  # OMN-22930: the effects role runs in main
         "runtime-worker",  # OMN-21288 (T9): the workers role runs in main
+        "projection-api",  # OMN-21288 (T17)
     }
     census = len(retired)
     compose_calls = calls[census + 2 :]
