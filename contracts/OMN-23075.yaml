@@ -19,16 +19,24 @@ emergency_bypass:
   follow_up_ticket_id: ''
 evidence_requirements:
   - kind: tests
-    description: The gateway read failure tests of omnibase_infra#5795 pass on the base this contract is built on.
-    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23058_gateway_read_failure_not_replayed.py tests/integration/runtime/test_omn23058_gateway_read_boundary_dlq_replay.py -q --no-cov -p no:randomly
+    description: The recorded readings of the redeployed gateway runtime hold, and the count goes red on the pre-fix burst of one command answered ten times with a retryable job-log 404.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23075_gateway_redeploy_readings.py -q --no-cov -p no:randomly
 dod_evidence:
-  - id: dod-omn23075-contract-present
-    description: This contract file is present in the repository.
+  - id: dod-omn23075-ac1-deploy-agent-run
+    description: The deploy-agent job for the redeploy reads success, the three dev runtime containers report image revision f87ae5813ff8 and the merge commit f84141dbd is an ancestor of it (read on lab host h202 against the dev containers and the canonical clone).
     source: manual
     checks:
-      - check_type: command
-        check_value: 'test -f contracts/OMN-23075.yaml'
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23075_gateway_redeploy_readings.py::TestAc1DeployAgentRun -q --no-cov -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn23075-ac2-gateway-terminals
+    description: The gateway terminal topic read over one hour after the redeploy, counted per command id, holds no command answered more than once with a retryable job-log 404; the same count over the pre-fix burst reports ten replays of one command.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn23075_gateway_redeploy_readings.py::TestAc2GatewayTerminals -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
       - AC2

@@ -1,0 +1,2158 @@
+{
+ "ticket": "OMN-23075",
+ "terminal_topic": "onex.evt.omnimarket.github-repo-gateway-read-completed.v1",
+ "window_start": "2026-11-08T06:06:00Z",
+ "window_end": "2026-11-08T07:06:30Z",
+ "unparsed_records": 0,
+ "deploy": {
+  "job_id": "e129ac40-69de-4f95-b0bf-50b29db262f6",
+  "status": "success",
+  "requested_git_ref": "f87ae5813ff8ab6c6efc0cd53dee584551045c2c",
+  "completed_at": "2026-11-08T06:05:56Z",
+  "merge_commit": "f84141dbdfa06c818621bb7ae9d29ad985b6861f",
+  "merge_commit_is_ancestor_of_requested_git_ref": true,
+  "container_revisions": {
+   "omninode-runtime-effects": "f87ae5813ff8ab6c6efc0cd53dee584551045c2c",
+   "omninode-runtime": "f87ae5813ff8ab6c6efc0cd53dee584551045c2c",
+   "omnibase-infra-runtime-worker-1": "f87ae5813ff8ab6c6efc0cd53dee584551045c2c"
+  }
+ },
+ "records": [
+  {
+   "correlation_id": "39fb7114-9cd8-457c-950b-2733525c949e",
+   "envelope_timestamp": "2026-11-08T06:08:55.076925Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "f091e783-9441-4255-af83-7e5097912d61",
+   "envelope_timestamp": "2026-11-08T06:09:49.358647Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ed1925ca-462f-44af-98f8-a28cca57719f",
+   "envelope_timestamp": "2026-11-08T06:10:04.454278Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e2be66e9-6122-416c-bbbc-e3c2e3dea251",
+   "envelope_timestamp": "2026-11-08T06:10:13.075161Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d46cee8c-898d-43f0-9bcf-58a9360d8c54",
+   "envelope_timestamp": "2026-11-08T06:10:13.205105Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1572b85f-236c-43b7-93da-921c2ef9730a",
+   "envelope_timestamp": "2026-11-08T06:10:15.810057Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "23c4b73d-cacf-481b-8735-142e4ccb231b",
+   "envelope_timestamp": "2026-11-08T06:10:18.578895Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "7879f9f4-601c-40a8-8a6e-25e296d4f1c7",
+   "envelope_timestamp": "2026-11-08T06:10:21.337300Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b4a3bc30-4da9-42f7-92d6-1316a0a71582",
+   "envelope_timestamp": "2026-11-08T06:10:24.135518Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "c0ec4cf1-6fb8-463c-81de-bbc20e7f2f2a",
+   "envelope_timestamp": "2026-11-08T06:10:32.646822Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "4535926c-c5af-46c5-a2f4-5553487f7da9",
+   "envelope_timestamp": "2026-11-08T06:10:54.491739Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "c1c867ac-c390-4547-b359-cbf0938e9bca",
+   "envelope_timestamp": "2026-11-08T06:11:02.121703Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "142376a5-b4b8-4f59-86f6-a97e2b681650",
+   "envelope_timestamp": "2026-11-08T06:12:07.393931Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1c89ebe9-fafb-4b13-a7a3-da87af89aba3",
+   "envelope_timestamp": "2026-11-08T06:12:20.817450Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "340742e2-8e5f-4829-a615-3b4ce80e054e",
+   "envelope_timestamp": "2026-11-08T06:12:34.904039Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "cbc87016-6721-4db1-877f-e0d9fde43246",
+   "envelope_timestamp": "2026-11-08T06:14:07.766964Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6a7430da-2d29-42b7-80ad-f0ea290970f2",
+   "envelope_timestamp": "2026-11-08T06:14:20.468429Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "69f88750-d126-4ec9-8523-c3b6a59de2b0",
+   "envelope_timestamp": "2026-11-08T06:14:24.246183Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "17575ae1-0063-407f-aee8-eb97745177ed",
+   "envelope_timestamp": "2026-11-08T06:14:25.801242Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "15c8fae5-b113-4cdd-bbc4-358e6cd71c79",
+   "envelope_timestamp": "2026-11-08T06:14:27.661101Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ea42442e-6c14-4c63-b1d8-0129c282d0e9",
+   "envelope_timestamp": "2026-11-08T06:14:29.157236Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3ddf6ba7-0dd1-48e2-87e2-8be1c54920a6",
+   "envelope_timestamp": "2026-11-08T06:14:32.558572Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "86d5d31e-aa19-4cd6-a88d-06c9e5fb9251",
+   "envelope_timestamp": "2026-11-08T06:14:42.941300Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "7bbd423a-be1e-48b6-b955-909cf7217b8c",
+   "envelope_timestamp": "2026-11-08T06:14:46.245269Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "f56121a5-39e8-4104-8d11-a9a5f89e5719",
+   "envelope_timestamp": "2026-11-08T06:14:50.223878Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "231faf84-513e-46cc-a6b1-1593026d825a",
+   "envelope_timestamp": "2026-11-08T06:14:53.628792Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1355ecb8-b8f1-4607-937a-dfec41050256",
+   "envelope_timestamp": "2026-11-08T06:16:07.088214Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ecbcbfb3-437f-4f6b-9f42-e3e125a547f7",
+   "envelope_timestamp": "2026-11-08T06:16:53.200810Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1297d5ba-0733-4e39-ad9f-9a0aa007b86a",
+   "envelope_timestamp": "2026-11-08T06:17:12.130718Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "27f96c55-d32a-48da-be9b-a003a1d974ac",
+   "envelope_timestamp": "2026-11-08T06:17:30.888392Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "29c6961e-52bd-4c53-bafc-74ddacb13b4b",
+   "envelope_timestamp": "2026-11-08T06:22:11.263561Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "job log not cached: HTTP 404, read_ceiling_hit=False"
+  },
+  {
+   "correlation_id": "142a7518-93ee-4537-8953-d1aca6a40821",
+   "envelope_timestamp": "2026-11-08T06:22:11.468491Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "job log not cached: HTTP 404, read_ceiling_hit=False"
+  },
+  {
+   "correlation_id": "59e55e28-2c11-409c-9658-e41672de9000",
+   "envelope_timestamp": "2026-11-08T06:22:12.690908Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "job log not cached: HTTP 404, read_ceiling_hit=False"
+  },
+  {
+   "correlation_id": "ce4d3ca6-34b9-435b-b2bf-e3b9219541e7",
+   "envelope_timestamp": "2026-11-08T06:22:39.664177Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "c33958a4-fcca-438b-93bb-4446d904339b",
+   "envelope_timestamp": "2026-11-08T06:22:48.822508Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1c7c9098-985f-4966-860d-8a68e60f7628",
+   "envelope_timestamp": "2026-11-08T06:22:57.580124Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "aafb428b-6af2-4522-b245-1cdd2cd03633",
+   "envelope_timestamp": "2026-11-08T06:23:06.286974Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3cb52280-2535-44a4-a7cf-2b306ac805c8",
+   "envelope_timestamp": "2026-11-08T06:23:41.444506Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3525297d-52d8-407a-ab9c-a51aadf571c3",
+   "envelope_timestamp": "2026-11-08T06:23:50.114252Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "bfc68a76-9e1b-4837-8fcf-1b5cc0dc11c8",
+   "envelope_timestamp": "2026-11-08T06:24:00.562772Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3585b992-adb8-43c3-b2c4-e2d33f0f4b80",
+   "envelope_timestamp": "2026-11-08T06:24:03.805427Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "5b6c03e4-1a86-4b40-aa53-ae687134155b",
+   "envelope_timestamp": "2026-11-08T06:24:12.341850Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "5386a5be-199b-417f-9865-03cfe2451472",
+   "envelope_timestamp": "2026-11-08T06:24:13.364333Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "557b1e8c-be31-46ba-9a54-688b3f05c064",
+   "envelope_timestamp": "2026-11-08T06:24:20.544796Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "be167bd3-9520-4998-8573-98a110e092cd",
+   "envelope_timestamp": "2026-11-08T06:24:25.841098Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a6a4fcc5-bc65-4722-8993-3045b5619499",
+   "envelope_timestamp": "2026-11-08T06:24:28.915323Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "0cc52090-f6b1-4fa0-966d-bf68d8d6d33e",
+   "envelope_timestamp": "2026-11-08T06:24:35.017743Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9cd10996-8ed7-48aa-a4e1-fb88b2a888d4",
+   "envelope_timestamp": "2026-11-08T06:24:44.501137Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "bb53fe93-ed1b-4fa6-b77c-3662372d8f68",
+   "envelope_timestamp": "2026-11-08T06:24:46.314178Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1142c191-93b0-4d17-86f6-1bd03494ebd4",
+   "envelope_timestamp": "2026-11-08T06:24:49.178162Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "5bd29cfe-0211-4fcb-8600-b9d700a065cf",
+   "envelope_timestamp": "2026-11-08T06:24:57.145747Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "2e2ea92d-e3be-4589-852c-c23ead48907e",
+   "envelope_timestamp": "2026-11-08T06:24:59.746873Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "16b0ed49-dac8-40bf-a933-bf521c534426",
+   "envelope_timestamp": "2026-11-08T06:25:04.157668Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "26cfaf12-35d3-4195-a382-5c0900a5f3b0",
+   "envelope_timestamp": "2026-11-08T06:25:06.018790Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "51ce055d-5c6f-4753-8ba6-5eeb9f424b7c",
+   "envelope_timestamp": "2026-11-08T06:25:06.150051Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "34731d22-f719-4194-8995-5cf495f8ae39",
+   "envelope_timestamp": "2026-11-08T06:25:07.648765Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "4ad8fe59-e3fe-40ba-af2b-598c7422f731",
+   "envelope_timestamp": "2026-11-08T06:25:14.414163Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "af158d1d-864a-4b69-a5a9-89638b82cf7c",
+   "envelope_timestamp": "2026-11-08T06:25:14.864566Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "bbb2715c-4e6b-4e5a-81e5-7ac9998f7b63",
+   "envelope_timestamp": "2026-11-08T06:25:16.063818Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9c79f80a-3dc5-46ad-b322-52f612f4a079",
+   "envelope_timestamp": "2026-11-08T06:25:28.315701Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "64df784c-d6b0-47e1-bf49-e8418c1b0e38",
+   "envelope_timestamp": "2026-11-08T06:25:34.361036Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "242656d7-5a91-4548-89d8-ceaf495be5dc",
+   "envelope_timestamp": "2026-11-08T06:25:56.067336Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "c7f4ce62-5fd1-427e-9741-72b71da389c8",
+   "envelope_timestamp": "2026-11-08T06:25:56.611652Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b462357f-8bcc-4fb3-8719-4d9a6d6b5072",
+   "envelope_timestamp": "2026-11-08T06:26:10.664258Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "[REDACTED - potentially sensitive data]"
+  },
+  {
+   "correlation_id": "f7b4af3e-7af0-496c-9194-25c12b8213dc",
+   "envelope_timestamp": "2026-11-08T06:26:14.442333Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1c8f74bb-eac4-4b02-be57-946e16b54af7",
+   "envelope_timestamp": "2026-11-08T06:26:19.918046Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "[REDACTED - potentially sensitive data]"
+  },
+  {
+   "correlation_id": "9a53b676-b484-42b1-bcc9-e87d870dd1d7",
+   "envelope_timestamp": "2026-11-08T06:26:23.773383Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "dcdb1b08-55ff-47a1-8947-5406a1420a3d",
+   "envelope_timestamp": "2026-11-08T06:26:28.448401Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d76b1ad9-5ddf-46d4-83d4-84fca1bdf310",
+   "envelope_timestamp": "2026-11-08T06:26:37.316112Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "2a13cdfc-6334-43d8-876f-125afe45cbe2",
+   "envelope_timestamp": "2026-11-08T06:26:59.078503Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "da2c050e-4751-4b6b-be10-a6cbc3b5d78e",
+   "envelope_timestamp": "2026-11-08T06:27:08.512350Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "982b0e52-c443-44e7-a8d1-ce82009c1445",
+   "envelope_timestamp": "2026-11-08T06:27:13.020490Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a4d385ab-56cd-4c30-9d7e-9e2b47a99807",
+   "envelope_timestamp": "2026-11-08T06:27:17.704425Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "37654824-69f5-4016-bdfd-b8e180bf05f0",
+   "envelope_timestamp": "2026-11-08T06:27:20.757087Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "54091261-6f10-48df-bfda-93f04cf0a47c",
+   "envelope_timestamp": "2026-11-08T06:27:25.785254Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "25b6e98a-15cf-4d6f-b2f0-054920b06734",
+   "envelope_timestamp": "2026-11-08T06:27:34.154389Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6cd391b4-af8d-4b92-b33d-fba43845095c",
+   "envelope_timestamp": "2026-11-08T06:27:43.025197Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "62f43da6-57f0-44ea-b0cd-77525ee39aa6",
+   "envelope_timestamp": "2026-11-08T06:27:44.162555Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "17afe223-d4d7-460c-89d0-88d64c83103b",
+   "envelope_timestamp": "2026-11-08T06:27:50.799240Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "8e2ce81b-bba3-4d3a-9367-201886b44ea4",
+   "envelope_timestamp": "2026-11-08T06:27:53.446726Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "0c782c8e-5dfe-4b48-9819-74f438fcff62",
+   "envelope_timestamp": "2026-11-08T06:27:58.369758Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e7c88857-b0c5-4df9-8e96-21adfede5115",
+   "envelope_timestamp": "2026-11-08T06:28:02.526527Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "12131462-e1eb-4a00-9f27-be3aae4d53e8",
+   "envelope_timestamp": "2026-11-08T06:28:17.291275Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3b5a40ab-3ed2-4dd0-94ce-ce0c2436b98c",
+   "envelope_timestamp": "2026-11-08T06:28:25.595154Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a3126cbd-451a-486a-8c85-3bedcf98f668",
+   "envelope_timestamp": "2026-11-08T06:28:31.010376Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a767d1bb-2679-4a24-9cb8-4d4ed6bb2cff",
+   "envelope_timestamp": "2026-11-08T06:28:34.942514Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "5a878f7c-7a67-4d43-81d6-97cceae3ecf2",
+   "envelope_timestamp": "2026-11-08T06:28:37.830415Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a04f2ba7-3888-4b4c-917b-5ca3a91d88e6",
+   "envelope_timestamp": "2026-11-08T06:28:44.646323Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ddd4abbb-8556-4f47-8ec4-9b11a3759765",
+   "envelope_timestamp": "2026-11-08T06:28:48.651105Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "10190e9a-c884-4b09-8dce-ec27fc820730",
+   "envelope_timestamp": "2026-11-08T06:28:56.785301Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "dbed2a23-2f10-4176-a731-373c19ea13d8",
+   "envelope_timestamp": "2026-11-08T06:29:05.631141Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "86389e69-76fd-4556-b46e-f9d93ea492e6",
+   "envelope_timestamp": "2026-11-08T06:29:14.616856Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1c1fa955-3979-432f-b361-d83b7fdf5e37",
+   "envelope_timestamp": "2026-11-08T06:29:23.699937Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e4f8e4d8-8f68-451c-829c-daa3851dc313",
+   "envelope_timestamp": "2026-11-08T06:29:32.556905Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "11145e67-2edd-49ba-99a2-1210c7c6961c",
+   "envelope_timestamp": "2026-11-08T06:30:32.915910Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d6bc41cd-c883-4309-851f-c976babbced6",
+   "envelope_timestamp": "2026-11-08T06:30:43.365830Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "2a540ac1-0844-4497-bad0-e8a477df45be",
+   "envelope_timestamp": "2026-11-08T06:31:03.987178Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "c5987312-efce-4ff0-b40f-8215659d35fa",
+   "envelope_timestamp": "2026-11-08T06:31:13.901084Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3e31b218-ef70-409e-aea3-7b4df88f6c73",
+   "envelope_timestamp": "2026-11-08T06:31:22.990552Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9da2ec94-4060-4584-b9e2-3e7948b7bbdf",
+   "envelope_timestamp": "2026-11-08T06:32:02.345119Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "271d7496-6d84-4e79-a5ac-0eaae5b31534",
+   "envelope_timestamp": "2026-11-08T06:32:05.459686Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d67ad704-99c7-48e2-8005-76d0d4826ecc",
+   "envelope_timestamp": "2026-11-08T06:32:08.382811Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "580934df-f8ba-4562-8ca4-a10b15647aa4",
+   "envelope_timestamp": "2026-11-08T06:32:37.588753Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "77b658b4-a639-41cd-8a43-2299047f70f7",
+   "envelope_timestamp": "2026-11-08T06:32:46.474680Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6dcbced6-1adf-4764-83a0-0c4ce1b33db5",
+   "envelope_timestamp": "2026-11-08T06:32:57.059218Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a2c921eb-e83e-4173-9d2d-0044ea6baffa",
+   "envelope_timestamp": "2026-11-08T06:33:02.893342Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ebe0f8d0-4602-4179-a588-3d7a5744997b",
+   "envelope_timestamp": "2026-11-08T06:33:12.847407Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "bdda2483-064e-4de0-93de-e04d17c5f063",
+   "envelope_timestamp": "2026-11-08T06:34:14.184829Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "edc5c72a-af25-4967-a9eb-307507bc84d9",
+   "envelope_timestamp": "2026-11-08T06:34:16.781682Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "2501fcb6-53e0-4199-8142-d4bc406abc80",
+   "envelope_timestamp": "2026-11-08T06:34:19.461933Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "795fc093-b867-4bcd-a419-7043574581ea",
+   "envelope_timestamp": "2026-11-08T06:34:22.085773Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1874bf50-8f5d-4fbf-ba24-3e497c5dbdc8",
+   "envelope_timestamp": "2026-11-08T06:34:54.319626Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "38fa3a75-5946-41aa-9d2a-be2d6cecff8a",
+   "envelope_timestamp": "2026-11-08T06:34:57.310671Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "58f067a9-627b-485b-a204-05456aa0faf9",
+   "envelope_timestamp": "2026-11-08T06:35:00.552009Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "8db6fc55-9e9c-46ff-a4af-9ea3b718d6a8",
+   "envelope_timestamp": "2026-11-08T06:35:26.231428Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b9ea3ff9-a16f-4bd1-b635-24f9acae9d60",
+   "envelope_timestamp": "2026-11-08T06:35:38.382655Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e7ff1f86-e6b3-485a-8073-af44b28cc5e9",
+   "envelope_timestamp": "2026-11-08T06:36:10.127948Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "548d4801-ff79-45d8-abfb-33474796f7df",
+   "envelope_timestamp": "2026-11-08T06:36:20.133275Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1a571a47-d0b5-494e-846f-ef6566b3ac56",
+   "envelope_timestamp": "2026-11-08T06:36:33.162175Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "00055dfe-247b-498a-93ad-25a4e62b150c",
+   "envelope_timestamp": "2026-11-08T06:36:42.970185Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "92cb55f1-ecd8-40b6-93fa-a4261240ade9",
+   "envelope_timestamp": "2026-11-08T06:36:57.808398Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6d730999-8f11-4302-96da-2b9e0f64f9ef",
+   "envelope_timestamp": "2026-11-08T06:38:58.586424Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d8f86d42-e50c-48ee-8454-4e2019247cb2",
+   "envelope_timestamp": "2026-11-08T06:40:26.136234Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b38aadd5-3e3c-4ddc-b0bc-ed69e366dadf",
+   "envelope_timestamp": "2026-11-08T06:40:45.304799Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3fd05cdf-8718-459c-8efe-8622281f8d19",
+   "envelope_timestamp": "2026-11-08T06:41:02.041537Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9a98352b-919a-4e5b-8906-8ad49b42856b",
+   "envelope_timestamp": "2026-11-08T06:41:09.293472Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "97465937-4ea6-4d39-a9d3-2622c214fb26",
+   "envelope_timestamp": "2026-11-08T06:41:13.027262Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "f1a215fa-ddc3-4493-9e0a-38aa676e2340",
+   "envelope_timestamp": "2026-11-08T06:41:28.752820Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a67b8861-57d2-4587-875d-3667d7d660c6",
+   "envelope_timestamp": "2026-11-08T06:42:47.733936Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "f8de58ec-4897-40bd-ba32-a2b04048b2e3",
+   "envelope_timestamp": "2026-11-08T06:43:01.450439Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b48f9790-2e9c-4f15-b7d5-b82345ff2d53",
+   "envelope_timestamp": "2026-11-08T06:43:09.024241Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a3c34e87-b487-4070-834e-e5af57758186",
+   "envelope_timestamp": "2026-11-08T06:43:13.179533Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a7805042-0b8e-4853-a0a8-6f618faa0c4d",
+   "envelope_timestamp": "2026-11-08T06:43:15.565814Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "JOB-LOG-CACHE-MISS: no GitHub call made"
+  },
+  {
+   "correlation_id": "3b20a887-1792-4749-8483-32f6df40fe33",
+   "envelope_timestamp": "2026-11-08T06:43:16.142883Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ee17e7f1-e248-4965-9494-7580a86b576b",
+   "envelope_timestamp": "2026-11-08T06:43:19.251114Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6f057803-32cc-4ec1-a5f6-5a302a73e4f9",
+   "envelope_timestamp": "2026-11-08T06:43:22.254928Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "421f5f27-cd53-476e-a1b8-4eeda8cf0ffc",
+   "envelope_timestamp": "2026-11-08T06:43:25.794722Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e2a3ff07-866d-4df1-8114-be2a43159fd5",
+   "envelope_timestamp": "2026-11-08T06:43:29.439344Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "JOB-LOG-CACHE-MISS: no GitHub call made"
+  },
+  {
+   "correlation_id": "325f1b61-edf1-4a5e-80d0-599c8e5ae3d6",
+   "envelope_timestamp": "2026-11-08T06:43:30.188911Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e2d203ab-ee8c-4b84-aff1-62aff8a96fef",
+   "envelope_timestamp": "2026-11-08T06:43:33.470492Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "8d338da7-fe2e-4e4f-90f1-31b4eacb2dae",
+   "envelope_timestamp": "2026-11-08T06:43:36.887264Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6a8774e1-f859-4c8e-b106-e246ebc6842b",
+   "envelope_timestamp": "2026-11-08T06:43:40.395470Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d4d57c98-7627-401e-a318-1ca5a9da5aba",
+   "envelope_timestamp": "2026-11-08T06:43:43.719208Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "03e44e6d-3bf1-4813-a6ce-eb59d658940a",
+   "envelope_timestamp": "2026-11-08T06:43:46.864474Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9348f116-a554-46b7-9be7-f2cec690fde3",
+   "envelope_timestamp": "2026-11-08T06:43:50.011043Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "2876b201-418f-436e-9a20-2b79b0c39aef",
+   "envelope_timestamp": "2026-11-08T06:43:53.228356Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "bc89150e-a0e1-432f-8b2d-8f482267c036",
+   "envelope_timestamp": "2026-11-08T06:43:56.534318Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "7cd8f70f-3347-4baa-b69a-0cbedf309462",
+   "envelope_timestamp": "2026-11-08T06:43:59.777533Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "47f3c4ae-70e4-4462-af9a-d6828c7179a0",
+   "envelope_timestamp": "2026-11-08T06:44:02.994066Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "4ca957eb-434e-4d17-a42a-a5678dd2e570",
+   "envelope_timestamp": "2026-11-08T06:44:06.277788Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "26b8d26c-daa9-43ed-b157-f328c3404157",
+   "envelope_timestamp": "2026-11-08T06:44:09.428695Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "5b41d0f6-6082-4743-98cb-5e59df3ef8d9",
+   "envelope_timestamp": "2026-11-08T06:44:12.691204Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "49a83699-9b4a-4a09-8133-f9c06fcf5183",
+   "envelope_timestamp": "2026-11-08T06:44:15.833130Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "afe3f7c5-cc82-4782-af43-919ae807f373",
+   "envelope_timestamp": "2026-11-08T06:44:18.988146Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "97c19a24-9ca6-4714-b4b0-e0e262c82c5e",
+   "envelope_timestamp": "2026-11-08T06:44:22.151652Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6e50b604-e8cc-4ac1-ad28-d0d0f12bc5fe",
+   "envelope_timestamp": "2026-11-08T06:44:25.329333Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "cb6850f3-bf75-4586-bb81-e82519ab873a",
+   "envelope_timestamp": "2026-11-08T06:44:28.440488Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "cfadddb5-e485-48cd-8b5d-c6904bed08fa",
+   "envelope_timestamp": "2026-11-08T06:44:31.594221Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3ee5c098-4e59-4593-8964-2093a22053ce",
+   "envelope_timestamp": "2026-11-08T06:44:34.739398Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e65cc50a-4986-4025-ad81-d140abcc986c",
+   "envelope_timestamp": "2026-11-08T06:44:37.899208Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "0941041f-9239-41a6-8374-81d5aadc55d6",
+   "envelope_timestamp": "2026-11-08T06:44:40.991052Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "69653792-cd07-4f2e-9f42-2d9b02477681",
+   "envelope_timestamp": "2026-11-08T06:44:44.073885Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ce43d3e8-4abb-4cb3-8f00-8663a9ecc5af",
+   "envelope_timestamp": "2026-11-08T06:44:47.106957Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "8ab5fd0f-50e3-491b-9db6-9d21249a77fc",
+   "envelope_timestamp": "2026-11-08T06:44:48.511622Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "159f0ffb-066d-4dda-8834-47d5e378752b",
+   "envelope_timestamp": "2026-11-08T06:44:50.112661Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1727a5a7-1a28-4ab2-821a-6fa00761d4c0",
+   "envelope_timestamp": "2026-11-08T06:44:52.991761Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "8b186d76-cfbb-4a38-9a62-686db5896ebe",
+   "envelope_timestamp": "2026-11-08T06:44:55.825667Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "cd780532-65aa-4bbd-ad94-8d5d7c105d50",
+   "envelope_timestamp": "2026-11-08T06:44:58.908982Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "138270a4-1cde-48cb-a7db-d3f7adf21a86",
+   "envelope_timestamp": "2026-11-08T06:45:01.846184Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "43add026-e9e9-44d5-9a42-536e2995f2e2",
+   "envelope_timestamp": "2026-11-08T06:45:04.831987Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6eb61063-b907-4759-9373-eaa38f74e7c8",
+   "envelope_timestamp": "2026-11-08T06:45:07.826323Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9ef06bf6-b03a-4528-b868-4e5ea0518184",
+   "envelope_timestamp": "2026-11-08T06:45:10.798677Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e5e8d4e3-a567-44a1-9179-5e120490971e",
+   "envelope_timestamp": "2026-11-08T06:45:13.827075Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "f9d74611-1690-4e6f-8733-2b9b62b4281c",
+   "envelope_timestamp": "2026-11-08T06:45:16.761146Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "84736e80-9289-421c-a0fe-880df3cc2c14",
+   "envelope_timestamp": "2026-11-08T06:45:19.686158Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "0088a96b-5e10-45bb-81f4-3533a848bceb",
+   "envelope_timestamp": "2026-11-08T06:45:22.781879Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "49649ad0-60a3-4e2c-a2ab-1adebd4b5f9b",
+   "envelope_timestamp": "2026-11-08T06:45:25.824117Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "f64c0978-3d2e-48b5-a795-fcbe87d3b91a",
+   "envelope_timestamp": "2026-11-08T06:45:29.077402Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "c7b0a947-9c95-4aee-b15d-e721cbc703ad",
+   "envelope_timestamp": "2026-11-08T06:45:37.051759Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1aa4dd6d-024b-428d-81a3-25382a8ca502",
+   "envelope_timestamp": "2026-11-08T06:45:46.931561Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "83cae6dc-5074-4c23-9ed1-87997a04a6c5",
+   "envelope_timestamp": "2026-11-08T06:45:49.848051Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "232d24c4-a953-4efe-baca-72fe4287f586",
+   "envelope_timestamp": "2026-11-08T06:45:52.740403Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "88478485-610f-4639-be2d-5d322793aa60",
+   "envelope_timestamp": "2026-11-08T06:45:55.540688Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "bbadeefe-2b4f-4304-99c5-136e2b41c1a2",
+   "envelope_timestamp": "2026-11-08T06:45:58.495959Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9a199516-dd3d-49cf-90b4-a107e52841d8",
+   "envelope_timestamp": "2026-11-08T06:46:02.166025Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "2442aeb2-b521-48de-93d5-f7eaeeaff039",
+   "envelope_timestamp": "2026-11-08T06:46:05.336461Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "faa172b8-3942-46e8-a828-a8fe4919e404",
+   "envelope_timestamp": "2026-11-08T06:46:08.856258Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "7e879dcb-8d18-475e-9cb5-89b9a050abf4",
+   "envelope_timestamp": "2026-11-08T06:46:11.828368Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "52c0fc72-b8ea-4416-9b56-6bc089396c46",
+   "envelope_timestamp": "2026-11-08T06:46:14.950103Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ade393d9-638f-41f3-a66e-151f478f5d9c",
+   "envelope_timestamp": "2026-11-08T06:46:17.878440Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "def42209-28a6-49f6-ad2c-61bb689eaedf",
+   "envelope_timestamp": "2026-11-08T06:46:18.166708Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "fa6abc81-103e-4e40-a720-c659d364389d",
+   "envelope_timestamp": "2026-11-08T06:46:21.145305Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "853a0cc9-48c8-4f52-8ee4-390e49c6998b",
+   "envelope_timestamp": "2026-11-08T06:46:21.408100Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3ceb1493-a420-4e2f-8de1-a864f678dc24",
+   "envelope_timestamp": "2026-11-08T06:46:24.349625Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "67528806-b443-4920-b704-e46498701142",
+   "envelope_timestamp": "2026-11-08T06:46:27.311409Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "78119ee8-83b3-4b9b-81f9-4909a8bbf604",
+   "envelope_timestamp": "2026-11-08T06:46:30.307114Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "c43e9156-a40c-480e-b756-127b5f63305f",
+   "envelope_timestamp": "2026-11-08T06:46:33.224820Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "bdaabb40-2628-40e6-b88f-fb69f8514ada",
+   "envelope_timestamp": "2026-11-08T06:46:36.279798Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b7e3fa19-babc-466f-96fc-4690fc4eae3e",
+   "envelope_timestamp": "2026-11-08T06:46:37.442239Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ba4fb96e-f6f5-4f37-8c29-925317de2b55",
+   "envelope_timestamp": "2026-11-08T06:46:39.922148Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9dacf7e4-9aaf-4f17-ab7f-70ff3cbed946",
+   "envelope_timestamp": "2026-11-08T06:46:43.026854Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "62ab8028-239e-4a4d-a48c-bb4488eaa0f0",
+   "envelope_timestamp": "2026-11-08T06:46:45.975095Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9f6f087e-493a-4dc2-976f-d8e6a7cfae9c",
+   "envelope_timestamp": "2026-11-08T06:46:48.866581Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b83750c2-be42-4979-92f4-96bab8dbfd8d",
+   "envelope_timestamp": "2026-11-08T06:46:49.726456Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "03aa265e-a182-445d-b77a-11fc1a800d20",
+   "envelope_timestamp": "2026-11-08T06:46:51.988607Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "fa686084-01a5-436a-b291-33b9b1e48518",
+   "envelope_timestamp": "2026-11-08T06:46:54.915303Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1f07d9a7-8fb1-4a5c-9205-aef038c30c23",
+   "envelope_timestamp": "2026-11-08T06:46:57.983825Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ba656495-49d5-46f1-a23b-e38ea04ba2d2",
+   "envelope_timestamp": "2026-11-08T06:47:00.908136Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d788e1fd-a160-4dcb-b197-e63192fd32dd",
+   "envelope_timestamp": "2026-11-08T06:47:04.012165Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ab7ccbc5-32c1-4c90-a14b-38d0e0a52c41",
+   "envelope_timestamp": "2026-11-08T06:47:07.039108Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "31118ac9-93d1-48ed-949e-37417a3d046b",
+   "envelope_timestamp": "2026-11-08T06:47:09.911444Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "c0845df7-417f-43f7-919e-0843e706dcc3",
+   "envelope_timestamp": "2026-11-08T06:47:12.863131Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "db8530af-f63b-4df6-8946-ea1fce88a130",
+   "envelope_timestamp": "2026-11-08T06:47:15.785215Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "8ebc496e-25b6-4d2a-90c7-744e909dfc1f",
+   "envelope_timestamp": "2026-11-08T06:47:18.822800Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "327b943e-8046-4b3f-8497-c730b99a216b",
+   "envelope_timestamp": "2026-11-08T06:47:21.837971Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d591cced-b226-429b-99de-abccb828116d",
+   "envelope_timestamp": "2026-11-08T06:47:24.758778Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "47db3b34-543b-4068-9de5-91501da1ec30",
+   "envelope_timestamp": "2026-11-08T06:47:27.661418Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "fe752e16-fcf5-4324-9bea-850d1d95fc0b",
+   "envelope_timestamp": "2026-11-08T06:47:30.753085Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "bc1cd9a4-ced2-43fd-8525-bcdc0620c99b",
+   "envelope_timestamp": "2026-11-08T06:47:33.644700Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "1a6ee097-a6ec-4d8c-b729-8ecccc8b8572",
+   "envelope_timestamp": "2026-11-08T06:47:36.069385Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "4f650c10-fd76-45f8-b7e5-7c6cf63ff24d",
+   "envelope_timestamp": "2026-11-08T06:47:36.598632Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a1f2c859-7729-4dff-a3ad-e14b82ccdb3b",
+   "envelope_timestamp": "2026-11-08T06:47:39.599516Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "20c156c9-a955-412c-a6ae-2fadb3d2d8bf",
+   "envelope_timestamp": "2026-11-08T06:47:42.603991Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a185d0ee-6015-4bf7-8a3d-618c3d24a4fd",
+   "envelope_timestamp": "2026-11-08T06:47:43.172045Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b2ee3b2e-8dac-4fbd-97c9-21e4e7771307",
+   "envelope_timestamp": "2026-11-08T06:47:45.552789Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "556b40e3-ada3-4014-bf21-49cb1fa9465a",
+   "envelope_timestamp": "2026-11-08T06:47:48.433996Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "2fc1b54a-38a0-4401-8b30-c897d02c32cf",
+   "envelope_timestamp": "2026-11-08T06:47:51.337627Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "9e159212-17c8-4e66-a403-cdb1ad0fb819",
+   "envelope_timestamp": "2026-11-08T06:47:54.460233Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "8ffe7296-32d3-4cdb-83a8-e0f5a764535f",
+   "envelope_timestamp": "2026-11-08T06:47:57.373112Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "57d4d759-44c6-4636-99e4-880e9e19ff69",
+   "envelope_timestamp": "2026-11-08T06:48:00.317143Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "d5145292-cf9a-4667-aea9-a2489e4d2d66",
+   "envelope_timestamp": "2026-11-08T06:48:16.585963Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "GitHub request failed: <html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<bod"
+  },
+  {
+   "correlation_id": "ba3706ff-a3ae-44b7-8102-13a3af77263b",
+   "envelope_timestamp": "2026-11-08T06:48:51.150786Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "0f33e682-7379-4096-8e50-8126db5140aa",
+   "envelope_timestamp": "2026-11-08T06:50:29.117729Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "73fee53b-4161-4f58-ac90-d5407a823f6a",
+   "envelope_timestamp": "2026-11-08T06:51:05.908803Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e12e5e9e-6853-4081-bf4a-fafb4d3db2d5",
+   "envelope_timestamp": "2026-11-08T06:51:18.682685Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "f3004ea2-c6bd-497c-8951-6bdbe1b60bb5",
+   "envelope_timestamp": "2026-11-08T06:51:26.339956Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "0fe6e090-d764-47b7-aee8-44a8360f8103",
+   "envelope_timestamp": "2026-11-08T06:52:26.370063Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "a9fe8e8b-5293-4189-9c8e-9a57c096472e",
+   "envelope_timestamp": "2026-11-08T06:56:51.479382Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3ddb7fac-fc3e-4c30-8c3a-89ea9e829510",
+   "envelope_timestamp": "2026-11-08T06:57:16.692068Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "660c177e-a141-436d-ab30-df07aca06747",
+   "envelope_timestamp": "2026-11-08T06:58:13.795564Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "871d3e26-1f82-4998-8d9a-6b9b39c179f5",
+   "envelope_timestamp": "2026-11-08T06:59:41.711283Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "20a686b5-bc25-4024-997b-ea4423924c37",
+   "envelope_timestamp": "2026-11-08T06:59:42.349205Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "914a9004-10ea-47f1-b659-2619f66f2652",
+   "envelope_timestamp": "2026-11-08T07:00:36.254516Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "03049fe3-f126-419a-a369-2b909553f251",
+   "envelope_timestamp": "2026-11-08T07:00:40.037520Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "dd306243-f079-42f3-971c-519c9a3273d8",
+   "envelope_timestamp": "2026-11-08T07:00:43.730546Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "86135c81-7368-4598-b3ff-6b7d3675d723",
+   "envelope_timestamp": "2026-11-08T07:00:47.346405Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "fed283f8-fb72-449b-83ea-4fe4c1f4d2fc",
+   "envelope_timestamp": "2026-11-08T07:00:51.073025Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "88b77453-d736-490f-8ad9-bac492f5f5b1",
+   "envelope_timestamp": "2026-11-08T07:01:28.772073Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "4c597f68-2add-43cd-98d4-91c5cacec0cd",
+   "envelope_timestamp": "2026-11-08T07:02:28.635476Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "fc2341dc-968b-4c93-bb55-ea02eec0692f",
+   "envelope_timestamp": "2026-11-08T07:02:32.549858Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "3a21ae71-8746-4d7f-a557-6ca9cb01dabf",
+   "envelope_timestamp": "2026-11-08T07:02:53.188776Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "17f4ae66-a477-4754-8236-4806dca6d48f",
+   "envelope_timestamp": "2026-11-08T07:03:02.417941Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "2967dc6b-d0c8-4484-a682-3663bcb01fbd",
+   "envelope_timestamp": "2026-11-08T07:03:10.040127Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "ea456df9-cad9-4db5-8a59-9f56bf18b3ca",
+   "envelope_timestamp": "2026-11-08T07:03:10.703962Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "dbb1a19c-4ada-463a-9c95-7aaabc3b9745",
+   "envelope_timestamp": "2026-11-08T07:03:46.464315Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "job 128651279227 has no step named 'Run tests'; its steps: 'Set up job', 'Initia"
+  },
+  {
+   "correlation_id": "d6434fba-65cc-4eb8-a832-421112d85487",
+   "envelope_timestamp": "2026-11-08T07:05:23.973825Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "6d88f6ee-8ff8-44b9-93ee-7679eb6e3a72",
+   "envelope_timestamp": "2026-11-08T07:05:24.003958Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "8c5e3cf9-1878-41de-b972-d0fbb3ec23b9",
+   "envelope_timestamp": "2026-11-08T07:05:24.775753Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "4d6ef60d-eed8-45fa-a38e-951ef3da29ae",
+   "envelope_timestamp": "2026-11-08T07:05:24.792152Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "832812b9-e263-4fe2-9884-d0bc3e8fe44f",
+   "envelope_timestamp": "2026-11-08T07:05:24.810118Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "dcfdf211-c13d-45f3-b06d-cb1ba3730902",
+   "envelope_timestamp": "2026-11-08T07:05:28.096297Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "e1c1763e-47f1-4227-9aaa-02594c308669",
+   "envelope_timestamp": "2026-11-08T07:05:32.187955Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b002f553-fe48-4c8c-8e52-9baeeccb986a",
+   "envelope_timestamp": "2026-11-08T07:05:33.902961Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "05722f3b-9642-4138-90c3-391d60340e0d",
+   "envelope_timestamp": "2026-11-08T07:05:39.556017Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "4354bd3b-1989-45d0-85fa-78339202bf65",
+   "envelope_timestamp": "2026-11-08T07:05:48.234382Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  },
+  {
+   "correlation_id": "b6486c68-91c2-483b-8ae4-6576569945f1",
+   "envelope_timestamp": "2026-11-08T07:05:52.270452Z",
+   "status": "failed",
+   "failure_class": "GitHubTransportError",
+   "retryable": false,
+   "failure_reason": "job 128651279317 has no step named 'nonexistent'; its steps: 'Set up job', 'Init"
+  },
+  {
+   "correlation_id": "ca7f94aa-2e23-4d48-9665-b31d8fae724d",
+   "envelope_timestamp": "2026-11-08T07:05:59.879137Z",
+   "status": "completed",
+   "failure_class": null,
+   "retryable": null,
+   "failure_reason": null
+  }
+ ]
+}
