@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 import yaml
 
@@ -44,9 +44,9 @@ class ProbeResult:
     probe: str
     outcome: str
     reasons: list[str] = field(default_factory=list)
-    evidence: dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, object] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "probe": self.probe,
             "outcome": self.outcome,
@@ -55,7 +55,7 @@ class ProbeResult:
         }
 
 
-def _text(value: Any) -> str | None:
+def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
@@ -77,7 +77,7 @@ class PinnedRun:
     role: str
     backend_id: str
     correlation_id: str = ""
-    accepted: Mapping[str, Any] | None = None
+    accepted: Mapping[str, object] | None = None
     terminal_cost_usd: float | None = None
     error: str | None = None
 
@@ -132,7 +132,7 @@ def load_row_query(path: Path) -> str:
 
 
 def pinned_run_from_receipt(
-    role: str, backend_id: str, receipt: Mapping[str, Any] | None, error: str | None
+    role: str, backend_id: str, receipt: Mapping[str, object] | None, error: str | None
 ) -> PinnedRun:
     """Reduce a delegate receipt to the fields the comparison reads."""
     if receipt is None:
@@ -244,7 +244,9 @@ def grade_pinned_backends(
     return result
 
 
-def pinned_observations_from_replay(payload: Mapping[str, Any]) -> PinnedObservations:
+def pinned_observations_from_replay(
+    payload: Mapping[str, object],
+) -> PinnedObservations:
     """Build observations from recorded runs and rows (offline grading)."""
     raw = payload.get("pinned")
     if not isinstance(raw, dict) or not isinstance(raw.get("runs"), list):
@@ -296,7 +298,7 @@ def observe_pinned_live(
     for role in PINNED_ROLES:
         backend = config[role]
         code, out = run_command([*delegate_argv, "--backend-id", backend], timeout)
-        receipt: Mapping[str, Any] | None = None
+        receipt: Mapping[str, object] | None = None
         match = re.search(r"full receipt (\S+receipt\.json)", out)
         error = None if code == 0 else f"delegate exited {code}"
         if match:
