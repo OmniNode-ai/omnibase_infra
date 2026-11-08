@@ -51,7 +51,7 @@ dod_evidence:
       - AC3
     checks:
       - check_type: command
-        check_value: grep -q 'ONEX_ATOMIC_INSTALL=1' scripts/reconcile-workspace-venvs.sh
+        check_value: grep -q 'ONEX_ATOMIC_INSTALL=..atomic' scripts/reconcile-workspace-venvs.sh
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22712-ratchet
     description: The canonical-file-shape ratchet passes with the four baselined scripts not grown.
