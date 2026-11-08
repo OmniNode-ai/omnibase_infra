@@ -11,10 +11,15 @@ requirements:
     acceptance:
       - id: AC1
         statement: The infra-first ownership control passes only with one exact declaration and rejects a wrong schema, wrong table, duplicate declaration, undeclared objects, and a downstream declaration of the wrong object kind.
+      - id: AC2
+        statement: "AC2: the local_alerts interim declaration is no longer carried in LEGACY_MIGRATION_TABLE_DECLARATIONS once the advanced omnimarket pin declares the relation, and the local_identity declaration still is -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py -q --no-cov -k TheLocalAlertsInterimEntryIsRetired, which fails at the merge base where the entry is still carried"
 evidence_requirements:
   - kind: tests
     description: Exercise exact local migration ownership and downstream authority handover with seeded rejection controls.
     command: uv run --frozen pytest tests/ci/test_application_database_sql_gate.py -k infra_first_ownership -q --no-cov
+  - kind: tests
+    description: The retired local_alerts interim declaration is absent and the local_identity declaration is still present.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py -q --no-cov -k TheLocalAlertsInterimEntryIsRetired
 emergency_bypass:
   enabled: false
   justification: ''
@@ -28,3 +33,11 @@ dod_evidence:
         check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_application_database_sql_gate.py -k infra_first_ownership -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn15361-ac2-local-alerts-retired
+    description: With the interim local_alerts declaration deleted, the repo-only test finds it absent and finds local_identity still present. At the merge base the declaration is still carried, so the absence test fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py -q --no-cov -k TheLocalAlertsInterimEntryIsRetired
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

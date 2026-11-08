@@ -173,6 +173,26 @@ class TestTheMapMatchesTheManifest:
         )
 
 
+class TestTheLocalAlertsInterimEntryIsRetired:
+    """Runs everywhere. Needs no foreign tree, so it is never skipped.
+
+    The pin advance to ``947c15cf3cd1`` makes omnimarket's
+    ``node_projection_local_alerts`` contract declare ``local_alerts`` (OMN-19991),
+    so the supplemental entry is redundant and is deleted in the same change. The
+    expiry assertion below it needs the pinned checkout and skips on a bare run,
+    so this class answers the same question from the repo alone: the retired
+    relation is no longer hand-declared here, and the entry that is still
+    waiting on its own node contract is, so the deletion took nothing else.
+    """
+
+    def test_local_alerts_is_no_longer_hand_declared(self) -> None:
+        assert "local_alerts" not in _supplemental_relation_names()
+
+    def test_local_identity_is_still_hand_declared(self) -> None:
+        """Positive control: the deletion removed one relation, not the tuple."""
+        assert "local_identity" in _supplemental_relation_names()
+
+
 class TestTheRootIsThePinAndNotTheTrailerTree:
     """Runs everywhere. Builds both checkout layouts, so it needs no foreign tree.
 
