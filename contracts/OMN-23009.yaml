@@ -47,3 +47,11 @@ dod_evidence:
       - check_type: command
         check_value: "grep -qF 'ONEX_RUNTIME_FOLD_HANDOVERS: ${DEV_RUNTIME_MAIN_FOLD_HANDOVERS' docker/docker-compose.dev-tenant-fold.yml"
         cwd: .
+  - id: dod-omn23009-dev-runtime-holds-the-handovers
+    description: After the deploy agent rolls dev from this change, the running omninode-runtime container holds ONEX_RUNTIME_FOLD_HANDOVERS naming runtime-worker and runtime-effects, and omninode-runtime and the 8085 health port answer. Red before the roll, when the container holds no such name.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" "docker exec omninode-runtime env | grep '^ONEX_RUNTIME_FOLD_HANDOVERS=' | grep -F runtime-worker | grep -F runtime-effects && curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8085/health | grep -x 200"
+        cwd: .
