@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
+from typing import cast
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import JsonValue, RootModel
@@ -352,7 +352,7 @@ def read_lane_presence(
     health_targets: Sequence[tuple[str, int]],
     disabled_services: frozenset[str],
     *,
-    run: Callable[..., Any],
+    run: Callable[..., ModelSubprocessOutcome],
     unreadable: tuple[type[Exception], ...],
 ) -> tuple[str, str]:
     """``(state, detail)`` of the lane's containers: running, down, companion_down or unknown.
