@@ -523,7 +523,8 @@ build)
   [ -z "${STAGE_DEV_TAGS:-}" ] || { REFS=(); DR=origin/dev; }
   OMNI_HOME="$R" CONSUMER_LOCK="$R/omnimarket/uv.lock" DEPLOY_REF=$DR bash scripts/runtime_build/stage_workspace.sh ${REFS[@]+"${REFS[@]}"} 2>&1 | tail -5
   echo "stage rc=${PIPESTATUS[0]} $(ts)"
-  make local-env LOCAL_ENV_FILE="$W/local.env" LOCAL_OVERLAY_FILE="$W/local.bifrost.yaml" 2>&1 | tail -2
+  # OMN-19998: this step used to pipe make through tail and go on, so a host without make (or a failed recipe) reached the compose build with no env file and the readback carried only "build rc=1". It now stops here and names the cause on the build rc line the receipt keeps.
+  lenv=$(make local-env LOCAL_ENV_FILE="$W/local.env" LOCAL_OVERLAY_FILE="$W/local.bifrost.yaml" 2>&1); lrc=$?; printf '%s\n' "$lenv" | tail -2; if [ "$lrc" != 0 ] || [ ! -s "$W/local.env" ] || [ ! -s "$W/local.bifrost.yaml" ]; then echo "build rc=1 make local-env failed (exit $lrc): $(printf '%s' "$lenv" | tail -3 | tr '\n' ' ' | cut -c1-300)"; exit 1; fi
   # the model rung comes from the pool config (config/lab/prepr_runtime_pool.yaml under the workspace config root)
   : "${MODEL_ENDPOINT:?MODEL_ENDPOINT is required}"
   sed -i.bak -E "s|endpoint_url: &model_endpoint \"[^\"]*\"|endpoint_url: \\&model_endpoint \"${MODEL_ENDPOINT}\"|" "$W/local.bifrost.yaml"
