@@ -9,7 +9,7 @@ the same files. Source and vendor were compared byte for byte before pinning.
 Failure modes: a vendored file drifts from its source, loses its checksum-bound
 ledger row, is declared with a class other than the one the class checker reads
 from its statements, the FORCE step reaches a lane unfenced, or the interim grant
-declaration is missing.
+declaration of a relation still waiting on its node contract is missing.
 """
 
 import hashlib
@@ -124,7 +124,19 @@ def test_only_the_force_step_is_fenced(table: str, node: str) -> None:
     assert f"node:{node}:0001_grant_tenant_projection_writer_{table}.sql" not in ids
 
 
-@pytest.mark.parametrize(("table", "node"), _TABLES)
+#: The relations whose interim grant declaration is still carried. local_alerts
+#: left it when the pinned omnimarket contract began declaring the relation
+#: (OMN-15361); its absence is asserted below.
+_STILL_BRIDGED = [(table, node) for table, node in _TABLES if table != "local_alerts"]
+
+
+def test_the_retired_local_alerts_interim_declaration_is_gone() -> None:
+    declared = {entry.table.name for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS}
+    assert "local_alerts" not in declared
+    assert "local_identity" in declared
+
+
+@pytest.mark.parametrize(("table", "node"), _STILL_BRIDGED)
 def test_the_interim_grant_declaration_names_the_vendored_create(
     table: str, node: str
 ) -> None:
