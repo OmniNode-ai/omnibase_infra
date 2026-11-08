@@ -51,7 +51,14 @@ def test_every_merge_queue_runner_carries_the_reserved_label_and_no_shared_one(
     for name, service in services.items():
         labels = set(str(service["environment"]["RUNNER_LABELS"]).split(","))
         assert labels == RESERVED, name
-        assert service["environment"]["RUNNER_GROUP"] == "omnibase-ci"
+        if host == "h053":
+            # OMN-23156: the h053 pool registers into the private-only group the host names, never the shared one.
+            assert service["environment"]["RUNNER_GROUP"].startswith(
+                "${MQ_RUNNER_GROUP:?"
+            ), name
+            assert "omnibase-ci" not in service["environment"]["RUNNER_GROUP"], name
+        else:
+            assert service["environment"]["RUNNER_GROUP"] == "omnibase-ci"
         assert service["environment"]["ONEX_LANE_HOST"] == host
         assert service["environment"]["RUNNER_NAME"] == name
         assert service["container_name"] == name
