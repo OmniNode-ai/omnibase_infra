@@ -1257,8 +1257,15 @@ services:
   # environment -- so the deploy script gains DEV_LANE_EXTRA_BROKER_CLIENTS in
   # the same change. Guarded by
   # tests/unit/scripts/test_omn18012_dev_lane_broker_client_restart_coverage.py.
+  # OMN-23066 (T13): primary dev runs the context audit projection inside main
+  # as node_projection_context_audit, which names this consumer's group under
+  # consumer_group_handover. The container of the previous revision starts under
+  # no profile a lane bring-up requests, and the deploy handler retires it by
+  # name (retired_services in the runtime policy). It stays declared here, not
+  # in the fold overlay, so the stack-shape baseline count does not grow.
   context-audit-consumer:
     build: *dev_lane_composed_runtime_build
+    profiles: !override ["folded-context-audit"]
     environment:
       !!merge <<: *dev_lane_broker_auth_env
   # ===========================================================================

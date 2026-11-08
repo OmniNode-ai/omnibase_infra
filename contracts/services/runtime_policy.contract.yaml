@@ -271,8 +271,14 @@ profiles:
         # OMN-21288: the claude hook-events projection node runs in main with no
         # profile of its own; its writer container of the previous revision is
         # retired by name, from this list, by the deploy agent and handler.
+        # OMN-23066 (T13): the context audit projection node runs in main, so the
+        # context-audit-consumer container of the previous revision is retired the
+        # same way. The node's contract names the retired consumer's group under
+        # consumer_group_handover (from_group_id context-audit-postgres), so main
+        # resumes from that group's committed offsets and the table has one writer.
         retired_services:
           - projection-claude-hook-events-writer
+          - context-audit-consumer
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof
