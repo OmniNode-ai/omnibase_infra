@@ -97,6 +97,22 @@ on:
         description: 'Total seconds the lane resolution may wait for a stability-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
         required: false
         default: '2400'
+      check_pinned_backends:
+        description: 'OMN-23176: also pin one delegation to each backend of config/c16_pinned_backends.yaml and compare the receipt with the delegation_events row. Dispatch only; the schedule never runs it (the paid rung spends).'
+        required: false
+        default: 'false'
+      pinned_backend_override_local:
+        description: 'Replace the config backend of the local role for this dispatch (empty keeps the config). A backend the lane lacks grades RED.'
+        required: false
+        default: ''
+      pinned_backend_override_free_cloud:
+        description: 'Replace the config backend of the free_cloud role for this dispatch (empty keeps the config).'
+        required: false
+        default: ''
+      pinned_backend_override_paid:
+        description: 'Replace the config backend of the paid role for this dispatch (empty keeps the config).'
+        required: false
+        default: ''
 
 concurrency:
   group: chain-canary-c16-${{ github.ref }}
@@ -229,6 +245,48 @@ jobs:
           echo "probe exit status: ${status}"
           exit "${status}"
 
+      # OMN-23176 (scenario R7): three delegations pinned with --backend-id to
+      # the rungs config/c16_pinned_backends.yaml names, each receipt compared
+      # with its delegation_events row. Dispatch only: the paid rung spends, so
+      # the schedule never reaches it. A named backend the lane lacks, or a
+      # row that cannot be read, exits non-zero; the set is never shrunk.
+      - name: Pin one delegation to each named backend and compare with the delegation_events row
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.check_pinned_backends == 'true' }}
+        env:
+          OVERRIDE_LOCAL: ${{ github.event.inputs.pinned_backend_override_local }}
+          OVERRIDE_FREE_CLOUD: ${{ github.event.inputs.pinned_backend_override_free_cloud }}
+          OVERRIDE_PAID: ${{ github.event.inputs.pinned_backend_override_paid }}
+          # A JSON array: the read-only SQL client prefix for delegation_events.
+          # Unset grades SKIP, which is red.
+          PSQL_ARGV_JSON: ${{ vars.C16_PINNED_PSQL_ARGV_JSON }}
+          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+        run: |
+          set -uo pipefail
+          uv run --frozen python -c "
+          import json, os, yaml
+          document = yaml.safe_load(open('config/c16_pinned_backends.yaml', encoding='utf-8'))
+          for role, name in (('local', 'OVERRIDE_LOCAL'), ('free_cloud', 'OVERRIDE_FREE_CLOUD'), ('paid', 'OVERRIDE_PAID')):
+              if os.environ.get(name, '').strip():
+                  document['pinned_backends'][role] = os.environ[name].strip()
+          yaml.safe_dump(document, open('c16-pinned-backends.yaml', 'w', encoding='utf-8'))
+          request = {
+              'config_path': 'c16-pinned-backends.yaml',
+              'record_path': 'c16-pinned-backends.json',
+              'timeout_seconds': 300,
+              'delegate_argv': ['uv', 'run', '--frozen', 'onex', 'delegate', 'Reply with the single word: alive.', '--task-type', 'test', '--ticket', 'OMN-23176', '--bus', 'kafka', '--lane', os.environ.get('LANE_NAME', ''), '--locus', 'deployed-lane', '--state-root', '.onex_state'],
+              'psql_argv': json.loads(os.environ.get('PSQL_ARGV_JSON') or '[]'),
+          }
+          json.dump(request, open('c16-pinned-backends-input.json', 'w', encoding='utf-8'))
+          "
+          uv run --frozen onex node node_c16_pinned_backend_effect \
+            --input c16-pinned-backends-input.json --backend event_bus=inmemory \
+            --state-root .onex_state/c16-pinned-backends
+          status=$?
+          echo "pinned probe exit status: ${status}"
+          exit "${status}"
+
       - name: Assert the C16 record is present and non-empty
         if: always()
         run: |
@@ -243,5 +301,22 @@ jobs:
         with:
           name: c16-receipt-identity
           path: c16-receipt-identity.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Assert the pinned-backend record is present and non-empty
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.check_pinned_backends == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact c16-pinned-backends \
+            --require c16-pinned-backends.json
+
+      - name: Upload the pinned-backend record
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.check_pinned_backends == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: c16-pinned-backends
+          path: c16-pinned-backends.json
           if-no-files-found: error
           retention-days: 30

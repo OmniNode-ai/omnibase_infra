@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_c16_pinned_backend_effect
+contract_name: node_c16_pinned_backend_effect
+node_name: node_c16_pinned_backend_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: "OMN-23176: pin one delegation per named backend and compare each receipt with its delegation_events row."
+input_model:
+  name: ModelC16PinnedBackendRequest
+  module: omnibase_infra.models.model_c16_pinned_backend_request
+  description: "Role to backend config path, and a replay file or the delegate and SQL reader argv."
+output_model:
+  name: ModelC16PinnedBackendResult
+  module: omnibase_infra.models.model_c16_pinned_backend_result
+  description: "Outcome PASS, FAIL or SKIP with reasons and the compared keys; only PASS is success."
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.c16-pinned-backend-check.v1"]
+  publish_topics: ["onex.evt.platform.c16-pinned-backend-checked.v1"]
+terminal_event: "onex.evt.platform.c16-pinned-backend-checked.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: c16_pinned_backend.check
+      handler:
+        name: HandlerC16PinnedBackend
+        module: omnibase_infra.handlers.handler_c16_pinned_backend
+      event_model:
+        name: ModelC16PinnedBackendRequest
+        module: omnibase_infra.models.model_c16_pinned_backend_request
+      output_events: [ModelC16PinnedBackendResult]
+capabilities:
+  - name: c16_pinned_backend.check
+    description: "Red when a named backend is missing from the lane or a receipt disagrees with its delegation_events row."
+metadata:
+  ticket: OMN-23176
+  author: OmniNode Team
+  description: "Scenario R7 of the delegation readiness suite."
+  tags: [effect, ci, delegation]

@@ -1,0 +1,44 @@
+schema_version: 1.0.0
+ticket_id: OMN-23176
+title: The C16 receipt probe pins three delegations to the lane's local, free cloud and paid rungs and compares host, backend and cost with the delegation_events row
+summary: The C16 workflow graded receipt identity for one unpinned delegation and held no backend pinning and no host or cost equality. The probe now reads config/c16_pinned_backends.yaml, pins one delegation per named role with --backend-id, and compares each receipt's accepted-attempt backend and host and the terminal cost with the delegation_events row for the same correlation id. A named backend the lane lacks, a missing row or an unreadable table is red, never a shrunk set. The step runs only on workflow_dispatch because the paid rung spends.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23176-pinned-backend-comparison
+    statement: Each pinned delegation's accepted backend, host and cost equal the delegation_events row, and a backend named in the probe config that the lane lacks exits non-zero.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the pinned-delegation comparison is covered by a unit test over recorded receipts and rows -- falsifier: uv run pytest tests/scripts/test_c16_pinned_backends.py -q'
+      - id: AC2
+        statement: 'AC2: one workflow_dispatch run with a backend missing from the lane exits non-zero, run id in the PR body -- falsifier: gh run view <run id> --json conclusion with uv run pytest tests/scripts/test_c16_pinned_backends.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The pinned-backend grader over passing and single-field-mutated receipts and rows, the missing-backend case, the config reader, the command exit codes, the live half over one injected process runner, and a recorded real pinned receipt
+    command: uv run pytest tests/scripts/test_c16_pinned_backends.py tests/ci/test_c16_pinned_backends_live_contact_omn23176.py tests/ci/test_c16_receipt_identity_probe_omn19181.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23176-unit
+    description: Three pinned runs that agree with their rows grade PASS; a host, backend or cost that differs from the row, a backend missing from the lane, a role with no run, an answer from another rung and a missing row each grade FAIL, an unreadable table grades SKIP, and the command exits non-zero on each. With the probe taken from dev the tests fail on the missing grader.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_c16_pinned_backends.py tests/ci/test_c16_pinned_backends_live_contact_omn23176.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23176-deploy
+    description: Hosted-runner probe that reads the committed probe from GitHub at the checked-out commit and requires the pinned grader and the config reader the workflow step calls.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/ci/c16_receipt_identity_probe.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def grade_pinned_backends" in src; assert "def load_pinned_config" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
