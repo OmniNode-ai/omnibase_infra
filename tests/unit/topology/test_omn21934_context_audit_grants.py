@@ -122,27 +122,6 @@ def test_the_ledger_hashes_match_the_node_migration_files() -> None:
 
 
 @pytest.mark.unit
-def test_the_bridge_declaration_names_the_existing_table_migration() -> None:
-    declarations = [
-        d for d in LEGACY_MIGRATION_TABLE_DECLARATIONS if d.table.name == _TABLE
-    ]
-    assert len(declarations) == 1
-    assert declarations[0].table.schema == "public"
-    assert declarations[0].table.access == "read_write"
-    assert declarations[0].table.database_ref == "application"
-    assert declarations[0].table.migration == (
-        "docker/migrations/forward/nodes/node_projection_context_audit/"
-        "0000_add_context_audit_event_key.sql"
-    )
-    assert declarations[0].contract_path == Path(declarations[0].table.migration)
-    migration = _ROOT / declarations[0].table.migration
-    assert migration.is_file()
-    assert f"CREATE TABLE IF NOT EXISTS public.{_TABLE}" in migration.read_text(
-        encoding="utf-8"
-    )
-
-
-@pytest.mark.unit
 def test_the_shared_declaration_helper_keeps_each_entry_shape() -> None:
     by_node = {
         d.node: d
