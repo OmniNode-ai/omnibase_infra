@@ -14,6 +14,7 @@ this repository.
 from __future__ import annotations
 
 import asyncio
+import re
 import signal
 from collections.abc import Callable
 from functools import partial
@@ -22,6 +23,7 @@ from unittest.mock import patch
 
 import aiohttp
 import pytest
+import yaml
 
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
@@ -34,6 +36,29 @@ from tests.unit.runtime.test_service_kernel_early_http_mount_omn21288 import (
 
 FIXTURES = "tests.unit.handlers.http_mount.asgi_fixtures"
 INTELLIGENCE_PREFIX = "/api/v1"
+INTELLIGENCE_APP = "omniintelligence.api.app"
+COMPOSE_DIR = Path(__file__).resolve().parents[3] / "docker"
+
+
+def _compose_services_serving_the_intelligence_app() -> list[str]:
+    """Compose services whose command still runs the intelligence ASGI app itself.
+
+    The runtime's mount is the only place the API may answer. A sibling container
+    running the same app on its own port would keep serving when the mount fails, which
+    is the partial serving the boot refusal exists to prevent.
+    """
+    holders: list[str] = []
+    for path in sorted(COMPOSE_DIR.glob("docker-compose*.yml")):
+        # compose's ``!override`` and merge tags only change how overlays merge.
+        text = re.sub(r"!override[ \t]*|!!merge[ \t]*", "", path.read_text("utf-8"))
+        services = yaml.safe_load(text).get("services") or {}
+        holders.extend(
+            f"{path.name}:{name}"
+            for name, service in services.items()
+            if isinstance(service, dict)
+            and INTELLIGENCE_APP in str(service.get("command", ""))
+        )
+    return holders
 
 
 def _declare_intelligence_mount(tmp_path: Path, factory: str) -> Path:
@@ -54,7 +79,12 @@ def _declare_intelligence_mount(tmp_path: Path, factory: str) -> Path:
 async def test_failing_intelligence_mount_refuses_to_become_ready(
     request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
-    """AC2: a planted factory error stops boot; nothing listens, wiring never starts."""
+    """AC2: a planted factory error stops boot; nothing listens, wiring never starts.
+
+    No compose service serves the intelligence app in its place, so the refusal leaves
+    nothing answering it.
+    """
+    assert _compose_services_serving_the_intelligence_app() == []
     port: int = request.getfixturevalue("kernel_harness")
     discovered = discover_contracts_from_paths(
         [_declare_intelligence_mount(tmp_path, f"{FIXTURES}:create_app_planted_error")]
@@ -86,7 +116,11 @@ async def test_failing_intelligence_mount_refuses_to_become_ready(
 async def test_intelligence_api_answers_on_the_runtime_port(
     request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
-    """AC1 (in-repo form): the mounted API answers GET /api/v1/patterns on main's port."""
+    """AC1 (in-repo form): the mounted API answers GET /api/v1/patterns on main's port.
+
+    The runtime is the only server of it: no compose service runs the app itself.
+    """
+    assert _compose_services_serving_the_intelligence_app() == []
     port: int = request.getfixturevalue("kernel_harness")
     loop = asyncio.get_running_loop()
     shutdown_ready: asyncio.Future[Callable[[], None]] = loop.create_future()
