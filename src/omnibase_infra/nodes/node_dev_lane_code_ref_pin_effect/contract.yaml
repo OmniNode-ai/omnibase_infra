@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_dev_lane_code_ref_pin_effect
+contract_name: node_dev_lane_code_ref_pin_effect
+node_name: node_dev_lane_code_ref_pin_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Dev-only record, kept in the dev deploy agent's state directory, of the branch whose code the agent loads. The agent follows the pinned branch instead of its tracking ref while the record is live and returns to the tracking ref when it is released or expires, at most seven days out.
+input_model:
+  name: ModelDevLaneCodeRefPin
+  module: omnibase_infra.models.model_dev_lane_code_ref_pin
+  description: The pin to register.
+output_model:
+  name: ModelDevLaneCodeRefPin
+  module: omnibase_infra.models.model_dev_lane_code_ref_pin
+  description: The live pin; absent when none is live.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: register
+      handler: {name: HandlerDevLaneCodeRefPin, module: omnibase_infra.handlers.handler_dev_lane_code_ref_pin}
+    - operation: active
+      handler: {name: HandlerDevLaneCodeRefPin, module: omnibase_infra.handlers.handler_dev_lane_code_ref_pin}
+    - operation: release
+      handler: {name: HandlerDevLaneCodeRefPin, module: omnibase_infra.handlers.handler_dev_lane_code_ref_pin}
+capabilities:
+  - name: dev_lane.code_ref_pin
+    description: Keep the dev deploy agent's own code on a branch until it expires or is released, so a fix to the agent is shown working before its merge.
+metadata:
+  ticket: OMN-23039
+  author: OmniNode Team
+  description: Host-local effect. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment, dev]
