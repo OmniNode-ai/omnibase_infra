@@ -424,6 +424,26 @@ SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
 # ``docs/**`` and ``*.md`` moved.
 DOCS_ONLY_MARKER_JOB = "Docs-Only Marker (OMN-16661)"
 
+# Notes that sat inside the tables now read from ci_summary_gate_tables.json:
+# OMN-18970 adversarial review: a queue run's rows are a verdict about
+# a queue commit, not about this pull request. The sweep only runs on
+# `pull_request` today so this cannot currently fire, and it is listed
+# anyway because the deny list is the place a reader looks to learn
+# which events are not pull-request verdicts.
+# In ci-summary ``needs`` but deliberately EXCLUDED from the pass/fail
+# condition (advisory / informational):
+# Not in ci-summary ``needs`` and not a required context:
+# Advisory off merge_group only (OMN-9120); on merge_group its compose
+# inner job is STRICT via MERGE_GROUP_STRICT_GATE_JOBS (OMN-20147).
+# OMN-14909: report-only telemetry needs ci-summary, so it is never
+# completed while the poller runs; allowlisted so a re-run of CI Summary
+# can never read a prior attempt's red telemetry as a failure.
+# Structural path filter — reusable caller, excluded from the condition:
+# Tables the gate reads as data (the baselined gate file only shrinks).
+_TABLES = json.loads(
+    Path(__file__).with_name("ci_summary_gate_tables.json").read_text(encoding="utf-8")
+)
+
 #
 # NOTE ON MEMBERSHIP vs ci.yml GATING — these are two different sets, on
 # purpose. This tuple only ever RELAXES a ``STRICT_GATE_JOBS`` member, so it
@@ -434,12 +454,7 @@ DOCS_ONLY_MARKER_JOB = "Docs-Only Marker (OMN-16661)"
 # tolerated by the L3 default-deny sweep (``skipped`` ∈ GOOD_CONCLUSIONS).
 # Adding it would be a no-op that misleads the reader into thinking the poller
 # enforces it.
-DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
-    "Application Database Domain Enforcement (OMN-15361)",  # ~7 min
-    "Kafka Schema Handshake (OMN-3411)",  # ~4 min
-    "Effect-Assertion Gate (RT-5)",  # ~2 min
-    "Demo Loop Gate",  # ~2 min
-)
+DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = tuple(_TABLES["docs_only_skippable"])
 
 # Every job the completeness anchor must observe present+good for SUCCESS.
 GATE_JOBS: tuple[str, ...] = STRICT_GATE_JOBS + SKIPPABLE_GATE_JOBS
@@ -493,27 +508,7 @@ def strict_gates_for_event(event_name: str) -> tuple[str, ...]:
 # callers — whose inner jobs surface as ``"<caller name> / <inner job>"`` — are
 # covered by their caller entry (``zone-filter``, ``Runtime Boot Smoke
 # (compose)``).
-SOFT_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        # In ci-summary ``needs`` but deliberately EXCLUDED from the pass/fail
-        # condition (advisory / informational):
-        "Test-Failure Ratchet Gate",  # advisory (OMN-13867)
-        "Version Pin Compliance",  # in needs, never checked in the condition
-        # Not in ci-summary ``needs`` and not a required context:
-        # Advisory off merge_group only (OMN-9120); on merge_group its compose
-        # inner job is STRICT via MERGE_GROUP_STRICT_GATE_JOBS (OMN-20147).
-        "Runtime Boot Smoke (compose)",
-        "Cross-Repo Migration Conflicts",  # migration-conflict-check; not required
-        "Kafka Boundary Compat (OMN-3256)",  # advisory; carries xfail known-drift
-        "AI-Slop Pattern Check (strict, PR diff)",  # aislop-sweep gates the tree
-        # OMN-14909: report-only telemetry needs ci-summary, so it is never
-        # completed while the poller runs; allowlisted so a re-run of CI Summary
-        # can never read a prior attempt's red telemetry as a failure.
-        "CI cascade reason-graph (report-only)",
-        # Structural path filter — reusable caller, excluded from the condition:
-        "zone-filter",  # zone-filter (reusable) inner jobs surface prefixed
-    }
-)
+SOFT_ALLOWLIST: frozenset[str] = frozenset(_TABLES["soft_allowlist"])
 
 # ---------------------------------------------------------------------------
 # OMN-15496 — cross-workflow ("external") required contexts.
@@ -1261,30 +1256,7 @@ EXTERNAL_FAILURE_SUPERSESSION_GRACE_S: int = 1200
 # such as code scanning or the change-control writer, a run absent from the
 # supplied index, an unparseable URL, or no index supplied at all — is SWEPT.
 # An allow list would silently exempt every one of those.
-SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(
-    {
-        "push",
-        # OMN-18970 adversarial review: a queue run's rows are a verdict about
-        # a queue commit, not about this pull request. The sweep only runs on
-        # `pull_request` today so this cannot currently fire, and it is listed
-        # anyway because the deny list is the place a reader looks to learn
-        # which events are not pull-request verdicts.
-        "merge_group",
-        "schedule",
-        "workflow_dispatch",
-        "release",
-        "deployment",
-        "deployment_status",
-        "repository_dispatch",
-        "create",
-        "delete",
-        "fork",
-        "page_build",
-        "public",
-        "registry_package",
-        "watch",
-    }
-)
+SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(_TABLES["sweep_non_pr_events"])
 
 # The STRICT bar, and it is the same one layer 4 holds its own tuple to: the
 # ONLY conclusion that passes is `success`.
@@ -1350,11 +1322,24 @@ class SweepExclusion:
 # where the numbers are recorded, not here.
 SWEEP_EXCLUSION_MAX_DAYS: int = 90
 
-# The registry is data, in ci_summary_sweep_exclusions.json beside this file (stdlib
-# json: the poller runs with no third-party packages). Each entry names its reason,
-# ticket, added date and expiry. The first entries cover names the measurement found
-# non-green on ANY head over the 16-PR window recorded above (OMN-18979); every one
-# is a named, dated, owned decision, and an entry nobody renews re-arms the sweep.
+# The remaining live entries cover names the measurement found non-green on
+# ANY head over the 16-PR window recorded above. OMN-18960 shipped this dict EMPTY
+# beside a weaker conclusion set; OMN-18979 replaced that pairing with the strict bar
+# and these entries, so every tolerance is now a named, dated, owned decision
+# rather than a silent one buried in a frozenset.
+#
+# Those initial entries all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
+# mechanism looks structural — a fork-only job, a main-branch-only job, a
+# manual-dispatch entrypoint. The cap is not a prediction that the mechanism
+# will change. It is what forces a premise that has held for a quarter to be
+# re-read by a person, which is the whole difference between this list and an
+# allowlist.
+# The registry is data, in ci_summary_sweep_exclusions.json beside this file
+# (stdlib json: the poller runs with no third-party packages). Each entry names
+# its reason, ticket, added date and expiry. The Tessl Reviewer entry is
+# RULING 2026-11-05T20:27:56Z (OMN-22478): the automated reviewer app posts a
+# neutral row on every pull request and holds no merge. Moved out of code
+# because the canonical-file-shape ratchet refuses growth of this file.
 SWEEP_EXCLUSIONS_FILE = Path(__file__).with_name("ci_summary_sweep_exclusions.json")
 
 
@@ -1368,56 +1353,40 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = load_sweep_exclusions(
     SWEEP_EXCLUSIONS_FILE
 )
 
-
-_SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")
-_SWEEP_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
 # Per-check advisory or blocking mode is data (ruling 2026-11-08): the contract names
 # each mode and the conclusions it adds to success, the overlay declares each check's
 # mode. A neutral passes only for a declared-advisory check; undeclared stays denied.
-CHECK_MODES_CONTRACT_FILE = Path(__file__).with_name(
-    "ci_summary_external_check_modes.contract.json"
-)
-CHECK_MODES_OVERLAY_FILE = Path(__file__).with_name(
-    "ci_summary_external_check_modes.json"
-)
+# A missing, unparsable or malformed file refuses the gate and admits nothing.
+CHECK_MODES_FILES = [
+    Path(__file__).with_name(f"ci_summary_external_check_modes{part}.json")
+    for part in (".contract", "")
+]
 
 
-def load_check_modes(
-    contract_path: Path, overlay_path: Path
-) -> tuple[dict[str, frozenset[str]], list[str]]:
-    """Return ``(conclusions each declared check adds to success, refusals)``.
-
-    A missing, unparsable or malformed file refuses and admits nothing: fail closed.
-    """
+def load_check_modes(contract: Path, overlay: Path) -> tuple[dict, list[str]]:
+    # Returns (conclusions each declared check adds to success, refusals).
     try:
-        contract = json.loads(contract_path.read_text(encoding="utf-8"))
-        overlay = json.loads(overlay_path.read_text(encoding="utf-8"))
-        modes, fields = contract["modes"], contract["entry_fields"]
-        if not (isinstance(overlay, dict) and isinstance(modes, dict)):
-            raise TypeError("modes and the overlay must be objects")
-        modes = {m: frozenset(c) for m, c in modes.items()}
-        fields = tuple(fields)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        return {}, [f"check-mode registry unreadable or malformed: {exc!r}"]
-    admitted: dict[str, frozenset[str]] = {}
-    refusals: list[str] = []
-    for name, entry in sorted(overlay.items()):
-        bad = [
-            f
-            for f in fields
-            if not isinstance(entry, dict)
-            or not isinstance(entry.get(f), str)
-            or not entry[f].strip()
-        ]
-        if bad:
-            refusals.append(f"{name}: missing or non-text {', '.join(bad)}")
-        elif entry.get("mode") not in modes:
-            refusals.append(f"{name}: mode {entry.get('mode')!r} is not declared")
-        else:
-            admitted[name] = modes[entry["mode"]]
-    return admitted, refusals
+        spec = json.loads(contract.read_text(encoding="utf-8"))
+        decls = json.loads(overlay.read_text(encoding="utf-8"))
+        modes = {m: frozenset(c) for m, c in spec["modes"].items()}
+        need = sorted({"mode", *spec["entry_fields"]})
+        bad = {
+            n
+            for n, e in decls.items()
+            if not isinstance(e, dict)
+            or not all(isinstance(e.get(f), str) and e[f].strip() for f in need)
+            or e["mode"] not in modes
+        }
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return {}, [f"unreadable or malformed: {exc!r}"]
+    return {n: modes[e["mode"]] for n, e in decls.items() if n not in bad}, [
+        f"{n}: needs non-empty text {', '.join(need)} and a declared mode"
+        for n in sorted(bad)
+    ]
 
+
+_SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")
+_SWEEP_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -2423,7 +2392,6 @@ def evaluate_external_sweep(
     now: datetime | None,
     own_run_ids: frozenset[int] = frozenset(),
     workflow_runs: list[dict[str, object]] | None = None,
-    check_modes: Mapping[str, frozenset[str]] | None = None,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     """Layer 5 — default-deny over every check-run nothing else accounts for.
 
@@ -2436,10 +2404,7 @@ def evaluate_external_sweep(
     * ``swept`` — every name this layer judged, so a clean run records what it
       looked at instead of printing nothing (rule 16).
     * ``excluded`` — swept-population names an active registry entry admitted,
-      regardless of their conclusion, and (as ``name (conclusion, declared
-      advisory)``) rows a declared-advisory check admitted by its mode, so the
-      finding still shows. ``check_modes`` is :func:`load_check_modes`'s admitted
-      map; ``None`` admits nothing.
+      regardless of their conclusion.
     * ``provisional`` — swept names whose replacement is demonstrably due
       inside the re-run grace. These hold the verdict at PENDING; they are
       NOT a quiet pass, and they red as soon as the grace closes.
@@ -2464,7 +2429,10 @@ def evaluate_external_sweep(
         return [], [], [], [], []
     accounted = frozenset(expected) | in_run_names | {self_name}
     active, _expired = active_sweep_exclusions(exclusions, now=now)
-    failures: list[str] = []
+    check_modes, mode_refusals = load_check_modes(*CHECK_MODES_FILES)
+    # A row a declared-advisory check's mode admits lands in ``excluded`` as
+    # "name (conclusion, declared advisory)"; an unreadable registry is a failure.
+    failures = [f"check-mode registry {r}" for r in mode_refusals]
     in_flight: list[str] = []
     swept: list[str] = []
     excluded: list[str] = []
@@ -2492,9 +2460,7 @@ def evaluate_external_sweep(
             continue
         if state.status == "completed" and state.conclusion in SWEEP_GOOD_CONCLUSIONS:
             continue
-        if state.status == "completed" and state.conclusion in (check_modes or {}).get(
-            name, ()
-        ):
+        if state.conclusion in check_modes.get(name, ()):
             excluded.append(f"{name} ({state.conclusion}, declared advisory)")
             continue
         if verdict_is_provisional(state, now) or replacement_run_in_flight(
@@ -2678,11 +2644,6 @@ def evaluate(
         if sweep_external
         else (frozenset(), ())
     )
-    check_modes, mode_refusals = (
-        load_check_modes(CHECK_MODES_CONTRACT_FILE, CHECK_MODES_OVERLAY_FILE)
-        if sweep_external
-        else ({}, [])
-    )
     (
         ext_sweep_failures,
         ext_sweep_in_flight,
@@ -2700,7 +2661,6 @@ def evaluate(
             now=now,
             own_run_ids=own_workflow_run_ids(jobs, current_run_id),
             workflow_runs=workflow_runs,
-            check_modes=check_modes,
         )
         if sweep_external
         else ([], [], [], [], [])
@@ -2716,7 +2676,6 @@ def evaluate(
         # A malformed exclusion entry fails the gate outright. An unreviewable
         # exception is worse than none: it reads as a considered decision.
         + [f"malformed sweep exclusion: {f}" for f in exclusion_findings]
-        + [f"malformed check-mode registry: {f}" for f in mode_refusals]
     )
     # OMN-18991: a swept row inside its re-run grace holds the verdict at
     # PENDING rather than passing quietly. Bounded by the grace, after which
@@ -2756,7 +2715,6 @@ def evaluate(
                 sweep_excluded=ext_sweep_excluded,
                 sweep_expired=list(expired_exclusions),
                 sweep_findings=exclusion_findings,
-                sweep_mode_refusals=mode_refusals,
                 sweep_external=sweep_external,
                 sweep_provisional=ext_sweep_provisional,
             )
@@ -2792,7 +2750,6 @@ def _report(
     sweep_excluded: list[str] | None = None,
     sweep_expired: list[str] | None = None,
     sweep_findings: list[str] | None = None,
-    sweep_mode_refusals: list[str] | None = None,
     sweep_external: bool = True,
     sweep_provisional: list[str] | None = None,
 ) -> str:
@@ -2909,10 +2866,6 @@ def _report(
     if sweep_findings:
         lines.append(
             "  external sweep exclusion registry REFUSED: " + "; ".join(sweep_findings)
-        )
-    if sweep_mode_refusals:
-        lines.append(
-            "  external check-mode registry REFUSED: " + "; ".join(sweep_mode_refusals)
         )
     return "\n".join(lines)
 

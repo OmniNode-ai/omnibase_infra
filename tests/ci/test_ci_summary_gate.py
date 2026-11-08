@@ -2574,6 +2574,34 @@ class TestExternalDefaultDenySweep:
         assert "external default-deny sweep: 2 unregistered context(s) judged" in report
 
 
+class TestSweepExclusionRegistryFileOmn22478:
+    """The registry is the JSON file beside the gate; a malformed file fails closed."""
+
+    def test_the_shipped_registry_is_the_json_file_beside_the_gate(self) -> None:
+        from scripts.ci import ci_summary_gate as gate_module
+
+        assert (
+            gate_module.SWEEP_EXCLUSIONS_FILE.name == "ci_summary_sweep_exclusions.json"
+        )
+        assert gate_module.SWEEP_EXCLUSIONS_FILE.is_file()
+        assert gate_module.load_sweep_exclusions(
+            gate_module.SWEEP_EXCLUSIONS_FILE
+        ) == dict(EXTERNAL_SWEEP_EXCLUSIONS)
+
+    def test_control_a_malformed_registry_raises_instead_of_admitting_everything(
+        self, tmp_path: Path
+    ) -> None:
+        from scripts.ci import ci_summary_gate as gate_module
+
+        bad = tmp_path / "bad.json"
+        bad.write_text('{"Tessl Reviewer": {"reason": "x"}}', encoding="utf-8")
+        with pytest.raises(TypeError):
+            gate_module.load_sweep_exclusions(bad)
+        bad.write_text("not json", encoding="utf-8")
+        with pytest.raises(ValueError):
+            gate_module.load_sweep_exclusions(bad)
+
+
 class TestExternalSweepExclusions:
     """AC-2 — the exclusion registry is closed-ended or it is an allowlist."""
 

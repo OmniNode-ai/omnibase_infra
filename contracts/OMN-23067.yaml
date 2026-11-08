@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23067
+title: Dev projection API is served by the main runtime and its container is retired (T17)
+summary: The projection query node node_projection_query_api_effect (omnimarket) answers every route the projection-api service answered and is served through the runtime's contract-declared http_mount. This change folds the projection-api role into the primary dev main runtime through the runtime policy, the mapping the folded writers use, so the dev stack renders no projection-api container and the deploy handler and deploy agent retire the previous revision's container before main is recreated. Every other dev instance keeps its own container. The dev lab-pass and onex-api delivery probes read the API from main's port under the mount prefix. The live dev read follows the deploy agent's rebuild after the merge.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23067-fold
+    statement: The runtime policy folds projection-api into primary dev main only, and the dev stack renders no projection-api container while the other dev instances keep theirs.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the policy folds projection-api into primary dev main only, the committed policy env equals its render, and the dev stack renders no projection-api container while other dev instances keep theirs -- falsifier: uv run pytest tests/unit/docker/test_dev_projection_api_fold_omn21288.py -q --no-cov, red against the pre-change policy, env and compose files"
+  - id: req-omn23067-retire
+    statement: The deploy handler and the deploy agent retire the previous projection-api container before main is recreated.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the deploy handler and the deploy agent stop and remove the previous projection-api container before main is recreated, and name it in no up or verify list -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov, red against the pre-change policy and handler"
+  - id: req-omn23067-probe
+    statement: The dev lab pass reads the projection API from the mount on main's port.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the dev lab-pass projection URL is main's URL plus the mount prefix, in the routing table and in the onex-api delivery probe, and the projection_ready check passes against the mounted node -- falsifier: uv run pytest tests/ci/test_deploy_lane_verify_route_omn19507.py tests/unit/docker/test_dev_projection_api_fold_omn21288.py -q --no-cov, red with the URL put back to port 3002"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23067-ac1-fold
+    description: The policy folds projection-api into primary dev main only, the committed env equals its render, and the dev stack renders no projection-api container. With the policy, env or the dev-lane gate reverted these tests fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_projection_api_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn23067-ac2-retire
+    description: The deploy handler stops and removes the previous projection-api container before main is recreated and the deploy agent disables the service and retires its container; neither names it in an up or verify list.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn23067-ac3-probe
+    description: The routing table and the onex-api delivery probe name main's URL plus the mount prefix for the dev lane, and the lab-pass projection_ready check passes against the node served through the runtime's AsgiMounts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_deploy_lane_verify_route_omn19507.py tests/ci/test_onex_api_guard_job_end_omn20154.py tests/unit/docker/test_dev_projection_api_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn23067-deploy-probe
+    description: Hosted-runner probe reads the committed policy env and the routing table from GitHub at the checked-out commit and requires projection-api among the folded profiles and the dev lane's projection URL under main's port. The live reads on dev follow the deploy agent's rebuild after the merge.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/runtime-policy.env?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; lines = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l); assert "projection-api" in lines["DEV_RUNTIME_MAIN_FOLDED_PROFILES"].split(","); assert lines["DEV_RUNTIME_MAIN_PROJECTION_API_RUNTIME_PROFILE"] == "folded-projection-api-runtime"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC3

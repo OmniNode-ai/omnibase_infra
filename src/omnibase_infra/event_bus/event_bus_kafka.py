@@ -293,6 +293,9 @@ from omnibase_infra.handlers.kafka_transactional_producer import (
     KafkaTransactionalProducer,
     open_kafka_transactional_producer,
 )
+from omnibase_infra.handlers.projection_failure_fingerprint import (
+    projection_failure_fingerprint,
+)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import ModelReadCommittedTopics
@@ -3062,21 +3065,8 @@ class EventBusKafka(
 
     @staticmethod
     def _projection_failure_fingerprint(exc: BaseException) -> str:
-        """Identify a failure so "the same refusal again" is decidable.
-
-        The count must reset when the failure CHANGES, because a write path
-        being repaired in stages reports a different error as it goes and such a
-        record is progressing toward a row rather than stuck. Fingerprinting on
-        the type alone would miss that -- every refusal on this path is a
-        ``ProjectionNotMaterializedError`` -- so the underlying cause's type and
-        the rendered message are folded in. The message is hashed rather than
-        stored: it carries the payload's own identifiers on some paths, and a
-        cache of error strings keyed by offset is not a thing this class should
-        hold.
-        """
-        cause = exc.__cause__
-        parts = f"{type(exc).__name__}|{type(cause).__name__ if cause else ''}|{exc}"
-        return hashlib.sha256(parts.encode("utf-8", "replace")).hexdigest()[:32]
+        """Identify a failure so "the same refusal again" is decidable (OMN-23024)."""
+        return projection_failure_fingerprint(exc)
 
     def _record_projection_withhold(
         self,

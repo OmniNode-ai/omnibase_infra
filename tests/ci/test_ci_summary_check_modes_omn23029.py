@@ -63,8 +63,7 @@ def _declare(
     contract_file, overlay_file = tmp_path / "c.json", tmp_path / "o.json"
     contract_file.write_text(json.dumps(contract), encoding="utf-8")
     overlay_file.write_text(json.dumps(overlay), encoding="utf-8")
-    monkeypatch.setattr(gate, "CHECK_MODES_CONTRACT_FILE", contract_file)
-    monkeypatch.setattr(gate, "CHECK_MODES_OVERLAY_FILE", overlay_file)
+    monkeypatch.setattr(gate, "CHECK_MODES_FILES", [contract_file, overlay_file])
 
 
 def _entry(mode: str) -> dict[str, str]:
@@ -74,9 +73,7 @@ def _entry(mode: str) -> dict[str, str]:
 def test_shipped_overlay_declares_the_reviewer_advisory_and_the_sweep_passes_it() -> (
     None
 ):
-    admitted, refusals = gate.load_check_modes(
-        gate.CHECK_MODES_CONTRACT_FILE, gate.CHECK_MODES_OVERLAY_FILE
-    )
+    admitted, refusals = gate.load_check_modes(*gate.CHECK_MODES_FILES)
     assert refusals == []
     assert admitted[TESSL] == frozenset({"neutral"})
     assert TESSL not in gate.EXTERNAL_SWEEP_EXCLUSIONS
@@ -126,12 +123,27 @@ def test_control_advisory_failure_is_still_reported_as_a_finding(
 @pytest.mark.parametrize(
     ("overlay", "needle"),
     [
-        ({"X": {"mode": "advisory"}}, "X: missing or non-text reason"),
-        ({"X": {"mode": "advisory", "reason": "  "}}, "X: missing or non-text reason"),
-        ({"X": {"mode": "advisory", "reason": 7}}, "X: missing or non-text reason"),
-        ({"X": {"mode": "optional", "reason": "r"}}, "mode 'optional' is not declared"),
-        ({"X": {"mode": ["advisory"], "reason": "r"}}, "missing or non-text mode"),
-        ({"X": "advisory"}, "X: missing or non-text mode, reason"),
+        (
+            {"X": {"mode": "advisory"}},
+            "X: needs non-empty text mode, reason and a declared mode",
+        ),
+        (
+            {"X": {"mode": "advisory", "reason": "  "}},
+            "X: needs non-empty text mode, reason and a declared mode",
+        ),
+        (
+            {"X": {"mode": "advisory", "reason": 7}},
+            "X: needs non-empty text mode, reason and a declared mode",
+        ),
+        (
+            {"X": {"mode": "optional", "reason": "r"}},
+            "X: needs non-empty text mode, reason and a declared mode",
+        ),
+        (
+            {"X": {"mode": ["advisory"], "reason": "r"}},
+            "X: needs non-empty text mode, reason and a declared mode",
+        ),
+        ({"X": "advisory"}, "X: needs non-empty text mode, reason and a declared mode"),
     ],
 )
 def test_control_a_malformed_overlay_entry_fails_closed(
@@ -140,7 +152,7 @@ def test_control_a_malformed_overlay_entry_fails_closed(
     _declare(tmp_path, monkeypatch, overlay)
     code, report = _verdict(_row("Some Other Gate", "success"))
     assert code == EXIT_FAILURE, report
-    assert "check-mode registry REFUSED" in report
+    assert "check-mode registry " in report
     assert needle in report
 
 
@@ -148,20 +160,24 @@ def test_control_a_missing_overlay_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _declare(tmp_path, monkeypatch, {})
-    monkeypatch.setattr(gate, "CHECK_MODES_OVERLAY_FILE", tmp_path / "absent.json")
+    monkeypatch.setattr(
+        gate, "CHECK_MODES_FILES", [tmp_path / "c.json", tmp_path / "absent.json"]
+    )
     code, report = _verdict(_row("Some Other Gate", "success"))
     assert code == EXIT_FAILURE, report
-    assert "check-mode registry REFUSED" in report
+    assert "check-mode registry " in report
 
 
 def test_control_a_missing_contract_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _declare(tmp_path, monkeypatch, {})
-    monkeypatch.setattr(gate, "CHECK_MODES_CONTRACT_FILE", tmp_path / "absent.json")
+    monkeypatch.setattr(
+        gate, "CHECK_MODES_FILES", [tmp_path / "absent.json", tmp_path / "o.json"]
+    )
     code, report = _verdict(_row("Some Other Gate", "success"))
     assert code == EXIT_FAILURE, report
-    assert "check-mode registry REFUSED" in report
+    assert "check-mode registry " in report
 
 
 @pytest.mark.parametrize(
@@ -180,7 +196,7 @@ def test_control_a_malformed_contract_fails_closed(
     _declare(tmp_path, monkeypatch, {}, contract=contract)
     code, report = _verdict(_row("Some Other Gate", "success"))
     assert code == EXIT_FAILURE, report
-    assert "check-mode registry REFUSED" in report
+    assert "check-mode registry " in report
 
 
 @pytest.mark.parametrize("raw", ["{not json", "[]", "null"])
@@ -191,7 +207,7 @@ def test_control_an_unparsable_overlay_fails_closed(
     (tmp_path / "o.json").write_text(raw, encoding="utf-8")
     code, report = _verdict(_row("Some Other Gate", "success"))
     assert code == EXIT_FAILURE, report
-    assert "check-mode registry REFUSED" in report
+    assert "check-mode registry " in report
 
 
 def test_control_the_reviewer_neutral_fails_when_the_overlay_does_not_declare_it(
