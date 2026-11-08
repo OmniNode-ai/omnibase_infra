@@ -49,6 +49,7 @@ dod_evidence:
   - id: dod-omn23062-fold-live-at-ref
     description: The runtime policy contract and the dev lane compose file read from the repository at the code commit of the fold carry the workers handover from the runtime-worker instance and the policy-derived worker profile; read at the pre-fold commit the same probes find neither, so the probe goes red without the fold.
     source: manual
+    execution_scope: local_done_gate
     binds_ac:
       - AC2
     checks:
