@@ -74,11 +74,11 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k "stale_listing or current_listing"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23027-ac5-gate-calls-observed
-    description: The stub gate script records its calls, so the unreadable-input test fails when a report call is injected into the no-success deadline branch (shown failing by that injected break).
+    description: The stub gate script records its calls, and the unreadable-input and stale-listing tests both assert on that record, so a gate report added back to the no-success deadline branch fails the first and the old report over a retained listing fails the second. At the merge base the stale-listing test fails because the recorder sees the --report-only call the old deadline branch makes over the retained snapshot, so this selection fails there and passes at the head.
     source: manual
     binds_ac:
       - AC5
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k unreadable_input
+        check_value: uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -k "unreadable_input or stale_listing"
         cwd: ${OMNI_HOME}/omnibase_infra
