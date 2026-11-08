@@ -1,0 +1,49 @@
+schema_version: 1.0.0
+ticket_id: OMN-23009
+title: The folded dev main runtime receives the fold handovers the policy renders, so queued effects and workflow events are neither skipped nor run twice across the fold
+summary: The runtime policy contract declares a last_ran consumer group handover for the effects and workers roles and render_runtime_policy_env writes it as DEV_RUNTIME_MAIN_FOLD_HANDOVERS, but docker-compose.dev-tenant-fold.yml never set ONEX_RUNTIME_FOLD_HANDOVERS on omninode-runtime, the name the runtime reads. A read of the running dev runtime after the worker fold (omnibase_infra#5792) found ONEX_RUNTIME_FOLDED_PROFILES set with effects and workers, no ONEX_RUNTIME_FOLD_HANDOVERS, and no handover line for either retired instance in its log. The overlay now sets the name from the rendered policy value, with the variable listed as required. Dev only; the stability lane and prod are untouched. Live delivery through the deploy agent and the read of the running container are pending the merge.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23009-fold-handovers-reach-main
+    statement: The folded dev main runtime's environment carries the per-profile consumer group handover the runtime policy renders, so the effects and workers consumer groups resume from the commits of the side that last ran.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the overlay passes DEV_RUNTIME_MAIN_FOLD_HANDOVERS to omninode-runtime as ONEX_RUNTIME_FOLD_HANDOVERS and the pre-fix overlay does not -- falsifier: uv run pytest tests/unit/docker/test_dev_fold_handover_reaches_main_omn23009.py, 2 red against the overlay at the merge base'
+      - id: AC2
+        statement: 'AC2: the real docker compose render of primary dev holds the handovers for effects and workers in main, with the retired instance ids -- falsifier: the compose render test named fold_handovers, red against the overlay at the merge base'
+evidence_requirements:
+  - kind: tests
+    description: The handover reach tests with their failing controls, the real docker compose render of primary dev, the required-names pin and the worker fold tests.
+    command: uv run pytest tests/unit/docker/test_dev_fold_handover_reaches_main_omn23009.py tests/unit/docker/test_dev_worker_fold_omn21288.py tests/scripts/test_dev_lane_required_env_omn17530.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23009-handover-reach-tests
+    description: The five handover reach tests pass on the branch; against the overlay at the merge base two of them fail (the name is missing from main's environment), and the test file is absent at the merge base.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_fold_handover_reaches_main_omn23009.py tests/unit/docker/test_dev_worker_fold_omn21288.py tests/scripts/test_dev_lane_required_env_omn17530.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23009-real-compose-render
+    description: The real docker compose config render of primary dev holds ONEX_RUNTIME_FOLD_HANDOVERS on omninode-runtime with the workers handover from runtime-worker and the effects handover from runtime-effects, both last_ran.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -k fold_handovers -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23009-overlay-sets-the-name
+    description: The fold overlay sets the name the runtime reads, from the rendered policy variable; the merge base overlay holds neither string.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "grep -qF 'ONEX_RUNTIME_FOLD_HANDOVERS: ${DEV_RUNTIME_MAIN_FOLD_HANDOVERS' docker/docker-compose.dev-tenant-fold.yml"
+        cwd: .
