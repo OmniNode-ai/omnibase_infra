@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22027
+title: The claude hook-events projection runs inside the dev main runtime with its consumer group id unchanged (T7)
+summary: The fold itself merged in omnibase_infra#5586 (dev-lane overlay without the hook-events service or ONEX_RUNTIME_NODE_EXCLUSION, handler retirement of the previous revision's container, refresh_dev_lane.sh and the deploy agent's service list). This change adds the missing real-compose proof for the consumer group id, in the file the ticket names, with a planted break that turns it red. The live newest-row reading across a deploy-agent redeploy is not taken here and follows the deploy agent's rebuild.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22027-service-gone
+    statement: The dev lane starts no hook-events service and sets no node exclusion on main, so the projection runs inside the main runtime.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the hook-events service is gone from the dev lane and the newest claude_hook_events row stays within the bound across a redeploy -- falsifier: reading 4 of plan section 9 (hook events projecting) taken during a deploy through the deploy agent; the failure that #5418 answered was an 11 hour lag"
+  - id: req-omn22027-group-id
+    statement: The consumer group id is the one main already used, because the retired writer and main share KAFKA_INSTANCE_ID.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the consumer group id is unchanged by the fold -- falsifier: `uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q`"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22027-ac1-service-gone
+    description: The dev lane overlay declares no hook-events writer and no ONEX_RUNTIME_NODE_EXCLUSION, the fold overlay gates the retired writer under a profile no bring-up requests, no deploy set starts it, and the deploy handler retires a previous revision's container before main is recreated. The live newest-row reading during a deploy-agent redeploy is outstanding and is taken from reading 4 of plan section 9 after the next rebuild.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: >-
+          python3 -c 'import pathlib; t = pathlib.Path("docker/docker-compose.dev-lane.yml").read_text(encoding="utf-8"); code = "\n".join(l for l in t.splitlines() if not l.lstrip().startswith("#")); assert "omninode-runtime:" in code; assert "projection-claude-hook-events-writer" not in code; assert "ONEX_RUNTIME_NODE_EXCLUSION" not in code'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22027-ac2-group-id
+    description: Real docker compose renders of the dev lane overlay show main with KAFKA_INSTANCE_ID runtime-main, no hook-events service in a dev bring-up, and the retired writer's declaration under the folded-hook-events profile carrying the same KAFKA_INSTANCE_ID. With the writer's id changed to another value the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/infra/test_dev_runtime_compose_render.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
