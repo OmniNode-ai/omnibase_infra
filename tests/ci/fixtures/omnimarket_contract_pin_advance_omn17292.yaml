@@ -3,4 +3,4 @@
 # Written by .github/workflows/omnimarket-contract-pin-refresh.yml on each pin
 # advance: the sha tests/ci/test_omnimarket_contract_pin_advance_omn17292.py
 # expects every omnimarket pin to carry (OMN-17292, OMN-20068).
-omnimarket_contract_ref: f3a5bdd8113eb381ce9392635709fcc9d60f4df5
+omnimarket_contract_ref: f88570610657a307ccfbb80be6024635d99e5912
