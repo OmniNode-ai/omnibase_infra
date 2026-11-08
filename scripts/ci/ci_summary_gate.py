@@ -424,6 +424,26 @@ SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
 # ``docs/**`` and ``*.md`` moved.
 DOCS_ONLY_MARKER_JOB = "Docs-Only Marker (OMN-16661)"
 
+# Notes that sat inside the tables now read from ci_summary_gate_tables.json:
+# OMN-18970 adversarial review: a queue run's rows are a verdict about
+# a queue commit, not about this pull request. The sweep only runs on
+# `pull_request` today so this cannot currently fire, and it is listed
+# anyway because the deny list is the place a reader looks to learn
+# which events are not pull-request verdicts.
+# In ci-summary ``needs`` but deliberately EXCLUDED from the pass/fail
+# condition (advisory / informational):
+# Not in ci-summary ``needs`` and not a required context:
+# Advisory off merge_group only (OMN-9120); on merge_group its compose
+# inner job is STRICT via MERGE_GROUP_STRICT_GATE_JOBS (OMN-20147).
+# OMN-14909: report-only telemetry needs ci-summary, so it is never
+# completed while the poller runs; allowlisted so a re-run of CI Summary
+# can never read a prior attempt's red telemetry as a failure.
+# Structural path filter — reusable caller, excluded from the condition:
+# Tables the gate reads as data (the baselined gate file only shrinks).
+_TABLES = json.loads(
+    Path(__file__).with_name("ci_summary_gate_tables.json").read_text(encoding="utf-8")
+)
+
 #
 # NOTE ON MEMBERSHIP vs ci.yml GATING — these are two different sets, on
 # purpose. This tuple only ever RELAXES a ``STRICT_GATE_JOBS`` member, so it
@@ -434,12 +454,7 @@ DOCS_ONLY_MARKER_JOB = "Docs-Only Marker (OMN-16661)"
 # tolerated by the L3 default-deny sweep (``skipped`` ∈ GOOD_CONCLUSIONS).
 # Adding it would be a no-op that misleads the reader into thinking the poller
 # enforces it.
-DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
-    "Application Database Domain Enforcement (OMN-15361)",  # ~7 min
-    "Kafka Schema Handshake (OMN-3411)",  # ~4 min
-    "Effect-Assertion Gate (RT-5)",  # ~2 min
-    "Demo Loop Gate",  # ~2 min
-)
+DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = tuple(_TABLES["docs_only_skippable"])
 
 # Every job the completeness anchor must observe present+good for SUCCESS.
 GATE_JOBS: tuple[str, ...] = STRICT_GATE_JOBS + SKIPPABLE_GATE_JOBS
@@ -493,27 +508,7 @@ def strict_gates_for_event(event_name: str) -> tuple[str, ...]:
 # callers — whose inner jobs surface as ``"<caller name> / <inner job>"`` — are
 # covered by their caller entry (``zone-filter``, ``Runtime Boot Smoke
 # (compose)``).
-SOFT_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        # In ci-summary ``needs`` but deliberately EXCLUDED from the pass/fail
-        # condition (advisory / informational):
-        "Test-Failure Ratchet Gate",  # advisory (OMN-13867)
-        "Version Pin Compliance",  # in needs, never checked in the condition
-        # Not in ci-summary ``needs`` and not a required context:
-        # Advisory off merge_group only (OMN-9120); on merge_group its compose
-        # inner job is STRICT via MERGE_GROUP_STRICT_GATE_JOBS (OMN-20147).
-        "Runtime Boot Smoke (compose)",
-        "Cross-Repo Migration Conflicts",  # migration-conflict-check; not required
-        "Kafka Boundary Compat (OMN-3256)",  # advisory; carries xfail known-drift
-        "AI-Slop Pattern Check (strict, PR diff)",  # aislop-sweep gates the tree
-        # OMN-14909: report-only telemetry needs ci-summary, so it is never
-        # completed while the poller runs; allowlisted so a re-run of CI Summary
-        # can never read a prior attempt's red telemetry as a failure.
-        "CI cascade reason-graph (report-only)",
-        # Structural path filter — reusable caller, excluded from the condition:
-        "zone-filter",  # zone-filter (reusable) inner jobs surface prefixed
-    }
-)
+SOFT_ALLOWLIST: frozenset[str] = frozenset(_TABLES["soft_allowlist"])
 
 # ---------------------------------------------------------------------------
 # OMN-15496 — cross-workflow ("external") required contexts.
@@ -1261,30 +1256,7 @@ EXTERNAL_FAILURE_SUPERSESSION_GRACE_S: int = 1200
 # such as code scanning or the change-control writer, a run absent from the
 # supplied index, an unparseable URL, or no index supplied at all — is SWEPT.
 # An allow list would silently exempt every one of those.
-SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(
-    {
-        "push",
-        # OMN-18970 adversarial review: a queue run's rows are a verdict about
-        # a queue commit, not about this pull request. The sweep only runs on
-        # `pull_request` today so this cannot currently fire, and it is listed
-        # anyway because the deny list is the place a reader looks to learn
-        # which events are not pull-request verdicts.
-        "merge_group",
-        "schedule",
-        "workflow_dispatch",
-        "release",
-        "deployment",
-        "deployment_status",
-        "repository_dispatch",
-        "create",
-        "delete",
-        "fork",
-        "page_build",
-        "public",
-        "registry_package",
-        "watch",
-    }
-)
+SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(_TABLES["sweep_non_pr_events"])
 
 # The STRICT bar, and it is the same one layer 4 holds its own tuple to: the
 # ONLY conclusion that passes is `success`.
@@ -1380,6 +1352,37 @@ def load_sweep_exclusions(path: Path) -> dict[str, SweepExclusion]:
 EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = load_sweep_exclusions(
     SWEEP_EXCLUSIONS_FILE
 )
+
+# Per-check advisory or blocking mode is data (ruling 2026-11-08): the contract names
+# each mode and the conclusions it adds to success, the overlay declares each check's
+# mode. A neutral passes only for a declared-advisory check; undeclared stays denied.
+# A missing, unparsable or malformed file refuses the gate and admits nothing.
+CHECK_MODES_FILES = [
+    Path(__file__).with_name(f"ci_summary_external_check_modes{part}.json")
+    for part in (".contract", "")
+]
+
+
+def load_check_modes(contract: Path, overlay: Path) -> tuple[dict, list[str]]:
+    # Returns (conclusions each declared check adds to success, refusals).
+    try:
+        spec = json.loads(contract.read_text(encoding="utf-8"))
+        decls = json.loads(overlay.read_text(encoding="utf-8"))
+        modes = {m: frozenset(c) for m, c in spec["modes"].items()}
+        need = sorted({"mode", *spec["entry_fields"]})
+        bad = {
+            n
+            for n, e in decls.items()
+            if not isinstance(e, dict)
+            or not all(isinstance(e.get(f), str) and e[f].strip() for f in need)
+            or e["mode"] not in modes
+        }
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return {}, [f"unreadable or malformed: {exc!r}"]
+    return {n: modes[e["mode"]] for n, e in decls.items() if n not in bad}, [
+        f"{n}: needs non-empty text {', '.join(need)} and a declared mode"
+        for n in sorted(bad)
+    ]
 
 
 _SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")
@@ -2426,7 +2429,10 @@ def evaluate_external_sweep(
         return [], [], [], [], []
     accounted = frozenset(expected) | in_run_names | {self_name}
     active, _expired = active_sweep_exclusions(exclusions, now=now)
-    failures: list[str] = []
+    check_modes, mode_refusals = load_check_modes(*CHECK_MODES_FILES)
+    # A row a declared-advisory check's mode admits lands in ``excluded`` as
+    # "name (conclusion, declared advisory)"; an unreadable registry is a failure.
+    failures = [f"check-mode registry {r}" for r in mode_refusals]
     in_flight: list[str] = []
     swept: list[str] = []
     excluded: list[str] = []
@@ -2453,6 +2459,9 @@ def evaluate_external_sweep(
             in_flight.append(name)
             continue
         if state.status == "completed" and state.conclusion in SWEEP_GOOD_CONCLUSIONS:
+            continue
+        if state.conclusion in check_modes.get(name, ()):
+            excluded.append(f"{name} ({state.conclusion}, declared advisory)")
             continue
         if verdict_is_provisional(state, now) or replacement_run_in_flight(
             raw, workflow_runs

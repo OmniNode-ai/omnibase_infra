@@ -1003,15 +1003,17 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
             config = config.model_copy(
                 update={"disabled_services": config.disabled_services | retired}
             )
-        return config
-    config = _LANE_CONFIGS[lane]
+    else:
+        config = _LANE_CONFIGS[lane]
     if "effects" in lane_folded_profiles(lane):
+        # The effects port is published by main once the role is folded, so the
+        # effects health target reads main's container (OMN-22930 on primary dev).
         targets = list(config.runtime_health_targets)
         index = SERVICE_HEALTH_TARGET_INDEX["runtime-effects"]
         _, port = targets[index]
         main, _ = targets[SERVICE_HEALTH_TARGET_INDEX["omninode-runtime"]]
         targets[index] = (main, port)
-        return config.model_copy(update={"runtime_health_targets": tuple(targets)})
+        config = config.model_copy(update={"runtime_health_targets": tuple(targets)})
     return config
 
 
