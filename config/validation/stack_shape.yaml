@@ -379,11 +379,6 @@ command_baseline:
     files: 1
     argv_sha256: 00ad7d712962e4c395883d778505ef04524dda86a61ceaf293d61e8332659948
     command_hint: python -m
-  - service: intelligence-api
-    field: command
-    files: 1
-    argv_sha256: b6b340a065b2ac1f0ab85864a12148dc1320ea9d86e5b57646b53c170a1ebd7f
-    command_hint: uvicorn omniintelligence.api.app:create_app
   - service: omninode-contract-resolver
     field: command
     files: 1
@@ -737,9 +732,6 @@ baseline:
     ticket: OMN-21288
   - service: infra-routing-decisions-consumer
     files: 4
-    ticket: OMN-21288
-  - service: intelligence-api
-    files: 7
     ticket: OMN-21288
   - service: omninode-contract-resolver
     files: 7
