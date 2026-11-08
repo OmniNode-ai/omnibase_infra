@@ -171,3 +171,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_contract_retired_labels_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2, AC3, AC4]
+  - id: dod-omn-17292-interim-entries-retired-at-pin
+    description: The pin advance to f88570610657 makes the supplemental table declarations for context_audit_events, local_alerts, overlay_store and view_seam_readings redundant, so they are deleted and the expiry test passes against the pinned contracts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
