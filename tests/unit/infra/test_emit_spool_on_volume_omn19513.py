@@ -21,7 +21,11 @@ from tests.unit.infra.test_broker_profile_omn19419 import _render
 
 pytestmark = pytest.mark.unit
 
-_SERVICES = ("omninode-runtime", "runtime-effects")
+# OMN-22930 (T8): primary dev folds the effects role into omninode-runtime, so
+# the rendered dev lane holds one runtime and no runtime-effects service. The
+# hosts list names both; the tests below read which of them the render holds.
+_SERVICES = ("omninode-runtime",)
+_RETIRED_BY_FOLD = "runtime-effects"
 _DATA = PurePosixPath("/app/data")
 
 
@@ -48,6 +52,20 @@ def test_spool_dir_is_under_the_services_data_volume(name: str) -> None:
     assert _volume_at(service, _DATA), f"{name} mounts no named volume at {_DATA}"
 
 
+def test_the_effects_role_runs_inside_the_one_runtime_so_it_has_no_second_spool() -> (
+    None
+):
+    services = _dev()["services"]
+    assert _RETIRED_BY_FOLD not in services, (
+        f"{_RETIRED_BY_FOLD} renders on primary dev: the effects fold (OMN-22930) "
+        "should have folded it into omninode-runtime"
+    )
+    assert "omninode-runtime" in services
+
+
 def test_no_two_services_drain_the_same_spool_volume() -> None:
-    sources = [_volume_at(_dev()["services"][name], _DATA) for name in _SERVICES]
+    services = _dev()["services"]
+    hosts = [name for name in (*_SERVICES, _RETIRED_BY_FOLD) if name in services]
+    sources = [_volume_at(services[name], _DATA) for name in hosts]
+    assert hosts, "no emit-effect host renders on the dev lane"
     assert len(set(sources)) == len(sources), sources

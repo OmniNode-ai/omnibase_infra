@@ -1,0 +1,73 @@
+schema_version: 1.0.0
+ticket_id: OMN-23024
+title: The runtime's projection writer dead-letters an unknown-tenant event once instead of retrying it forever, and the broker-lag alarm reads the runtime's delegation writer groups
+summary: omnibase_infra's _is_projection_content_failure now classifies TenantRegistryResolutionError (matched by defining module and class name, because omnimarket is not a dependency here) as the event's defect, so the runtime writer sends the event to the dead-letter path once and the offset advances, as the standalone runner did before the fold (omnibase_infra#5743). config/lab_alarm.json names the runtime's 47 consumer groups for all six projection writers, equal to the set derived from the nodes' contracts, in place of the standalone groups that have had no members since the fold. The retry bound's failure fingerprint masks the event's age so a replayed refusal reaches it. The growth rule of the alarm is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23024-unknown-tenant-is-poison
+    statement: An event whose tenant cannot be resolved is dead-lettered once and the offset advances.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the runtime writer sends an event whose tenant cannot be resolved to the dead-letter path once, and moves on; a test replays the recorded unknown-tenant event and fails on the current code -- falsifier: uv run pytest of the writer''s poison classification tests'
+  - id: req-omn23024-alarm-reads-runtime-groups
+    statement: The broker-lag alarm reads the runtime's live consumer groups for the delegation writer.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the broker-lag alarm reads the runtime''s live consumer group for the delegation writer, not the orphaned standalone group, and still fires on planted lag -- falsifier: uv run pytest of the alarm''s group-binding tests with a planted lag control'
+evidence_requirements:
+  - kind: tests
+    description: The replay of the recorded unknown-tenant event is acknowledged after one dead letter, the unconfirmed-dead-letter and look-alike controls still withhold, a replayed refusal that differs only in the event's age reaches the redelivery bound, and the alarm derives the runtime's groups for all six projection writers from the runtime's contracts with the growth rule unchanged.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_omn23024_unknown_tenant_is_poison.py tests/integration/runtime/test_omn23024_unknown_tenant_dead_letter_integration.py tests/ci/test_lab_alarm_delegation_groups_omn23024.py tests/unit/event_bus/test_omn23024_withhold_fingerprint_stable.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23024-ac1-unknown-tenant-poison
+    description: At the merge base the replay test fails (the writer withholds the offset and raises ProjectionNotMaterializedError); with the change it passes, with the unconfirmed-dead-letter control still withholding.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_omn23024_unknown_tenant_is_poison.py tests/integration/runtime/test_omn23024_unknown_tenant_dead_letter_integration.py tests/unit/runtime/auto_wiring/test_omn17862_quarantine_publish_confirmed.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23024-ac2-alarm-binds-runtime-groups
+    description: At the merge base the alarm config declares the standalone delegation-writer group and the binding tests fail; with the change the eight runtime groups are declared and a planted growth on delegate-skill-completed alarms.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_delegation_groups_omn23024.py tests/ci/test_lab_alarm_omn18867.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23024-ac1-retry-bound-fires-for-the-refusal
+    description: At the previous head a refusal whose message carries the event's age hashes differently on every redelivery, so the redelivery bound never fired for it (the replay test fails, 6 seeks and no dead letter); with the stable-parts fingerprint the replay reaches the bound and is dead-lettered once, and a refusal about a different tenant still resets the count.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_omn23024_withhold_fingerprint_stable.py tests/unit/event_bus/test_omn17379_projection_wedge_bounded.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23024-ac2-groups-derived-from-contracts
+    description: At the previous head the alarm still declared five standalone writer groups that hold no member and pinned the delegation names by hand (six tests fail on that config); with the change it declares the runtime's 47 groups for all six writers, a test requires them to equal the set derived from the nodes' contract data, a recorded contract version bump turns that test red, and a planted growth on a formerly standalone writer's group alarms.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_delegation_groups_omn23024.py tests/ci/test_lab_alarm_omn18867.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-deploy-omn23024-classifies-unknown-tenant
+    description: The deployed runtime classifies the unknown-tenant refusal as the event's defect, a probe against the live container that fails before this change deploys; without the container it reads the source.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: >-
+          PROBE='import sys; sys.path.insert(0, "src"); from omnibase_infra.runtime.auto_wiring.handler_wiring import _is_projection_content_failure as f; E = type("TenantRegistryResolutionError", (ValueError,), {"__module__": "omnimarket.projection.tenant_registry_resolution"}); assert f(E("x")) is True; assert f(ValueError("x")) is False'; if docker inspect ${RUNTIME_CONTAINER:-omninode-runtime} >/dev/null 2>&1; then docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "$PROBE"; else grep -q 'omnimarket.projection.tenant_registry_resolution' src/omnibase_infra/handlers/projection_failure_classification.py; fi
+        cwd: ${OMNI_HOME}/omnibase_infra

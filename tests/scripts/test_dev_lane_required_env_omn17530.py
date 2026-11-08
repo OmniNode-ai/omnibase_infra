@@ -517,7 +517,17 @@ def test_tenant_fold_required_names_match_its_manifest() -> None:
     declared = _declared_names(
         _REPO_ROOT / "docker/dev-tenant-fold-required-env.manifest.txt"
     )
-    assert required == declared == {"DEV_RUNTIME_MAIN_FOLDED_PROFILES"}
+    # OMN-22930 (T8): the effects fold adds the effects host port and the folded
+    # main's own store resolver config to the fold overlay's required names.
+    assert (
+        required
+        == declared
+        == {
+            "DEV_RUNTIME_EFFECTS_PORT",
+            "DEV_RUNTIME_MAIN_FOLDED_PROFILES",
+            "DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON",
+        }
+    )
     assert "docker-compose.dev-tenant-fold.yml" in _REFRESH_DEV_LANE.read_text()
     hooks = (_REPO_ROOT / ".pre-commit-config.yaml").read_text()
     assert "--manifest-file docker/dev-tenant-fold-required-env.manifest.txt" in hooks

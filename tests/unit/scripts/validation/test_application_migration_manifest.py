@@ -1226,7 +1226,12 @@ def test_duplicate_verified_adoptions_are_rejected(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "filename",
-    ["0000_create_work_ledger.sql", "0001_grant_omninode_runtime_work_ledger.sql"],
+    [
+        "0000_create_work_ledger.sql",
+        "0001_grant_omninode_runtime_work_ledger.sql",
+        "0007_work_ledger_history_import.sql",
+        "0008_grant_omninode_runtime_ledger_line_citation.sql",
+    ],
 )
 def test_work_ledger_migrations_are_declared_in_the_internal_domain(
     filename: str,

@@ -108,8 +108,10 @@ def test_ac1_dev_lane_declares_the_estimator_page_service() -> None:
     assert svc["restart"] == "unless-stopped"
     assert "omnibase-infra-network" in svc["networks"]
     # OMN-23011: the fixed lane port is published on the host's declared bind address only.
+    # OMN-22692: and on loopback, the upstream of the tailnet https front.
     assert svc["ports"] == [
-        f"${{COST_ESTIMATOR_BIND_ADDR:-127.0.0.1}}:{_LANE_PORT}:3000"
+        f"${{COST_ESTIMATOR_BIND_ADDR:-127.0.0.1}}:{_LANE_PORT}:3000",
+        f"127.0.0.1:{_LANE_PORT}:3000",
     ]
     labels = svc["labels"]
     assert "com.omninode.lane=dev" in labels

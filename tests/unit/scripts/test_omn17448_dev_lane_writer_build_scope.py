@@ -117,9 +117,11 @@ def _refresh_build_scope(lane: str) -> set[str]:
 def _core_services(lane: str) -> set[str]:
     _, refresh_script = GOVERNED_REFRESHES[lane]
     script = refresh_script.read_text(encoding="utf-8")
-    core = re.search(r"readonly CORE_SERVICES=\((?P<items>[^)]*)\)", script)
+    core = re.search(r"^readonly CORE_SERVICES=\((?P<items>.*)\)$", script, re.M)
     assert core is not None
-    return set(core.group("items").split())
+    # OMN-22930: the effects service is left out when the policy folds it into main.
+    items = re.sub(r"\$\(.*\)", "runtime-effects", core.group("items"))
+    return set(items.split())
 
 
 @pytest.mark.parametrize("lane", sorted(GOVERNED_REFRESHES))

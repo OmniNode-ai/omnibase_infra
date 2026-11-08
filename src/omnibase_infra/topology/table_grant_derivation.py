@@ -200,14 +200,11 @@ def _vendored_read_write(
 # generated YAML: ``--check`` continues to prove every shipped instance and
 # rendered catalog against one auditable derivation source.
 LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    _vendored_read_write(
-        "tenant_inference_credentials",
-        "node_projection_tenant_credentials",
-        "0000_create_tenant_inference_credentials.sql",
-        schema="public",
-        access="write",
-        role="credentials",
-    ),
+    # OMN-21947: the tenant_inference_credentials bridge that sat here was
+    # deleted; the omnimarket contract pin 63aaa30a2 declares the relation in
+    # node_projection_tenant_credentials' db_io, and --check --prove reports
+    # the same grants for all nine profiles without it. This frees the code
+    # lines the ledger_line_citation bridge below adds.
     # OMN-18159: the four delegation aggregate read views (model_routing,
     # quality_gate, summary, token_usage) that sat here were deleted once the
     # omnimarket contract pin c7cd6a481 declared all four in
@@ -524,6 +521,21 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "node_projection_skill_lifecycle",
         "0001_create_skill_executions.sql",
         schema="public",
+        access="write",
+    ),
+    # OMN-21947: infra vendors the work-ledger history-import migrations (0007
+    # creates ledger_line_citation, 0008 grants the runtime SELECT, INSERT,
+    # UPDATE and never DELETE) ahead of the omnimarket change whose
+    # node_projection_work_ledger contract declares the relation with write
+    # access and the ledger_line_citation role. Its auto-wiring refuses a
+    # principal with no declared privilege, so this grant must exist before
+    # that change can merge. The table's own trigger refuses every UPDATE and
+    # DELETE. Retired when the contract merges and the omnimarket pin advances
+    # past it; the OMN-18863 expiry module names this bridge.
+    _vendored_read_write(
+        "ledger_line_citation",
+        "node_projection_work_ledger",
+        "0007_work_ledger_history_import.sql",
         access="write",
     ),
 )

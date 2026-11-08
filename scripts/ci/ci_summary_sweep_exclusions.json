@@ -1,0 +1,56 @@
+{
+  "verify": {
+    "reason": "The check run verify was skipped on all sixteen measured heads and never concluded success. The job configuration includes a condition that requires the pull request head repository to be a fork. Because the internal pull requests do not satisfy this fork condition, the job skips execution without producing a result. Excluding this name prevents the gate from failing on a check that is logically inapplicable to internal merges.",
+    "ticket": "OMN-18979",
+    "added": "2026-09-21",
+    "expires": "2026-12-20"
+  },
+  "Docker Integration Tests": {
+    "reason": "The check run Docker Integration Tests was skipped on the seven heads where it appeared and never concluded success. The job carries a condition requiring the event to not be a pull request. Since the gate judges pull request heads specifically the condition is false and the job skips. Excluding this entry prevents the gate from treating the inapplicable integration test suite as a blocking failure.",
+    "ticket": "OMN-18979",
+    "added": "2026-09-21",
+    "expires": "2026-12-20"
+  },
+  "Security Scan (Trivy)": {
+    "reason": "The check run Security Scan (Trivy) was skipped on the seven heads where it appeared and never concluded success. The job configuration requires the git reference to be the main branch for execution. On a pull request head this reference condition is not met so the job skips. This exclusion ensures the gate does not block merges due to a security scan that is restricted to the main branch.",
+    "ticket": "OMN-18979",
+    "added": "2026-09-21",
+    "expires": "2026-12-20"
+  },
+  "Image Size Analysis": {
+    "reason": "The check run Image Size Analysis was skipped on the seven heads where it appeared and never concluded success. The job shares the same mechanism as the security scan and requires the git reference to be the main branch. It therefore skips on pull request heads where the reference does not match the main branch. The gate excludes this name to avoid failing on an analysis job that only runs on the main branch.",
+    "ticket": "OMN-18979",
+    "added": "2026-09-21",
+    "expires": "2026-12-20"
+  },
+  "Hostile Reviewer (adversarial gate)": {
+    "reason": "The operator ruled on 2026-11-05 that the automated review holds no merge.",
+    "ticket": "OMN-22478",
+    "added": "2026-11-05",
+    "expires": "2027-02-03"
+  },
+  "Hostile Review Gate": {
+    "reason": "The operator ruled on 2026-11-05 that the automated review holds no merge.",
+    "ticket": "OMN-22478",
+    "added": "2026-11-05",
+    "expires": "2027-02-03"
+  },
+  "Hostile Review Thread Gate": {
+    "reason": "The operator ruled on 2026-11-05 that the automated review holds no merge.",
+    "ticket": "OMN-22478",
+    "added": "2026-11-05",
+    "expires": "2027-02-03"
+  },
+  "Hostile Review Judge": {
+    "reason": "The operator ruled on 2026-11-05 that the automated review holds no merge.",
+    "ticket": "OMN-22478",
+    "added": "2026-11-05",
+    "expires": "2027-02-03"
+  },
+  "Enforce clean + promoted build source": {
+    "reason": "The check run Enforce clean + promoted build source is the lineage-check job of prod-promotion-lineage.yml, which carries the condition github.event_name == 'workflow_call' && inputs.enforce_lineage. The workflow runs on pull_request for a path filter that includes the deploy-agent executor and onex-runtime-deploy, so on every such pull request the job skips without producing a verdict. Measured on omnibase_infra#3980 at head ba61dc95: every producer green, CI Summary red on this skipped row alone. The job does its real work only when the prod image build calls the workflow, which this exclusion does not touch.",
+    "ticket": "OMN-19218",
+    "added": "2026-09-22",
+    "expires": "2026-12-20"
+  }
+}

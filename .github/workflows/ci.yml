@@ -1761,7 +1761,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 63aaa30a25583b6af10a44daa4316cfb2d24f809 # .github/sibling-pins.yaml
+          ref: f3a5bdd8113eb381ce9392635709fcc9d60f4df5 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -4788,20 +4788,48 @@ jobs:
           set -uo pipefail
           deadline=$(( $(date +%s) + DEADLINE_MINUTES * 60 ))
           attempt=0
+          # OMN-23027: reads of this run's OWN job listing that failed, and
+          # whether any ever succeeded. The deadline branch below needs both so
+          # it can say WHICH condition it died of. On 2026-11-07 an API outage
+          # failed 90 consecutive reads across the whole 90m window, and the
+          # deadline then printed 91 finished, green gates as "missing/pending"
+          # because the only input it could read was a jobs.json that the failed
+          # fetch had already truncated.
+          jobs_fetch_failures=0
+          jobs_fetch_ever_ok=false
           while true; do
             if [ "$(date +%s)" -ge "${deadline}" ]; then
-              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs or external contexts still pending, or the API unreachable — failing closed"
+              if [ "${jobs_fetch_ever_ok}" = "false" ]; then
+                # No listing was ever read, so there is nothing to report ON:
+                # every gate would print as pending whatever its real state.
+                # Name the unreadable input instead of blaming the gates.
+                echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached after ${jobs_fetch_failures} consecutive failed read(s) of this run's own job listing and no successful read — the GitHub API was unreachable from this job, NOT a gating job red; failing closed (OMN-23027). The gate list is omitted because it would be an artefact of the unread input; rerun once the API answers."
+                exit 1
+              fi
+              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs or external contexts still pending — failing closed (job-listing read failures during this poll: ${jobs_fetch_failures})"
               python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" --report-only 2>/dev/null || true
               exit 1
             fi
             attempt=$((attempt + 1))
-            if ! gh api --paginate \
+            # OMN-23027: write through a temporary file and move it into place
+            # only on success. A bare `> jobs.json` truncates the file BEFORE
+            # the pipeline runs, so a failed fetch leaves an empty listing that
+            # reads as "no gate has reported" — the same trap the check-runs
+            # fetch below already avoids by removing its file outright.
+            if ! { gh api --paginate \
                 "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=100" \
-                --jq '.jobs[]' | jq -s '.' > jobs.json; then
-              echo "gh api fetch failed (attempt ${attempt}); retrying after ${POLL_INTERVAL_SECONDS}s"
+                --jq '.jobs[]' 2>jobs_fetch.err | jq -s '.' > jobs.json.tmp; }; then
+              jobs_fetch_failures=$((jobs_fetch_failures + 1))
+              rm -f jobs.json.tmp
+              echo "gh api fetch failed (attempt ${attempt}, failures ${jobs_fetch_failures}); retrying after ${POLL_INTERVAL_SECONDS}s"
+              # Surface the HTTP status. Without it the log says only that a
+              # fetch failed, and the cause is unreadable after the fact.
+              sed -e 's/^/  gh: /' jobs_fetch.err || true
               sleep "${POLL_INTERVAL_SECONDS}"
               continue
             fi
+            mv jobs.json.tmp jobs.json
+            jobs_fetch_ever_ok=true
             # Cross-workflow check-runs for the exact head. On a failed fetch the
             # file is REMOVED, not left stale: the gate reads an absent file as
             # "no external context observed" → PENDING → fail-closed at the
