@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 from deploy_agent import executor as executor_mod
-from deploy_agent.build_budget import EnumBuildOutcome
+from deploy_agent.build_budget import HARD_UPPER_BOUND_SECONDS, EnumBuildOutcome
 from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus, Scope
 from deploy_agent.executor import DeployExecutor
 from deploy_agent.host_conditions import EnumBuildCacheState, probe_host_conditions
@@ -355,7 +355,7 @@ class TestAC5TheLaneIsStillNotMutated:
             runtime_lane=EnumRuntimeLane.DEV,
             git_ref="origin/dev",
         )
-        assert seen["timeout"] <= executor_mod.HARD_UPPER_BOUND_SECONDS
+        assert seen["timeout"] <= HARD_UPPER_BOUND_SECONDS
 
 
 @pytest.mark.unit

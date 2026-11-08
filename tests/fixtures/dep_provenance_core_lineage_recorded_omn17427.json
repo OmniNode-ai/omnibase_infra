@@ -12,9 +12,9 @@
   "cases": [
     {
       "label": "real",
-      "tag": "dev-20261105194015-1adbf46062bd",
-      "pyproject_toml": "[project]\nname = \"dep-provenance-recording\"\ndependencies = [\"omnibase-core>=0.47.58,<0.48.0\"]\n\n[tool.uv.sources]\nomnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261105194015-1adbf46062bd\" }\n",
-      "source_line": "omnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261105194015-1adbf46062bd\" }\n",
+      "tag": "dev-20261108014124-2fe30fd9dc47",
+      "pyproject_toml": "[project]\nname = \"dep-provenance-recording\"\ndependencies = [\"omnibase-core>=0.47.58,<0.48.0\"]\n\n[tool.uv.sources]\nomnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261108014124-2fe30fd9dc47\" }\n",
+      "source_line": "omnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261108014124-2fe30fd9dc47\" }\n",
       "core": {
         "command": [
           "uv",
@@ -41,11 +41,11 @@
           "ls-remote",
           "--tags",
           "https://github.com/OmniNode-ai/omnibase_core.git",
-          "refs/tags/dev-20261105194015-1adbf46062bd",
-          "refs/tags/dev-20261105194015-1adbf46062bd^{}"
+          "refs/tags/dev-20261108014124-2fe30fd9dc47",
+          "refs/tags/dev-20261108014124-2fe30fd9dc47^{}"
         ],
         "exit_code": 0,
-        "stdout": "1adbf46062bd13e9fbbdb979df65328416e6e04f\trefs/tags/dev-20261105194015-1adbf46062bd\n",
+        "stdout": "2fe30fd9dc47fcf0e25bead887ea7505b39612b9\trefs/tags/dev-20261108014124-2fe30fd9dc47\n",
         "stderr": ""
       }
     },
