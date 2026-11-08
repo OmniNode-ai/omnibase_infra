@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -230,6 +231,131 @@ def test_history_import_refuses_an_incompatible_existing_primary_key(
     assert (
         _sql(ledger, "SELECT row_id FROM omninode_internal.ledger_line_citation")
         == "legacy"
+    )
+
+
+_UNCONSTRAINED_CITATION_TABLE = (
+    "CREATE TABLE omninode_internal.ledger_line_citation "
+    "(ledger_id text, file_key text, generation int, line_no int, row_id text); "
+    "CREATE UNIQUE INDEX ledger_line_citation_pkey ON "
+    "omninode_internal.ledger_line_citation "
+    "(ledger_id, file_key, generation, line_no)"
+)
+
+
+def _line_checks(pg: EphemeralPostgres) -> str:
+    return _sql(
+        pg,
+        "SELECT count(*) FROM pg_constraint "
+        "WHERE conrelid='omninode_internal.ledger_line_citation'::regclass "
+        "AND contype='c' AND pg_get_constraintdef(oid) LIKE '%line_no >= 1%'",
+    )
+
+
+@pytest.mark.parametrize("existing", [False, True], ids=["fresh", "existing-table"])
+def test_citation_defaults_and_line_check_match_on_both_paths(
+    ledger: EphemeralPostgres, existing: bool
+) -> None:
+    """A reconciled table gets the fresh table's DEFAULT 0 and line_no check."""
+    if existing:
+        _sql(ledger, _UNCONSTRAINED_CITATION_TABLE)
+    _apply(ledger, _HISTORY)
+    _apply(ledger, _HISTORY)
+    _sql(
+        ledger,
+        "INSERT INTO omninode_internal.ledger_line_citation "
+        "(ledger_id, file_key, line_no, row_id) VALUES ('ledger', 'live', 1, 'legacy')",
+    )
+    assert (
+        _sql(ledger, "SELECT generation FROM omninode_internal.ledger_line_citation")
+        == "0"
+    )
+    refused = ledger.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "INSERT INTO omninode_internal.ledger_line_citation "
+        "(ledger_id, file_key, line_no, row_id) VALUES ('ledger', 'live', 0, 'zero')",
+    )
+    assert refused.returncode != 0
+    assert "violates check constraint" in refused.stderr
+    assert _line_checks(ledger) == "1"
+
+
+def test_history_import_refuses_existing_non_positive_line_numbers(
+    ledger: EphemeralPostgres,
+) -> None:
+    _sql(
+        ledger,
+        _UNCONSTRAINED_CITATION_TABLE + "; "
+        "INSERT INTO omninode_internal.ledger_line_citation "
+        "VALUES ('ledger', 'live', 0, 0, 'legacy')",
+    )
+    refused = ledger.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CHAIN / _HISTORY))
+    assert refused.returncode != 0
+    assert "violated by some row" in refused.stderr
+    assert (
+        _sql(
+            ledger,
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_schema='omninode_internal' AND table_name='work_ledger_rows' "
+            "AND column_name='legacy_ordinal'",
+        )
+        == "0"
+    )
+
+
+def test_history_import_refuses_a_key_index_that_is_not_the_citation_identity(
+    ledger: EphemeralPostgres,
+) -> None:
+    _sql(
+        ledger,
+        "CREATE TABLE omninode_internal.ledger_line_citation "
+        "(ledger_id text, file_key text, generation int, line_no int, row_id text); "
+        "CREATE UNIQUE INDEX ledger_line_citation_pkey ON "
+        "omninode_internal.ledger_line_citation (row_id)",
+    )
+    refused = ledger.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CHAIN / _HISTORY))
+    assert refused.returncode != 0
+    assert "ledger_line_citation_pkey is not the citation identity" in refused.stderr
+    assert (
+        _sql(
+            ledger,
+            "SELECT count(*) FROM pg_constraint "
+            "WHERE conrelid='omninode_internal.ledger_line_citation'::regclass "
+            "AND contype='p'",
+        )
+        == "0"
+    )
+
+
+def test_history_import_bounds_its_wait_for_the_active_ledger_lock(
+    ledger: EphemeralPostgres, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reader holding work_ledger_rows must not park the migration indefinitely."""
+    # Backstop only: without the migration's own lock bound the statement cap
+    # ends the wait and the assertion below names the missing bound.
+    monkeypatch.setenv("PGOPTIONS", "-c statement_timeout=25s")
+    reader = ledger.connect()
+    try:
+        with reader.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM omninode_internal.work_ledger_rows")
+        started = time.monotonic()
+        refused = ledger.psql("-v", "ON_ERROR_STOP=1", "-f", str(_CHAIN / _HISTORY))
+        waited = time.monotonic() - started
+    finally:
+        reader.close()
+    assert refused.returncode != 0
+    assert "lock timeout" in refused.stderr
+    assert waited < 20
+    assert (
+        _sql(
+            ledger,
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_schema='omninode_internal' AND table_name='work_ledger_rows' "
+            "AND column_name='legacy_ordinal'",
+        )
+        == "0"
     )
 
 
