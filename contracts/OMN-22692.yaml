@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22692
+title: The dev estimator's tailnet https name serves the page again, because the dev-lane compose also publishes port 3080 on loopback, the upstream the https front's overlay names
+summary: The https listener node fronts a loopback upstream only, and the dev estimator's overlay names loopback port 3080. After OMN-23011 published 3080 on the host's tailnet address alone, nothing listened on loopback 3080 and the tailnet https name answered 502 while the page stayed up on the tailnet address (read live 2026-11-07 about 22:55Z). The dev-lane page service now publishes 3080 on loopback as well as on the declared bind address; every published address is still never every interface.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22692-loopback-upstream
+    statement: The dev-lane page service publishes 3080 on loopback beside the declared bind address, and on no address that is every interface.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev-lane page service publishes 3080 on loopback and on the declared bind address, and on loopback alone when the address is unset -- falsifier: uv run --frozen pytest tests/unit/docker/test_cost_estimator_https_upstream_omn22692.py -q --no-cov, red at dev head 9465ce81b and green on the branch"
+      - id: AC2
+        statement: "AC2: no published address is every interface -- falsifier: uv run --frozen pytest tests/unit/docker/test_cost_estimator_https_upstream_omn22692.py tests/unit/docker/test_cost_estimator_tailnet_gate_omn23011.py -q --no-cov, red with the mapping put back to every interface"
+      - id: AC3
+        statement: "AC3: after the deploy agent's follower rebuilds from dev, a read of the tailnet https name's /cost-estimator answers 200 -- falsifier: a live curl of the https name from a tailnet host, 502 before the rebuild"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22692-ac1-loopback
+    description: The rendered dev-lane page service publishes 3080 on loopback and on the bind-address lane variable's value, and on loopback once when it is unset. Without the loopback entry the new test is red.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_cost_estimator_https_upstream_omn22692.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22692-ac2-no-wildcard
+    description: No rendered published address is every interface, with and without the bind address set.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_cost_estimator_https_upstream_omn22692.py tests/unit/docker/test_cost_estimator_tailnet_gate_omn23011.py tests/unit/docker/test_cost_estimator_dev_lane_omn21481.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn22692-deploy-probe
+    description: Hosted-runner probe reads the dev-lane compose from GitHub at the checked-out commit and requires the loopback entry beside the bind-address entry. The live https read of AC3 runs on the lab after the follower rebuilds from dev and is recorded in the lane's terminal row.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import re, sys, yaml; d = yaml.safe_load(re.sub(r"!(?:override|reset|merge)(?=\s)", "", sys.stdin.read())); s = d["services"]["cost-estimator-web"]; assert s["ports"] == ["${COST_ESTIMATOR_BIND_ADDR:-127.0.0.1}:3080:3000", "127.0.0.1:3080:3000"]'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC3

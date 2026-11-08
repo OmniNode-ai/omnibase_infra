@@ -191,11 +191,12 @@ readonly COMPOSE_PROJECT="${DEV_COMPOSE_PROJECT}"
 # correct home for them, out of scope for this config-duplication kill.
 readonly REDPANDA_CONTAINER="omnibase-infra-redpanda"
 readonly POSTGRES_CONTAINER="omnibase-infra-postgres"
-# OMN-22930 (T8): a lane whose rendered policy folds the effects role into main has no
-# runtime-effects container, so it is left out of the services this refresh builds,
-# gates, snapshots and rolls back. The verifier reads the same set from --container-ids.
+# OMN-22930 (T8), OMN-21288 (T9): a lane whose rendered policy folds the effects or workers
+# role into main has no runtime-effects or runtime-worker container, so each is left out of
+# the services this refresh builds, gates, snapshots and rolls back. The verifier reads the
+# same set from --container-ids.
 # shellcheck disable=SC2046,SC2207
-readonly CORE_SERVICES=(omninode-runtime $([[ ",${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}," == *,effects,* ]] || echo runtime-effects) runtime-worker projection-api)
+readonly CORE_SERVICES=(omninode-runtime $([[ ",${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}," == *,effects,* ]] || echo runtime-effects) $([[ ",${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}," == *,workers,* ]] || echo runtime-worker) projection-api)
 # OMN-18496: must equal CLOUD_MIGRATION_FAILED_EXIT_CODE in
 # src/omnibase_infra/handlers/handler_runtime_deploy.sh.
 readonly CLOUD_MIGRATION_FAILED_DEPLOY_EXIT=3

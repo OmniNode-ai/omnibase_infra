@@ -31,7 +31,6 @@ from pydantic import BaseModel, ConfigDict
 
 from deploy_agent import recreate_supervisor
 from deploy_agent.build_budget import (
-    HARD_UPPER_BOUND_SECONDS,
     EnumBuildOutcome,
     LaneBuilderError,
     ModelBuildBudget,
@@ -182,6 +181,8 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
+        "models/model_dev_lane_code_ref_pin.py",
+        "handlers/handler_dev_lane_code_ref_pin.py",
         "models/model_cost_estimator_build_config.py",
         "models/model_cost_estimator_build_request.py",
         "models/model_cost_estimator_build_result.py",
@@ -2172,11 +2173,6 @@ def _runtime_health_reason(result: subprocess.CompletedProcess[str]) -> str:
     )
 
 
-def _runtime_health_passed(result: subprocess.CompletedProcess[str]) -> bool:
-    """Return whether a runtime /health response proves deploy readiness."""
-    return not _runtime_health_reason(result)
-
-
 class ModelAnsweringDegraded(BaseModel):
     """A runtime that answered ``/health`` running, with its monitor degraded.
 
@@ -3723,7 +3719,10 @@ class DeployExecutor:
             )
             return
 
-        branch = load_tracking_ref_from_env()
+        # OMN-23039: a live code-ref pin names the branch whose code this agent loads.
+        branch = load_dev_boot_guard("handler_dev_lane_code_ref_pin").followed_branch(
+            load_tracking_ref_from_env(), os.environ, boundary.value
+        )
 
         # The identity of the code THIS process imported, recorded at startup
         # before anything could move the clone underneath it. Read before any
