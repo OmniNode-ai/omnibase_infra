@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23053
+title: The dev trigger learns the namespaces the CI bus lane overlay uses
+summary: The trigger script's model of a lane's resolver block (extra=forbid) gains an optional namespaces field of typed pattern-scoped rules, shape only, so a block that declares it loads and the binding check no longer reds on it. The script still resolves no secret and a typo inside the block is still refused. Script and test file only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23053-namespaces
+    statement: The trigger's lane model accepts a secret_resolver namespaces block of typed rules without changing routing, leaves it optional, and refuses a block with an unknown key, a missing required key, or a misspelled block name.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev trigger accepts the namespaces named in the branch and still rejects an unnamed one -- falsifier: uv run pytest of the trigger tests, red on the base and green on the branch"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+evidence_requirements:
+  - kind: tests
+    description: The six tests of the trigger namespace module pass on the branch (6 passed on a lab host); with scripts/trigger_rebuild_on_merge.py read from origin/dev the two acceptance tests fail with Extra inputs are not permitted for the namespaces key and no attribute namespaces (2 failed, 4 passed on the same host).
+    command: uv run --frozen pytest tests/unit/scripts/test_trigger_learns_secret_namespaces.py -q --no-cov
+dod_evidence:
+  - id: dod-omn23053-ac1-tests
+    description: The namespace module passes on the branch (6 passed on a lab host); with the base script in place the load test fails on the extra-forbidden error for the namespaces key and the optional-field test fails on the missing attribute (2 failed, 4 passed on the same host).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_trigger_learns_secret_namespaces.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn23053-ac1-deploy-probe
+    description: Hosted-runner probe reads the trigger script at the checked-out commit and requires the namespace rule model and the optional namespaces field on the secret resolver model. It needs no lab host and resolves no secret.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import ast, pathlib; t = ast.parse(pathlib.Path("scripts/trigger_rebuild_on_merge.py").read_text()); c = {n.name: n for n in t.body if isinstance(n, ast.ClassDef)}; assert "ModelCiBusLaneSecretNamespace" in c; assert any(isinstance(s, ast.AnnAssign) and s.target.id == "namespaces" for s in c["ModelCiBusLaneSecretResolver"].body)'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
