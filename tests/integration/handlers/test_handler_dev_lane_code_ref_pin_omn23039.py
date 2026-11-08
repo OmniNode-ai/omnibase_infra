@@ -20,11 +20,17 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from omnibase_infra.handlers.handler_dev_lane_code_ref_pin import (
     ENV_STATE_DIR,
     PIN_FILE_NAME,
+    HandlerDevLaneCodeRefPin,
     followed_branch,
+)
+from omnibase_infra.models.model_dev_lane_code_ref_pin import (
+    ModelDevLaneCodeRefPin,
+    ModelDevLaneCodeRefPinRequest,
 )
 
 pytestmark = pytest.mark.integration
@@ -123,4 +129,83 @@ def test_bad_record_is_refused_and_writes_nothing(
     result = _register(tmp_path, **override)
     assert result.returncode == 2
     assert "code-ref-pin refused" in result.stderr
+    assert not (tmp_path / PIN_FILE_NAME).exists()
+
+
+# -- the single typed entry point the runtime dispatches through -----------------
+
+
+def _pin() -> ModelDevLaneCodeRefPin:
+    now = datetime.now(UTC)
+    return ModelDevLaneCodeRefPin(
+        branch=_BRANCH,
+        head=_HEAD,
+        pr=5772,
+        ticket="OMN-23039",
+        registered_by="oneruntime-t8-2340",
+        registered_at=now,
+        expires_at=now + timedelta(hours=6),
+    )
+
+
+def test_handle_registers_reads_and_releases_through_one_entry_point(
+    tmp_path: Path,
+) -> None:
+    handler = HandlerDevLaneCodeRefPin()
+    pin = _pin()
+    registered = handler.handle(
+        ModelDevLaneCodeRefPinRequest(operation="register", state_dir=tmp_path, pin=pin)
+    )
+    assert registered.operation == "register"
+    assert registered.path == tmp_path / PIN_FILE_NAME
+    assert registered.path.exists()
+    live = handler.handle(
+        ModelDevLaneCodeRefPinRequest(
+            operation="active", state_dir=tmp_path, now=datetime.now(UTC)
+        )
+    )
+    assert live.pin == pin
+    released = handler.handle(
+        ModelDevLaneCodeRefPinRequest(operation="release", state_dir=tmp_path)
+    )
+    assert released.pin is None
+    assert not (tmp_path / PIN_FILE_NAME).exists()
+    after = handler.handle(
+        ModelDevLaneCodeRefPinRequest(
+            operation="active", state_dir=tmp_path, now=datetime.now(UTC)
+        )
+    )
+    assert after.pin is None
+
+
+def test_handle_reports_no_live_pin_once_it_has_expired(tmp_path: Path) -> None:
+    handler = HandlerDevLaneCodeRefPin()
+    pin = _pin()
+    handler.handle(
+        ModelDevLaneCodeRefPinRequest(operation="register", state_dir=tmp_path, pin=pin)
+    )
+    expired = handler.handle(
+        ModelDevLaneCodeRefPinRequest(
+            operation="active",
+            state_dir=tmp_path,
+            now=pin.expires_at + timedelta(seconds=1),
+        )
+    )
+    assert expired.pin is None
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"operation": "register"},
+        {"operation": "active"},
+        {"operation": "active", "now": datetime(2026, 1, 1)},
+        {"operation": "restart"},
+    ],
+)
+def test_handle_refuses_a_request_missing_what_its_operation_needs(
+    tmp_path: Path, fields: dict[str, object]
+) -> None:
+    with pytest.raises(ValidationError):
+        ModelDevLaneCodeRefPinRequest.model_validate({"state_dir": tmp_path, **fields})
     assert not (tmp_path / PIN_FILE_NAME).exists()

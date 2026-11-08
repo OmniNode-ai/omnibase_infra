@@ -50,7 +50,11 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.models.model_dev_lane_code_ref_pin import ModelDevLaneCodeRefPin
+from omnibase_infra.models.model_dev_lane_code_ref_pin import (
+    ModelDevLaneCodeRefPin,
+    ModelDevLaneCodeRefPinRequest,
+    ModelDevLaneCodeRefPinResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +132,29 @@ class HandlerDevLaneCodeRefPin:
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
+
+    def handle(
+        self, request: ModelDevLaneCodeRefPinRequest
+    ) -> ModelDevLaneCodeRefPinResult:
+        """Run the requested operation; the node's single entry point."""
+        if request.operation == "register":
+            if request.pin is None:  # unreachable past the request validator
+                raise ValueError("register needs a pin")
+            path = self.register(request.state_dir, request.pin)
+            return ModelDevLaneCodeRefPinResult(
+                operation="register", path=path, pin=request.pin
+            )
+        if request.operation == "active":
+            if request.now is None:  # unreachable past the request validator
+                raise ValueError("active needs the instant to judge expiry against")
+            return ModelDevLaneCodeRefPinResult(
+                operation="active",
+                path=pin_path(request.state_dir),
+                pin=self.active(request.state_dir, request.now),
+            )
+        return ModelDevLaneCodeRefPinResult(
+            operation="release", path=self.release(request.state_dir)
+        )
 
     def register(self, state_dir: Path, pin: ModelDevLaneCodeRefPin) -> Path:
         return write_pin(state_dir, pin)
