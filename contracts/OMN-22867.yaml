@@ -11,17 +11,17 @@ requirements:
   - id: req-omn22867-family1-hosted
     statement: Each gate workflow of the family selects only the GitHub-hosted label and is allowlisted with a reason.
     acceptance:
-      - id: AC1
-        statement: Every job of the 26 family workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason.
       - id: AC2
-        statement: The runner-routing audit and the public runner placement tests stay green with the family hosted.
+        statement: 'AC2: Every job of the 26 family workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason -- falsifier: uv run pytest tests/ci/test_public_runner_family_gates_omn22867.py -q -o addopts='''''
+      - id: AC3
+        statement: 'AC3: The runner-routing audit and the public runner placement tests stay green with the family hosted -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py tests/ci/test_public_runner_placement_omn19998.py -q -o addopts='''''
   - id: req-omn22867-family2-hosted
     statement: Each scheduled, dispatched or reusable workflow of the family selects only the GitHub-hosted label and is allowlisted with a reason.
     acceptance:
-      - id: AC3
-        statement: Every job of the 18 family workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason.
       - id: AC4
-        statement: The runner-routing audit and the workflow tests that read the family stay green with the family hosted.
+        statement: 'AC4: Every job of the 18 family workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason -- falsifier: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py -q -o addopts='''''
+      - id: AC5
+        statement: 'AC5: The runner-routing audit and the workflow tests that read the family stay green with the family hosted -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py tests/ci/test_lockfile_cve_autobump.py -q -o addopts='''''
 evidence_requirements:
   - kind: tests
     description: Workflow shape test of the family and the routing audit tests.
@@ -38,7 +38,7 @@ dod_evidence:
     description: Every job of each family workflow selects ubuntu-latest and each file is allowlisted with a reason.
     source: manual
     binds_ac:
-      - AC1
+      - AC2
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_public_runner_family_gates_omn22867.py -q -o addopts=''
@@ -47,7 +47,7 @@ dod_evidence:
     description: The routing audit controls and the public runner placement tests pass.
     source: manual
     binds_ac:
-      - AC2
+      - AC3
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_routing_audit.py tests/ci/test_public_runner_placement_omn19998.py -q -o addopts=''
@@ -56,7 +56,7 @@ dod_evidence:
     description: Every job of each family workflow selects ubuntu-latest and each file is allowlisted with a reason.
     source: manual
     binds_ac:
-      - AC3
+      - AC4
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py -q -o addopts=''
@@ -65,7 +65,7 @@ dod_evidence:
     description: The routing audit controls and the lockfile autobump workflow test pass.
     source: manual
     binds_ac:
-      - AC4
+      - AC5
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_routing_audit.py tests/ci/test_lockfile_cve_autobump.py -q -o addopts=''
