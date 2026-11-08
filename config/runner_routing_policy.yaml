@@ -855,6 +855,56 @@ hosted_runner_allowlist:
     reason: "OMN-17427: re-runs the Hostile Review Thread Gate when a finding thread is answered; it reads GitHub thread state and the PR's git history and touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z); omnibase_core's check-public-runner-placement refuses a variable-driven runs-on that is not in its shrink-only baseline, so the pin is a literal hosted label."
   - path: .github/workflows/hostile-review-judge.yml
     reason: "OMN-17427: the workflow_run judge executes base-branch code and calls the judge model over the CI overlay's public endpoint. It touches no lab service. This is a public repository, so it uses a literal hosted label per RULING 2026-10-16T07:07:09Z."
+  - path: .github/workflows/canonical-inference-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/check-env-reads-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/check-handshake.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/check-sibling-compat.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/ci-live-contact.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/contract-topic-graph.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/contract-validation.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/contractor-integration-note.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dep-provenance-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/direct-model-call.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/exposure-reader-coverage.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/git-env-scrub.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/integration-test-check.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/main-target-guard.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/non-dev-base-guard.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/pin-resolvability-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/pr-title-check.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/precommit-parity-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/receipt-honesty.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/seed-provenance-check.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/skill-node-mapping-sync.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/stale-todo-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/todo-audit-on-merge.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/url-authority-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/wheel-content-parity.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
 #
 # The route job (scripts/ci/runner_route_decision.py) decides, once per run,
