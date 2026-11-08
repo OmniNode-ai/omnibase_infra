@@ -224,7 +224,22 @@ profiles:
           - projection-writer-tenant-credentials
           - projection-writer-tenant-registry
           - projection-writer-delegation
+          # OMN-22930 (T8): the effects role runs as nodes inside main. The
+          # separate runtime-effects service is retired through the same
+          # contract mapping as the writers; its consumer groups resume from
+          # the committed offsets through the fold handover (OMN-22877).
+          - effects
+        fold_handovers:
+          effects:
+            # KAFKA_INSTANCE_ID the retired runtime-effects service set
+            # (docker-compose.infra.yml), and the event bus default it ran
+            # with (kafka_event_bus_config.yaml, KAFKA_AUTO_OFFSET_RESET).
+            from_instance_id: runtime-effects
+            from_auto_offset_reset: latest
+            # Effects handlers cannot take a repeat (plan T8).
+            handover_rule: last_ran
         foldable_services:
+          effects: runtime-effects
           tenant-projection: tenant-projection-writer
           projection-writer-live-events: projection-live-events-writer
           projection-writer-registration: projection-registration-writer
@@ -268,6 +283,18 @@ profiles:
             - projection_claude_hook_events
             - projection_hook_ledger
           memory_limit: 3072M
+        # OMN-22930 (T8): the BYOK credential READ that only the separate
+        # effects service resolved (OMN-20533) now happens in main, because the
+        # provider call runs there once the role is folded. The rule is the
+        # same one the effects process declares below (kept for the other dev
+        # instances, which still render a separate effects role), so the folded
+        # main resolves every name the retired service resolved, from the same
+        # sources. Renders as DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON.
+        secret_resolver_namespaces:
+          - namespace: tenant_inference_credentials
+            ref_pattern: "^cred_[A-Za-z0-9._:-]+_[A-Za-z0-9_-]+_[0-9a-f]{32}$"
+            source_type: infisical
+            source_path_template: "/tenant-inference-credentials/{ref}"
       effects:
         runtime_id: dev-effects
         runtime_address: runtime://omninode-pc/dev/effects

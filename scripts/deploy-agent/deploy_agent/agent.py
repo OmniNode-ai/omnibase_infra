@@ -2062,7 +2062,7 @@ class DeployAgent:
                     )
 
                     if dev_guard is not None:
-                        dev_guard.wait()
+                        dev_guard.wait(deployed_generation=True)
 
                     # prod must serve exactly the pinned digest: verify the running
                     # container image digest equals the requested digest BEFORE any
