@@ -37,7 +37,6 @@ REVIEW_CONTEXTS = (
     "Hostile Review Gate",
     "Hostile Review Thread Gate",
     "Hostile Review Judge",
-    "Tessl Reviewer",
 )
 
 

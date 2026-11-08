@@ -40,27 +40,30 @@ def _lane_overlay() -> Path:
     raise AssertionError(f"no compose overlay names project {project!r}")
 
 
-def test_exactly_one_lane_folds_effects() -> None:
+def test_only_the_stability_lane_and_primary_dev_fold_effects() -> None:
+    """The stability lane (OMN-21288) and primary dev (OMN-22930); no other lane."""
     contract = load_contract()
     folding = {
         name: profile
         for name, profile in contract.profiles.items()
         if "effects" in profile.processes["main"].folded_profiles
     }
-    assert len(folding) == 1, sorted(folding)
-    (profile,) = folding.values()
-    assert profile.compose_project == _lane_project()
-    assert profile.processes["main"].folded_profiles == ("effects",)
-    # effects stays a declared process: it is a required process name.
-    assert "effects" in profile.processes
+    # The lane is found through its compose project, never by spelling its id.
+    lane = [n for n, p in folding.items() if p.compose_project == _lane_project()]
+    assert sorted(folding) == sorted([*lane, "dev"]) and len(lane) == 1, sorted(folding)
+    stability = folding[lane[0]]
+    assert stability.processes["main"].folded_profiles == ("effects",)
+    # effects stays a declared process on both: it is a required process name.
+    assert all("effects" in profile.processes for profile in folding.values())
 
 
-def test_rendered_env_carries_the_fold_for_that_lane_only() -> None:
+def test_rendered_env_carries_the_fold_for_those_lanes_only() -> None:
     rendered = render_env(load_contract())
     folds = {k: v for k, v in rendered.items() if k.endswith("_FOLDED_PROFILES")}
-    # Primary dev folds its own roles (OMN-21288 tenant and writer folds), never effects.
+    # Primary dev folds its own roles (OMN-21288 tenant and writer folds) and,
+    # since OMN-22930, effects.
     dev_folds = folds.pop("DEV_RUNTIME_MAIN_FOLDED_PROFILES").split(",")
-    assert "effects" not in dev_folds
+    assert "effects" in dev_folds
     assert folds == {FOLDED_KEY: "effects"}
     committed = (ROOT / "docker" / "runtime-policy.env").read_text(encoding="utf-8")
     assert committed == format_dotenv(rendered)
