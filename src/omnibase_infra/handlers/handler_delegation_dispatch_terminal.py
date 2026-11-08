@@ -224,9 +224,16 @@ class RunStepSequence:
         reason: str | None,
     ) -> None:
         self._calls += 1
+        # The call has finished: its start is its own, not the run's.
+        finished = datetime.now(UTC)
+        call_started_at = (
+            finished - timedelta(milliseconds=duration_ms)
+            if duration_ms is not None
+            else finished
+        )
         self._record(
             "provider_call",
-            started_at=self._started_at,
+            started_at=call_started_at,
             duration_ms=duration_ms,
             failure_cause=failure_cause,
             backend_id=backend_id,
