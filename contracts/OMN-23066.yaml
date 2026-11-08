@@ -1,0 +1,50 @@
+schema_version: 1.0.0
+ticket_id: OMN-23066
+title: The dev stack retires the context audit consumer container, its projection runs as a node in the one runtime
+summary: One-runtime plan T13, the omnibase_infra half. node_projection_context_audit (omnimarket) names the retired consumer's group under consumer_group_handover from_group_id context-audit-postgres, so the dev main runtime resumes from that group's committed offsets. The runtime policy contract adds context-audit-consumer to the dev main process's retired_services list, the rendered runtime-policy.env carries it, and the dev-lane stanza of the consumer starts under no profile a primary-dev bring-up requests. The deploy handler and the deploy agent retire a previous revision's container by name before main is recreated, so context_audit_events has one writer at a time. The stack-shape baseline count for the service does not change because the gate sits in the stanza dev-lane already holds. Other dev instances, the stability lane and prod keep their consumer. Live delivery through the deploy agent is pending the merge of the node's omnimarket pull request and of the preceding fold pull requests.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23066-consumer-retired-on-dev
+    statement: Primary dev has no context-audit-consumer container and its projection is a node in the main runtime; other lanes keep the consumer.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the runtime policy retires context-audit-consumer by name on primary dev and the rendered env file carries it -- falsifier: uv run pytest tests/unit/docker/test_dev_context_audit_fold_omn23066.py, red when the retirement or the stanza gate is removed'
+      - id: AC2
+        statement: 'AC2: the deploy handler and the deploy agent census and retire the previous revision container before main is recreated, and no other lane retires it -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py, red when the consumer is not in the retired set'
+evidence_requirements:
+  - kind: tests
+    description: The context audit fold test with its gate-removed control, the hook events and tenant fold tests updated for the second retired service, the stack-shape check over the real compose files, and the deploy agent retirement tests.
+    command: uv run pytest tests/unit/docker/test_dev_context_audit_fold_omn23066.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23066-policy-and-stanza
+    description: The policy retires the consumer by name, the rendered env file carries it, the dev-lane stanza starts under the folded profile only, the fold overlay adds no declaration, the dev stack renders no consumer, and other dev instances keep theirs. The gate-removed control fails two of these.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_context_audit_fold_omn23066.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23066-retirement-and-stack-shape
+    description: The deploy agent censuses and retires the consumer container with the hook events writer and the folded writers, volumes kept, and the stack-shape check passes over the real compose files with the baseline count unchanged.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23066-deploy-probe
+    description: After the deploy agent rolls primary dev with this change, no omninode-context-audit-consumer container runs on the dev host. The probe fails while the container runs, so it reads the deployed system and not a file this pull request wrote.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" 'test -z "$(docker ps -q --filter name=^omninode-context-audit-consumer$)"'
+        cwd: .
