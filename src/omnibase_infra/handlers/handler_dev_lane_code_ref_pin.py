@@ -46,15 +46,20 @@ import tempfile
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.models.model_dev_lane_code_ref_pin import (
-    ModelDevLaneCodeRefPin,
-    ModelDevLaneCodeRefPinRequest,
-    ModelDevLaneCodeRefPinResult,
-)
+from omnibase_infra.models.model_dev_lane_code_ref_pin import ModelDevLaneCodeRefPin
+
+if TYPE_CHECKING:
+    from omnibase_infra.models.model_dev_lane_code_ref_pin_request import (
+        ModelDevLaneCodeRefPinRequest,
+    )
+    from omnibase_infra.models.model_dev_lane_code_ref_pin_result import (
+        ModelDevLaneCodeRefPinResult,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +142,12 @@ class HandlerDevLaneCodeRefPin:
         self, request: ModelDevLaneCodeRefPinRequest
     ) -> ModelDevLaneCodeRefPinResult:
         """Run the requested operation; the node's single entry point."""
+        # The standalone deploy agent loads this module without the request and
+        # result models (it only calls followed_branch); the node path has them.
+        from omnibase_infra.models.model_dev_lane_code_ref_pin_result import (
+            ModelDevLaneCodeRefPinResult,
+        )
+
         if request.operation == "register":
             if request.pin is None:  # unreachable past the request validator
                 raise ValueError("register needs a pin")

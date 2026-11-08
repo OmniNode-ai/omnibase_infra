@@ -28,8 +28,8 @@ from omnibase_infra.handlers.handler_dev_lane_code_ref_pin import (
     HandlerDevLaneCodeRefPin,
     followed_branch,
 )
-from omnibase_infra.models.model_dev_lane_code_ref_pin import (
-    ModelDevLaneCodeRefPin,
+from omnibase_infra.models.model_dev_lane_code_ref_pin import ModelDevLaneCodeRefPin
+from omnibase_infra.models.model_dev_lane_code_ref_pin_request import (
     ModelDevLaneCodeRefPinRequest,
 )
 
