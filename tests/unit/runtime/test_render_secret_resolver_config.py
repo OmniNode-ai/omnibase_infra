@@ -4,20 +4,23 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import stat
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import yaml
 
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.errors import ProtocolConfigurationError, SecretResolutionError
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
 from omnibase_infra.runtime.render_secret_resolver_config import (
     render_secret_resolver_config,
 )
+from omnibase_infra.runtime.secret_resolver import SecretResolver
 
 pytestmark = [pytest.mark.unit]
 
@@ -127,3 +130,64 @@ def test_secret_resolver_renderer_rejects_duplicate_logical_refs(
             target_path=tmp_path / "secret_resolver.yaml",
             environ={"ONEX_SECRET_RESOLVER_CONFIG_JSON": json.dumps(payload)},
         )
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_LINEAR_LOGICAL_NAME = "LINEAR_API_KEY"
+_LINEAR_SYNTHETIC_VALUE = "synthetic-linear-value-for-the-render-path-test"
+_DEV_RESOLVER_CONFIG_VARIABLE = "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON"
+
+
+def _policy_renderer() -> ModuleType:
+    path = _REPO_ROOT / "scripts" / "render_runtime_policy_env.py"
+    spec = importlib.util.spec_from_file_location("render_runtime_policy_env", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _dev_policy_config_json() -> str:
+    renderer = _policy_renderer()
+    env = renderer.render_env(renderer.load_contract())
+    assert _DEV_RESOLVER_CONFIG_VARIABLE in env
+    return str(env[_DEV_RESOLVER_CONFIG_VARIABLE])
+
+
+def test_linear_api_key_resolves_through_the_container_render_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dev contract's JSON goes through the container's renderer and resolves the key."""
+    monkeypatch.setenv(_LINEAR_LOGICAL_NAME, _LINEAR_SYNTHETIC_VALUE)
+    target = tmp_path / "secret_resolver.yaml"
+    render_secret_resolver_config(
+        target_path=target,
+        environ={"ONEX_SECRET_RESOLVER_CONFIG_JSON": _dev_policy_config_json()},
+    )
+    resolver = SecretResolver(config=_load_rendered(target))
+
+    secret = resolver.get_secret(_LINEAR_LOGICAL_NAME, required=True)
+
+    assert secret is not None
+    assert secret.get_secret_value() == _LINEAR_SYNTHETIC_VALUE
+
+
+def test_linear_api_key_refused_through_the_render_path_without_the_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failing control: the same rendered config without the mapping is the defect."""
+    monkeypatch.setenv(_LINEAR_LOGICAL_NAME, _LINEAR_SYNTHETIC_VALUE)
+    payload = json.loads(_dev_policy_config_json())
+    mappings = payload["mappings"]
+    kept = [m for m in mappings if m["logical_name"] != _LINEAR_LOGICAL_NAME]
+    assert len(kept) == len(mappings) - 1, "the mapping was not there"
+    payload["mappings"] = kept
+    target = tmp_path / "secret_resolver.yaml"
+    render_secret_resolver_config(
+        target_path=target,
+        environ={"ONEX_SECRET_RESOLVER_CONFIG_JSON": json.dumps(payload)},
+    )
+    resolver = SecretResolver(config=_load_rendered(target))
+
+    with pytest.raises(SecretResolutionError):
+        resolver.get_secret(_LINEAR_LOGICAL_NAME, required=True)

@@ -91,7 +91,6 @@ from omnibase_core.services.service_local_handler_ownership_query import (
 )
 from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.errors import (
-    EnvelopeValidationError,
     ProjectionNotMaterializedError,
     ProjectionQueryRowBudgetError,
     QuarantinePublishUnconfirmedError,
@@ -127,6 +126,7 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.handlers.projection_failure_classification import is_content_failure
 from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
 from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.models.projection import ModelProjectionDerivedWriteRequest
@@ -4441,9 +4441,7 @@ def _is_projection_content_failure(exc: BaseException) -> bool:
     as the event's own defect is treated as the runtime's — the direction that
     stalls loudly rather than the direction that discards a fact silently.
     """
-    from pydantic import ValidationError as PydanticValidationError
-
-    return isinstance(exc, PydanticValidationError | EnvelopeValidationError)
+    return is_content_failure(exc)
 
 
 async def _route_projection_error_to_dlq(
