@@ -123,3 +123,36 @@ def test_each_stability_proof_passes_the_name_of_the_variable_it_reads(
     inputs = resolve_steps[0]["with"]
     assert inputs["lanes-json"] == "${{ vars.LAB_PROOF_LANES_JSON }}"
     assert inputs["lanes-var"] == STABILITY_VAR
+
+
+@pytest.mark.unit
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/omn21916_stability_resolve_worker_logs.json"
+)
+def test_the_recorded_empty_stability_overlay_is_named_by_its_own_variable(
+    recorded_response: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The three runs the runner logged (an empty overlay read through the
+    stability variable) now print the stability variable's name."""
+    response = recorded_response["response"]
+    assert isinstance(response, dict)
+    runs = response["runs"]
+    assert isinstance(runs, list)
+    assert len(runs) == len(STABILITY_PROOFS)
+    for run in runs:
+        assert run["error_messages"][0].endswith(DEV_VAR)
+        read_variable = run["lanes_json_input_expression"].removeprefix("vars.")
+        loaded = yaml.safe_load(
+            (WORKFLOWS / run["workflow"]).read_text(encoding="utf-8")
+        )
+        passed = [
+            step["with"]["lanes-var"]
+            for job in loaded["jobs"].values()
+            for step in job["steps"]
+            if step.get("uses") == "./.github/actions/resolve-lab-lane"
+        ]
+        assert passed == [read_variable]
+        code, out = _main_output(capsys, "", passed[0])
+        assert code == 1
+        assert read_variable in out
+        assert DEV_VAR not in out
