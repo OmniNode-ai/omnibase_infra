@@ -232,6 +232,9 @@ def test_policy_contract_without_a_fold_renders_no_fold_key() -> None:
     for profile in raw["profiles"].values():
         for service in profile["services"].values():
             service.pop("folded_profiles", None)
+            # OMN-22930 (T8): a handover names a folded profile, so a contract
+            # with no fold carries no handover either.
+            service.pop("fold_handovers", None)
     env = render_env(ModelRuntimePolicyContract.model_validate(raw))
 
     assert not [key for key in env if key.endswith("_FOLDED_PROFILES")]
