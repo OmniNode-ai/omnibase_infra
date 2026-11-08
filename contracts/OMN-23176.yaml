@@ -49,5 +49,5 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_c16_pinned_backend.py?ref=omn-23176-c16-pinned-backends" --jq .content | base64 -d | grep -q 'def grade_pinned_backends' && grep -q 'def load_pinned_config' src/omnibase_infra/handlers/handler_c16_pinned_backend.py
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_c16_pinned_backend.py?ref=omn-23176-c16-pinned-backends" --jq .content | base64 -d | grep -c 'def grade_pinned_backends' > /dev/null && grep -q 'def load_pinned_config' src/omnibase_infra/handlers/handler_c16_pinned_backend.py
         cwd: ${OMNI_HOME}/omnibase_infra
