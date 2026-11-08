@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-23169"
 title: "omnibase_infra vendors omnimarket node migration 0068, the delegation summary without experiment runs"
 summary: >-
-  Vendors omnimarket node_projection_delegation migration 0068 byte for byte (sha256 da43281cc16cc5f9e5cec5301b65eefa858abe3d66656fc604f125448f7c04b6). It replaces the view projection_delegation_summary so a run typed experiment is left out of the run, quality, token, spend and savings totals, and keeps security_invoker. One ledger row (tenant domain) and a forward-only class declaration accompany it, so the next omnibase_infra release vendors the file the omnimarket change adds.
+  Vendors omnimarket node_projection_delegation migration 0068 byte for byte (sha256 edd209eebd070c9de9038f487ac7afaf2349886067bc724834f6e313162b6f4e). It replaces the view projection_delegation_summary so a run typed experiment is left out of the run, quality, token, spend and savings totals, and keeps security_invoker. One ledger row (tenant domain) and a forward-only class declaration accompany it, so the next omnibase_infra release vendors the file the omnimarket change adds.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []

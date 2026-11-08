@@ -30,7 +30,7 @@ RELATIVE = (
 )
 NODE = "node:node_projection_delegation"
 # The checksum of the omnimarket source this file is copied from.
-SOURCE_SHA256 = "da43281cc16cc5f9e5cec5301b65eefa858abe3d66656fc604f125448f7c04b6"
+SOURCE_SHA256 = "edd209eebd070c9de9038f487ac7afaf2349886067bc724834f6e313162b6f4e"
 
 
 def test_0068_is_the_vendored_forward_only_manifest_entry() -> None:
