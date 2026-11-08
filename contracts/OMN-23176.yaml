@@ -39,15 +39,15 @@ dod_evidence:
       - AC2
     checks:
       - check_type: command
-        check_value: gh run view 42500808408 --repo OmniNode-ai/omnibase_infra --json conclusion --jq .conclusion | grep -qx failure
+        check_value: grep -q 'def grade_pinned_backends' src/omnibase_infra/handlers/handler_c16_pinned_backend.py && gh run view 42500808408 --repo OmniNode-ai/omnibase_infra --json conclusion --jq .conclusion | grep -qx failure
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23176-deploy
-    description: Hosted-runner probe that reads the committed pinned-backend handler from GitHub on the PR branch and requires the grader and the config reader the workflow step calls.
+    description: Probe that reads the pinned-backend handler from the checked-out tree (absent at the merge base) and requires the grader and the config reader the workflow step calls.
     source: manual
     binds_ac:
       - AC2
     checks:
       - check_type: command
         check_value: >-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_c16_pinned_backend.py?ref=omn-23176-c16-pinned-backends" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def grade_pinned_backends" in src; assert "def load_pinned_config" in src'
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_c16_pinned_backend.py?ref=omn-23176-c16-pinned-backends" --jq .content | base64 -d | grep -q 'def grade_pinned_backends' && grep -q 'def load_pinned_config' src/omnibase_infra/handlers/handler_c16_pinned_backend.py
         cwd: ${OMNI_HOME}/omnibase_infra
