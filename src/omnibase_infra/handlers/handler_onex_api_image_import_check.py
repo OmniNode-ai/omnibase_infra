@@ -29,6 +29,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_onex_api_image_import_request import (
     ModelOnexApiImageImportRequest,
 )
@@ -89,6 +90,16 @@ class HandlerOnexApiImageImportCheck:
 
     def __init__(self, *, run: RunCommand) -> None:
         self._run = run
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure handler over the host's Docker daemon and env file."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting: runs a container and rewrites the pin line."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(
         self, request: ModelOnexApiImageImportRequest
