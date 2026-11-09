@@ -2203,8 +2203,8 @@ def _wire_criteria_mode(criteria_mode: str | None) -> str | None:
 # Where a tenant overlay is declared it arrives as ``ONEX_TENANT_ID``, the same
 # variable the delegate handler already reads, and it wins, so the stamp is the
 # tenant the handler would have resolved had the lane held it. Lab usage goes
-# through the host tenant declared in lab_run_hosts.yaml even without the
-# overlay (OMN-18829); there is no fallback tenant.
+# through the host tenant declared in the lab_hosts overlay's projection even
+# without the overlay (OMN-18829); there is no fallback tenant.
 #
 # NOTHING HERE IS A DEFAULT. Every branch returns a stamp that was declared or
 # minted, or refuses naming ``onex local init``. The one request that carries no
@@ -2304,8 +2304,8 @@ def read_lab_host_tenant(
         table = Path(configured)
     elif registry:
         table = (
-            Path(registry).resolve().parent
-            / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+            Path(environ.get("HOME") or "/")
+            / ".local/state/onex/overlay-store/lab_hosts/overlay.yaml"
         )
         if not table.exists() and not host:
             return None

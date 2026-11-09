@@ -1,0 +1,34 @@
+schema_version: 1.0.0
+ticket_id: OMN-23356
+title: onex delegate reads the lab host table from the overlay store's lab_hosts projection, not a copy packaged beside the registry
+summary: The lab host list is the lab_hosts overlay of the overlays repository, read through the overlay store's projection under a host's HOME (RULING 2026-11-07T15:59:02Z), and the copy packaged beside the registry is deleted (RULING 2026-11-03T18:40:27Z lane=orchestrator-31d9). onex delegate's lab tenant read still named the deleted file, so it now names the projection. A host with no projection and no declared lane host is outside the lab and keeps its install identity, as before.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23356-infra-reads-projection
+    statement: read_lab_host_tenant resolves the lab host tenant from the projection under HOME when no table variable is set.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: with no ONEX_LAB_RUN_HOSTS, onex delegate resolves the host tenant from the lab_hosts projection under HOME and reads nothing beside the registry -- falsifier: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The tenant read over a planted projection and a table beside the registry that is not read.
+    command: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23356-ac1
+    description: The projection tests pass on the branch; the old packaged path is no longer named by read_lab_host_tenant.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: sh -c 'test "$(grep -c "lab_run_hosts" src/omnibase_infra/cli/cli_delegate.py)" = 0'
+        cwd: ${OMNI_HOME}/omnibase_infra
