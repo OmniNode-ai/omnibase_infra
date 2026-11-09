@@ -132,7 +132,14 @@ def test_the_rule_is_declared_on_dev_effects_and_on_the_main_that_folds_it() -> 
     # Effects keeps its rule for the dev instances that still render a separate
     # effects role; main carries the same rule because the fold runs the effects
     # nodes there (OMN-22930). Nothing else declares one.
-    assert declared == {
+    # The stability profile's main resolves the shared keys by path (OMN-21611);
+    # it is tested in test_stability_h051_shared_secret_binding_omn21611.py.
+    shared = {key: value for key, value in declared.items() if key[0] != "dev"}
+    assert [key[1] for key in shared] == ["main"]
+    assert list(shared.values()) == [
+        ["shared_env_credentials", "shared_lane_env_credentials"]
+    ]
+    assert {key: value for key, value in declared.items() if key[0] == "dev"} == {
         ("dev", "effects"): [_NAMESPACE],
         ("dev", "main"): [_NAMESPACE],
     }
@@ -165,11 +172,17 @@ def test_the_rendered_store_config_is_the_house_config_plus_the_rule() -> None:
     assert not house.namespaces
     assert config_declares_infisical_source(store)
     assert not config_declares_infisical_source(house)
-    # Exactly two store variants exist: effects' own and the folded main's. No
-    # other lane or process gained one.
+    # Exactly three store variants exist: effects' own, the folded main's and the
+    # h051 stability main's (OMN-21611). No other lane or process gained one.
     assert sorted(
         key for key in env if "_STORE_SECRET_RESOLVER_CONFIG_JSON" in key
-    ) == sorted([_STORE_VAR, _MAIN_STORE_VAR])
+    ) == sorted(
+        [
+            _STORE_VAR,
+            _MAIN_STORE_VAR,
+            "STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON",
+        ]
+    )
 
 
 def test_the_folded_main_store_config_is_its_house_config_plus_the_rule() -> None:
