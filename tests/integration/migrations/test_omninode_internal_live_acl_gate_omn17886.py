@@ -401,10 +401,13 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     # SELECT/INSERT/UPDATE on both work-ledger tables, with no DELETE.
     # OMN-21947: 0008 grants the runtime SELECT/INSERT/UPDATE on the immutable
     # citation table, with no DELETE.
+    # OMN-23152: 0008 grants the runtime SELECT/INSERT/UPDATE on the sequence
+    # conflicts table, with no DELETE.
     for work_ledger_table in (
         "work_ledger_rows",
         "work_ledger_state",
         "ledger_line_citation",
+        "work_ledger_seq_conflicts",
     ):
         work_ledger_declared = {
             privilege

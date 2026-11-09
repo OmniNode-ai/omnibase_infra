@@ -38,8 +38,7 @@ jobs:
   live-lineage-check:
     name: live-lineage-check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest.
-    runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout code
@@ -91,8 +90,7 @@ jobs:
     needs: [live-lineage-check]
     if: failure()
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest.
-    runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Post Slack alert
