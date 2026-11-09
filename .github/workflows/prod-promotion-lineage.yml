@@ -65,13 +65,7 @@ jobs:
     name: Prod promotion-lineage guard tests
     # Run on PRs and pushes; skipped for the reusable workflow_call path.
     if: github.event_name != 'workflow_call'
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
@@ -98,8 +92,7 @@ jobs:
     name: Enforce clean + promoted build source
     # Only runs when invoked by the prod build (workflow_call with enforce).
     if: github.event_name == 'workflow_call' && inputs.enforce_lineage
-    runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
