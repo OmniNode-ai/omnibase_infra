@@ -30,6 +30,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/migrations/test_omn23055_gate_store_vendor.py -q --no-cov
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/db/test_omn23055_gate_store_migration_tree.py -q --no-cov
+        cwd: .
   - id: dod-omn23055-gate-store-integration-proof
     description: >-
       The pushed head ran the vendor test on a lab host through the lab work runner. Hosted CI cannot reach the lab, so only the local Done gate runs this check.
