@@ -38,11 +38,19 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_deploy_lane_verify_route_omn19507.py tests/ci/test_lane_sibling_revision_omn18268.py -q --no-cov -p no:randomly
         cwd: .
-  - id: dod-omn23333-receipt-after-merge
-    description: Reads the dev lane row of the lane-health projection on the lab runtime after the change is on dev and a runtime-affecting merge has been verified; it holds only on the lab host.
+  - id: dod-omn23333-routing-row-at-commit
+    description: Hosted-runner probe that reads the committed routing table at the checked-out commit and requires the verify row whose runtime container is the main runtime container to name the main runtime container as its effects container, which is the target the dev lane receipt writer's converge step reads. The same probe on the merge base fails, because that row names the retired effects container. The read of the projection after the change is on dev is the local Done item below.
     source: manual
     binds_ac:
       - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import re; t = open("config/deploy_lane_routing.yaml").read(); assert re.search(r"\n      runtime_container: omninode-runtime\n(?:      #[^\n]*\n)*      effects_container: omninode-runtime\n", t)'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23333-receipt-after-merge
+    description: Reads the dev lane row of the lane-health projection on the lab runtime after the change is on dev and a runtime-affecting merge has been verified; it holds only on the lab host, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
     execution_scope: local_done_gate
     checks:
       - check_type: command
