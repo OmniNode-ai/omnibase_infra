@@ -68,6 +68,15 @@ def _spread_verify_and_plane() -> list[dict[str, Any]]:
         _runner("omninode-studio-runner-1", "self-hosted", "omnibase-verify"),
         _runner("omninode-runner-7", "self-hosted", "omnibase-customer-plane"),
         _runner("omnipc2-verify-runner-2", "self-hosted", "omnibase-customer-plane"),
+        *_spread_merge_queue(),
+    ]
+
+
+def _spread_merge_queue() -> list[dict[str, Any]]:
+    # OMN-23387: the merge-queue label on two declared hosts, h051 and h053.
+    return [
+        _runner("hp051-ci-mq-runner-1", "self-hosted", "omnibase-ci-mq"),
+        _runner("hp053-ci-mq-runner-1", "self-hosted", "omnibase-ci-mq"),
     ]
 
 
@@ -190,7 +199,63 @@ def test_runner_pool_spread_reads_each_hosts_pools(tmp_path: Path) -> None:
                 "omnibase-customer-plane",
             ),
         ]
+        + _spread_merge_queue()
     )
     result = _run(tmp_path, runners)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "undeclared" not in result.stdout, result.stdout
+
+
+def _everything_but_the_merge_queue() -> list[dict[str, Any]]:
+    return (
+        [
+            r
+            for r in _spread_verify_and_plane()
+            if "omnibase-ci-mq" not in [x["name"] for x in r["labels"]]
+        ]
+        + [
+            _runner(f"omninode-runner-{n}", "self-hosted", "omnibase-ci")
+            for n in range(1, 45)
+        ]
+        + [
+            _runner(f"hp053-ci-runner-{n}", "self-hosted", "omnibase-ci")
+            for n in range(1, 6)
+        ]
+    )
+
+
+def test_runner_pool_spread_watches_the_merge_queue_label() -> None:
+    """OMN-23387: the merge-queue label is one of the probe's required labels."""
+    assert "omnibase-ci-mq" in str(_step()["env"]["SPREAD_LABELS"]).split()
+
+
+def test_runner_pool_spread_fails_when_every_merge_queue_runner_shares_one_host(
+    tmp_path: Path,
+) -> None:
+    """The 2026-11-09 shape: every online merge-queue runner on h053, so one full disk stopped the queue."""
+    runners = _everything_but_the_merge_queue() + [
+        _runner(f"hp053-ci-mq-runner-{n}", "self-hosted", "omnibase-ci-mq")
+        for n in range(1, 5)
+    ]
+    result = _run(tmp_path, runners)
+    assert result.returncode == 1, result.stdout
+    assert "omnibase-ci-mq" in result.stdout.split("::error::", 1)[1]
+
+
+def test_runner_pool_spread_passes_when_merge_queue_runners_span_two_hosts(
+    tmp_path: Path,
+) -> None:
+    runners = (
+        _everything_but_the_merge_queue()
+        + [
+            _runner(f"hp053-ci-mq-runner-{n}", "self-hosted", "omnibase-ci-mq")
+            for n in range(1, 5)
+        ]
+        + [
+            _runner(f"hp051-ci-mq-runner-{n}", "self-hosted", "omnibase-ci-mq")
+            for n in range(1, 5)
+        ]
+    )
+    result = _run(tmp_path, runners)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "omnibase-ci-mq: 2 host(s)" in result.stdout

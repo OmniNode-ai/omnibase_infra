@@ -60,7 +60,8 @@ jobs:
         env:
           RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
-          SPREAD_LABELS: omnibase-ci omnibase-verify omnibase-customer-plane
+          # OMN-23387: omnibase-ci-mq is the merge-queue label; a queue whose runners sit on one host stops with that host.
+          SPREAD_LABELS: omnibase-ci omnibase-verify omnibase-customer-plane omnibase-ci-mq
           SPREAD_MIN_HOSTS: "2"
         run: |
           set -euo pipefail
