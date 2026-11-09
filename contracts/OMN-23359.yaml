@@ -22,7 +22,7 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
-  - id: dod-omn23359-fleet-declares-zero-general-runners
+  - id: dod-omn23359-fleet-zero-general-runners
     description: The fleet config and fleet hosts tests pass at the head with h201 declared at zero general runners and its host-specific runners kept. With config/runner_fleet.yaml read from the base the same tests fail.
     source: manual
     binds_ac: [AC1]
@@ -30,7 +30,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest -q -k runner_fleet tests/unit/observability/runner_health/test_runner_fleet_config.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn23359-compose-and-roll-tests-read-new-totals
+  - id: dod-omn23359-compose-and-roll-tests
     description: The runner compose, cache volume, relabel roll and registration preflight tests pass against the compose file without omninode-runner-1..10.
     source: manual
     binds_ac: [AC1]
@@ -38,7 +38,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest -q tests/ci/test_runner_cache_volumes.py tests/ci/test_deploy_runners_registration_preflight.py tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn23359-h201-runs-no-general-runner
+  - id: dod-omn23359-h201-no-general-runner
     description: After deploy-runners.sh --retire-surplus has run on the Mac, docker ps on h201 lists no omninode-runner-N container. Read after the merge; the swap reading before and after is recorded beside it.
     source: manual
     execution_scope: local_done_gate
