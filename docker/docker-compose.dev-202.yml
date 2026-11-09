@@ -327,10 +327,6 @@ services:
     container_name: omninode-dev-202-context-audit-consumer
     ports: !override
       - "127.0.0.1:61093:8093"
-  intelligence-api:
-    container_name: omnibase-dev-202-intelligence-api
-    ports: !override
-      - "127.0.0.1:61053:8053"
   omninode-contract-resolver:
     container_name: omninode-dev-202-contract-resolver
     ports: !override

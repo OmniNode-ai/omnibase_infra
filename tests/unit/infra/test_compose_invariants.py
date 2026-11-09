@@ -52,7 +52,6 @@ def test_hot_runtime_services_have_expanded_memory_limits() -> None:
     expected = {
         "agent-actions-consumer": ("512M", "128M"),
         "skill-lifecycle-consumer": ("512M", "128M"),
-        "intelligence-api": ("768M", "128M"),
     }
 
     for service_name, (limit, reservation) in expected.items():

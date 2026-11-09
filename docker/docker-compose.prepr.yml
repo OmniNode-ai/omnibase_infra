@@ -189,12 +189,11 @@ services:
   # Docker daemon, not within a project. A second copy on a slot would race the
   # dev lane's own autoheal over the dev lane's containers.
   autoheal: *prepr_fenced
-  # The migration gate and the intelligence API gate the DEV databases. A
+  # The migration gate gates the DEV databases. A
   # slot's databases are migrated by the forward-migration and
   # intelligence-migration one-shots below, under their own profile, against
   # the suffixed names.
   migration-gate: *prepr_fenced
-  intelligence-api: *prepr_fenced
   # Auxiliary consumers. Out of the slot's declared twelve (OMN-18890), so they
   # are fenced rather than namespaced: a service the lane manifest does not
   # declare must not be running in a slot, or the census cannot reconcile it.
