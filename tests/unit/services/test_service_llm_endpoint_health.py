@@ -711,9 +711,7 @@ class TestServiceLlmEndpointHealthProbe:
     ) -> None:
         """Complete chat URLs must not be probed as /chat/completions/v1/models."""
         cfg = ModelLlmEndpointHealthConfig(
-            endpoints={
-                "cloud-glm": ("https://api.z.ai/api/coding/paas/v4/chat/completions")
-            },
+            endpoints={"cloud-glm": ("https://api.z.ai/api/paas/v4/chat/completions")},
             probe_interval_seconds=5.0,
             probe_timeout_seconds=2.0,
         )
@@ -731,8 +729,8 @@ class TestServiceLlmEndpointHealthProbe:
 
         assert status_map["cloud-glm"].available is True
         assert seen_urls == [
-            "https://api.z.ai/api/coding/paas/v4/health",
-            "https://api.z.ai/api/coding/paas/v4/models",
+            "https://api.z.ai/api/paas/v4/health",
+            "https://api.z.ai/api/paas/v4/models",
         ]
 
     @pytest.mark.asyncio
@@ -750,9 +748,7 @@ class TestServiceLlmEndpointHealthProbe:
         re-probed every 30s.
         """
         cfg = ModelLlmEndpointHealthConfig(
-            endpoints={
-                "cloud-glm": ("https://api.z.ai/api/coding/paas/v4/chat/completions")
-            },
+            endpoints={"cloud-glm": ("https://api.z.ai/api/paas/v4/chat/completions")},
             probe_interval_seconds=5.0,
             probe_timeout_seconds=2.0,
             circuit_breaker_threshold=1,

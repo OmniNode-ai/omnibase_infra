@@ -824,7 +824,7 @@ hosted_runner_allowlist:
   - path: .github/workflows/model-review-capability-canary.yml
     reason: "OMN-17876: capability contract evidence must stay on hosted compute until separately authorized live runner selection."
   - path: .github/workflows/security-scan.yml
-    reason: "OMN-22896: the secret-scan job runs the TruffleHog action in a public repository. The repository is public, so the job is pinned to a literal ubuntu-latest and never follows a variable onto an internal runner; the action also cannot run on the self-hosted fleet, where its docker bind mount resolves on the host daemon (OMN-16045)."
+    reason: "OMN-22896: the secret-scan job runs the pinned TruffleHog image with docker run in a public repository. The repository is public, so the job is pinned to a literal ubuntu-latest and never follows a variable onto an internal runner; the scanner also cannot run on the self-hosted fleet, where its docker bind mount resolves on the host daemon (OMN-16045)."
   - path: .github/workflows/runner-broker-dispatch-wedge-rerun.yml
     reason: "OMN-15776: scheduled broker-dispatch-wedge rerun must not share fate with the self-hosted runner fleet it remediates -- same isolation rationale as runner-fleet-canary.yml above."
   - path: .github/workflows/pr-ci-zombie-detector.yml
@@ -959,6 +959,20 @@ hosted_runner_allowlist:
     reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
   - path: .github/workflows/wheel-content-parity.yml
     reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/artifact-reconciliation-webhook.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dependency-cascade.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/fresh-deploy-fitness.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/pr-merged-event.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/prod-promotion-lineage.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/release-drift-monitor.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/runner-routing-audit.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
 #
 # The route job (scripts/ci/runner_route_decision.py) decides, once per run,
