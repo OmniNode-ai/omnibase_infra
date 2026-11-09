@@ -93,6 +93,15 @@ PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
     }
 )
 
+# Relations whose vendored migration also grants DELETE, which no ``access`` mode
+# derives. The reservations table is released or expired by deleting its rows
+# (OMN-23055, node_gate_store_effect/0001). Each is declared as a separate
+# PRUNE_PRIVILEGES grant beside the derived one, so no grant carries a
+# non-canonical privilege set; expire with the gate store bridge.
+PRUNED_RELATIONS: frozenset[tuple[str, str]] = frozenset(
+    {("omninode_internal", "gate_store_reservations")}
+)
+
 # Mirrors ``_projection_operation_bindings``. PLATFORM_CATALOG is absent by
 # design: that domain requires a caller-supplied read/write binding, so a
 # contract declaration alone cannot name the principal. Such declarations are
@@ -657,6 +666,7 @@ def derive_table_grants(
     # contract that declares the same relation.
     required: dict[tuple[str, str, str], set[EnumDatabasePrivilege]] = {}
     unmappable: dict[tuple[str, str, str], UnmappableDeclaration] = {}
+    pruned: set[tuple[str, str, str]] = set()
 
     def refuse(declaration: ContractTableDeclaration, reason: str) -> None:
         table = declaration.table
@@ -705,6 +715,8 @@ def derive_table_grants(
             (binding.principal, grant_schema, table.name), set()
         )
         entry.update(_privileges_for_access(table.access))
+        if (table.schema, table.name) in PRUNED_RELATIONS:
+            pruned.add((binding.principal, grant_schema, table.name))
 
     grants: dict[str, tuple[ModelDeploymentTopologyDatabaseGrant, ...]] = {}
     # Group by (principal, schema, privilege set) so each principal carries at
@@ -714,6 +726,12 @@ def derive_table_grants(
         privilege_key = tuple(sorted(privilege.value for privilege in privileges))
         grouped.setdefault(principal, {}).setdefault(
             (schema_name, privilege_key), []
+        ).append(table_name)
+
+    prune_key = tuple(sorted(privilege.value for privilege in PRUNE_PRIVILEGES))
+    for principal, schema_name, table_name in pruned:
+        grouped.setdefault(principal, {}).setdefault(
+            (schema_name, prune_key), []
         ).append(table_name)
 
     for principal in sorted(grouped):
