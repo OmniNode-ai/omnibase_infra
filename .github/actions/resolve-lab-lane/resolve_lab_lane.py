@@ -125,26 +125,24 @@ def _check_url(lane: str, field: str, value: Any) -> str:
     return value.rstrip("/")
 
 
-def parse_lanes(raw: str) -> list[dict[str, Any]]:
-    """Validate the overlay list. Raises OverlayError; never returns a default."""
+def parse_lanes(raw: str, source: str = "LAB_LANES_JSON") -> list[dict[str, Any]]:
+    """Validate the overlay list; ``source`` names the variable it came from."""
     if not raw or not raw.strip():
-        raise OverlayError(
-            "no lab lane is declared; set the repository variable LAB_LANES_JSON"
-        )
+        raise OverlayError(f"no lab lane declared; set repository variable {source}")
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise OverlayError(f"LAB_LANES_JSON is not JSON: {exc}") from exc
+        raise OverlayError(f"{source} is not JSON: {exc}") from exc
     if not isinstance(data, list) or not data:
-        raise OverlayError("LAB_LANES_JSON must be a non-empty JSON list")
+        raise OverlayError(f"{source} must be a non-empty JSON list")
     lanes: list[dict[str, Any]] = []
     seen: set[str] = set()
     for index, entry in enumerate(data):
         if not isinstance(entry, dict):
-            raise OverlayError(f"LAB_LANES_JSON[{index}] is not an object")
+            raise OverlayError(f"{source}[{index}] is not an object")
         name = entry.get("name")
         if not isinstance(name, str) or not NAME_RE.match(name):
-            raise OverlayError(f"LAB_LANES_JSON[{index}] has no valid name")
+            raise OverlayError(f"{source}[{index}] has no valid name")
         if name in seen:
             raise OverlayError(f"lane {name!r} is declared twice")
         seen.add(name)
@@ -346,7 +344,8 @@ def main(environ: Mapping[str, str] | None = None) -> int:
         match[field] = want
     timeout = float(env.get("LANE_PROBE_TIMEOUT_SECONDS", "10"))
     try:
-        lanes = parse_lanes(env.get("LAB_LANES_JSON", ""))
+        var = env.get("LAB_LANES_VAR") or "LAB_LANES_JSON"
+        lanes = parse_lanes(env.get("LAB_LANES_JSON", ""), var)
     except OverlayError as exc:
         _say(f"::error::{exc}")
         return 1

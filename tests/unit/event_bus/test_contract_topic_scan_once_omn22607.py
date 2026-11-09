@@ -12,6 +12,7 @@ and a different request is its own scan.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -145,3 +146,29 @@ def test_bytecode_written_by_an_import_is_not_a_change(
     (cache / "handler.cpython-312.pyc").write_bytes(b"\0")
     ModelContractTopicScan.read(contracts_root=tmp_path)
     assert len(extract_calls) == 1
+
+
+def test_a_scan_that_runs_logs_one_line_and_a_reused_scan_logs_none(
+    tmp_path: Path,
+    extract_calls: list[Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A runtime boot counts its scans from this line; a reused scan adds none."""
+    (tmp_path / "contract.yaml").write_text("name: probe\n")
+    with caplog.at_level(
+        logging.INFO, logger="omnibase_infra.models.event_bus.model_contract_topic_scan"
+    ):
+        for _ in range(3):
+            assert _provisioner(tmp_path)._topic_specs
+        TopicStartupValidator(
+            bootstrap_servers=_BOOTSTRAP, contracts_root=tmp_path
+        )._required_topics()
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if "contract topic scan ran" in r.getMessage()
+    ]
+    assert len(extract_calls) == 1
+    assert len(lines) == 1
+    assert "topics=1" in lines[0]
+    assert "seconds=" in lines[0]
