@@ -1175,8 +1175,15 @@ services:
       - "com.omninode.service=runtime-worker"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # OMN-21288 (T16): primary dev serves the contract resolver from main (the
+  # node_contract_resolver_bridge http_mount). The container of the previous
+  # revision starts under no profile a lane bring-up requests, and the deploy
+  # handler retires it by name (retired_services in the runtime policy). It
+  # stays declared here, not in the fold overlay, so the stack-shape baseline
+  # count does not grow.
   omninode-contract-resolver:
     build: *dev_lane_composed_runtime_build
+    profiles: !override ["folded-contract-resolver"]
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
   # ===========================================================================

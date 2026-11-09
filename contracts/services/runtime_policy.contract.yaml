@@ -276,9 +276,14 @@ profiles:
         # same way. The node's contract names the retired consumer's group under
         # consumer_group_handover (from_group_id context-audit-postgres), so main
         # resumes from that group's committed offsets and the table has one writer.
+        # OMN-21288 (T16): the contract resolver is mounted in main (the
+        # node_contract_resolver_bridge http_mount), so its container of the
+        # previous revision is retired by name the same way. The deploy handler
+        # no longer restarts it on the dev lane either.
         retired_services:
           - projection-claude-hook-events-writer
           - context-audit-consumer
+          - omninode-contract-resolver
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof
