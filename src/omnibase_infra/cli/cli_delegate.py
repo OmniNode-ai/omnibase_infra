@@ -252,12 +252,19 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
     HandlerWorkspaceRuntimeConfigMaterializer,
 )
+from omnibase_infra.models.delegation.delegate_flag_checks import (
+    validate_backend_pin as _validate_backend_pin,
+)
+from omnibase_infra.models.delegation.delegate_flag_checks import (
+    validate_model_choice as _validate_model_choice,
+)
 from omnibase_infra.models.delegation.delegate_refusal_state_root import (
     funnel_state_root,
     state_root_from_arguments,
 )
 from omnibase_infra.models.delegation.delegate_request_payload import (
     DELEGATE_TICKET_METADATA_KEY,
+    load_probe_ladder,
 )
 from omnibase_infra.models.delegation.delegate_request_payload import (
     build_delegate_request_payload as _request_payload,
@@ -2007,48 +2014,6 @@ def load_acceptance_capable_criteria() -> frozenset[str] | None:
     return frozenset(capable)
 
 
-def _validate_backend_pin(backend_id: str | None) -> str | None:
-    """Normalise ``--backend-id`` and refuse an empty one (OMN-19124).
-
-    Whitespace-only is refused rather than normalised to ``None``: a pin the
-    caller believes they set, silently dropped, walks the cheapest-first
-    ladder and answers — the exact silence this flag exists to remove.
-
-    The id itself is deliberately NOT validated against a list of known
-    backends. The routing contract is the source of truth for what backends
-    exist and the routing authority already raises loudly on an unresolvable
-    pin (``_resolve_initial_backend``: "a resolution failure on a caller's
-    EXPLICIT pin means the caller asked for a backend that doesn't exist, and
-    hiding that behind a silent fallback would defeat the whole point of
-    pinning"). A second, CLI-side copy of that vocabulary is a table that
-    goes stale and starts refusing backends the contract declares.
-    """
-    if backend_id is None:
-        return None
-    pinned = backend_id.strip()
-    if not pinned:
-        raise ValueError(
-            "--backend-id was given an empty value. Pass a backend id declared "
-            "by the routing contract, or omit the flag to use the "
-            "cheapest-first tier_order walk."
-        )
-    return pinned
-
-
-def _validate_model_choice(model: str | None) -> str | None:
-    """Normalise ``--model`` and refuse an empty choice (OMN-20844)."""
-    if model is None:
-        return None
-    chosen = model.strip()
-    if not chosen:
-        raise ValueError(
-            "--model was given an empty value. Pass a model id for the "
-            "customer's own provider key, or omit the flag to use the model "
-            "stored with the key."
-        )
-    return chosen
-
-
 #: A Linear issue identifier: a team key, a hyphen, a positive number.
 _TICKET_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9]+-[1-9][0-9]*$")
 
@@ -2203,8 +2168,8 @@ def _wire_criteria_mode(criteria_mode: str | None) -> str | None:
 # Where a tenant overlay is declared it arrives as ``ONEX_TENANT_ID``, the same
 # variable the delegate handler already reads, and it wins, so the stamp is the
 # tenant the handler would have resolved had the lane held it. Lab usage goes
-# through the host tenant declared in lab_run_hosts.yaml even without the
-# overlay (OMN-18829); there is no fallback tenant.
+# through the host tenant declared in the lab_hosts overlay's projection even
+# without the overlay (OMN-18829); there is no fallback tenant.
 #
 # NOTHING HERE IS A DEFAULT. Every branch returns a stamp that was declared or
 # minted, or refuses naming ``onex local init``. The one request that carries no
@@ -2304,8 +2269,8 @@ def read_lab_host_tenant(
         table = Path(configured)
     elif registry:
         table = (
-            Path(registry).resolve().parent
-            / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+            Path(environ.get("HOME") or "/")
+            / ".local/state/onex/overlay-store/lab_hosts/overlay.yaml"
         )
         if not table.exists() and not host:
             return None
@@ -2455,6 +2420,7 @@ def _write_payload(
     session_model: str | None = None,
     traffic_class: str | None = None,
     source_surface: str | None = None,
+    probe_ladder: Mapping[str, object] | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -2512,6 +2478,7 @@ def _write_payload(
             session_model=session_model,
             traffic_class=traffic_class,
             source_surface=source_surface,
+            probe_ladder=probe_ladder,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -3783,6 +3750,7 @@ def delegate_command(
     session_model: str | None = None,
     traffic_class: str | None = None,
     source_surface: str | None = None,
+    probe_ladder: Path | None = None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print the result.
 
@@ -3869,6 +3837,9 @@ def delegate_command(
         named_test_metadata = (
             resolved_named_tests.as_metadata() if resolved_named_tests else None
         )
+        probe_ladder_rungs = load_probe_ladder(
+            probe_ladder, traffic_class=traffic_class
+        )
         acceptance_criteria = tuple(criteria)
         declared_contract = _load_response_contract(response_contract)
         _validate_replace_mode_authority(
@@ -3907,6 +3878,7 @@ def delegate_command(
             session_model=session_model,
             traffic_class=traffic_class,
             source_surface=source_surface,
+            probe_ladder=probe_ladder_rungs,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -3947,6 +3919,7 @@ def run_delegate(
     session_model: str | None = None,
     traffic_class: str | None = None,
     source_surface: str | None = None,
+    probe_ladder: Mapping[str, object] | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -4063,6 +4036,7 @@ def run_delegate(
                 correlation_id=uuid.uuid4(),
                 traffic_class=traffic_class,
                 source_surface=source_surface,
+                probe_ladder=probe_ladder,
             )
         )
     except RegistryUnresolvedError as exc:
@@ -4283,6 +4257,7 @@ def run_delegate(
             session_model=session_model,
             traffic_class=traffic_class,
             source_surface=source_surface,
+            probe_ladder=probe_ladder,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.

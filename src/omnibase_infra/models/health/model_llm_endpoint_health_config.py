@@ -33,6 +33,7 @@ circuit breaker thresholds consumed by ``ServiceLlmEndpointHealth``.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
@@ -40,6 +41,8 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.utils.util_error_sanitization import sanitize_url
+
+logger = logging.getLogger(__name__)
 
 
 def _validate_url_map(v: dict[str, str], field_label: str) -> dict[str, str]:
@@ -114,6 +117,51 @@ class ModelLlmEndpointHealthConfig(BaseModel):
         default_factory=dict,
         description="Mapping of logical name to base URL",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_coding_plan_endpoints(cls, data: object) -> object:
+        """Drop every endpoint that addresses the GLM Coding Plan (OMN-19127).
+
+        The Coding Plan's terms bar calling the model API from our own
+        services, so the plan is used only through Claude Code (OMN-20173).
+        Probing it from here, with the bearer credential attached, is that
+        call: it is what the dev lane's GLM rung read as a 401. ``PluginLlm``
+        already ignores a Coding Plan ``LLM_GLM_URL``; this puts the same rule
+        in the config every prober is built from, so no caller or registry
+        entry can reopen the path. The name leaves every map keyed by endpoint
+        name, so the declaration check below still holds. Only names are
+        logged, never a URL or a credential.
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("endpoints"), dict):
+            return data
+        # Imported here: the adapters package imports this model's package.
+        from omnibase_infra.adapters.llm.coding_plan_endpoint import (
+            is_coding_plan_endpoint,
+        )
+
+        blocked = {
+            name
+            for name, url in data["endpoints"].items()
+            if isinstance(url, str) and is_coding_plan_endpoint(url)
+        }
+        if not blocked:
+            return data
+        logger.warning(
+            "LLM endpoint(s) %s address the GLM Coding Plan; not probed, Coding "
+            "Plan use is Claude Code only (OMN-19127, OMN-20173)",
+            sorted(blocked),
+        )
+        kept = dict(data)
+        for key in ("endpoints", "endpoint_auth_env", "endpoint_probe_paths"):
+            declared = data.get(key)
+            if isinstance(declared, dict):
+                kept[key] = {
+                    name: value
+                    for name, value in declared.items()
+                    if name not in blocked
+                }
+        return kept
 
     @field_validator("endpoints")
     @classmethod

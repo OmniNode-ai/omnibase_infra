@@ -285,6 +285,7 @@ migrations:
   forward/nodes/node_projection_delegation/0065_quality_gate_failure_categories_bounded.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation/0066_delegation_events_projection_cursor.sql: forward-only # ALTER TABLE ADD COLUMN (BIGSERIAL numbers existing rows); SET NOT NULL; CREATE UNIQUE INDEX; GRANT USAGE ON SEQUENCE
   forward/nodes/node_projection_delegation/0067_delegation_daily_view.sql: forward-only # CREATE OR REPLACE VIEW (new); ALTER VIEW SET (security_invoker); GRANT SELECT
+  forward/nodes/node_projection_delegation/0068_delegation_summary_excludes_experiment.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation_capability_map/0000_create_delegation_capability_cells.sql: forward-only
   forward/nodes/node_projection_delegation_capability_map/0001_grant_tenant_projection_writer_delegation_capability_cells.sql: expand-only
   forward/nodes/node_projection_delegation_capability_map/0002_force_rls_delegation_capability_cells.sql: forward-only

@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-23169"
+title: "omnibase_infra vendors omnimarket node migration 0068, the delegation summary without experiment runs"
+summary: >-
+  Vendors omnimarket node_projection_delegation migration 0068 byte for byte (sha256 edd209eebd070c9de9038f487ac7afaf2349886067bc724834f6e313162b6f4e). It replaces the view projection_delegation_summary so a run typed experiment is left out of the run, quality, token, spend and savings totals, and keeps security_invoker. One ledger row (tenant domain) and a forward-only class declaration accompany it, so the next omnibase_infra release vendors the file the omnimarket change adds.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn23169-vendored-0068"
+    statement: "The experiment-excluding delegation summary reaches the delegation projection through a migration this repository vendors byte-identical from omnimarket."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the vendored file's sha256 equals the omnimarket source's, it has exactly one tenant ledger row with that checksum and a forward-only class"
+evidence_requirements:
+  - kind: "tests"
+    description: "The vendored 0068 matches the omnimarket source checksum, has its tenant ledger row and forward-only class, leaves experiment rows out, keeps invoker rights and rewrites no row."
+    command: "uv run --frozen pytest tests/unit/migrations/test_omn23169_summary_excludes_experiment_vendored.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn23169-vendored-0068-test"
+    description: "The vendored 0068 matches the omnimarket source checksum, has its tenant ledger row and forward-only class, leaves experiment rows out, keeps security_invoker and rewrites no row. At the merge base the file is absent and the test fails."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/migrations/test_omn23169_summary_excludes_experiment_vendored.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
