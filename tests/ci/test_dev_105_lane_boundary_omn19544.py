@@ -130,7 +130,6 @@ DEV_TO_DEV_105 = {
     "omnibase-infra-cloud-migration": "omnibase-infra-dev-105-cloud-migration",
     "omnibase-infra-cloud-migration-files": "omnibase-infra-dev-105-cloud-migration-files",
     "onex-api": "onex-api-dev-105",
-    "omninode-infra-routing-decisions-consumer": "omninode-dev-105-infra-routing-decisions-consumer",
 }
 
 #: Declared but disabled on .105: the cloud image only the .201 lab-overlay pin
