@@ -125,6 +125,7 @@ databases:
               - topic_produce_windows
               - work_events
               - work_ledger_rows
+              - work_ledger_seq_conflicts
               - work_ledger_state
               - work_outcome_units
               - worktree_reconcile_hosts
@@ -467,5 +468,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: e92c90b229b9bf34412f704148323608c114ea749158e14eab73250ed3cc8e60
+  sha256: f630632e11c82d7b4497418dcdf7e67aaac1ea473b29085a2fdacd94d3643e2d
 topology_instance: onex-dev

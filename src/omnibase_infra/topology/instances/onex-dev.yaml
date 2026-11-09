@@ -135,6 +135,7 @@ databases:
               - topic_produce_windows
               - work_events
               - work_ledger_rows
+              - work_ledger_seq_conflicts
               - work_ledger_state
               - work_outcome_units
               - worktree_reconcile_hosts

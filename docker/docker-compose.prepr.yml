@@ -189,12 +189,11 @@ services:
   # Docker daemon, not within a project. A second copy on a slot would race the
   # dev lane's own autoheal over the dev lane's containers.
   autoheal: *prepr_fenced
-  # The migration gate and the intelligence API gate the DEV databases. A
+  # The migration gate gates the DEV databases. A
   # slot's databases are migrated by the forward-migration and
   # intelligence-migration one-shots below, under their own profile, against
   # the suffixed names.
   migration-gate: *prepr_fenced
-  intelligence-api: *prepr_fenced
   # Auxiliary consumers. Out of the slot's declared twelve (OMN-18890), so they
   # are fenced rather than namespaced: a service the lane manifest does not
   # declare must not be running in a slot, or the census cannot reconcile it.
@@ -202,7 +201,6 @@ services:
   agent-actions-consumer: *prepr_fenced
   skill-lifecycle-consumer: *prepr_fenced
   context-audit-consumer: *prepr_fenced
-  infra-routing-decisions-consumer: *prepr_fenced
   # =========================================================================
   # The slot's forward migration. Its own profile, `prepr-migrate`, so it runs
   # as an explicit one-shot step of the entrypoint and never as part of a
@@ -389,8 +387,8 @@ services:
       - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
-      - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
-      - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/omniinfra/.claude:ro
+      - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.codex/auth.json:ro
+      - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.claude:ro
     labels: !override
       - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
       - "com.omninode.service=runtime-effects"

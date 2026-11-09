@@ -217,9 +217,12 @@ class TestRuntimePhaseRolling:
         lane = _fixture_lane()
         lane.current_image = NEW_IMAGE
         _run_runtime_phase(lane)
-        # 19 containers in the recorded job; the hook-events writer is among them
-        # and OMN-21288 folded it into main, so the runtime scope no longer names it.
-        assert len(lane.recreated) == 18
+        # 19 containers in the recorded job; the hook-events writer (OMN-21288), the
+        # infra-routing-decisions consumer (OMN-23072) and the intelligence API
+        # (OMN-22391) are among them, and the runtime scope no longer names any.
+        assert len(lane.recreated) == 16
+        assert "infra-routing-decisions-consumer" not in lane.recreated
+        assert "intelligence-api" not in lane.recreated
         assert "projection-claude-hook-events-writer" not in lane.recreated
         assert lane.max_starting == 1, "two runtimes were down at once"
         assert lane.largest_recreate == 1

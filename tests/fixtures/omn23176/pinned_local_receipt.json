@@ -1,0 +1,20 @@
+{
+  "_provenance": {
+    "captured_utc": "2026-11-08T15:58:57Z",
+    "source": "onex delegate --backend-id local-coder --task-type test, deployed dev lane, run cbe6d9ef-2365-459a-8962-9cea36d2e75c; the receipt's requested_backend_id, correlation_id, terminal status, attempts (backend_id, host, cost_usd, tier, acceptance_decision) and metrics.cost_usd copied; the host's private address replaced by the label lab-model-host, other keys dropped",
+    "source_sha256": "bde5b5066132358b4449bdf4d5ddc1dc2c6a4852e3fd6c898ac517e4a34e3ee0"
+  },
+  "attempts": [
+    {
+      "acceptance_decision": "accept",
+      "backend_id": "local-coder",
+      "cost_usd": 0.0,
+      "host": "lab-model-host",
+      "tier": "local"
+    }
+  ],
+  "correlation_id": "df8410ef-a964-4854-b2d9-ba0cf8d049ed",
+  "requested_backend_id": "local-coder",
+  "status": "completed",
+  "terminal_cost_usd": 0.0
+}

@@ -34,13 +34,7 @@ permissions:
 jobs:
   node-migration-sync:
     name: node-migration-sync
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     # OMN-14017: sparse sibling checkouts can be slow when GitHub fetches stall
     # under fleet egress saturation; keep the gate strict but allow retries.
     timeout-minutes: 15
@@ -110,13 +104,7 @@ jobs:
   # its test suite fails and blocks merge.
   deployed-migration-tree-sync-logic:
     name: deployed-migration-tree-sync-logic
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     # OMN-14017: setup-python-uv may recover after a transient git dependency
     # fetch failure, then still need time to finish sync and run the logic tests.
     timeout-minutes: 30
