@@ -108,6 +108,8 @@ requirements:
     statement: The runner routing audit admits exactly one hosted job in a private repository, the outside canary, and refuses every other hosted job there.
   - id: req-omn19998-api-fixture-record-test-timeout
     statement: The recorder contract test gives each loopback request the handler's default timeout, so a CI worker that stalls one answer for a second no longer turns the capture into capture_failed and reds Tests, CI Tests Gate, Test-Failure Ratchet Gate and CI Summary on the pull request.
+  - id: req-omn19998-lane-liveness-folded-effects
+    statement: The lane liveness probe does not demand the effects container on a lane whose runtime policy folds the effects role into main, so a serving primary dev lane no longer reads red on runtime_containers; a policy that does not fold effects still requires it.
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -199,6 +201,9 @@ evidence_requirements:
   - kind: tests
     description: The stall case answers route 14 after one second and expects the recorder to capture all 63 pairs; it fails on a 0.75 second request timeout.
     command: uv run pytest tests/integration/handlers/test_api_fixture_record_contract.py -q -n 0 --no-cov -k stall
+  - kind: tests
+    description: The folded-lane case runs the real health gate over a census with no effects container and the shipped policy, and expects green; the control runs it under a policy that does not fold effects and expects red naming the effects container.
+    command: uv run pytest tests/ci/test_dev_lane_liveness.py -q -n 0 --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1422,6 +1427,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/handlers/test_api_fixture_record_contract.py -q -n 0 --no-cov -k stall
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn19998-lane-liveness-folded-effects
+    description: The lane health gate reads the folded-profile list from the rendered runtime policy and drops the effects container from the runtime containers it expects when effects is folded. On the merge base the folded-lane case fails with runtime_containers red, partial 2 of 3 running, missing omninode-runtime-effects; the unfolded-policy control stays red.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_liveness.py -q -n 0 --no-cov
         cwd: .
     binds_ac:
       - AC1

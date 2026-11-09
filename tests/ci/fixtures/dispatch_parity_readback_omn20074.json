@@ -2,7 +2,7 @@
   "_provenance": {
     "captured_utc": "2026-11-06T04:33:36.693951+00:00",
     "legacy_product_sha": "6c82d7967161a1f4bf98ec3f694d06ed989c63eb",
-    "retired_product_sha": "cfe2a5b83037ceb6c00042bdc8be959bff509c7f",
+    "retired_product_sha": "9262d48a27b91ab1d37698c10429b2075926f1d8",
     "source": "Live MessageDispatchEngine.dispatch snapshots for the declared dependency corpora"
   },
   "legacy": {
@@ -24,7 +24,7 @@
     "snapshot_sha256": "5509645535394bcd5e81e23c4c5dbc9712cf7b71c26d4f6b3c8b759638ef627f"
   },
   "retired": {
-    "captured_utc": "2026-11-09T17:15:36.762739+00:00",
+    "captured_utc": "2026-11-09T20:08:37.234051+00:00",
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
