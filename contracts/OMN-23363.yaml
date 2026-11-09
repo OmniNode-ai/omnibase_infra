@@ -45,3 +45,12 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn23363.py -q -n 0 -p no:cacheprovider -k flips_the_broker
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn23363-ac1-deploy-probe
+    description: >-
+      Deploy probe. The proof lane's refresh script GitHub serves at the checked-out commit carries the SASL one-shots in its build scope, which is what makes a governed refresh run the flip. The probe reads the file from GitHub at that commit and exits nonzero on a tree without them, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'lane-redpanda-scram-user lane-redpanda-sasl-enable' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
