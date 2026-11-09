@@ -25,6 +25,9 @@ evidence_requirements:
   - kind: tests
     description: The vendored bytes, ledger rows, classes and grants in every topology instance and rendered catalog.
     command: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -q --no-cov
+  - kind: tests
+    description: The skill lifecycle fold test with its base-revision control, the hook events and tenant fold tests updated for the retired service, and the deploy agent retirement tests.
+    command: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
