@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-23176 (scenario R7 of the delegation readiness suite). The three rungs
+# the C16 pinned-backend probe pins one delegation to each, by role. The probe
+# reads this file; nothing in the grader names a backend. A role named here and
+# absent from the lane is RED (never a shrunk set), and a role missing from
+# this file is a probe input error.
+#
+# The ids are the lane routing contract's backend ids. They are pinned with the
+# delegate CLI's --backend-id flag, so each pin selects the INITIAL attempt.
+version: 1
+pinned_backends:
+  # The lane's local rung.
+  local: local-coder
+  # A free cloud rung (explicit-pin-only; priced 0).
+  free_cloud: openrouter-north-mini-code
+  # A paid rung (explicit-pin-only). Only a dispatched run reaches it: the
+  # workflow never schedules this probe.
+  paid: cloud-vertex-gemini
+# The query that reads the delegation_events row for one correlation id. The
+# probe puts the canonical uuid in place of the single placeholder; the SQL
+# client is the workflow's C16_PINNED_PSQL_ARGV_JSON variable.
+row_query: "SELECT backend_id, host, cost_usd FROM delegation_events WHERE correlation_id = '{correlation_id}'"

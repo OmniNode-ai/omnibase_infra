@@ -43,13 +43,7 @@ permissions:
 jobs:
   skill-node-mapping-sync:
     name: skill-node-mapping-sync
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     # OMN-14017: checkout/action download/setup retries can exceed 10 minutes
     # during runner-lane egress saturation.
     timeout-minutes: 30

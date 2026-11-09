@@ -35,12 +35,8 @@ NODE_MODULE = "omnimarket.nodes.node_pr_title_check_compute"
 INSTALL_TIMEOUT_S = 180
 TEST_TIMEOUT_S = 240
 UV_HTTP_TIMEOUT_S = "30"
-RUNS_ON = """${{
-  (github.event_name == 'pull_request' &&
-   github.event.pull_request.head.repo.full_name != github.repository)
-  && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-  || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-}}"""
+# OMN-22867: a public repository runs this job on a GitHub-hosted label.
+RUNS_ON = "ubuntu-latest"
 LEGACY_BASH = r"""# Guard: workflow_call must be triggered by a pull_request event
 if [[ -z "$PR_TITLE" ]]; then
   echo "[FAIL] PR_TITLE is empty — this workflow must be called from a pull_request event."
