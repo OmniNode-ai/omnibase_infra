@@ -1,0 +1,35 @@
+# OMN-23368 contract file for omnibase_infra: the deploy agent refuses before a build when its service list names a service the target compose lacks, and reports a code-ref pin behind dev.
+schema_version: "1.0.0"
+ticket_id: "OMN-23368"
+title: "The deploy agent's code-ref pin cannot fall behind the dev tree whose compose it builds"
+summary: "A dev deploy failed twice on 2026-11-09 with docker's no such service (intelligence-api, then infra-routing-decisions-consumer): the agent followed a code-ref pin on a branch cut before a dev merge that removed those services, so its own service lists named services the dev compose no longer declares. rebuild_scope now reads the services the lane's compose files declare before the first build and raises ComposeServiceMissingError naming the pin and every missing service, and it reports the pin's distance from origin/dev (commits missing, friction_type=code_ref_pin_stale) before the build."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23368-pin-guard
+    statement: "A code-ref pin that carries a service list the dev compose no longer matches is refused or reported before docker runs."
+    acceptance:
+      - id: AC1
+        statement: "AC1: before a build the agent reads the services the target compose declares and refuses, naming the pin and the missing service, when its service list names one the compose lacks -- falsifier: uv run pytest over the deploy agent tests with a fixture compose lacking a listed service fails today with the docker error instead of the named refusal"
+      - id: AC2
+        statement: "AC2: a pin older than the dev head it builds is either rebased onto dev by the agent or reported stale before the build -- falsifier: a pytest case with a pin behind dev that reaches docker compose build"
+evidence_requirements:
+  - kind: tests
+    description: "The pin-guard tests drive rebuild_scope over a fixture compose and real git clones: the refusal names the pin and the service with no docker call, the staleness report precedes the build, and the controls (declared services, pin at dev head, the repository's own service lists against its own compose) reach the build or pass."
+    command: "cd scripts/deploy-agent && uv run pytest tests/unit/test_pin_guard_omn23368.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "A service list naming a service the lane's compose lacks is refused before any docker call, naming the pin and the service; declared services reach the build."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'cd scripts/deploy-agent && uv run pytest tests/unit/test_pin_guard_omn23368.py -q -p no:cacheprovider -k "TestAC1ServiceListAgainstCompose or TestAC1AgainstTheRealDevCompose"'
+  - id: dod-002
+    description: "A pin behind origin/dev is reported stale, with the commit count, before the build; a pin at the dev head reports nothing."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'cd scripts/deploy-agent && uv run pytest tests/unit/test_pin_guard_omn23368.py -q -p no:cacheprovider -k TestAC2PinBehindDev'

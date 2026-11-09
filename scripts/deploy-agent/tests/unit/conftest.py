@@ -116,6 +116,25 @@ def _stub_promotion_guard(
 
 
 @pytest.fixture(autouse=True)
+def _stub_service_pin_guard(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep unrelated rebuild tests off the host's compose files and code clone.
+
+    The guard (OMN-23368) reads the lane's compose files and counts commits in the
+    agent's code clone, neither of which exists in the unit sandbox. The marked
+    tests drive the real guard through ``rebuild_scope``.
+    """
+    if request.node.get_closest_marker("service_pin_guard") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod.load_dev_boot_guard("handler_dev_lane_pin_service_guard"),
+        "guard_before_build",
+        lambda *args, **kwargs: "",
+    )
+
+
+@pytest.fixture(autouse=True)
 def _stub_runtime_boot_gate(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:

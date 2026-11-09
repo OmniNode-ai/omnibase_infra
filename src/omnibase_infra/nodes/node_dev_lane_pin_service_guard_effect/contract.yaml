@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_dev_lane_pin_service_guard_effect
+contract_name: node_dev_lane_pin_service_guard_effect
+node_name: node_dev_lane_pin_service_guard_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Dev-only reading taken by the dev deploy agent before any image build. It counts the commits of the tracking ref that the agent's running code lacks (a code-ref pin behind dev is reported) and compares the services the deploy is about to build and recreate with the services the lane's compose files declare (a service the compose lacks is refused, naming the pin and the service).
+input_model:
+  name: ModelDevLanePinGuardRequest
+  module: omnibase_infra.models.model_dev_lane_pin_guard_request
+  description: The services the deploy targets, the services the lane's compose files declare, the compose file names, the agent's code clone, the agent environment and the instant to judge pin expiry against.
+output_model:
+  name: ModelDevLanePinGuardResult
+  module: omnibase_infra.models.model_dev_lane_pin_guard_result
+  description: The staleness report; empty when the agent's code is not behind the tracking ref. A service the compose lacks raises ComposeServiceMissingError instead.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: guard_before_build
+      handler: {name: HandlerDevLanePinServiceGuard, module: omnibase_infra.handlers.handler_dev_lane_pin_service_guard}
+capabilities:
+  - name: dev_lane.pin_service_guard
+    description: Refuse, before any docker call, a deploy whose service list names a service the lane's compose files do not declare, and report a code-ref pin behind the tracking ref.
+metadata:
+  ticket: OMN-23368
+  author: OmniNode Team
+  description: Host-local effect. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment, dev]
