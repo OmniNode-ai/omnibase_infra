@@ -313,23 +313,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
     ),
-    # OMN-21934: the vendored node migration creates this application-DB table;
-    # flat 053 belongs to the infra DB. Expire when the node reaches the pin.
-    _vendored_read_write(
-        "context_audit_events",
-        "node_projection_context_audit",
-        "0000_add_context_audit_event_key.sql",
-        schema="public",
-    ),
-    # OMN-22020: node_view_seam_reading_reducer/0001 creates view_seam_readings and
-    # 0002 grants tenant_projection_writer SELECT, INSERT, UPDATE, ahead of the
-    # omnimarket node contract reaching the pin; expire this bridge when it does.
-    _vendored_read_write(
-        "view_seam_readings",
-        "node_view_seam_reading_reducer",
-        "0001_create_view_seam_readings.sql",
-        schema="public",
-    ),
     # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
@@ -339,10 +322,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
             # when node_context_install_confirm_trigger_effect reaches the pin.
             ("compaction_activations", "node_context_install_confirm_trigger_effect"),
-            # OMN-22478: node_projection_overlay_store/0000 creates the overlay store
-            # ahead of the omnimarket writer's contract and 0001 grants omninode_runtime
-            # SELECT, INSERT, UPDATE; expire this bridge when that contract reaches the pin.
-            ("overlay_store", None),
             # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
             # omnimarket node contract. 0001 grants
             # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
@@ -354,43 +333,14 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ("compaction_current_context", None),
         )
     ),
-    # OMN-21920: infra vendors node_projection_agent_actions/0000-0001 ahead of the
-    # omnimarket node contract that declares the six agent_* relations the retired
-    # agent-actions consumer wrote. The source contract declares each relation for
-    # write in the public schema of the application database; 0001 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE on all six. Retired when
-    # node_projection_agent_actions merges in omnimarket and the pin advances past
-    # it; the OMN-18863 expiry module names these bridges.
-    *(
-        _vendored_read_write(
-            table,
-            "node_projection_agent_actions",
-            "0000_create_agent_observability_tables.sql",
-            schema="public",
-        )
-        for table in (
-            "agent_actions",
-            "agent_transformation_events",
-            "router_performance_metrics",
-            "agent_detection_failures",
-            "agent_execution_logs",
-            "agent_status_events",
-        )
-    ),
-    # OMN-19991: an infra-first window; this repo
-    # vendors node_projection_local_alerts/0000-0002 ahead of the omnimarket node
-    # contract that declares the relation. 0001 grants tenant_projection_writer
-    # SELECT, INSERT, UPDATE. Retired when omnimarket's node_projection_local_alerts
-    # contract merges and the pin advances past it; the expiry module names it.
+    # OMN-19991: the local_alerts bridge was DELETED by the pin advance to
+    # 6eb582222a76, which declares the relation.
     # OMN-19986: the same window for node_projection_local_identity/0000-0002,
     # the API Keys page's local identity. 0001 grants tenant_projection_writer
     # SELECT, INSERT, UPDATE. Retired when omnimarket's
     # node_projection_local_identity contract merges and the pin advances past
     # it; the expiry module names it.
-    *(
-        _vendored_read_write(t, schema="public")
-        for t in ("local_alerts", "local_identity")
-    ),
+    *(_vendored_read_write(t, schema="public") for t in ("local_identity",)),
     # OMN-21970: the same infra-first window. This repo vendors
     # node_projection_delegation 0067's projection_delegation_daily view ahead of
     # the omnimarket contract that declares it (access read, role aggregate_daily),
