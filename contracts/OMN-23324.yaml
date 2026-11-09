@@ -32,14 +32,14 @@ dod_evidence:
         check_value: uv run --frozen pytest tests -q --no-cov -p no:randomly -k contract_resolver_retired
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23324-ac1-gate-committed
-    description: Hosted-runner probe that reads the committed dev-lane compose from GitHub at the checked-out commit and requires the folded-contract-resolver profile gate and the retirement in the runtime policy.
+    description: Hosted-runner probe that reads the committed dev-lane compose at the checked-out commit and requires the folded-contract-resolver profile gate and the retirement in the runtime policy.
     source: manual
     binds_ac:
       - AC1
     checks:
       - check_type: command
         check_value: >-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q 'folded-contract-resolver'
+          git show HEAD:docker/docker-compose.dev-lane.yml | grep -c 'folded-contract-resolver' >/dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23324-ac2-container-gone
     description: Read of h201's dev lane after the next deploy-agent run with docker ps; pending until that run completes, recorded in the lane TERMINAL and on the ticket.

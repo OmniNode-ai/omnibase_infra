@@ -105,6 +105,8 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             "runtime-worker",
             CONTEXT_AUDIT_CONSUMER,
             INTELLIGENCE_API,
+            # OMN-23324: the contract resolver is mounted in main.
+            "omninode-contract-resolver",
             # OMN-21288 (T17): the projection API is served by main as a mounted node.
             "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
@@ -172,6 +174,7 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
     assert censused == [
         f"label=com.docker.compose.service={CONTEXT_AUDIT_CONSUMER}",
         f"label=com.docker.compose.service={INTELLIGENCE_API}",
+        "label=com.docker.compose.service=omninode-contract-resolver",
         f"label=com.docker.compose.service={HOOK_EVENTS_WRITER}",
         "label=com.docker.compose.service=projection-savings-writer",
         "label=com.docker.compose.service=tenant-projection-writer",
@@ -182,6 +185,8 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
             f"{CONTEXT_AUDIT_CONSUMER}-b",
             f"{INTELLIGENCE_API}-a",
             f"{INTELLIGENCE_API}-b",
+            "omninode-contract-resolver-a",
+            "omninode-contract-resolver-b",
             f"{HOOK_EVENTS_WRITER}-a",
             f"{HOOK_EVENTS_WRITER}-b",
             "projection-savings-writer-a",
@@ -292,6 +297,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         CONTEXT_AUDIT_CONSUMER,
         INTELLIGENCE_API,
         "projection-api",  # OMN-21288 (T17)
+        "omninode-contract-resolver",  # OMN-23324
     }
     census = len(retired)
     compose_calls = calls[census + 2 :]
