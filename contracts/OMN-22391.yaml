@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22391
+title: The intelligence API is served by the runtime through a contract-declared HTTP mount (T15)
+summary: The omniintelligence API is declared as an http_mount (factory omniintelligence.api.app:create_app, prefix /api/v1) in the contract of node_pattern_storage_effect, so the runtime answers it on its own HTTP port. This change removes the separate intelligence-api service from every compose file, the service catalog and the bundles, drops its stack-shape baseline and command-baseline entries, takes it out of the deploy handler and deploy agent service lists, and adds it to the dev policy's retired_services so the deploy agent and handler retire the previous revision's container by name before main is recreated. The live dev read follows the deploy agent's rebuild after the merge.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22391-mount
+    statement: The runtime serves the intelligence API from the contract-declared mount, and a failing mount refuses boot.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the intelligence API answers on its existing port and path from the runtime -- falsifier: the existing intelligence API smoke test run against the main runtime with uv run pytest, quoted in the PR"
+      - id: AC2
+        statement: "AC2: a failing mount fails boot rather than serving partly -- falsifier: uv run pytest on a new test that plants a factory error and asserts the runtime refuses to become ready"
+  - id: req-omn22391-retire
+    statement: The intelligence-api service is gone from the dev lane compose file and every other compose file, and the stack-shape check holds.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the intelligence-api service is removed from the dev lane compose file and the stack-shape check passes on the dev file set -- falsifier: uv run pytest tests/unit/validation/test_checker_stack_shape.py -q with the service absent from the allowlist and baseline"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22391-ac1-serves
+    description: The runtime's real bootstrap with a contract declaring the intelligence prefix answers GET /api/v1/patterns on its own port while /health stays the runtime's. The factory is a stand-in with the same absolute routes, because the omniintelligence package is not a dependency of this repository. The test also requires that no compose service runs the intelligence app itself, so the runtime is its only server; the merge base still declares that service and fails it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_service_kernel_intelligence_mount_omn22391.py -q --no-cov -k answers_on_the_runtime_port
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22391-ac2-fails-boot
+    description: A planted factory error on the intelligence prefix makes bootstrap exit 1 before wiring starts and nothing listens on the runtime port. The test also requires that no compose service runs the intelligence app in its place, so the refusal leaves nothing answering; the merge base still declares that service and fails it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_service_kernel_intelligence_mount_omn22391.py -q --no-cov -k refuses_to_become_ready
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn22391-ac3-stack-shape
+    description: No compose file, catalog service or bundle names intelligence-api, the policy retires the previous container by name with the committed env equal to its render, and the stack-shape check passes with no allowlist or baseline entry for the service.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py tests/unit/docker/test_dev_intelligence_api_fold_omn22391.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn22391-deploy-probe
+    description: Hosted-runner probe reads the committed policy env from GitHub at the checked-out commit and requires intelligence-api among the retired services. The live reads on dev follow the deploy agent's rebuild after the merge.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/runtime-policy.env?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; lines = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l); assert "intelligence-api" in lines["DEV_RUNTIME_MAIN_RETIRED_SERVICES"].split(",")'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

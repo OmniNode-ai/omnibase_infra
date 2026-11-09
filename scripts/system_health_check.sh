@@ -67,6 +67,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Resolve OMNI_HOME for cross-repo checks
+OMNI_HOME="${OMNI_HOME:-${REPO_ROOT}/..}"
+
 # ----- Flags -----
 FLAG_JSON=false
 FLAG_CI=false
@@ -297,11 +300,11 @@ check_keycloak() {
 
 check_runtime_containers() {
     local name="runtime_containers"
-    local expected=("omninode-runtime" "omnibase-intelligence-api")
+
     # OMN-22930: primary dev folds the effects role into main, so the policy's
     # folded-profile list names it and no effects container exists to expect.
     # Other lanes render no such fold and keep theirs.
-    [[ ",$(policy_env_value DEV_RUNTIME_MAIN_FOLDED_PROFILES)," == *",effects,"* ]] || expected+=("omninode-runtime-effects")
+    local expected=("omninode-runtime"); [[ ",$(policy_env_value DEV_RUNTIME_MAIN_FOLDED_PROFILES)," == *",effects,"* ]] || expected+=("omninode-runtime-effects")
     local running
     running=$(docker ps --format '{{.Names}}' 2>/dev/null) || true
 

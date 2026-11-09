@@ -65,7 +65,6 @@
 #     - omninode-runtime: 8085 [runtime profile]
 #     - runtime-effects: 8086 [runtime profile]
 #     - agent-actions-consumer: 8087 [runtime profile]
-#     - intelligence-api: 8053 [runtime profile]
 #     - contract-resolver: 8091 [runtime profile] (OMN-2756 transitional bridge)
 #     - skill-lifecycle-consumer: 8092 [runtime profile] (OMN-2934)
 #     - context-audit-consumer: 8093 [runtime profile] (OMN-5240)
@@ -1908,16 +1907,15 @@ services:
   # OmniIntelligence Migration Runner (Runtime Profile) — OMN-4082
   # ==========================================================================
   # One-shot init container that creates the omniintelligence database (if
-  # absent) and applies all pending SQL migrations before intelligence-api
-  # starts. Uses the bundled SQL files at docker/migrations/intelligence/.
+  # absent) and applies all pending SQL migrations before the runtime serves the
+  # intelligence API mount. Uses the bundled SQL files at docker/migrations/intelligence/.
   #
-  # Why a separate service: intelligence-api runs uvicorn and has no built-in
-  # migration entrypoint. PluginIntelligence.validate_handshake() auto-stamps
+  # Why a separate service: the runtime has no built-in migration entrypoint
+  # for the omniintelligence database. PluginIntelligence.validate_handshake() auto-stamps
   # a schema fingerprint on first boot — if tables are missing the fingerprint
   # is wrong and all subsequent boots fail (Audit Gap #7).
   #
-  # This service exits 0 on success; intelligence-api depends on
-  # service_completed_successfully so it will not start if migration fails.
+  # This service exits 0 on success.
   intelligence-migration:
     image: postgres:16-alpine
     container_name: omnibase-infra-intelligence-migration
@@ -1948,63 +1946,6 @@ services:
       - "com.omninode.service=intelligence-migration"
       - "com.omninode.layer=infrastructure"
       - "com.omninode.ticket=OMN-4082"
-  # ==========================================================================
-  # OmniIntelligence HTTP API - Pattern Query Service (Runtime Profile)
-  # ==========================================================================
-  # Serves GET /api/v1/patterns for runtime enforcement nodes.
-  # Shares Dockerfile.runtime (omniintelligence==0.5.0 is installed there).
-  intelligence-api:
-    !!merge <<: *runtime-base
-    container_name: omnibase-intelligence-api
-    profiles: ["runtime", "full"]
-    depends_on:
-      migration-gate:
-        condition: service_healthy
-      intelligence-migration:
-        condition: service_completed_successfully
-      redpanda:
-        condition: service_healthy
-    command:
-      - uvicorn
-      - omniintelligence.api.app:create_app
-      - --factory
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8053"
-      - --workers
-      - "1"
-    environment:
-      # DatabaseSettings reads POSTGRES_* env vars (env_prefix="POSTGRES_")
-      # Must point to the omniintelligence database, not omnibase_infra.
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DATABASE: omniintelligence
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
-      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
-    ports:
-      - "${INTELLIGENCE_API_EXTERNAL_PORT:-8053}:8053"
-    stop_grace_period: 30s
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8053/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 768M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
-    labels:
-      - "com.omninode.service=intelligence-api"
-      - "com.omninode.layer=runtime"
-      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   # ==========================================================================
   # Contract Resolver Bridge - Synchronous HTTP for Dashboard (Runtime Profile)
   # ==========================================================================
@@ -2088,7 +2029,7 @@ services:
   # LLM inference calls. Accepts OTLP HTTP on port 6006 and serves its UI there too.
   # Docker-internal consumers reach Phoenix at phoenix:6006.
   # Host browsers access the UI at http://localhost:6006.
-  # OMN-3542: Added as a runtime-profile service alongside intelligence-api.
+  # OMN-3542: Added as a runtime-profile service alongside the runtime.
   phoenix:
     image: arizephoenix/phoenix:13.11.0 # Pinned; update via PR when bumping (OMN-4303)
     container_name: omnibase-infra-phoenix

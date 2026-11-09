@@ -483,7 +483,7 @@ def test_folded_effects_container_absent_is_green(
 
     assert result.returncode == 0, result.stdout
     assert '"overall": "green"' in result.stdout
-    assert "all runtime containers running (2/2)" in result.stdout
+    assert "all runtime containers running (1/1)" in result.stdout
 
 
 def _gate_with_policy(
