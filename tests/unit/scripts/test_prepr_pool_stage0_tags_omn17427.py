@@ -274,3 +274,31 @@ def test_pool_clone_base_is_injected_not_spelled_in_the_script() -> None:
     spec.loader.exec_module(pool)
     assert "CLONE_BASE_URL" in pool.RESERVED_PARAMS
     assert pool.settings().clone_base_url() == "https://git.example.invalid/OmniNode-ai"
+
+
+def test_pool_staging_defaults_to_dev_tags_for_an_omnimarket_only_proof(
+    tmp_path: Path,
+) -> None:
+    # OMN-21968: the landing prover writes no STAGE_DEV_TAGS; the image audit then
+    # refused every sha-pinned sibling and the stack never built.
+    env, tags, commits = _origins(tmp_path)
+    params = _params(tmp_path, INFRA_DEV_TAG=tags["omnibase_infra"])
+    params.write_text(
+        "".join(
+            line
+            for line in params.read_text(encoding="utf-8").splitlines(keepends=True)
+            if not line.startswith("STAGE_DEV_TAGS=")
+        ),
+        encoding="utf-8",
+    )
+    assert "STAGE_DEV_TAGS" not in params.read_text(encoding="utf-8")
+    cloned = _run(env, "bash", str(PROVE), str(params), "clone")
+    assert cloned.returncode == 0, cloned.stdout + cloned.stderr
+    done = _run(env, "bash", str(PROVE), str(params), "build")
+    assert "stage rc=0" in done.stdout, done.stdout + done.stderr
+    refs = json.loads((tmp_path / "work/refs.json").read_text())
+    for repo in SIBLINGS:
+        assert refs["repos"][repo]["ref"] == tags[repo]
+        assert refs["repos"][repo]["dev_tag_from"] == "origin/dev"
+        staged = tmp_path / "work/root/omnibase_infra/workspace/sibling-repos" / repo
+        assert (staged / ".build-sha").read_text().strip() == commits[repo]
