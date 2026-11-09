@@ -194,8 +194,8 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
             "tenant-projection-writer-a",
             "tenant-projection-writer-b",
         ]
-        assert calls[5] == ["docker", "stop", "--time", "30", *ids]
-        assert calls[6] == ["docker", "rm", *ids]
+        assert calls[6] == ["docker", "stop", "--time", "30", *ids]
+        assert calls[7] == ["docker", "rm", *ids]
 
 
 def test_retirement_is_inert_on_other_lanes() -> None:
