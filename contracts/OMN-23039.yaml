@@ -17,6 +17,11 @@ requirements:
         statement: "AC3: one dev deploy through that agent leaves dev as one container, with no runtime-effects container and ports 8085 and 8086 answering HTTP 200 -- falsifier: docker ps on the dev lane plus curl of ports 8085 and 8086 after the deploy"
       - id: AC4
         statement: "AC4: a ledger row records installed=<host>:<revision> for omnibase_infra#5772 so that the pr-handoff readiness read accepts it -- falsifier: pr-handoff readiness read of #5772 at head 58b95d2b"
+  - id: req-omn23039-onex-api-pin-import-check
+    statement: A candidate onex-api image that cannot import its omnimarket modules does not keep the advanced pin, so onex-api is not recreated into a crash loop.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the deploy agent imports-checks the candidate onex-api image and writes the previous pin back when a module is missing -- falsifier: uv run pytest of the import-check unit and integration tests, which fail with the gate call removed"
 evidence_requirements:
   - kind: tests
     description: The pin tests drive self_update over real git clones; the pinned branch is loaded and held across a second heartbeat, and the same clone without a pin returns to dev.
@@ -85,3 +90,19 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_code_ref_pin_omn23039.py -q -k "TestPinRecord or show"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-onex-api-import-check-rolls-back
+    description: The import check refuses an image whose omnimarket module is gone and restores the previous pin, keeps the pin for an importable image, and the integration test runs the check script in a real interpreter over a fixture tree.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_handler_onex_api_image_import_check_omn23039.py scripts/deploy-agent/tests/unit/test_onex_api_import_check_omn23039.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-onex-api-import-check-integration-proof
+    description: Run this pull request's own import-check tests on a lab host at the pushed head. Hosted CI cannot reach the lab, so only the local Done gate runs this unbound check.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-23039 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/handlers/test_handler_onex_api_image_import_check_omn23039.py -q --no-cov
+        cwd: .
