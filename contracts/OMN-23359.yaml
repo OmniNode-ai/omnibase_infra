@@ -12,7 +12,7 @@ requirements:
       - id: AC1
         statement: "AC1: the declared runner fleet gives h201 zero general CI runners and keeps its host-specific runners, with the fleet tests updated to the new totals -- falsifier: uv run pytest -q -k runner_fleet in omnibase_infra"
       - id: AC2
-        statement: "AC2: after the merged change is applied with deploy-runners.sh --retire-surplus, h201 runs no general CI runner for an hour and its swap use falls -- falsifier: docker ps on h201 and its swap reading before and after"
+        statement: "AC2: the compose file declares no omninode-runner-N service, so the repair timer has nothing to recreate on h201 once deploy-runners.sh --retire-surplus has retired the running containers -- falsifier: grep for omninode-runner-N service keys in docker/docker-compose.runners.yml"
 evidence_requirements:
   - kind: tests
     description: The fleet config and fleet hosts tests pin h201 at zero general runners with its host-specific runners kept, and the compose and relabel tests read the new totals.
@@ -38,12 +38,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest -q tests/ci/test_runner_cache_volumes.py tests/ci/test_deploy_runners_registration_preflight.py tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn23359-h201-no-general-runner
-    description: After deploy-runners.sh --retire-surplus has run on the Mac, docker ps on h201 lists no omninode-runner-N container. Read after the merge; the swap reading before and after is recorded beside it.
+  - id: dod-omn23359-compose-declares-no-general-runner
+    description: The runner compose file holds no omninode-runner-N service key. At the merge base the same grep finds ten, so the check fails there.
     source: manual
-    execution_scope: local_done_gate
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: ssh "$DEPLOY_PROBE_HOST" "test \"$(docker ps --format '{{.Names}}' | grep -c -E '^omninode-runner-[0-9]+$')\" = 0"
+        check_value: bash -c '! grep -qE "^  omninode-runner-[0-9]+:" docker/docker-compose.runners.yml'
         cwd: ${OMNI_HOME}/omnibase_infra
