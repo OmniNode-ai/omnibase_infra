@@ -26,6 +26,7 @@ This module only ever invokes `docker compose config` (a non-mutating render)
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -227,6 +228,18 @@ _UNFOLDED_WRITER_PROFILES: dict[str, str] = {
     )
     for kind in ("RUNTIME", "FULL")
 }
+# OMN-22930 folds the effects role the same way: the committed policy env gates
+# `runtime-effects` under `folded-effects-*`, and the assertions that read the
+# service's definition render it with the profiles it declares unfolded.
+_UNFOLDED_WRITER_PROFILES |= {
+    f"DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_{kind}_PROFILE": kind.lower()
+    for kind in ("RUNTIME", "FULL")
+}
+# OMN-21288 (T9) folds the workers role the same way, under `folded-workers-*`.
+_UNFOLDED_WRITER_PROFILES |= {
+    f"DEV_RUNTIME_MAIN_RUNTIME_WORKER_{kind}_PROFILE": kind.lower()
+    for kind in ("RUNTIME", "FULL")
+}
 
 
 def _render_env(**overrides: str) -> dict[str, str]:
@@ -321,6 +334,28 @@ def test_primary_dev_tenant_fold_removes_the_carrier_in_real_compose() -> None:
         "/app/tenant-projection-data",
         "/app/tenant-projection-logs",
     } <= targets
+
+
+@pytest.mark.integration
+def test_primary_dev_main_receives_the_fold_handovers_in_real_compose() -> None:
+    """OMN-23009: the policy's handovers for effects and workers reach main's env.
+
+    The runtime reads ``ONEX_RUNTIME_FOLD_HANDOVERS``; the render shows the
+    folded main holds it, carrying the retired instance ids the policy declares.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert result.returncode == 0, result.stderr
+    main = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
+    handovers = json.loads(main["environment"]["ONEX_RUNTIME_FOLD_HANDOVERS"])
+    assert handovers["workers"]["from_instance_id"] == "runtime-worker"
+    assert handovers["workers"]["handover_rule"] == "last_ran"
+    assert handovers["effects"]["from_instance_id"] == "runtime-effects"
+    assert set(handovers) <= set(
+        main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")
+    )
 
 
 @pytest.mark.integration
@@ -1090,6 +1125,85 @@ def _binding_mount_source(service: dict[str, Any]) -> Path | None:
     for mount in _mounts_at(service, _RUNTIME_BINDING_TARGET):
         return Path(mount["source"])
     return None
+
+
+def _primary_dev_services(
+    *, effects_folded: bool, workers_folded: bool = True
+) -> dict[str, Any]:
+    """Primary dev's layered render; ``*_folded=False`` is that role's pre-fold shape."""
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    if effects_folded:
+        # The committed policy env, as the deploy agent renders primary dev.
+        for kind in ("RUNTIME", "FULL"):
+            env.pop(f"DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_{kind}_PROFILE")
+    if workers_folded:
+        for kind in ("RUNTIME", "FULL"):
+            env.pop(f"DEV_RUNTIME_MAIN_RUNTIME_WORKER_{kind}_PROFILE")
+    result = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert result.returncode == 0, result.stderr
+    return yaml.safe_load(result.stdout)["services"]
+
+
+@pytest.mark.integration
+def test_primary_dev_effects_fold_removes_the_service_in_real_compose() -> None:
+    """OMN-22930: no runtime-effects service; main carries its secrets, port and state."""
+    services = _primary_dev_services(effects_folded=True)
+    assert "runtime-effects" not in services
+    main = services["omninode-runtime"]
+    assert "effects" in main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")
+    policy = {
+        key: value.strip("'")
+        for key, value in (
+            line.split("=", 1)
+            for line in POLICY_ENV_PATH.read_text(encoding="utf-8").splitlines()
+            if "=" in line and not line.startswith("#")
+        )
+    }
+    # `docker compose config` doubles every literal dollar sign.
+    assert (
+        main["environment"]["ONEX_SECRET_RESOLVER_CONFIG_JSON"].replace("$$", "$")
+        == policy["DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert main["environment"]["INFISICAL_ENVIRONMENT_SLUG"] == "dev"
+    published = {
+        (port["target"], int(port["published"])) for port in main.get("ports", [])
+    }
+    assert (8085, int(policy["DEV_RUNTIME_EFFECTS_PORT"])) in published
+    targets = {volume["target"] for volume in main["volumes"]}
+    assert {"/app/effects-data", "/app/effects-logs"} <= targets
+
+
+@pytest.mark.integration
+def test_failing_control_pre_fold_render_still_has_the_effects_service() -> None:
+    """The pre-fold profiles restore the service, with the resolver config it always had."""
+    services = _primary_dev_services(effects_folded=False)
+    resolver = services["runtime-effects"]["environment"][
+        "ONEX_SECRET_RESOLVER_CONFIG_JSON"
+    ].replace("$$", "$")
+    assert resolver.startswith('{"enable_convention_fallback":false')
+    assert '"namespace":"tenant_inference_credentials"' in resolver
+
+
+@pytest.mark.integration
+def test_primary_dev_worker_fold_removes_the_service_in_real_compose() -> None:
+    """OMN-21288 (T9): no runtime-worker service; main carries the role and its logs."""
+    services = _primary_dev_services(effects_folded=True, workers_folded=True)
+    assert "runtime-worker" not in services
+    main = services["omninode-runtime"]
+    folded = main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")
+    assert {"effects", "workers"} <= set(folded)
+    assert "/app/worker-logs" in {volume["target"] for volume in main["volumes"]}
+
+
+@pytest.mark.integration
+def test_failing_control_pre_fold_render_still_has_the_worker_service() -> None:
+    """The pre-fold profiles restore the service, with its one replica and its profile."""
+    services = _primary_dev_services(effects_folded=True, workers_folded=False)
+    worker = services["runtime-worker"]
+    assert worker["environment"]["RUNTIME_PROFILE"] == "workers"
+    assert worker["deploy"]["replicas"] == 1
 
 
 def _render_dev_lane_services() -> dict[str, Any]:

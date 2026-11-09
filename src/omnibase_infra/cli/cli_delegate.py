@@ -252,12 +252,17 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
     HandlerWorkspaceRuntimeConfigMaterializer,
 )
+from omnibase_infra.models.delegation.delegate_refusal_state_root import (
+    funnel_state_root,
+    state_root_from_arguments,
+)
 from omnibase_infra.models.delegation.delegate_request_payload import (
     DELEGATE_TICKET_METADATA_KEY,
 )
 from omnibase_infra.models.delegation.delegate_request_payload import (
     build_delegate_request_payload as _request_payload,
 )
+from omnibase_infra.models.delegation.delegate_traffic_options import traffic_options
 from omnibase_infra.models.delegation.model_delegate_incomplete_terminal import (
     ModelDelegateIncompleteTerminal,
 )
@@ -2448,6 +2453,8 @@ def _write_payload(
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
     session_model: str | None = None,
+    traffic_class: str | None = None,
+    source_surface: str | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -2503,6 +2510,8 @@ def _write_payload(
             lineage=lineage,
             named_tests=named_tests,
             session_model=session_model,
+            traffic_class=traffic_class,
+            source_surface=source_surface,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2772,7 +2781,6 @@ def resolve_prompt_source(prompt: str | None, prompt_file: str | None) -> str:
 _RUN_ID_META_KEY = "omnibase_infra.delegate.run_id"
 _CORRELATION_ID_META_KEY = "omnibase_infra.delegate.correlation_id"
 
-_STATE_ROOT_FLAG = "--state-root"
 _RESULT_ONLY_FLAG = "--result-only"
 _DIAGNOSTICS_LOG_NAME = "diagnostics.log"
 #: Receipt classes the CLI writes when no terminal arrived. They name no cause.
@@ -2927,44 +2935,6 @@ def _write_refusal_run_files(
     else:
         click.echo(artifacts_line, err=True)
     return run_dir
-
-
-def _funnel_state_root(explicit: Path | None, *, quiet: bool = False) -> Path | None:
-    """The root a refusal receipt is filed under: the command's own rule.
-
-    The flag is the operator's own choice and is used as given; without it the
-    root resolves exactly as the command body resolves it (OMN-19232), never
-    against the working directory. ``None`` when no root can be resolved (a
-    relative ``ONEX_STATE_DIR``, a root under ``~/.claude``): there is then no
-    place the receipt belongs, and the cause goes to stderr instead. ``quiet``
-    (``--result-only``) leaves stderr alone: the command body refuses on the same
-    unresolvable root and that refusal is the one line the caller reads.
-    """
-    if explicit is not None:
-        return explicit
-    try:
-        return resolve_state_root(None)
-    except ProtocolConfigurationError as exc:
-        if not quiet:
-            click.echo(
-                f"onex delegate: no refusal receipt was written: {exc.message}",
-                err=True,
-            )
-        return None
-
-
-def _state_root_from_arguments(arguments: Sequence[str]) -> Path | None:
-    """Read ``--state-root`` out of raw arguments that did not parse.
-
-    Argument parsing may have failed before the option was read, and the
-    receipt belongs where the caller said state lives.
-    """
-    for index, argument in enumerate(arguments):
-        if argument == _STATE_ROOT_FLAG and index + 1 < len(arguments):
-            return Path(arguments[index + 1])
-        if argument.startswith(f"{_STATE_ROOT_FLAG}="):
-            return Path(argument.partition("=")[2])
-    return None
 
 
 def _result_only_requested(arguments: Sequence[str]) -> bool:
@@ -3196,8 +3166,8 @@ class DelegateCommand(click.Command):
             return super().parse_args(ctx, args)
         except click.ClickException as exc:
             quiet = _result_only_requested(given)
-            state_root = _funnel_state_root(
-                _state_root_from_arguments(given), quiet=quiet
+            state_root = funnel_state_root(
+                state_root_from_arguments(given), quiet=quiet
             )
             self._file_refusal(
                 ctx,
@@ -3243,7 +3213,7 @@ class DelegateCommand(click.Command):
         the answer on success, one ``Error:`` line on any failure (OMN-21088).
         """
         explicit = ctx.params.get("state_root")
-        state_root = _funnel_state_root(
+        state_root = funnel_state_root(
             Path(explicit) if explicit is not None else None, quiet=True
         )
         run_dir = self._run_dir(ctx, state_root)
@@ -3294,7 +3264,7 @@ class DelegateCommand(click.Command):
 
     def _invoke_filed(self, ctx: click.Context, *, quiet: bool) -> object:
         explicit = ctx.params.get("state_root")
-        state_root = _funnel_state_root(
+        state_root = funnel_state_root(
             Path(explicit) if explicit is not None else None, quiet=quiet
         )
         try:
@@ -3775,6 +3745,7 @@ class DelegateCommand(click.Command):
         "come from an UNVERIFIED build and are not evidence."
     ),
 )
+@traffic_options
 def delegate_command(
     prompt: str | None,
     prompt_file: str | None,
@@ -3810,6 +3781,8 @@ def delegate_command(
     test_files: tuple[str, ...] = (),
     answer_path: str | None = None,
     session_model: str | None = None,
+    traffic_class: str | None = None,
+    source_surface: str | None = None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print the result.
 
@@ -3932,6 +3905,8 @@ def delegate_command(
             lineage=lineage,
             named_tests=named_test_metadata,
             session_model=session_model,
+            traffic_class=traffic_class,
+            source_surface=source_surface,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -3970,6 +3945,8 @@ def run_delegate(
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
     session_model: str | None = None,
+    traffic_class: str | None = None,
+    source_surface: str | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -4084,6 +4061,8 @@ def run_delegate(
                 model=model,
                 max_tokens=max_tokens,
                 correlation_id=uuid.uuid4(),
+                traffic_class=traffic_class,
+                source_surface=source_surface,
             )
         )
     except RegistryUnresolvedError as exc:
@@ -4302,6 +4281,8 @@ def run_delegate(
             lineage=lineage,
             named_tests=named_tests,
             session_model=session_model,
+            traffic_class=traffic_class,
+            source_surface=source_surface,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.

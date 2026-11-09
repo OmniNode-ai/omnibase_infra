@@ -43,6 +43,9 @@ GATES_PENDING = "gating jobs or external contexts still pending"
 
 SENTINEL = '[{"name": "a job read before the outage", "conclusion": "success"}]'
 
+#: What the gate script is asked for when the deadline reports the gates.
+REPORT_ONLY = "--report-only"
+
 
 def _poll_step() -> dict[str, object]:
     """The CI Summary poll step, located by the text only it contains."""
@@ -58,6 +61,7 @@ def _run_poll(
     *,
     clock_jumps_after: int,
     seed_jobs_json: str | None = None,
+    gh_ok_calls: int = 0,
     timeout: int = 30,
 ) -> subprocess.CompletedProcess[str]:
     """Run the step's own shell with a failing ``gh`` and a controlled clock.
@@ -65,7 +69,13 @@ def _run_poll(
     ``clock_jumps_after`` is the number of ``date +%s`` calls answered with the
     real time before every later call jumps far past the deadline. The step calls
     it once to compute the deadline and once per loop iteration, so 2 lets
-    exactly one fetch attempt happen before the deadline branch is taken.
+    exactly one fetch attempt happen before the deadline branch is taken, and
+    each further read the poll makes needs one more real call.
+
+    ``gh_ok_calls`` is how many ``gh`` calls succeed, returning one finished job,
+    before every later call fails. A stub ``ci_summary_gate.py`` that reports
+    PENDING records its arguments in ``gate_calls`` so a test can see whether the
+    deadline asked it for a gate report.
     """
     step = _poll_step()
     script = tmp_path / "poll.sh"
@@ -73,9 +83,28 @@ def _run_poll(
 
     stub_bin = tmp_path / "bin"
     stub_bin.mkdir()
-    # gh always fails, on stderr, the way a 502 from the jobs listing does.
+    # gh fails, on stderr, the way a 502 from the jobs listing does, once its
+    # allowance of successful calls is spent.
+    gh_counter = tmp_path / "gh_calls"
+    gh_counter.write_text("0", encoding="utf-8")
     (stub_bin / "gh").write_text(
-        '#!/bin/sh\necho "gh: Something went wrong (HTTP 502)" >&2\nexit 1\n',
+        "#!/bin/sh\n"
+        f'n=$(cat "{gh_counter}")\n'
+        f'echo $((n + 1)) > "{gh_counter}"\n'
+        f'if [ "$n" -lt "{gh_ok_calls}" ]; then\n'
+        '  echo \'{"name": "a finished job", "conclusion": "success"}\'\n'
+        "  exit 0\n"
+        "fi\n"
+        'echo "gh: Something went wrong (HTTP 502)" >&2\n'
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    gate_dir = tmp_path / "scripts" / "ci"
+    gate_dir.mkdir(parents=True)
+    (gate_dir / "ci_summary_gate.py").write_text(
+        "import sys\n"
+        f'open("{tmp_path / "gate_calls"}", "a").write(" ".join(sys.argv[1:]) + "\\n")\n'
+        "sys.exit(2)\n",
         encoding="utf-8",
     )
     counter = tmp_path / "date_calls"
@@ -163,6 +192,64 @@ def test_the_deadline_names_the_unreadable_input_not_the_gates(tmp_path: Path) -
         f"the job listing once:\n{out}"
     )
     assert "failed read(s)" in out, "the count of failed reads was not reported"
+    assert not any(REPORT_ONLY in call for call in _gate_calls(tmp_path)), (
+        "the deadline asked the gate script for a report of an unread listing; "
+        "the stub gate records every call, so this is the omission AC2 requires"
+    )
+
+
+def _gate_calls(tmp_path: Path) -> list[str]:
+    """The argument lines the stub gate script was called with, in order."""
+    calls = tmp_path / "gate_calls"
+    return calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+
+
+def test_a_stale_listing_is_not_evidence_of_current_state(tmp_path: Path) -> None:
+    """One good read, then failures to the deadline: the current state is unread.
+
+    The first poll reads a listing and the gate reports PENDING; every later read
+    fails until the deadline. The retained jobs.json is a snapshot, so the
+    deadline must name the unreadable input and must not ask the gate script for
+    a report of it, exactly as when no read ever succeeded.
+    """
+    result = _run_poll(tmp_path, clock_jumps_after=3, gh_ok_calls=1)
+    out = result.stdout + result.stderr
+
+    assert result.returncode == 1, out
+    assert (tmp_path / "jobs.json").exists(), "the first good listing was not read"
+    assert UNREADABLE_INPUT in out, (
+        "an earlier successful read suppressed the outage attribution at the "
+        f"deadline:\n{out}"
+    )
+    assert GATES_PENDING not in out, (
+        "the deadline reported gates as pending off a listing the newest reads "
+        f"failed to refresh:\n{out}"
+    )
+    assert "1 consecutive failed read(s)" in out, (
+        f"the failure count was not the count since the last good read:\n{out}"
+    )
+    assert not any(REPORT_ONLY in call for call in _gate_calls(tmp_path)), (
+        "the deadline printed a gate report from a stale listing"
+    )
+
+
+def test_a_deadline_with_a_current_listing_still_reports_the_gates(
+    tmp_path: Path,
+) -> None:
+    """Positive control: when the newest read succeeded, the gates are reported.
+
+    Without this the two tests above would pass for a deadline that always
+    claimed an outage.
+    """
+    result = _run_poll(tmp_path, clock_jumps_after=2, gh_ok_calls=1)
+    out = result.stdout + result.stderr
+
+    assert result.returncode == 1, out
+    assert GATES_PENDING in out, f"a current listing was reported as unreadable:\n{out}"
+    assert UNREADABLE_INPUT not in out, out
+    assert any(REPORT_ONLY in call for call in _gate_calls(tmp_path)), (
+        "the deadline did not ask the gate script for its report"
+    )
 
 
 def test_the_failing_fetch_surfaces_the_http_status(tmp_path: Path) -> None:

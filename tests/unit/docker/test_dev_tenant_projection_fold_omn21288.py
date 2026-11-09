@@ -272,6 +272,10 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
     assert process.foldable_services == {
         "tenant-projection": SERVICE,
         **RUNTIME_WRITERS,
+        # OMN-22930: the effects role folds the same way, by the same mapping.
+        "effects": "runtime-effects",
+        # OMN-21288 (T9): the workers role folds the same way, by the same mapping.
+        "workers": "runtime-worker",
         # OMN-21288 (T17): the projection API, served by main as a mounted node.
         "projection-api": "projection-api",
     }

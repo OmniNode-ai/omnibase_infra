@@ -6,11 +6,62 @@ services:
   omninode-runtime:
     environment:
       ONEX_RUNTIME_FOLDED_PROFILES: ${DEV_RUNTIME_MAIN_FOLDED_PROFILES:?runtime policy contract must set DEV_RUNTIME_MAIN_FOLDED_PROFILES}
+      # OMN-23009: the per-profile consumer group handover the policy renders
+      # (effects and workers resume from the commits of the retired service that
+      # last ran). The runtime reads it as ONEX_RUNTIME_FOLD_HANDOVERS; without
+      # this line the folded roles start at their auto_offset_reset and a queued
+      # event is skipped. `:?` as on the folded profiles: a blank value is
+      # refused at render, never read as "no handover".
+      ONEX_RUNTIME_FOLD_HANDOVERS: ${DEV_RUNTIME_MAIN_FOLD_HANDOVERS:?runtime policy contract must set DEV_RUNTIME_MAIN_FOLD_HANDOVERS}
+      #
+      # -- Effects role (OMN-22930, T8) ---------------------------------------
+      # The values below are the ones the retired runtime-effects service set
+      # in docker-compose.infra.yml and docker-compose.dev-lane.yml, carried
+      # over unchanged to the one process that now runs the effects nodes.
+      #
+      # Secret resolver: the rendered store-backed config (house mappings plus
+      # the tenant_inference_credentials rule that main now owns) and the same
+      # read-only Infisical identity the retired service used, resolved from
+      # the same operator env names. `:-` as on the retired service: a blank
+      # identity is refused loudly at wiring time naming each blank variable.
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON}
+      INFISICAL_ADDR: ${RUNTIME_EFFECTS_INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${RUNTIME_EFFECTS_INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_SECRET:-}
+      INFISICAL_ENVIRONMENT_SLUG: "dev"
+      # Coding-agent nodes, savings consumer and the projection read binding.
+      CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}
+      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/${RUNTIME_USER_NAME:-omniinfra}/agent-workspaces
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: /etc/onex/projection-read-binding.yaml
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays
+      ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
+      ONEX_TICKET_GUARD_PATH: /etc/onex/ticket-guard/plugins/onex/hooks/lib/ticket_creation_guard.py
+    # The effects health port keeps answering, now from main (plan T8: port
+    # 8086 answers from main).
+    ports:
+      - "${DEV_RUNTIME_EFFECTS_PORT:?runtime policy contract must set DEV_RUNTIME_EFFECTS_PORT}:8085"
+    networks:
+      - omnibase-infra-network
+      - omnimemory-network
     volumes:
       # Main keeps runtime_data at /app/data. Retain the carrier's historical
       # state and logs separately; no volume is removed during retirement.
       - tenant_projection_data:/app/tenant-projection-data
       - tenant_projection_logs:/app/tenant-projection-logs:ro
+      # The retired effects service's state and logs stay in place and are
+      # never removed; a rollback restores the service on the same volumes.
+      - effects_data:/app/effects-data
+      - effects_logs:/app/effects-logs:ro
+      # OMN-21288 (T9): the retired worker's logs stay in place and are never
+      # removed; a rollback restores the service on the same volume.
+      - worker_logs:/app/worker-logs:ro
+      - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
+      - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro
+      - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.codex/auth.json:ro
+      - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.claude:ro
   # The retired carrier starts under no profile a lane bring-up requests, as
   # the stability lane folds runtime-effects. A service-level `!reset` would
   # break every reader that loads the overlays with SafeLoader.

@@ -224,13 +224,42 @@ profiles:
           - projection-writer-tenant-credentials
           - projection-writer-tenant-registry
           - projection-writer-delegation
+          # OMN-22930 (T8): the effects role runs as nodes inside main. The
+          # separate runtime-effects service is retired through the same
+          # contract mapping as the writers; its consumer groups resume from
+          # the committed offsets through the fold handover (OMN-22877).
+          - effects
+          # OMN-21288 (T9): the worker role runs as nodes inside main. The
+          # separate runtime-worker service is retired through the same
+          # contract mapping; its consumer groups resume from the committed
+          # offsets through the same handover as effects, so a queued workflow
+          # event is neither skipped nor run twice across the fold.
+          - workers
           # OMN-21288 (T17): the projection API is the query node
           # node_projection_query_api_effect. Main serves it on its own HTTP port
           # under the http_mount prefix its contract declares, so the separate
           # projection-api service is retired through the same contract mapping.
           # The service holds no consumer group, so there is no fold handover.
           - projection-api
+        fold_handovers:
+          workers:
+            # KAFKA_INSTANCE_ID the retired runtime-worker service set
+            # (docker-compose.infra.yml). A repeat of a workflow event is not
+            # tolerated, so the rule is last_ran, never copy_if_uncommitted.
+            from_instance_id: runtime-worker
+            from_auto_offset_reset: latest
+            handover_rule: last_ran
+          effects:
+            # KAFKA_INSTANCE_ID the retired runtime-effects service set
+            # (docker-compose.infra.yml), and the event bus default it ran
+            # with (kafka_event_bus_config.yaml, KAFKA_AUTO_OFFSET_RESET).
+            from_instance_id: runtime-effects
+            from_auto_offset_reset: latest
+            # Effects handlers cannot take a repeat (plan T8).
+            handover_rule: last_ran
         foldable_services:
+          effects: runtime-effects
+          workers: runtime-worker
           tenant-projection: tenant-projection-writer
           projection-writer-live-events: projection-live-events-writer
           projection-writer-registration: projection-registration-writer
@@ -255,6 +284,11 @@ profiles:
           - market.skill-proof
           - workflow.orchestration
           - runtime.main
+          # OMN-21288 (T9): the capabilities the retired runtime-worker declared,
+          # so the workflow capabilities resolve on main once the role is folded.
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
         bifrost_verify_endpoints: true
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
@@ -281,6 +315,18 @@ profiles:
             - projection_claude_hook_events
             - projection_hook_ledger
           memory_limit: 3072M
+        # OMN-22930 (T8): the BYOK credential READ that only the separate
+        # effects service resolved (OMN-20533) now happens in main, because the
+        # provider call runs there once the role is folded. The rule is the
+        # same one the effects process declares below (kept for the other dev
+        # instances, which still render a separate effects role), so the folded
+        # main resolves every name the retired service resolved, from the same
+        # sources. Renders as DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON.
+        secret_resolver_namespaces:
+          - namespace: tenant_inference_credentials
+            ref_pattern: "^cred_[A-Za-z0-9._:-]+_[A-Za-z0-9_-]+_[0-9a-f]{32}$"
+            source_type: infisical
+            source_path_template: "/tenant-inference-credentials/{ref}"
       effects:
         runtime_id: dev-effects
         runtime_address: runtime://omninode-pc/dev/effects
