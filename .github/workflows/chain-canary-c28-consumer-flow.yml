@@ -136,6 +136,7 @@ jobs:
         uses: ./.github/actions/resolve-lab-lane
         with:
           lanes-json: ${{ vars.LAB_PROOF_LANES_JSON }}
+          lanes-var: LAB_PROOF_LANES_JSON
           # OMN-21485: a stability lane only. Its compose project names the
           # containers node_board_probe_effect reads, so it is required.
           require: projection_url docker_runs_on compose_project
