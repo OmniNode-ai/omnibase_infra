@@ -26,6 +26,7 @@ This module only ever invokes `docker compose config` (a non-mutating render)
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -333,6 +334,28 @@ def test_primary_dev_tenant_fold_removes_the_carrier_in_real_compose() -> None:
         "/app/tenant-projection-data",
         "/app/tenant-projection-logs",
     } <= targets
+
+
+@pytest.mark.integration
+def test_primary_dev_main_receives_the_fold_handovers_in_real_compose() -> None:
+    """OMN-23009: the policy's handovers for effects and workers reach main's env.
+
+    The runtime reads ``ONEX_RUNTIME_FOLD_HANDOVERS``; the render shows the
+    folded main holds it, carrying the retired instance ids the policy declares.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert result.returncode == 0, result.stderr
+    main = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
+    handovers = json.loads(main["environment"]["ONEX_RUNTIME_FOLD_HANDOVERS"])
+    assert handovers["workers"]["from_instance_id"] == "runtime-worker"
+    assert handovers["workers"]["handover_rule"] == "last_ran"
+    assert handovers["effects"]["from_instance_id"] == "runtime-effects"
+    assert set(handovers) <= set(
+        main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")
+    )
 
 
 @pytest.mark.integration
