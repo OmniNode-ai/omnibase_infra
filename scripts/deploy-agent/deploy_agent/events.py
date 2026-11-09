@@ -161,7 +161,6 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
         "skill-lifecycle-consumer",
         "context-audit-consumer",
         "intelligence-migration",
-        "intelligence-api",
         "omninode-contract-resolver",
         "autoheal",
     ],
@@ -321,7 +320,6 @@ DEV_LANE_COMPOSED_RUNTIME_SERVICES: tuple[str, ...] = (
     "agent-actions-consumer",
     "skill-lifecycle-consumer",
     "context-audit-consumer",
-    "intelligence-api",
     "omninode-contract-resolver",
 )
 

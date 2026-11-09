@@ -238,8 +238,8 @@ def test_service_parity_local_only_is_warning() -> None:
     from compare_environments import check_service_deployment_parity
 
     findings = check_service_deployment_parity(
-        local_services={"omninode-runtime", "omnibase-intelligence-api"},
-        cloud_services={"omnibase-intelligence-api"},
+        local_services={"omninode-runtime", "omninode-contract-resolver"},
+        cloud_services={"omninode-contract-resolver"},
     )
     assert any(
         f.severity == "WARNING" and "omninode-runtime" in f.title for f in findings
@@ -253,10 +253,10 @@ def test_service_parity_cloud_only_is_info() -> None:
 
     findings = check_service_deployment_parity(
         local_services={"omninode-runtime"},
-        cloud_services={"omninode-runtime", "omnibase-intelligence-api"},
+        cloud_services={"omninode-runtime", "omninode-contract-resolver"},
     )
     assert any(
-        f.severity == "INFO" and "omnibase-intelligence-api" in f.title
+        f.severity == "INFO" and "omninode-contract-resolver" in f.title
         for f in findings
     )
 
