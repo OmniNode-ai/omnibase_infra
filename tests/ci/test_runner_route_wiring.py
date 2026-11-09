@@ -657,9 +657,11 @@ LINT_RUNS_ON = "${{ fromJSON(needs.route.outputs.labels) }}"
 SELECTOR_V2_MARKER = "OMNI_RUNNER_SELECTOR_V2"
 
 
-def test_lint_resolves_its_placement_from_the_route_output() -> None:
+def test_lint_selects_the_hosted_label_not_the_route_output() -> None:
+    # OMN-22867: a public repository selects no computed runs-on, so lint no
+    # longer resolves its placement from the route output.
     lint = _workflow("ci.yml")["jobs"]["lint"]
-    assert lint["runs-on"].strip() == LINT_RUNS_ON
+    assert lint["runs-on"].strip() == "ubuntu-latest"
     assert lint["name"] == "Lint"
 
 
@@ -672,21 +674,14 @@ def test_lint_declares_the_needs_edge_its_expression_requires() -> None:
     assert "occ-preflight" not in lint["needs"]
 
 
-def test_lint_carries_the_v2_selector_marker() -> None:
-    """The marker is how runner placement is FOUND. Every survey to date was a
-    grep for the V1 string; an unmarked consumer is invisible to the next one.
-    """
+def test_lint_leaves_no_selector_marker_behind() -> None:
+    """A marker left behind by a revert states a placement the workflow does not have."""
     text = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
-    lines = text.splitlines()
-    index = next(i for i, line in enumerate(lines) if LINT_RUNS_ON in line)
-    assert SELECTOR_V2_MARKER in "\n".join(lines[max(0, index - 6) : index])
+    assert SELECTOR_V2_MARKER not in text
 
 
-def test_lint_is_the_only_route_consumer_in_ci_yml() -> None:
-    """Blast radius. One cheap always-running job proves the mechanism; the
-    other heavy jobs move only on separate evidence, so a routing defect cannot
-    take the whole fan-out with it.
-    """
+def test_no_job_in_ci_yml_consumes_the_route_output() -> None:
+    """OMN-22867: lint was the one route consumer; it now selects the hosted label."""
     jobs = _workflow("ci.yml")["jobs"]
     consumers = sorted(
         name
@@ -695,7 +690,7 @@ def test_lint_is_the_only_route_consumer_in_ci_yml() -> None:
         and isinstance(job.get("runs-on"), str)
         and "outputs.labels" in job["runs-on"]
     )
-    assert consumers == ["lint"]
+    assert consumers == []
 
 
 def test_the_other_heavy_jobs_still_read_the_seam_directly() -> None:

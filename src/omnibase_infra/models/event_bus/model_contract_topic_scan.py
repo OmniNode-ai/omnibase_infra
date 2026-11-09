@@ -21,7 +21,9 @@ when a start began or whether a contract is new.
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar
@@ -32,6 +34,8 @@ from omnibase_infra.tools.contract_topic_extractor import (
     ContractTopicExtractor,
     ModelContractTopicEntry,
 )
+
+logger = logging.getLogger(__name__)
 
 _MAX_STORED = 16
 
@@ -85,6 +89,7 @@ class ModelContractTopicScan(BaseModel):
         with cls._lock:
             if key not in cls._stored:
                 cls._runs[0] += 1
+                started = time.monotonic()
                 extractor = ContractTopicExtractor(
                     include_installed_packages=include_installed_packages
                 )
@@ -92,6 +97,14 @@ class ModelContractTopicScan(BaseModel):
                     contracts_root=contracts_root,
                     skill_manifests_root=skill_manifests_root,
                     skill_manifests_roots=list(skill_manifests_roots or ()) or None,
+                )
+                logger.info(
+                    "contract topic scan ran: run=%d topics=%d seconds=%.3f "
+                    "contracts_root=%s (OMN-22607)",
+                    cls._runs[0],
+                    len(found),
+                    time.monotonic() - started,
+                    contracts_root,
                 )
                 if len(cls._stored) >= _MAX_STORED:
                     cls._stored.clear()
