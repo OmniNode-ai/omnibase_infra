@@ -103,3 +103,14 @@ def test_other_dev_instances_keep_their_own_consumer() -> None:
     for overlay in keepers:
         profiles = _overlay_services(DOCKER / overlay)[CONSUMER].get("profiles")
         assert profiles != ["folded-skill-lifecycle"], overlay
+
+
+def test_skill_lifecycle_retired_on_primary_dev() -> None:
+    # OMN-23332 AC1: the runtime policy retires the consumer by name and the
+    # rendered dev stack declares no skill-lifecycle-consumer service, so the
+    # handler the main runtime runs owns the consumer group alone.
+    process = load_contract().profiles["dev"].processes["main"]
+    assert CONSUMER in process.retired_services
+    stack = dev_stack_services()
+    assert "omninode-runtime" in stack  # positive control: the stack really rendered
+    assert CONSUMER not in stack
