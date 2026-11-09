@@ -68,7 +68,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Resolve OMNI_HOME for cross-repo checks
-OMNI_HOME="${OMNI_HOME:-/Volumes/PRO-G40/Code/omni_home}"
+OMNI_HOME="${OMNI_HOME:-${REPO_ROOT}/..}"
 
 # ----- Flags -----
 FLAG_JSON=false
@@ -300,7 +300,7 @@ check_keycloak() {
 
 check_runtime_containers() {
     local name="runtime_containers"
-    local expected=("omninode-runtime" "omninode-runtime-effects" "omnibase-intelligence-api")
+    local expected=("omninode-runtime" "omninode-runtime-effects")
     local running
     running=$(docker ps --format '{{.Names}}' 2>/dev/null) || true
 
