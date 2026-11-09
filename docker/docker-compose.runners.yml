@@ -2,9 +2,22 @@
 # OmniNode self-hosted GitHub Actions runners
 # Ticket: OMN-3276 / Epic: OMN-3273 | Scaled: OMN-3714 | Reconciled to live 48: OMN-12582 | Phase-A scale to 64: OMN-14029 | Saturation scale to 72: OMN-15978 | Reconciled to live 88: OMN-15978 | Capped to 60: OMN-18411 | Kept at 60, aggregate-cgroup contained: OMN-19077 (operator ruling ROLLING_WORK_LEDGER.md:3794) | Primary pool capped 44 -> 10: OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:66460)
 #
-# Runs the full steady-state runner fleet. The fleet count is owned by
+# Runs this host's runners. The fleet count is owned by
 # config/runner_fleet.yaml (expected_count). Each runner registers with GitHub
-# org OmniNode-ai in the 'omnibase-ci' runner group.
+# org OmniNode-ai in its own runner group.
+#
+# OMN-22898: this host declares NO general `omninode-runner-N` runner any more
+# (expected_count 0; it was 10 after OMN-19077). The general `omnibase-ci` pool
+# runs on the second amd64 host (its own docker-compose.runners-<prefix>.yml
+# pool file) and on h053 (docker-compose.runners-hp053-ci-runner.yml). What stays here are the
+# host-specific runners, each pinned by its own label to this host: the deploy
+# runner, three verify runners, two customer-plane runners and the production
+# deploy runner. No service in this file merges the `x-runner-base` and
+# `x-runner-env` anchors below any more; they are kept as the reference
+# definition of the general runner that the tests read. A default deploy of this file passes
+# `--remove-orphans`, so run `deploy-runners.sh --retire-surplus` first: it
+# retires any surviving `omninode-runner-N` container idle-checked, one at a
+# time, where `--remove-orphans` would remove them all at once.
 #
 # Prerequisites:
 #   - Build the runner image first (OMN-3275):
@@ -316,166 +329,6 @@ x-runner-base: &runner-base
       max-size: "10m"
       max-file: "3"
 services:
-  omninode-runner-1:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-1
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-1
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-1-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-1-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-2:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-2
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-2
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-2-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-2-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-3:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-3
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-3
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-3-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-3-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-4:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-4
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-4
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-4-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-4-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-5:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-5
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-5
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-5-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-5-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-5-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-6:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-6
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-6
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-6-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-6-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-6-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-7:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-7
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-7
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-7-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-7-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-7-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-8:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-8
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-8
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-8-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-8-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-8-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-9:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-9
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-9
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-9-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-9-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-9-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
-  omninode-runner-10:
-    !!merge <<: *runner-base
-    container_name: omninode-runner-10
-    environment:
-      !!merge <<: *runner-env
-      RUNNER_NAME: omninode-runner-10
-    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}:${RUNNER_USER_HOME:-/home/runner}/.lab-credentials:ro
-      - *lab-host-table
-      - runner-10-cache:${RUNNER_USER_HOME:-/home/runner}/.cache
-      - runner-10-work:${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work
-      - runner-10-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
   # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real
@@ -1301,63 +1154,3 @@ volumes:
   # another runner's label set, which is the entire access boundary here.
   prod-deploy-runner-1-creds:
     name: omninode-prod-deploy-runner-1-creds
-  runner-1-creds:
-    name: omninode-runner-1-creds
-  runner-1-cache:
-    name: omninode-runner-1-cache
-  runner-1-work:
-    name: omninode-runner-1-work
-  runner-2-creds:
-    name: omninode-runner-2-creds
-  runner-2-cache:
-    name: omninode-runner-2-cache
-  runner-2-work:
-    name: omninode-runner-2-work
-  runner-3-creds:
-    name: omninode-runner-3-creds
-  runner-3-cache:
-    name: omninode-runner-3-cache
-  runner-3-work:
-    name: omninode-runner-3-work
-  runner-4-creds:
-    name: omninode-runner-4-creds
-  runner-4-cache:
-    name: omninode-runner-4-cache
-  runner-4-work:
-    name: omninode-runner-4-work
-  runner-5-creds:
-    name: omninode-runner-5-creds
-  runner-5-cache:
-    name: omninode-runner-5-cache
-  runner-5-work:
-    name: omninode-runner-5-work
-  runner-6-creds:
-    name: omninode-runner-6-creds
-  runner-6-cache:
-    name: omninode-runner-6-cache
-  runner-6-work:
-    name: omninode-runner-6-work
-  runner-7-creds:
-    name: omninode-runner-7-creds
-  runner-7-cache:
-    name: omninode-runner-7-cache
-  runner-7-work:
-    name: omninode-runner-7-work
-  runner-8-creds:
-    name: omninode-runner-8-creds
-  runner-8-cache:
-    name: omninode-runner-8-cache
-  runner-8-work:
-    name: omninode-runner-8-work
-  runner-9-creds:
-    name: omninode-runner-9-creds
-  runner-9-cache:
-    name: omninode-runner-9-cache
-  runner-9-work:
-    name: omninode-runner-9-work
-  runner-10-creds:
-    name: omninode-runner-10-creds
-  runner-10-cache:
-    name: omninode-runner-10-cache
-  runner-10-work:
-    name: omninode-runner-10-work
