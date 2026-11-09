@@ -285,6 +285,7 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
     assert process.retired_services == (
         "projection-claude-hook-events-writer",
         "context-audit-consumer",
+        "intelligence-api",
         "skill-lifecycle-consumer",
     )
     assert _overlay_gates() == {

@@ -1123,8 +1123,6 @@ services:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
-  intelligence-api:
-    build: *dev_lane_composed_runtime_build
   projection-api:
     build: *dev_lane_composed_runtime_build
     # OMN-21288 (T17): gated from the runtime policy like the folded writers and
