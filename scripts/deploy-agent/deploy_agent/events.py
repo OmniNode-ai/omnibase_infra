@@ -257,7 +257,6 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     "projection-savings-writer",
     "projection-tenant-credentials-writer",
     "projection-live-events-writer",
-    "infra-routing-decisions-consumer",
     "onex-api",
     # OMN-18114: the TENANT-domain projection carrier, for a reason that is the
     # OPPOSITE of the writers' reason above and is stated separately so the two

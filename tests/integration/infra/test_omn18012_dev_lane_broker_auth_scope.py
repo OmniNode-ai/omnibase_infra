@@ -70,7 +70,6 @@ DEV_LANE_KAFKA_CLIENTS = frozenset(
         "projection-savings-writer",
         "projection-tenant-credentials-writer",
         "projection-live-events-writer",
-        "infra-routing-decisions-consumer",
         "agent-actions-consumer",
         "skill-lifecycle-consumer",
         "context-audit-consumer",
