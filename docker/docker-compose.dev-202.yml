@@ -331,10 +331,6 @@ services:
     container_name: omninode-dev-202-contract-resolver
     ports: !override
       - "127.0.0.1:61091:8091"
-  infra-routing-decisions-consumer:
-    container_name: omninode-dev-202-infra-routing-decisions-consumer
-    labels:
-      com.omninode.lane: dev-202
   projection-tenant-registry-writer:
     container_name: omnimarket-dev-202-projection-tenant-registry-writer
     labels:
