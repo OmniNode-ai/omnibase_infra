@@ -54,6 +54,7 @@ HOOK_EVENTS_WRITER = "projection-claude-hook-events-writer"
 # OMN-23066 (plan T13): the context audit projection runs in main as a node, so the
 # policy retires its consumer container by name as well.
 CONTEXT_AUDIT_CONSUMER = "context-audit-consumer"
+SKILL_LIFECYCLE_CONSUMER = "skill-lifecycle-consumer"  # OMN-21933 (T12)
 
 
 def test_primary_dev_disables_the_tenant_carrier_only(
@@ -101,6 +102,7 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             # OMN-21288 (T9): the workers role runs in main; its service is disabled too.
             "runtime-worker",
             CONTEXT_AUDIT_CONSUMER,
+            SKILL_LIFECYCLE_CONSUMER,
             # OMN-21288 (T17): the projection API is served by main as a mounted node.
             "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
@@ -169,6 +171,7 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         f"label=com.docker.compose.service={CONTEXT_AUDIT_CONSUMER}",
         f"label=com.docker.compose.service={HOOK_EVENTS_WRITER}",
         "label=com.docker.compose.service=projection-savings-writer",
+        f"label=com.docker.compose.service={SKILL_LIFECYCLE_CONSUMER}",
         "label=com.docker.compose.service=tenant-projection-writer",
     ]
     if failure is None:
@@ -179,11 +182,13 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
             f"{HOOK_EVENTS_WRITER}-b",
             "projection-savings-writer-a",
             "projection-savings-writer-b",
+            f"{SKILL_LIFECYCLE_CONSUMER}-a",
+            f"{SKILL_LIFECYCLE_CONSUMER}-b",
             "tenant-projection-writer-a",
             "tenant-projection-writer-b",
         ]
-        assert calls[4] == ["docker", "stop", "--time", "30", *ids]
-        assert calls[5] == ["docker", "rm", *ids]
+        assert calls[5] == ["docker", "stop", "--time", "30", *ids]
+        assert calls[6] == ["docker", "rm", *ids]
 
 
 def test_retirement_is_inert_on_other_lanes() -> None:
@@ -283,6 +288,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         "runtime-effects",  # OMN-22930: the effects role runs in main
         "runtime-worker",  # OMN-21288 (T9): the workers role runs in main
         CONTEXT_AUDIT_CONSUMER,
+        SKILL_LIFECYCLE_CONSUMER,
         "projection-api",  # OMN-21288 (T17)
     }
     census = len(retired)

@@ -14,6 +14,13 @@ requirements:
       - id: AC1
         statement: >-
           AC1: omnibase_infra topology grants tenant_projection_writer write on skill_executions in the local, dev and prod topology instances and a vendored migration delivers it -- falsifier: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -q --no-cov fails at the merge base
+  - id: req-omn21933-consumer-retired-on-dev
+    statement: >-
+      Primary dev has no skill-lifecycle-consumer container and its projection is a node in the main runtime; other dev instances, the stability lane and prod keep the consumer.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the runtime policy retires skill-lifecycle-consumer by name on primary dev, the rendered env file carries it, the dev-lane stanza starts under the folded profile only, and the deploy agent censuses and retires its container before main is recreated -- falsifier: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py -q --no-cov, red when the retirement or the stanza gate is removed
 evidence_requirements:
   - kind: tests
     description: The vendored bytes, ledger rows, classes and grants in every topology instance and rendered catalog.
@@ -49,4 +56,32 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_omn21933_skill_lifecycle_grant.py -k populated -q --no-cov
+        cwd: .
+  - id: dod-omn21933-ac2-policy-and-stanza
+    description: The policy retires the consumer by name, the rendered env file carries it, the dev-lane stanza starts under the folded profile only, the fold overlay adds no declaration, the dev stack renders no consumer, and other dev instances keep theirs.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn21933-ac2-retirement-and-stack-shape
+    description: The deploy agent censuses and retires the consumer container with the other folded services, volumes kept, and the stack-shape check passes over the real compose files with the baseline count unchanged.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn21933-ac2-deploy-probe
+    description: After the deploy agent rolls primary dev with this change, no omninode-skill-lifecycle-consumer container runs on the dev host. The probe fails while the container runs, so it reads the deployed system and not a file this pull request wrote.
+    source: manual
+    binds_ac:
+      - AC2
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" 'test -z "$(docker ps -q --filter name=^omninode-skill-lifecycle-consumer$)"'
         cwd: .
