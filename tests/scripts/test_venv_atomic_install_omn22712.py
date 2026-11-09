@@ -452,3 +452,39 @@ def test_the_typed_handler_runs_the_same_steps(tmp_path: Path) -> None:
         ModelVenvAtomicInstallRequest(command="finalize", stage_dir=staging)
     )
     assert done.status == "ok" and not staging.exists()
+
+
+_SHAPE_BASELINE = _REPO_ROOT / ".onex_ratchets/canonical_file_shape_baseline.txt"
+_NODE_RUNTIME = "nodes/node_venv_atomic_install/runtime_venv_atomic_install.py"
+_BASELINED_SCRIPTS = (
+    "scripts/install-node-skill-package.sh",
+    "scripts/reconcile-workspace-venvs.sh",
+)
+_NODE_SIDE_PREFIXES = (
+    "src/omnibase_infra/nodes/node_venv_atomic_install/",
+    "src/omnibase_infra/handlers/venv_atomic_install/",
+    "src/omnibase_infra/models/model_venv_atomic_install_",
+)
+
+
+def test_the_baselined_scripts_call_the_node_and_the_baseline_gained_nothing() -> None:
+    """AC4: the two baselined scripts keep only their call to the node (OMN-22712).
+
+    Before the change the scripts carried the exchange themselves and named no
+    node, so this reads red there. The baseline is shrink-only: no entry for the
+    node, its handler or its models may appear in it.
+    """
+    baseline_lines = [
+        line.strip()
+        for line in _SHAPE_BASELINE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    for script in _BASELINED_SCRIPTS:
+        assert script in baseline_lines, f"{script} left the baseline"
+    raised = [line for line in baseline_lines if line.startswith(_NODE_SIDE_PREFIXES)]
+    assert not raised, f"baseline entries raised for the node: {raised}"
+
+    reconcile = (_REPO_ROOT / _BASELINED_SCRIPTS[1]).read_text(encoding="utf-8")
+    install = (_REPO_ROOT / _BASELINED_SCRIPTS[0]).read_text(encoding="utf-8")
+    assert _NODE_RUNTIME in install, "the install script does not call the node"
+    assert "ONEX_ATOMIC_INSTALL" in reconcile, "the reconcile does not take the path"

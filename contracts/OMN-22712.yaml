@@ -54,13 +54,13 @@ dod_evidence:
         check_value: grep -q 'ONEX_ATOMIC_INSTALL=..atomic' scripts/reconcile-workspace-venvs.sh
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22712-ratchet
-    description: The canonical-file-shape ratchet passes with the four baselined scripts not grown.
+    description: The canonical-file-shape ratchet passes at head, and the two baselined scripts call the node with no baseline entry raised (the second test reads red on the tree before the change).
     source: manual
     binds_ac:
       - AC4
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_canonical_file_shape_ratchet_omn21523.py -q --no-cov
+        check_value: uv run --frozen pytest tests/ci/test_canonical_file_shape_ratchet_omn21523.py tests/scripts/test_venv_atomic_install_omn22712.py -q --no-cov -k "whole_tree_passes_at_head or baselined_scripts_call_the_node"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22712-deploy
     description: Hosted-runner probe that reads the committed node contract from GitHub at the checked-out commit and requires the atomic install node to be declared.
