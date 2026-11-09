@@ -228,6 +228,8 @@ def test_receipt_block_names_the_overlay_the_limit_came_from() -> None:
         "task_class_timeout_ceiling_seconds": 600,
         "execution_timeout_seconds": 300,
         "terminal_delivery_margin_seconds": 60,
+        "ceiling_overlay_ref": None,
+        "ceiling_source": "packaged",
     }
 
 
