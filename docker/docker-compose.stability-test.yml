@@ -225,7 +225,6 @@ services:
   # exit 0 without touching the broker on a host with no LANE_BROKER_AUTH_ENV_FILE.
   lane-redpanda-scram-user:
     image: redpandadata/redpanda:v24.2.7
-    container_name: ${COMPOSE_PROJECT_NAME}-redpanda-scram-user
     env_file: *lane_broker_auth_env_file
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -262,7 +261,6 @@ services:
       - "com.omninode.ticket=OMN-23363"
   lane-redpanda-sasl-enable:
     image: redpandadata/redpanda:v24.2.7
-    container_name: ${COMPOSE_PROJECT_NAME}-redpanda-sasl-enable
     env_file: *lane_broker_auth_env_file
     entrypoint: ["/bin/sh", "-c"]
     command:
