@@ -52,7 +52,8 @@ def test_only_the_stability_lane_and_primary_dev_fold_effects() -> None:
     lane = [n for n, p in folding.items() if p.compose_project == _lane_project()]
     assert sorted(folding) == sorted([*lane, "dev"]) and len(lane) == 1, sorted(folding)
     stability = folding[lane[0]]
-    assert stability.processes["main"].folded_profiles == ("effects",)
+    # OMN-22032 (T19): effects is one role of the list the lane folds.
+    assert "effects" in stability.processes["main"].folded_profiles
     # effects stays a declared process on both: it is a required process name.
     assert all("effects" in profile.processes for profile in folding.values())
 
@@ -64,7 +65,8 @@ def test_rendered_env_carries_the_fold_for_those_lanes_only() -> None:
     # since OMN-22930, effects.
     dev_folds = folds.pop("DEV_RUNTIME_MAIN_FOLDED_PROFILES").split(",")
     assert "effects" in dev_folds
-    assert folds == {FOLDED_KEY: "effects"}
+    assert "effects" in folds.pop(FOLDED_KEY).split(",")
+    assert folds == {}
     committed = (ROOT / "docker" / "runtime-policy.env").read_text(encoding="utf-8")
     assert committed == format_dotenv(rendered)
 

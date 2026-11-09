@@ -241,8 +241,8 @@ services:
     environment:
       !!merge <<: [*stability_test_strict_wiring_env, *stability_test_lane_identity_env]
       # OMN-21288: carried over unchanged from runtime-effects.
-      CODING_AGENT_CRED_HOME: /home/omniinfra
-      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/omniinfra/agent-workspaces
+      CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}
+      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/${RUNTIME_USER_NAME:-omniinfra}/agent-workspaces
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
@@ -300,6 +300,12 @@ services:
       # the retired files remain available here without overwriting main.
       - effects_data:/app/effects-data
       - effects_logs:/app/effects-logs:ro
+      # OMN-22032 (T19): the retired carrier's and worker's state and logs stay
+      # in place and are never removed; a rollback restores each service on the
+      # same volumes.
+      - stability_test_tenant_projection_data:/app/tenant-projection-data
+      - stability_test_tenant_projection_logs:/app/tenant-projection-logs:ro
+      - worker_logs:/app/worker-logs:ro
       - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
@@ -442,6 +448,16 @@ services:
       - "com.omninode.runtime.id=stability-test-effects"
   projection-api:
     container_name: omnimarket-stability-test-projection-api
+    # OMN-22032 (T19): gated from the runtime policy like the folded writers.
+    # The policy folds projection-api into main, which serves the query node on
+    # its own HTTP port, and these render as folded-projection-api-*, so no
+    # bring-up that requests `runtime` or `full` starts this service.
+    # `!override` because a plain list would merge with the base service's
+    # profiles and keep the container up. Rolling back restores the service by
+    # revision, with the image and overlay together.
+    profiles: !override
+      - "${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_API_RUNTIME_PROFILE:-runtime}"
+      - "${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_API_FULL_PROFILE:-full}"
     restart: unless-stopped
     environment:
       ONEX_ENVIRONMENT: stability-test
@@ -456,6 +472,11 @@ services:
       - "com.omninode.service=projection-api"
   runtime-worker:
     container_name: omninode-stability-test-runtime-worker
+    # OMN-22032 (T19): gated from the runtime policy like runtime-effects and
+    # the folded writers; see projection-api above for why `!override`.
+    profiles: !override
+      - "${STABILITY_TEST_RUNTIME_MAIN_RUNTIME_WORKER_RUNTIME_PROFILE:-runtime}"
+      - "${STABILITY_TEST_RUNTIME_MAIN_RUNTIME_WORKER_FULL_PROFILE:-full}"
     restart: unless-stopped
     depends_on:
       migration-gate:
@@ -638,7 +659,7 @@ services:
         BUILD_SOURCE: "${BUILD_SOURCE:-release}"
         EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
     container_name: omnimarket-stability-test-projection-tenant-registry-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_TENANT_REGISTRY_WRITER_RUNTIME_PROFILE:-runtime}", "${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_TENANT_REGISTRY_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -702,7 +723,7 @@ services:
         BUILD_SOURCE: "${BUILD_SOURCE:-release}"
         EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
     container_name: omnimarket-stability-test-projection-delegation-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_DELEGATION_WRITER_RUNTIME_PROFILE:-runtime}", "${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_DELEGATION_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -756,7 +777,7 @@ services:
         BUILD_SOURCE: "${BUILD_SOURCE:-release}"
         EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
     container_name: omnimarket-stability-test-projection-registration-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_REGISTRATION_WRITER_RUNTIME_PROFILE:-runtime}", "${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_REGISTRATION_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -809,7 +830,7 @@ services:
         BUILD_SOURCE: "${BUILD_SOURCE:-release}"
         EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
     container_name: omnimarket-stability-test-projection-savings-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_RUNTIME_PROFILE:-runtime}", "${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_SAVINGS_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -863,7 +884,7 @@ services:
         BUILD_SOURCE: "${BUILD_SOURCE:-release}"
         EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
     container_name: omnimarket-stability-test-projection-tenant-credentials-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_TENANT_CREDENTIALS_WRITER_RUNTIME_PROFILE:-runtime}", "${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_TENANT_CREDENTIALS_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -917,7 +938,7 @@ services:
         BUILD_SOURCE: "${BUILD_SOURCE:-release}"
         EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
     container_name: omnimarket-stability-test-projection-live-events-writer
-    profiles: ["runtime", "full"]
+    profiles: ["${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_LIVE_EVENTS_WRITER_RUNTIME_PROFILE:-runtime}", "${STABILITY_TEST_RUNTIME_MAIN_PROJECTION_LIVE_EVENTS_WRITER_FULL_PROFILE:-full}"]
     networks:
       - omnibase-infra-network
     restart: unless-stopped
@@ -984,7 +1005,7 @@ services:
   # policy, the same split the three shared kernels above already use.
   tenant-projection-writer:
     container_name: omnimarket-stability-test-tenant-projection-writer
-    profiles: !override ["runtime", "full"]
+    profiles: !override ["${STABILITY_TEST_RUNTIME_MAIN_TENANT_PROJECTION_WRITER_RUNTIME_PROFILE:-runtime}", "${STABILITY_TEST_RUNTIME_MAIN_TENANT_PROJECTION_WRITER_FULL_PROFILE:-full}"]
     restart: unless-stopped
     environment:
       !!merge <<: [*stability_test_analytics_env, *stability_test_strict_wiring_env]
