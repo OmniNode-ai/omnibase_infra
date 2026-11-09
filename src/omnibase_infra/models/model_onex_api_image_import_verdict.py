@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -25,7 +23,7 @@ class ModelOnexApiImageImportVerdict(BaseModel):
     candidate: str
     pin_after: str
 
-    def record_fields(self) -> dict[str, Any]:
+    def record_fields(self) -> dict[str, object]:
         """The fields a refused delivery adds to the executor's record.
 
         ``result`` is ``REFUSED``, the repoint script's own word for "nothing

@@ -28,7 +28,6 @@ import logging
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from omnibase_infra.models.model_onex_api_image_import_request import (
     ModelOnexApiImageImportRequest,
@@ -188,8 +187,8 @@ def build_import_check_handler(run: RunCommand) -> HandlerOnexApiImageImportChec
 
 
 def import_gate(
-    run: RunCommand, record: dict[str, Any], env_file: Path
-) -> dict[str, Any] | None:
+    run: RunCommand, record: dict[str, object], env_file: Path
+) -> dict[str, object] | None:
     """The deploy agent's one call: ``None`` to proceed, or the refused record fields.
 
     ``record`` is the repoint's own record of an advance, so ``pin_after`` is the
