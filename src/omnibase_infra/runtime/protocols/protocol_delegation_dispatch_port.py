@@ -6,8 +6,6 @@ Defines the structural interface that RuntimeDelegationDispatchPort conforms to,
 enabling handler_wiring to inject the dispatch port without a concrete dependency.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Protocol
 from uuid import UUID
@@ -100,6 +98,10 @@ class ProtocolDelegationDispatchPort(Protocol):
         # keeps working.
         trace_id: UUID | None = None,
         queue_wait_ms: int | None = None,
+        # OMN-23161 / OMN-23162: the OmniMarket consumer passes the probe
+        # ladder only when the request names one. Defaulted, per the note
+        # above, and typed as BaseModel because the consumer owns the models.
+        probe_ladder: BaseModel | None = None,
     ) -> dict[str, object]: ...
 
 

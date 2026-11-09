@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Runtime-owned dispatch port for consumer-facing delegation handlers."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import threading
@@ -355,14 +353,15 @@ class RuntimeDelegationDispatchPort:
         named_tests: BaseModel | None = None,
         trace_id: UUID | None = None,
         queue_wait_ms: int | None = None,
+        probe_ladder: BaseModel | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
         Dev run 8c2b5dfc-3907-475d-aab6-126fade5f707 exposed the blanket
         fault-pin refusal on a routing pin.
 
-        ``attribution`` (OMN-20606) and ``queue_wait_ms`` (OMN-19448) are accepted
-        and unused: this port publishes to a deployed lane whose own handler
+        ``attribution`` (OMN-20606), ``queue_wait_ms`` (OMN-19448) and
+        ``probe_ladder`` (OMN-23161) are accepted and unused: this port publishes to a deployed lane whose own handler
         stamps the caller onto its terminal and measures its own queue wait.
         Only omnimarket's in-process port writes an evidence terminal of its
         own and needs these caller values. The Core wire request has no
