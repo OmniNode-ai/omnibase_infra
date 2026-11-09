@@ -26,4 +26,5 @@ repo_slice:
   measured_at_sha: bf76c6681c90088fb9ca6dbca626d226c327c529
   # OMN-21923 adds the census command and result topics (2 more specs).
   # OMN-19998 adds the runner-tmp-prepare command and prepared terminal topics (2 more specs).
-  max_specs: 217
+  # OMN-23176 adds the c16-pinned-backend-check command and checked terminal topics (2 more specs).
+  max_specs: 219
