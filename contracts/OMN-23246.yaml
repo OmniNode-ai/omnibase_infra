@@ -2,7 +2,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-23246"
 title: "omnibase_infra dependency-pins reads the omnibase_core policy that exempts the check-public-runner-placement hook rev for seven days"
-summary: "The check-public-runner-placement hook stays pinned at omnibase_core 1c9566e2c249 (15 release tags behind the dependency-pins bound of 14 since core v0.47.70). Under RULING 2026-11-09T01:57:48Z the dependency-pins job in ci.yml passes omnibase-core-ref, an omnibase_core commit whose dependency_pin_policy.yaml exempts that one rev until 2026-11-16 and fails the job on it after that date. Migration of the remaining self-hosted jobs and the pin bump are OMN-22867. No baseline returns and no other dependency-pins rule changes."
+summary: "The check-public-runner-placement hook stays pinned at omnibase_core 1c9566e2c249 (15 release tags behind the dependency-pins bound of 14 since core v0.47.70). Under RULING 2026-11-09T01:57:48Z the dependency-pins job in ci.yml passes omnibase-core-ref dev-20261109032923-9f0af2b9bd43 (omnibase_core 9f0af2b9bd43), whose dependency_pin_policy.yaml exempts that one rev until 2026-11-16 and fails the job on it after that date. Migration of the remaining self-hosted jobs and the pin bump are OMN-22867. No baseline returns and no other dependency-pins rule changes."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -11,14 +11,14 @@ requirements:
     statement: "The dependency-pins job judges the held-back hook rev under the dated exemption and nothing else changes."
     acceptance:
       - id: AC1
-        statement: "AC1: the dependency-pins job passes one immutable omnibase_core commit as omnibase-core-ref, the hook pin stays 1c9566e2c249 alone on its block, and the core check run over this tree exits 0 with a warning today and exits 1 with --today 2026-11-17 -- falsifier: uv run --frozen pytest tests/ci/test_dependency_pins_hook_exemption_omn23246.py plus a lab run of check-dependency-pins on this tree at the core commit"
+        statement: "AC1: the dependency-pins job passes the omnibase_core dev tag dev-20261109032923-9f0af2b9bd43 as omnibase-core-ref, the hook pin stays 1c9566e2c249 alone on its block, and the core check run over this tree exits 0 with a warning today and exits 1 with --today 2026-11-17 -- falsifier: uv run --frozen pytest tests/ci/test_dependency_pins_hook_exemption_omn23246.py plus a lab run of check-dependency-pins on this tree at the core commit"
 evidence_requirements:
   - kind: tests
-    description: "The caller tests show the job input is a full sha and the held-back rev is unchanged and alone."
+    description: "The caller tests show the job input is the exemption dev tag and the held-back rev is unchanged and alone."
     command: "uv run --frozen pytest tests/ci/test_dependency_pins_hook_exemption_omn23246.py tests/ci/test_dependency_pins_wired_omn22360.py -q -p no:cacheprovider"
 dod_evidence:
   - id: dod-001
-    description: "The dependency-pins job passes one full-sha omnibase-core-ref, the job stays unconditional, and the held-back hook rev is the ruled one on a block of its own."
+    description: "The dependency-pins job passes the exemption dev tag as omnibase-core-ref, the job stays unconditional, and the held-back hook rev is the ruled one on a block of its own."
     source: generated
     binds_ac: [AC1]
     checks:

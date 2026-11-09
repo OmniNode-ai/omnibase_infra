@@ -5,8 +5,8 @@
 RULING 2026-11-09T01:57:48Z keeps the check-public-runner-placement hook pinned at one
 omnibase_core rev past the 14-tag bound for seven days. The exemption itself lives in
 omnibase_core's dependency_pin_policy.yaml, which the reusable workflow reads from the
-checkout it is given, so the caller job names that checkout. These tests hold the caller
-to the ruling: one input, an immutable commit, the held-back rev unchanged and still
+checkout it is given, so the caller job names that checkout by its dev-merge tag. These tests hold the caller
+to the ruling: one input, a dev tag, the held-back rev unchanged and still
 the only hook off the dev-merge tag.
 """
 
@@ -22,6 +22,7 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
 HELD_BACK_REV_PREFIX = "1c9566e2c249"
+EXEMPTION_TAG = "dev-20261109032923-9f0af2b9bd43"
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -32,11 +33,12 @@ def _job() -> dict[str, object]:
     return job
 
 
-def test_dependency_pins_job_passes_one_immutable_core_commit() -> None:
+def test_dependency_pins_job_passes_the_core_dev_tag_carrying_the_exemption() -> None:
     inputs = _job()["with"]
     assert isinstance(inputs, dict)
-    assert set(inputs) == {"omnibase-core-ref"}
-    assert FULL_SHA.fullmatch(str(inputs["omnibase-core-ref"])), inputs
+    assert inputs == {"omnibase-core-ref": EXEMPTION_TAG}
+    # A tag, not a commit sha: the sibling sha-pin ratchet refuses new sha pins.
+    assert not FULL_SHA.fullmatch(EXEMPTION_TAG)
 
 
 def test_dependency_pins_job_still_calls_the_core_workflow_unconditionally() -> None:

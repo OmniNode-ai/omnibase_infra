@@ -4672,14 +4672,14 @@ jobs:
   # needs/if. A CI Summary member through STRICT_GATE_JOBS in
   # scripts/ci/ci_summary_gate.py ("<caller job id> / <inner job name>").
   # OMN-23246 (RULING 2026-11-09T01:57:48Z): the validator and policy are read from the
-  # omnibase_core commit below, not from the tag the workflow file is called at. That
-  # commit's policy exempts the one check-public-runner-placement hook rev (1c9566e2c249)
-  # from the 14-tag bound until 2026-11-16 and nothing else; the migration ticket
-  # OMN-22867 bumps that rev and deletes this input in the same change.
+  # omnibase_core dev-merge tag below (omnibase_core#2298), not from the tag the workflow
+  # file is called at. Its policy exempts the one check-public-runner-placement hook rev
+  # (1c9566e2c249) from the 14-tag bound until 2026-11-16 and nothing else; the migration
+  # ticket OMN-22867 bumps that rev and deletes this input in the same change.
   dependency-pins:
     uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261105190003-87a6f5ddcbcc
     with:
-      omnibase-core-ref: 9f0af2b9bd43450de14640ee724eb7725190a4db
+      omnibase-core-ref: dev-20261109032923-9f0af2b9bd43
     permissions:
       contents: read
 
