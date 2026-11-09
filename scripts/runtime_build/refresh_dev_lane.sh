@@ -238,10 +238,6 @@ readonly REFRESH_BUILD_SERVICES=(
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
-    # OMN-16025 -- the infra routing-decision projection consumer. Dev-lane-only
-    # for the same reason as the six above, and in the build scope for the same
-    # reason: `restart: unless-stopped` keeps a stale image running and healthy.
-    infra-routing-decisions-consumer
     # OMN-17530 -- the tenant-scoped control plane. Here for redpanda-sasl-enable's
     # reason and NOT the writers'. All three are TAG-REFERENCED -- onex-api from
     # the omninode_infra clone, the migrate image from that repo's
