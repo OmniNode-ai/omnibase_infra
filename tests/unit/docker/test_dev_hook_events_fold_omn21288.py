@@ -128,9 +128,14 @@ def test_deploy_handler_retires_the_previous_writer_before_main_restarts(
     assert "RETIRED_NODE_CARRIER_SERVICES" not in DEPLOY.read_text(encoding="utf-8")
     process = load_contract().profiles["dev"].processes["main"]
     # OMN-23066 (T13) added the context audit consumer to the same list.
-    assert list(process.retired_services) == [WRITER, "context-audit-consumer"]
+    # OMN-22391 (T15) added the intelligence API container to it.
+    assert list(process.retired_services) == [
+        WRITER,
+        "context-audit-consumer",
+        "intelligence-api",
+    ]
     assert render_env(load_contract())["DEV_RUNTIME_MAIN_RETIRED_SERVICES"] == (
-        f"{WRITER},context-audit-consumer"
+        f"{WRITER},context-audit-consumer,intelligence-api"
     )
     harness = (
         _harness("", DEV_PROJECT, dev_profiles="projection-writer-savings")
