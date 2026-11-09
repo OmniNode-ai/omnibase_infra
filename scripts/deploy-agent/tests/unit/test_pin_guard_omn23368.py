@@ -47,7 +47,7 @@ from deploy_agent.executor import DeployExecutor, load_dev_boot_guard
 pytestmark = [pytest.mark.unit, pytest.mark.service_pin_guard]
 
 code_ref_pin = load_dev_boot_guard("handler_dev_lane_code_ref_pin")
-guard = load_dev_boot_guard("handler_dev_lane_pin_service_guard")
+guard = load_dev_boot_guard("handler_dev_lane_pin_compose_guard")
 ComposeServiceMissingError = guard.ComposeServiceMissingError
 assert_services_declared = guard.assert_services_declared
 _PIN_FILE = code_ref_pin.PIN_FILE_NAME

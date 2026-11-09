@@ -128,7 +128,7 @@ def _stub_service_pin_guard(
     if request.node.get_closest_marker("service_pin_guard") is not None:
         return
     monkeypatch.setattr(
-        executor_mod.load_dev_boot_guard("handler_dev_lane_pin_service_guard"),
+        executor_mod.load_dev_boot_guard("handler_dev_lane_pin_compose_guard"),
         "guard_before_build",
         lambda *args, **kwargs: "",
     )

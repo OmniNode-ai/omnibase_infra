@@ -185,7 +185,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
         "models/model_dev_lane_pin_staleness.py",
-        "handlers/handler_dev_lane_pin_service_guard.py",
+        "handlers/handler_dev_lane_pin_compose_guard.py",
         "models/model_cost_estimator_build_config.py",
         "models/model_cost_estimator_build_request.py",
         "models/model_cost_estimator_build_result.py",
@@ -4720,7 +4720,7 @@ class DeployExecutor:
 
         # OMN-23368: before any build, refuse a service the lane's compose lacks.
         self.pin_staleness_report = load_dev_boot_guard(
-            "handler_dev_lane_pin_service_guard"
+            "handler_dev_lane_pin_compose_guard"
         ).guard_before_build(
             _without_disabled_services(
                 without_gateway_services(

@@ -33,7 +33,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_dev_lane_pin_staleness import (
@@ -160,7 +160,7 @@ def guard_before_build(
     *,
     env: Mapping[str, str],
     agent_dir: str,
-    read_services: Callable[[Sequence[str]], Mapping[str, Any]],
+    read_services: Callable[[Sequence[str]], Iterable[str]],
     read_pin: Callable[[Path, datetime], ModelDevLaneCodeRefPin | None],
     git_timeout: float,
     clock: Callable[[], datetime] | None = None,
@@ -190,7 +190,7 @@ def guard_before_build(
     return report
 
 
-class HandlerDevLanePinServiceGuard:
+class HandlerDevLanePinComposeGuard:
     """The node's single entry point; the deploy agent calls :func:`guard_before_build`."""
 
     @property
@@ -216,7 +216,7 @@ class HandlerDevLanePinServiceGuard:
             request.compose_files,
             env=request.env,
             agent_dir=request.agent_dir,
-            read_services=lambda _files: dict.fromkeys(request.declared_services),
+            read_services=lambda _files: request.declared_services,
             read_pin=lambda _dir, _now: request.pin,
             git_timeout=request.git_timeout_seconds,
             clock=lambda: request.now,
