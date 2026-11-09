@@ -300,7 +300,11 @@ check_keycloak() {
 
 check_runtime_containers() {
     local name="runtime_containers"
-    local expected=("omninode-runtime" "omninode-runtime-effects")
+
+    # OMN-22930: primary dev folds the effects role into main, so the policy's
+    # folded-profile list names it and no effects container exists to expect.
+    # Other lanes render no such fold and keep theirs.
+    local expected=("omninode-runtime"); [[ ",$(policy_env_value DEV_RUNTIME_MAIN_FOLDED_PROFILES)," == *",effects,"* ]] || expected+=("omninode-runtime-effects")
     local running
     running=$(docker ps --format '{{.Names}}' 2>/dev/null) || true
 
@@ -538,7 +542,7 @@ check_env_audit() {
         return
     fi
 
-    local audit_script="${OMNI_HOME}/scripts/audit-env-files.sh"
+    local audit_script="${OMNI_HOME:-}/scripts/audit-env-files.sh"
     if [[ ! -f "$audit_script" ]]; then
         log_check "$name" "yellow" "audit script not found at ${audit_script}"
         return
@@ -561,7 +565,7 @@ check_cloud_bus_refs() {
         return
     fi
 
-    local guard_script="${OMNI_HOME}/scripts/check_no_cloud_bus.sh"
+    local guard_script="${OMNI_HOME:-}/scripts/check_no_cloud_bus.sh"
     if [[ ! -f "$guard_script" ]]; then
         log_check "$name" "yellow" "cloud bus guard not found at ${guard_script}"
         return
