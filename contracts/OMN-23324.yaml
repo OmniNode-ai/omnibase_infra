@@ -39,7 +39,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          git show HEAD:docker/docker-compose.dev-lane.yml | grep -c 'folded-contract-resolver' >/dev/null
+          docker run --rm -v "$PWD/docker:/d:ro" alpine:3 sh -c 'grep -A2 "^  omninode-contract-resolver:" /d/docker-compose.dev-lane.yml | grep -q folded-contract-resolver'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23324-ac2-container-gone
     description: Read of h201's dev lane after the next deploy-agent run with docker ps; pending until that run completes, recorded in the lane TERMINAL and on the ticket.
