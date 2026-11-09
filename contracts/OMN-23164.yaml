@@ -1,0 +1,53 @@
+schema_version: 1.0.0
+ticket_id: OMN-23164
+title: onex delegate --probe-ladder <file> sends a committed ladder file with the request, and only together with --traffic-class synthetic
+summary: The readiness producers pass a committed ladder file to the command line, and onex delegate had no flag for it. --probe-ladder reads the file (YAML or JSON mapping) and writes it to the request's probe_ladder field, and the command refuses a ladder file unless --traffic-class synthetic is given, before anything is written or dispatched.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23164-probe-ladder-flag
+    statement: onex delegate accepts --probe-ladder, sends the file's mapping in the request, and refuses it unless --traffic-class synthetic is given.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the file reaches the request -- falsifier: uv run pytest tests/unit/cli -q -k probe_ladder'
+      - id: AC2
+        statement: 'AC2: without --traffic-class synthetic the file is refused before dispatch -- falsifier: uv run pytest tests/unit/cli -q -k probe_ladder_needs_synthetic'
+evidence_requirements:
+  - kind: tests
+    description: The payload builder writes the ladder file's mapping to the request, omits it when no file is named, and the command refuses a ladder file without synthetic traffic before writing anything
+    command: uv run --frozen pytest tests/unit/cli/test_cli_delegate_probe_ladder_omn23164.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23164-probe-ladder-reaches-request
+    description: The committed ladder file's mapping reaches the request's probe_ladder field, and no key is written when no file is named.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli -q --no-cov -k probe_ladder
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23164-probe-ladder-needs-synthetic
+    description: A ladder file without --traffic-class synthetic exits with a usage error before the delegation payload is written or dispatched.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli -q --no-cov -k probe_ladder_needs_synthetic
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23164-deploy
+    description: Hosted-runner probe that reads the committed ladder loader from GitHub at the checked-out commit and requires the loader that refuses a ladder without synthetic traffic.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/delegation/delegate_request_payload.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def load_probe_ladder" in src; assert "--traffic-class synthetic" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
