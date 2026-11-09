@@ -127,3 +127,28 @@ def test_inmemory_run_on_a_declared_lab_host_records_under_the_install_identity(
     stamp = resolve_delegate_tenant(in_process=True, environ=environ)
     assert stamp == _HOST_TENANT
     assert local_store_tenant(stamp, environ=environ) == _MINTED
+
+
+def test_registry_without_a_table_variable_reads_the_projection_under_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-23356: with no ONEX_LAB_RUN_HOSTS the table is the overlay store's lab_hosts projection
+    under the process HOME, read from disk by the real reader; a registry with no projection
+    declares no lab host and keeps the install identity."""
+    monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: _MINTED)
+    registry = tmp_path / "registry" / "root"
+    registry.mkdir(parents=True)
+    home = tmp_path / "home"
+    projection = home / ".local/state/onex/overlay-store/lab_hosts/overlay.yaml"
+    projection.parent.mkdir(parents=True)
+    _table(
+        projection,
+        "hosts:\n"
+        "  - name: h101\n"
+        "    target: ssh://h101.invalid\n"
+        f"    tenant_id: {_HOST_TENANT}\n",
+    )
+    environ = {"OMNI_HOME": str(registry), "HOME": str(home), "ONEX_LANE_HOST": "h101"}
+    assert resolve_delegate_tenant(in_process=False, environ=environ) == _HOST_TENANT
+    bare = {"OMNI_HOME": str(registry), "HOME": str(tmp_path / "bare")}
+    assert resolve_delegate_tenant(in_process=False, environ=bare) == _MINTED

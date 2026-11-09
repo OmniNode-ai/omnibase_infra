@@ -147,10 +147,11 @@ from scripts.ci.check_dev_lane_staleness import (
 )
 from scripts.ci.lab_pass_receipt import ModelLaneGeneration, read_lane_generation
 
+# OMN-23333: the dev lane folds effects into main, so the effects role is read on the main runtime.
 #: The lane's effects container. Named AND fenced by its compose project below,
 #: so this guard can never read a governed lane (prod, stability-test, judge, or
 #: a collaborator lane) even if a container were renamed onto the same daemon.
-DEFAULT_CONTAINER = "omninode-runtime-effects"
+DEFAULT_CONTAINER = "omninode-runtime"
 DEFAULT_COMPOSE_PROJECT = "omnibase-infra"
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
 
