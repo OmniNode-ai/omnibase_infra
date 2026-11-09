@@ -6,6 +6,13 @@ services:
   omninode-runtime:
     environment:
       ONEX_RUNTIME_FOLDED_PROFILES: ${DEV_RUNTIME_MAIN_FOLDED_PROFILES:?runtime policy contract must set DEV_RUNTIME_MAIN_FOLDED_PROFILES}
+      # OMN-23009: the per-profile consumer group handover the policy renders
+      # (effects and workers resume from the commits of the retired service that
+      # last ran). The runtime reads it as ONEX_RUNTIME_FOLD_HANDOVERS; without
+      # this line the folded roles start at their auto_offset_reset and a queued
+      # event is skipped. `:?` as on the folded profiles: a blank value is
+      # refused at render, never read as "no handover".
+      ONEX_RUNTIME_FOLD_HANDOVERS: ${DEV_RUNTIME_MAIN_FOLD_HANDOVERS:?runtime policy contract must set DEV_RUNTIME_MAIN_FOLD_HANDOVERS}
       #
       # -- Effects role (OMN-22930, T8) ---------------------------------------
       # The values below are the ones the retired runtime-effects service set
