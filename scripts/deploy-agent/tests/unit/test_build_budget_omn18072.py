@@ -251,7 +251,9 @@ class TestLiveRuntimeModel:
         assert budget.timeout_seconds > budget.floor_seconds
         assert budget.dockerfile is not None
         assert budget.dockerfile.endswith("docker/Dockerfile.runtime")
-        assert len(budget.buildable_services) >= 9
+        # OMN-22391 folded the intelligence API into main, so the runtime image
+        # builds for one service fewer than the nine it named before.
+        assert len(budget.buildable_services) >= 8
 
     def test_the_build_ceiling_is_bounded_by_its_own_hard_upper_bound(self) -> None:
         """SUPERSEDES an OMN-18072 assertion that the incident falsified.
