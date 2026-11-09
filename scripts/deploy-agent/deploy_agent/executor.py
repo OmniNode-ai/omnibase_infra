@@ -184,6 +184,9 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_dev_boot_guard.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
+        "models/model_onex_api_image_import_request.py",
+        "models/model_onex_api_image_import_verdict.py",
+        "handlers/handler_onex_api_image_import_check.py",
         "models/model_dev_lane_pin_staleness.py",
         "handlers/handler_dev_lane_pin_compose_guard.py",
         "models/model_cost_estimator_build_config.py",
@@ -4151,28 +4154,29 @@ class DeployExecutor:
         never reached a container. They are different failures and a single
         boolean hides both.
         """
-        if lane != EnumRuntimeLane.DEV:
+
+        def _undelivered(result: str, reason: str) -> dict[str, Any]:
             return {
-                "result": "SKIPPED",
-                "reason": (
-                    f"lane {lane.value} is not the dev lane; the onex-api pin is "
-                    "a dev-lane delivery and no governed lane is repointed here"
-                ),
+                "result": result,
+                "reason": reason,
                 "tag_advanced": False,
                 "recreated": False,
             }
 
+        if lane != EnumRuntimeLane.DEV:
+            return _undelivered(
+                "SKIPPED",
+                f"lane {lane.value} is not the dev lane; the onex-api pin is "
+                "a dev-lane delivery and no governed lane is repointed here",
+            )
+
         env_file = operator_env_file()
         if env_file is None:
-            return {
-                "result": "SKIPPED",
-                "reason": (
-                    "DEPLOY_AGENT_ENV_FILE is not declared, so there is no "
-                    "operator env store to advance the pin in"
-                ),
-                "tag_advanced": False,
-                "recreated": False,
-            }
+            return _undelivered(
+                "SKIPPED",
+                "DEPLOY_AGENT_ENV_FILE is not declared, so there is no "
+                "operator env store to advance the pin in",
+            )
 
         argv = [
             "python3",
@@ -4193,16 +4197,12 @@ class DeployExecutor:
         try:
             record: dict[str, Any] = json.loads(repoint.stdout)
         except (ValueError, TypeError):
-            return {
-                "result": "REFUSED",
-                "reason": (
-                    f"repoint_dev_lane_onex_api.py exited {repoint.returncode} "
-                    f"with unparseable output: "
-                    f"{(repoint.stderr or repoint.stdout)[:400]}"
-                ),
-                "tag_advanced": False,
-                "recreated": False,
-            }
+            return _undelivered(
+                "REFUSED",
+                f"repoint_dev_lane_onex_api.py exited {repoint.returncode} "
+                f"with unparseable output: "
+                f"{(repoint.stderr or repoint.stdout)[:400]}",
+            )
 
         record.setdefault("recreated", False)
         # A refusal JSON carries only ``result`` and ``reason``, so without this
@@ -4221,7 +4221,11 @@ class DeployExecutor:
             )
             return record
 
-        config = lane_config_for(lane)
+        # OMN-23039: a candidate that cannot import what onex-api imports keeps the previous pin.
+        gate = load_dev_boot_guard("handler_onex_api_image_import_check")
+        if (refusal := gate.import_gate(_run, record, env_file)) is not None:
+            return {**record, **refusal}
+
         recreate = [
             *_compose_argv(lane),
             "--profile",
