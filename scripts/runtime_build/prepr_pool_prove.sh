@@ -520,7 +520,8 @@ build)
   echo "stage start $(ts)"
   # STAGE_DEV_TAGS: every sibling at its newest dev-merge tag (omnibase_infra#5472); a sha pin records no tag and the audit refuses it
   source scripts/runtime_build/sibling_clone_manifest.sh || exit 1; REFS=(); for repo in "${SIBLING_VENDORED_REPOS[@]}"; do REFS+=(--repo-ref "$repo=$(git -C "$R/$repo" rev-parse HEAD)"); done; DR=
-  [ -z "${STAGE_DEV_TAGS:-}" ] || { REFS=(); DR=origin/dev; }
+  # OMN-21968: the image audit refuses a sha-pinned sibling in the dev-lane context, so an omnimarket-only proof (no infra pull request, group or ref) stages dev-merge tags unless the params name STAGE_DEV_TAGS, even empty
+  [ -z "${STAGE_DEV_TAGS-$([ -n "${INFRA_PR:-}${INFRA_GROUP:-}${INFRA_REF_SHA:-}" ] || echo 1)}" ] || { REFS=(); DR=origin/dev; }
   OMNI_HOME="$R" CONSUMER_LOCK="$R/omnimarket/uv.lock" DEPLOY_REF=$DR bash scripts/runtime_build/stage_workspace.sh ${REFS[@]+"${REFS[@]}"} 2>&1 | tail -5
   echo "stage rc=${PIPESTATUS[0]} $(ts)"
   make local-env LOCAL_ENV_FILE="$W/local.env" LOCAL_OVERLAY_FILE="$W/local.bifrost.yaml" 2>&1 | tail -2

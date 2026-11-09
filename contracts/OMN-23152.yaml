@@ -1,0 +1,50 @@
+schema_version: 1.0.0
+ticket_id: OMN-23152
+title: Ledger rows reach the bus only after the judge accepts them, the emitter of the rows without a sequence is found, and ledger_seq 190463 is deduplicated under a unique index
+summary: 'omnibase_infra half of OMN-23152: vendors the work-ledger sequence migrations 0009 (creates work_ledger_seq_conflicts, copies duplicate sequences into it and adds the unique ledger_seq index) and 0010 (grants the runtime SELECT, INSERT, UPDATE, never DELETE) ahead of the omnimarket change, and bridges the relation in the table-grant derivation until the contract pin advances. The behavioural proof of every criterion is in the omnimarket contract for this ticket; this change makes that code wireable.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23152-infra-grant
+    statement: The runtime principal holds a declared grant on the sequence conflicts table so the omnimarket projection wires, and the vendored migrations match the omnimarket source.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the emitter of rows with no sequence is named from the bus and the host, and a row published without a judge acceptance is refused at the emit -- falsifier: uv run pytest src/omnimarket/nodes/node_work_ledger_append_effect -q -k emit_only_after_judge_accepts'
+      - id: AC2
+        statement: 'AC2: ledger_seq 190463 exists once, a unique index refuses a second row with the same sequence, and the history backfill keeps file order -- falsifier: uv run pytest src/omnimarket/nodes/node_projection_work_ledger -q -k ledger_seq_unique_index'
+      - id: AC3
+        statement: 'AC3: over 24 hours the count of projected rows with no sequence reads 0 on the lab and a planted unjudged publish turns the reading red -- falsifier: uv run pytest src/omnimarket/nodes/node_projection_work_ledger -q -k unjudged_publish_reads_red'
+evidence_requirements:
+  - kind: tests
+    description: The runtime grant on work_ledger_seq_conflicts is present in every topology instance, and the vendored migrations are in sync with the omnimarket source.
+    command: uv run pytest tests/unit/topology/test_omn23152_work_ledger_seq_conflicts_grant.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23152-infra-ac2
+    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC2: the vendored work-ledger migrations 0009 and 0010 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. The proof of the unique index and the dedupe is in the omnimarket contract for this ticket.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_omn23152_work_ledger_seq_conflicts_grant.py -q -n 0 --no-cov -p no:cacheprovider
+  - id: dod-omn23152-infra-ac1
+    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC1: the vendored work-ledger migrations 0009 and 0010 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. It adds no code for the emit gate and the naming of the emitter; the proof is in the omnimarket contract for this ticket.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_omn23152_work_ledger_seq_conflicts_grant.py -q -n 0 --no-cov -p no:cacheprovider
+  - id: dod-omn23152-infra-ac3
+    description: 'This is the omnibase_infra half of OMN-23152 and carries only the prerequisite for AC3: the vendored work-ledger migrations 0009 and 0010 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_seq_conflicts, which omnimarket''s projection auto-wiring requires before it will wire. It adds no code for the 24-hour unjudged-row reading; the proof is in the omnimarket contract for this ticket.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_omn23152_work_ledger_seq_conflicts_grant.py -q -n 0 --no-cov -p no:cacheprovider
