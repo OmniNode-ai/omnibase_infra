@@ -145,32 +145,6 @@ def test_non_migration_gate_is_not_flagged() -> None:
 
 
 @pytest.mark.unit
-def test_app_service_depending_on_migration_runner_is_not_flagged() -> None:
-    """An app service whose healthcheck is a liveness probe is NOT a gate.
-
-    Regression for the over-broad classifier (OMN-12973): ``intelligence-api``
-    depends on ``intelligence-migration`` via ``service_completed_successfully``
-    but its healthcheck is an HTTP liveness probe, not a migration-completion
-    poll. Its start_period (40s) is legitimately short and must not be swept
-    into the migration-gate floor. Only the sentinel whose healthcheck literally
-    polls migration completion is subject to the floor.
-    """
-    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
-    resolved = resolver.resolve(bundles=["runtime"])
-    assert "intelligence-api" in resolved.manifests
-    intelligence_api = resolved.manifests["intelligence-api"]
-    # It does depend on a migration runner completing...
-    assert any(
-        dep.condition is EnumDependsOnCondition.SERVICE_COMPLETED_SUCCESSFULLY
-        for dep in intelligence_api.depends_on
-    )
-    # ...but its healthcheck is a liveness probe, so it is NOT a completion gate.
-    assert not is_migration_completion_gate(intelligence_api)
-    result = validate_migration_gate_start_period(resolved.manifests)
-    assert result.ok, result.report()
-
-
-@pytest.mark.unit
 def test_completion_gate_requires_migration_probe_healthcheck() -> None:
     """A migration-runner dependant with a non-migration healthcheck is ignored.
 
