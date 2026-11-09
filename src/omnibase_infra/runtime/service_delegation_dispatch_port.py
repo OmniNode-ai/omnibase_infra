@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Runtime-owned dispatch port for consumer-facing delegation handlers."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import threading
