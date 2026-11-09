@@ -72,6 +72,21 @@ evidence_artifacts:
       - c16-receipt-identity.json
     rationale: >-
       One row per probe (R-DELEG-11, R-DELEG-12, R-DELEG-26) with its outcome, its reasons and the compared keys: the route, provider and model the receipt names beside the provider and model the orchestrator's own bus terminal records, the completed run's rule count, and the dead run's typed failure class and code. SKIP rows are recorded as SKIP and fail the verdict, so an empty record is exactly the state that must not read green.
+  # --- chain-canary-c16-receipt-identity.yml: the pinned-backend row (OMN-23176) --
+  #
+  # Dispatch only. The step's exit code is the verdict; the record shows the
+  # per-role comparison of the receipt's accepted backend, host and cost with
+  # the delegation_events row. An absent record beside a green run would claim
+  # three pinned delegations were compared with nothing behind the claim.
+  - id: c16-pinned-backends
+    workflow: .github/workflows/chain-canary-c16-receipt-identity.yml
+    job: c16-receipt-identity
+    producer_step: "Pin one delegation to each named backend and compare with the delegation_events row"
+    artifact_name: c16-pinned-backends
+    required_paths:
+      - c16-pinned-backends.json
+    rationale: >-
+      One row, R7-PINNED, with its outcome and reasons, and per role the backend and host the receipt names beside the backend and host the delegation_events row stores. A missing backend or an unreadable table is recorded as FAIL or SKIP and fails the step, so an empty record is exactly the state that must not read green.
   # --- chain-canary-c11-negative-paths.yml: the C11 verdict (OMN-19175) ----
   #
   # The probe's EXIT CODE is the criterion's verdict, so this record is not how

@@ -1,0 +1,44 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21968
+title: "The lab pool's isolated stack builds and boots for an omnimarket proof, so lab-proof-receipt can read PASS"
+summary: >-
+  lab-proof-receipt was red on open omnimarket pull requests because the pool's isolated lab stack never reached stack_built. Two causes, read on a lab pool host on 2026-11-09. First, the landing prover writes no STAGE_DEV_TAGS, so prepr_pool_prove.sh staged every sibling at a sha and the image audit (dev-lane context) refused them: build rc=1 in about 90 seconds. Second, with the audit passed, the broker ran at the 2G that docker/local.env.example sets, stopped at 2048 partition replicas ("partition ceiling ... memory limit") while the runtime desired 2187 topics, so omninode-runtime never turned healthy and compose up returned rc=1. The pool prove script now stages dev-merge tags for a proof with no infra pull request, group or ref, and the laptop env template sets the broker to 4G (4096 replicas). No check, bound or gate was widened.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21968-pool-stack-builds
+    statement: >-
+      A pool proof of an omnimarket pull request stages its siblings at dev-merge tags without the caller naming STAGE_DEV_TAGS, and the broker the template configures holds the omnimarket topic set.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: prepr_pool_prove.sh stages every sibling at its newest dev-merge tag when the params name no infra pull request, group or ref and no STAGE_DEV_TAGS -- falsifier: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -k defaults_to_dev_tags -q --no-cov fails at the merge base, where the siblings stage at their branch heads
+      - id: AC2
+        statement: >-
+          AC2: docker/local.env.example sets REDPANDA_MEMORY to at least 2699 MiB, the 2187 topics the omnimarket runtime provisions plus headroom, at one partition replica per MiB -- falsifier: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -k omn21968 -q --no-cov fails at the merge base, where the template sets 2G
+evidence_requirements:
+  - kind: tests
+    description: The default staging and the template broker memory tests pass on the branch and the first fails at the merge base for the stated reason.
+    command: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py tests/unit/infra/test_catalog_local_profile.py -q --no-cov -k "defaults_to_dev_tags or omn21968"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21968-default-dev-tags
+    description: An omnimarket-only pool proof stages dev-merge tags by default.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -k defaults_to_dev_tags -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21968-template-broker-memory
+    description: The laptop env template sets a broker memory that holds the omnimarket topic set.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -k omn21968 -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

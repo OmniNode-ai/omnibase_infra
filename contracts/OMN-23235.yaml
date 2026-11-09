@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-23235
+title: omnibase_infra ci.yml jobs run on a hosted runner, family 4
+summary: 'Family 4 of the hosted-runner migration of this public repository. The 56 jobs of ci.yml that omnibase_core''s public_runner_placement validator reports as self_hosted_in_public select the literal ubuntu-latest, so the validator reports none for ci.yml. ci.yml stays in the routing policy''s hosted_runner_allowlist and the route wiring tests no longer expect lint to consume the route output.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23235-ci-hosted
+    statement: Every job of ci.yml selects only a GitHub-hosted label.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the core validator run over .github/workflows/ci.yml with --repo omnibase_infra --visibility public exits 0 at the pull request head and reports 56 findings on the base copy -- falsifier: uv run python -m omnibase_core.validation.validator_public_runner_placement on the base copy of ci.yml'
+      - id: AC2
+        statement: 'AC2: the ci.yml family test passes at the head and fails with ci.yml restored from the previous copy -- falsifier: uv run pytest tests/ci/test_public_runner_family_ci_omn22867.py'
+evidence_requirements:
+  - kind: tests
+    description: ci.yml shape test and the route wiring and routing audit tests.
+    command: uv run pytest tests/ci/test_public_runner_family_ci_omn22867.py tests/ci/test_runner_route_wiring.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23235-ac1-ci-hosted
+    description: Every job of ci.yml selects a hosted label and the file is allowlisted with a reason.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_ci_omn22867.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23235-ac2-route-wiring
+    description: The route wiring and routing audit tests pass with lint hosted.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_ci_omn22867.py tests/ci/test_runner_route_wiring.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra

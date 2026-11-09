@@ -281,10 +281,12 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
     }
     # The hook-events writer has no runtime profile: the policy retires it by name.
     # OMN-23066 (T13): the context audit consumer is retired by name the same way.
+    # OMN-21933 (T12): the skill lifecycle consumer is retired by name the same way.
     assert process.retired_services == (
         "projection-claude-hook-events-writer",
         "context-audit-consumer",
         "intelligence-api",
+        "skill-lifecycle-consumer",
     )
     assert _overlay_gates() == {
         SERVICE: "tenant-projection",
@@ -305,6 +307,7 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
     # overlay's gate keeps the inert carrier out of every bring-up.
     assert "projection-claude-hook-events-writer" not in dev_stack_services()
     assert "context-audit-consumer" not in dev_stack_services()
+    assert "skill-lifecycle-consumer" not in dev_stack_services()
 
 
 def test_deploy_handler_retires_exactly_the_policy_services() -> None:
