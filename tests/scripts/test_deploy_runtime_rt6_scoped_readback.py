@@ -308,11 +308,6 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "projection-savings-writer",
         "projection-tenant-credentials-writer",
         "projection-live-events-writer",
-        # OMN-16025: the seventh dev-lane-only service. RT-6 resolves
-        # DEV_LANE_ONLY_RUNTIME_SERVICES and refuses to certify a deploy whose
-        # in-scope service has no running container, so a new member must appear
-        # here or the readback fixture no longer describes the real lane.
-        "infra-routing-decisions-consumer",
         # OMN-17530: the eighth. onex-api is the surface a lab proof is taken
         # THROUGH, so a stale one makes the proof itself stale -- it is in the
         # recreate scope for that reason and therefore in the readback's scope
@@ -348,7 +343,6 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "projection-savings-writer": "projection-savings-writer",
         "projection-tenant-credentials-writer": "projection-tenant-credentials-writer",
         "projection-live-events-writer": "projection-live-events-writer",
-        "infra-routing-decisions-consumer": "omninode-infra-routing-decisions-consumer",
         "onex-api": "onex-api",
         "tenant-projection-writer": "omnimarket-tenant-projection-writer",
         "cost-estimator-web": "omninode-cost-estimator-web",

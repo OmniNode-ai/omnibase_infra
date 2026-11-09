@@ -650,9 +650,6 @@ entries:
   - path: docker/docker-compose.dev-lane.yml
     family: O
     content_sha1: 15c00d181e75250214e883dbb7f958bfdfc993c6
-  - path: docker/docker-compose.dev-lane.yml
-    family: O
-    content_sha1: 2103d2e9023f70c2f7ee95468410278b2f8a0519
   - path: docker/docker-compose.dogfood.yml
     family: M
     content_sha1: 6a59aee6659ad9b2a233940f506c5dc5d25f5ccd

@@ -54,6 +54,9 @@ HOOK_EVENTS_WRITER = "projection-claude-hook-events-writer"
 # OMN-23066 (plan T13): the context audit projection runs in main as a node, so the
 # policy retires its consumer container by name as well.
 CONTEXT_AUDIT_CONSUMER = "context-audit-consumer"
+# OMN-22391 (plan T15): the intelligence API is the mount main serves; its container is
+# retired by name as well.
+INTELLIGENCE_API = "intelligence-api"
 # OMN-23043: the agent actions projection runs in main as a node, so the policy
 # retires its consumer container by name as well.
 AGENT_ACTIONS_CONSUMER = "agent-actions-consumer"
@@ -104,6 +107,7 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             # OMN-21288 (T9): the workers role runs in main; its service is disabled too.
             "runtime-worker",
             CONTEXT_AUDIT_CONSUMER,
+            INTELLIGENCE_API,
             AGENT_ACTIONS_CONSUMER,
             # OMN-21288 (T17): the projection API is served by main as a mounted node.
             "projection-api",
@@ -172,6 +176,7 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
     assert censused == [
         f"label=com.docker.compose.service={AGENT_ACTIONS_CONSUMER}",
         f"label=com.docker.compose.service={CONTEXT_AUDIT_CONSUMER}",
+        f"label=com.docker.compose.service={INTELLIGENCE_API}",
         f"label=com.docker.compose.service={HOOK_EVENTS_WRITER}",
         "label=com.docker.compose.service=projection-savings-writer",
         "label=com.docker.compose.service=tenant-projection-writer",
@@ -182,6 +187,8 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
             f"{AGENT_ACTIONS_CONSUMER}-b",
             f"{CONTEXT_AUDIT_CONSUMER}-a",
             f"{CONTEXT_AUDIT_CONSUMER}-b",
+            f"{INTELLIGENCE_API}-a",
+            f"{INTELLIGENCE_API}-b",
             f"{HOOK_EVENTS_WRITER}-a",
             f"{HOOK_EVENTS_WRITER}-b",
             "projection-savings-writer-a",
@@ -189,8 +196,8 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
             "tenant-projection-writer-a",
             "tenant-projection-writer-b",
         ]
-        assert calls[5] == ["docker", "stop", "--time", "30", *ids]
-        assert calls[6] == ["docker", "rm", *ids]
+        assert calls[6] == ["docker", "stop", "--time", "30", *ids]
+        assert calls[7] == ["docker", "rm", *ids]
 
 
 def test_retirement_is_inert_on_other_lanes() -> None:
@@ -290,6 +297,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         "runtime-effects",  # OMN-22930: the effects role runs in main
         "runtime-worker",  # OMN-21288 (T9): the workers role runs in main
         CONTEXT_AUDIT_CONSUMER,
+        INTELLIGENCE_API,
         AGENT_ACTIONS_CONSUMER,
         "projection-api",  # OMN-21288 (T17)
     }

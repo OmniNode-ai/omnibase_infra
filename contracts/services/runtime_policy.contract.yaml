@@ -284,6 +284,10 @@ profiles:
         retired_services:
           - projection-claude-hook-events-writer
           - context-audit-consumer
+          # OMN-22391 (T15): the intelligence API is the app node_pattern_storage_effect's
+          # contract mounts under /api/v1 on main's HTTP port, so the separate
+          # intelligence-api container of the previous revision is retired by name.
+          - intelligence-api
           - agent-actions-consumer
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
