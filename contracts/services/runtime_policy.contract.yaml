@@ -276,9 +276,15 @@ profiles:
         # same way. The node's contract names the retired consumer's group under
         # consumer_group_handover (from_group_id context-audit-postgres), so main
         # resumes from that group's committed offsets and the table has one writer.
+        # OMN-21933 (T12): the skill lifecycle projection node runs in main, so the
+        # skill-lifecycle-consumer container of the previous revision is retired the
+        # same way. Its node names the consumer's group (skill-lifecycle-postgres)
+        # under consumer_group_handover; while the container runs it keeps that group
+        # live and fences the node's own group.
         retired_services:
           - projection-claude-hook-events-writer
           - context-audit-consumer
+          - skill-lifecycle-consumer
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof

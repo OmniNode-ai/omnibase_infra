@@ -14,10 +14,23 @@ requirements:
       - id: AC1
         statement: >-
           AC1: omnibase_infra topology grants tenant_projection_writer write on skill_executions in the local, dev and prod topology instances and a vendored migration delivers it -- falsifier: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -q --no-cov fails at the merge base
+  - id: req-omn21933-skill-lifecycle-consumer-retired-on-dev
+    statement: >-
+      Primary dev declares no running skill-lifecycle-consumer container; the skill lifecycle projection is a node in the main runtime and other lanes keep the consumer.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the runtime policy retires skill-lifecycle-consumer by name on primary dev, the rendered env file carries it and the dev stack renders no such service -- falsifier: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py -q --no-cov, red when the retirement or the stanza gate is removed
+      - id: AC3
+        statement: >-
+          AC3: the deploy handler and the deploy agent census and retire the previous revision container before main is recreated, and no other lane retires it -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py, red when the consumer is not in the retired set
 evidence_requirements:
   - kind: tests
     description: The vendored bytes, ledger rows, classes and grants in every topology instance and rendered catalog.
     command: uv run pytest tests/unit/migrations/test_omn21933_skill_lifecycle_vendor.py -q --no-cov
+  - kind: tests
+    description: The skill lifecycle fold test with its base-revision control, the hook events and tenant fold tests updated for the retired service, and the deploy agent retirement tests.
+    command: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -49,4 +62,30 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_omn21933_skill_lifecycle_grant.py -k populated -q --no-cov
+        cwd: .
+  - id: dod-omn21933-fold-policy-and-stanza
+    description: The policy retires the consumer by name, the rendered env file carries it, the dev-lane stanza starts under the folded profile only, the fold overlay adds no declaration, the dev stack renders no consumer, and other dev instances keep theirs. Four of the six tests fail on the base revision.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn21933-fold-retirement-and-stack-shape
+    description: The deploy agent censuses and retires the consumer container with the hook events writer, the context audit consumer and the folded writers, volumes kept, and the stack-shape check passes over the real compose files with the baseline count unchanged.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn21933-fold-deploy-probe
+    description: After the deploy agent rolls primary dev with this change, no omninode-skill-lifecycle-consumer container runs on the dev host. The probe fails while the container runs, so it reads the deployed system and not a file this pull request wrote.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" 'test -z "$(docker ps -q --filter name=^omninode-skill-lifecycle-consumer$)"'
         cwd: .
