@@ -22,3 +22,11 @@ class ModelOnexApiImageImportRequest(BaseModel):
     timeout_seconds: int = Field(
         default=120, gt=0, description="Bound on the throwaway container."
     )
+    candidate_limit: int = Field(
+        default=6,
+        gt=0,
+        description="How many local images the roll-time heal checks, newest first.",
+    )
+    listing_timeout_seconds: int = Field(
+        default=30, gt=0, description="Bound on listing the local images."
+    )

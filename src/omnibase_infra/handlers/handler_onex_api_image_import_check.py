@@ -181,6 +181,90 @@ class HandlerOnexApiImageImportCheck:
         )
 
 
+def _read_pin(env_file: Path) -> str | None:
+    """The one ``ONEX_API_IMAGE`` value in ``env_file``, or ``None`` when not exactly one."""
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    pins = [line[len(_PIN_PREFIX) :] for line in lines if line.startswith(_PIN_PREFIX)]
+    return pins[0].strip() if len(pins) == 1 and pins[0].strip() else None
+
+
+def _local_images(
+    run: RunCommand, pin: str, request: ModelOnexApiImageImportRequest
+) -> list[str]:
+    """Local tags of ``pin``'s repository, newest first (``docker images`` order)."""
+    repository, _, tag = pin.rpartition(":")
+    if not repository or "/" in tag:
+        return []
+    try:
+        listing = run(
+            ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}", repository],
+            timeout=request.listing_timeout_seconds,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    if listing.returncode != 0:
+        return []
+    return [
+        line.strip()
+        for line in listing.stdout.splitlines()
+        if line.strip() and not line.strip().endswith(":<none>")
+    ]
+
+
+def heal_pin(run: RunCommand, env_file: Path | None) -> dict[str, object] | None:
+    """Roll-time repair of a pin that is ALREADY a broken image (OMN-23039).
+
+    ``import_gate`` only judges a candidate before it is written. The 03:58Z
+    delivery wrote one that could not import, and every roll since recreates
+    ``onex-api`` from it before any later delivery can run, so the gate never got
+    another turn. This is called once per dev roll, before ``onex-api`` is
+    recreated: a pin that imports is left alone and ``None`` is returned; a pin
+    that is missing modules is replaced by the newest local image of the same
+    repository that does import, and the record says ``PIN_HEALED``.
+
+    Fails closed in the repairing direction only. A check that could not run is
+    not evidence that the pin is broken (``None``, nothing rewritten); no importable
+    image to move to is a ``REFUSED`` record naming that, and the pin stays.
+    """
+    pin = _read_pin(env_file) if env_file is not None else None
+    if env_file is None or pin is None:
+        return None
+    handler = build_import_check_handler(run)
+    current = ModelOnexApiImageImportRequest(
+        image=pin, env_file=env_file, previous_pin=""
+    )
+    importable, detail = handler._check(current)
+    if importable or "could not run" in detail:
+        return None
+    candidates = [i for i in _local_images(run, pin, current) if i != pin]
+    for image in candidates[: current.candidate_limit]:
+        request = current.model_copy(update={"image": image, "previous_pin": image})
+        ok, _ = handler._check(request)
+        if not ok:
+            continue
+        restored, outcome = handler._restore(request)
+        if not restored:
+            return {"result": "REFUSED", "reason": outcome, "pin_before": pin}
+        logger.warning("onex-api pin %s cannot import; moved to %s", pin, image)
+        return {
+            "result": "PIN_HEALED",
+            "reason": f"{detail}; the pin moved to {image}",
+            "pin_before": pin,
+            "pin_after": image,
+        }
+    return {
+        "result": "REFUSED",
+        "reason": (
+            f"{detail}; no local onex-api image among the newest "
+            f"{current.candidate_limit} imports, so the pin stays"
+        ),
+        "pin_before": pin,
+    }
+
+
 def build_import_check_handler(run: RunCommand) -> HandlerOnexApiImageImportCheck:
     """Wire the handler to the caller's command runner (the agent has no container)."""
     return HandlerOnexApiImageImportCheck(run=run)

@@ -167,15 +167,26 @@ class _Lab:
         *,
         router_imports: str,
         docker_run: str = "image",
+        pinned: str = _PINNED,
+        local_tags: list[str] | None = None,
+        bad_images: tuple[str, ...] = (),
     ) -> None:
         self.env_file = tmp_path / "operator.env"
-        self.env_file.write_text(f"A=1\nONEX_API_IMAGE={_PINNED}\nB=2\n", "utf-8")
+        self.env_file.write_text(f"A=1\nONEX_API_IMAGE={pinned}\nB=2\n", "utf-8")
+        self.local_tags = local_tags if local_tags is not None else [_PINNED, _NEXT]
+        self.pinned = pinned
         self.clone = tmp_path / "omninode_clone"
         (self.clone / ".git").mkdir(parents=True)
         docker = _fake_docker(tmp_path, tags=[_PINNED, _NEXT])
         git = _fake_git(tmp_path)
         app, site = _build_image_tree(tmp_path, router_imports=router_imports)
+        bad_root = tmp_path / "bad_image"
+        bad_root.mkdir()
+        bad_app, bad_site = _build_image_tree(
+            bad_root, router_imports=f"from {_OLD_IMPORT} import X"
+        )
         self.compose_calls: list[list[str]] = []
+        self.pin_at_compose: list[str] = []
         self.docker_run_calls: list[list[str]] = []
         monkeypatch.setattr(executor_mod, "REPOINT_ONEX_API_SCRIPT", _SCRIPT)
         real_script = str(_SCRIPT)
@@ -195,8 +206,16 @@ class _Lab:
                 return subprocess.run(
                     argv, capture_output=True, text=True, check=False, timeout=timeout
                 )
+            if cmd[:2] == ["docker", "images"]:
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="\n".join(self.local_tags) + "\n", stderr=""
+                )
             if cmd[:2] == ["docker", "run"]:
                 self.docker_run_calls.append(cmd)
+                image = cmd[cmd.index("--entrypoint") + 2]
+                tree, packages = (
+                    (bad_app, bad_site) if image in bad_images else (app, site)
+                )
                 if docker_run == "unavailable":
                     return subprocess.CompletedProcess(
                         cmd, 125, stdout="", stderr="docker: daemon not reachable"
@@ -209,11 +228,12 @@ class _Lab:
                     capture_output=True,
                     text=True,
                     check=False,
-                    cwd=app,
-                    env={"PYTHONPATH": str(site), "PATH": ""},
+                    cwd=tree,
+                    env={"PYTHONPATH": str(packages), "PATH": ""},
                     timeout=timeout,
                 )
             self.compose_calls.append(cmd)
+            self.pin_at_compose.append(self.pin())
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         monkeypatch.setenv("DEPLOY_AGENT_ENV_FILE", str(self.env_file))
@@ -225,6 +245,9 @@ class _Lab:
         return executor.deliver_onex_api_pin(
             sha=_NEXT_SHA, omninode_clone=self.clone, lane=EnumRuntimeLane.DEV
         )
+
+    def heal(self) -> dict[str, Any] | None:
+        return _HANDLER.heal_pin(executor_mod._run, self.env_file)
 
     def pin(self) -> str:
         for line in self.env_file.read_text("utf-8").splitlines():
@@ -358,3 +381,145 @@ def test_a_rollback_that_cannot_find_one_pin_line_says_so_and_does_not_guess(
     assert "0 ONEX_API_IMAGE= lines" in verdict.reason
     assert verdict.pin_after == _NEXT
     assert env_file.read_text("utf-8") == "A=1\n"
+
+
+_OLDER = f"{_IMAGE}:0a0a0a0a-20261101T000000Z"
+
+
+def test_a_roll_over_an_already_bad_pin_moves_it_to_the_newest_importable_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The state the 03:58Z delivery left: the env pin IS the broken image.
+
+    Every roll recreates onex-api from that pin before anything can deliver a new
+    one, so the gate on the delivery alone never gets to run again. The roll must
+    put the lane on the newest local image that does import.
+    """
+    lab = _Lab(
+        tmp_path,
+        monkeypatch,
+        router_imports=f"from {_NEW_IMPORT} import X",
+        pinned=_NEXT,
+        local_tags=[_NEXT, _PINNED, _OLDER],
+        bad_images=(_NEXT,),
+    )
+
+    record = lab.heal()
+
+    assert record is not None
+    assert record["result"] == "PIN_HEALED", record
+    assert record["pin_before"] == _NEXT
+    assert record["pin_after"] == _PINNED
+    assert lab.pin() == _PINNED
+    assert lab.env_file.read_text("utf-8") == f"A=1\nONEX_API_IMAGE={_PINNED}\nB=2\n"
+    assert lab.compose_calls == [], "the heal rewrites the pin; the roll recreates"
+
+
+def test_a_roll_over_an_importable_pin_changes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Positive control: a good pin is left alone and no other image is checked."""
+    lab = _Lab(
+        tmp_path,
+        monkeypatch,
+        router_imports=f"from {_NEW_IMPORT} import X",
+        pinned=_PINNED,
+        local_tags=[_NEXT, _PINNED],
+    )
+
+    assert lab.heal() is None
+    assert lab.pin() == _PINNED
+    assert len(lab.docker_run_calls) == 1
+
+
+def test_a_roll_with_no_importable_image_keeps_the_pin_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing to heal onto: the pin is not guessed at, and the reason is named."""
+    lab = _Lab(
+        tmp_path,
+        monkeypatch,
+        router_imports=f"from {_NEW_IMPORT} import X",
+        pinned=_NEXT,
+        local_tags=[_NEXT, _PINNED],
+        bad_images=(_NEXT, _PINNED),
+    )
+
+    record = lab.heal()
+
+    assert record is not None
+    assert record["result"] == "REFUSED", record
+    assert "no local onex-api image" in record["reason"]
+    assert lab.pin() == _NEXT
+
+
+def test_a_roll_whose_check_could_not_run_does_not_rewrite_the_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A docker that cannot answer is not evidence that the pin is broken."""
+    lab = _Lab(
+        tmp_path,
+        monkeypatch,
+        router_imports=f"from {_NEW_IMPORT} import X",
+        docker_run="unavailable",
+        pinned=_NEXT,
+        local_tags=[_NEXT, _PINNED],
+    )
+
+    record = lab.heal()
+
+    assert record is None
+    assert lab.pin() == _NEXT
+
+
+def test_the_roll_heals_the_pin_before_it_recreates_onex_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wiring, driven through the real roll: the first onex-api ``up`` sees the healed pin."""
+    lab = _Lab(
+        tmp_path,
+        monkeypatch,
+        router_imports=f"from {_NEW_IMPORT} import X",
+        pinned=_NEXT,
+        local_tags=[_NEXT, _PINNED],
+        bad_images=(_NEXT,),
+    )
+    monkeypatch.setattr(
+        executor_mod, "verify_containers_up", lambda *a, **k: (True, [])
+    )
+    steps = [
+        ["docker", "compose", "up", "-d", "--no-deps", "omninode-runtime"],
+        ["docker", "compose", "up", "-d", "--no-deps", executor_mod.ONEX_API_SERVICE],
+    ]
+
+    _result, error = executor_mod.load_dev_boot_guard().run_compose_up_steps(
+        steps, 60, rolling=True, lane=EnumRuntimeLane.DEV, execution=executor_mod
+    )
+
+    assert error is None
+    assert len(lab.compose_calls) == 2
+    assert lab.pin_at_compose == [_PINNED, _PINNED], "the pin is healed before step one"
+
+
+def test_a_roll_that_does_not_touch_onex_api_does_not_check_its_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lab = _Lab(
+        tmp_path,
+        monkeypatch,
+        router_imports=f"from {_NEW_IMPORT} import X",
+        pinned=_NEXT,
+        local_tags=[_NEXT, _PINNED],
+        bad_images=(_NEXT,),
+    )
+    monkeypatch.setattr(
+        executor_mod, "verify_containers_up", lambda *a, **k: (True, [])
+    )
+    steps = [["docker", "compose", "up", "-d", "--no-deps", "omninode-runtime"]]
+
+    executor_mod.load_dev_boot_guard().run_compose_up_steps(
+        steps, 60, rolling=True, lane=EnumRuntimeLane.DEV, execution=executor_mod
+    )
+
+    assert lab.docker_run_calls == []
+    assert lab.pin() == _NEXT

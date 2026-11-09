@@ -22,6 +22,11 @@ requirements:
     acceptance:
       - id: AC5
         statement: "AC5: the deploy agent imports-checks the candidate onex-api image and writes the previous pin back when a module is missing -- falsifier: uv run pytest of the import-check unit and integration tests, which fail with the gate call removed"
+  - id: req-omn23039-onex-api-roll-pin-heal
+    statement: A dev roll whose ONEX_API_IMAGE pin is already an image that cannot import its omnimarket modules moves the pin to the newest local onex-api image that can, before onex-api is recreated, so one bad delivery no longer stops every later roll at onex-api.
+    acceptance:
+      - id: AC6
+        statement: "AC6: the dev roll import-checks the pinned onex-api image before recreating onex-api and writes the newest importable local image of the same repository as the pin when it is broken, and leaves a good pin and a check that could not run alone -- falsifier: uv run pytest of the roll pin-heal unit tests, whose wiring test fails with the heal call removed from run_compose_up_steps"
 evidence_requirements:
   - kind: tests
     description: The pin tests drive self_update over real git clones; the pinned branch is loaded and held across a second heartbeat, and the same clone without a pin returns to dev.
@@ -106,3 +111,11 @@ dod_evidence:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-23039 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/handlers/test_handler_onex_api_image_import_check_omn23039.py -q --no-cov
         cwd: .
+  - id: dod-omn23039-roll-pin-heal
+    description: The roll heals an already-broken onex-api pin onto the newest importable local image before recreating onex-api, leaves an importable pin and an unrunnable check alone, and names the refusal when no local image imports.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_import_check_omn23039.py -q -k "roll"
+        cwd: ${OMNI_HOME}/omnibase_infra
