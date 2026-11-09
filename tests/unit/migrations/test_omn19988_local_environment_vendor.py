@@ -38,6 +38,11 @@ _VENDORED = [
         "0a429ce454c5042c1e5c7d77dcb835fdb17872ff68e7d4ce73e37102719e5d16",
         "forward-only",
     ),
+    (
+        "0003_grant_delete_local_environment.sql",
+        "8cdd0ece55eda788c8cbf00a1922389ff0b40fd7d45c1081f426e86327ef986b",
+        "expand-only",
+    ),
 ]
 
 
@@ -90,3 +95,4 @@ def test_only_the_force_step_is_fenced() -> None:
         f"node:{_NODE}:0001_grant_tenant_projection_writer_local_environment.sql"
         not in ids
     )
+    assert f"node:{_NODE}:0003_grant_delete_local_environment.sql" not in ids

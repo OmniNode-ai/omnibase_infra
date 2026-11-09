@@ -313,7 +313,10 @@ repos:
   # This rev still enforces the existing placement ratchet. It is subject to the
   # same hook_rev_max_releases_behind policy as every other core hook: the required
   # dependency-pins job refuses it when more than 14 release tags are newer.
-  # This is a release-count bound, not an indefinite exception or a new baseline.
+  # OMN-23246 (RULING 2026-11-09T01:57:48Z): this one rev is past that bound (15 tags) and
+  # omnibase_core's policy exempts exactly it until 2026-11-16, after which the job fails
+  # on it; OMN-22867 moves the remaining self-hosted jobs off internal runners, bumps this
+  # rev to the dev-merge tag and deletes the exemption. No baseline is added.
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: 1c9566e2c249fe54257a4b3ef3ff2e71de027b89
     hooks:
