@@ -71,7 +71,6 @@ _CLASSES = [(node, name, klass) for node, name, _, klass in _VENDORED]
 
 _TABLES = [
     ("local_identity", "node_projection_local_identity"),
-    ("local_alerts", "node_projection_local_alerts"),
 ]
 
 
