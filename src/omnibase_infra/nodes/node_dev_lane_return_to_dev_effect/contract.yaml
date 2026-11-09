@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_dev_lane_return_to_dev_effect
+contract_name: node_dev_lane_return_to_dev_effect
+node_name: node_dev_lane_return_to_dev_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Dev-only record, kept in the dev deploy agent's state directory, of each build of the dev lane from an unmerged pull request's branch (repository, pull request, branch, head, requester, job, expiry at most seven days out). Settling reads the agent's job records, records the build the newest successful dev job declared, and names the builds whose pull request has merged or closed, or whose record expired, while the lane still runs the branch; the agent then returns the lane to dev's head through an ordinary deploy job, which is the later dev job that drops the record.
+input_model:
+  name: ModelDevLaneReturnToDevRequest
+  module: omnibase_infra.models.model_dev_lane_return_to_dev_request
+  description: The operation (record or settle), the state directory, the git timeout and, per operation, the build to record, or the agent's job records, the instant, clones, running commits and dev ref to settle against.
+output_model:
+  name: ModelDevLaneReturnToDevResult
+  module: omnibase_infra.models.model_dev_lane_return_to_dev_result
+  description: The record file touched, the builds now on record, the builds due for their return and the builds dropped (the lane already runs dev, or a later dev job replaced them).
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: record
+      handler: {name: HandlerDevLaneReturnToDev, module: omnibase_infra.handlers.handler_dev_lane_return_to_dev}
+    - operation: settle
+      handler: {name: HandlerDevLaneReturnToDev, module: omnibase_infra.handlers.handler_dev_lane_return_to_dev}
+capabilities:
+  - name: dev_lane.return_to_dev
+    description: Return the dev lane to dev's head, through the deploy agent, once the pull request whose branch it was built from has merged or closed.
+metadata:
+  ticket: OMN-22996
+  author: OmniNode Team
+  description: Host-local effect. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment, dev]
