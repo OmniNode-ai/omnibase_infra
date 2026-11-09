@@ -1,0 +1,100 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-22867
+title: omnibase_infra's workflows run on a hosted runner, families 1 to 3
+summary: 'Family 1 of the hosted-runner migration of this public repository. The 26 pull_request and merge_group gate workflows that touch no lab service select the literal ubuntu-latest in every job and are listed in the routing policy''s hosted_runner_allowlist, so omnibase_core''s check-public-runner-placement reports none of them. Family 2 of the hosted-runner migration of this public repository. The 18 scheduled, dispatched and reusable workflows that touch no lab service select the literal ubuntu-latest in every job and are listed in the routing policy''s hosted_runner_allowlist, so omnibase_core''s check-public-runner-placement reports none of them. Family 3: the 9 static gate workflows (compose teardown, governed helper, duplication sweep, shell hygiene, dispatch parity, dispatcher route coverage, consumer kwarg parity, compose config lint, s6 runtime seam) select the literal ubuntu-latest and are allowlisted.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22867-family1-hosted
+    statement: Each gate workflow of the family selects only the GitHub-hosted label and is allowlisted with a reason.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: Every job of the 26 family workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason -- falsifier: uv run pytest tests/ci/test_public_runner_family_gates_omn22867.py -q -o addopts='''''
+      - id: AC3
+        statement: 'AC3: The runner-routing audit and the public runner placement tests stay green with the family hosted -- falsifier: uv run pytest tests/ci/test_public_runner_family_gates_omn22867.py tests/ci/test_runner_routing_audit.py tests/ci/test_public_runner_placement_omn19998.py -q -o addopts='''''
+  - id: req-omn22867-family2-hosted
+    statement: Each scheduled, dispatched or reusable workflow of the family selects only the GitHub-hosted label and is allowlisted with a reason.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: Every job of the 18 family workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason -- falsifier: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py -q -o addopts='''''
+      - id: AC5
+        statement: 'AC5: The runner-routing audit and the workflow tests that read the family stay green with the family hosted -- falsifier: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py tests/ci/test_runner_routing_audit.py tests/ci/test_lockfile_cve_autobump.py -q -o addopts='''''
+  - id: req-omn22867-family3-hosted
+    statement: Each static gate workflow of the family selects only the GitHub-hosted label and is allowlisted with a reason.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: Every job of the 9 static gate workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason -- falsifier: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py -q -o addopts='''''
+      - id: AC7
+        statement: 'AC7: The runner-routing audit stays green with the static gates hosted -- falsifier: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts='''''
+evidence_requirements:
+  - kind: tests
+    description: Workflow shape test of the family and the routing audit tests.
+    command: uv run pytest tests/ci/test_public_runner_family_gates_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+  - kind: tests
+    description: Workflow shape test of the family and the routing audit tests.
+    command: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+  - kind: tests
+    description: Workflow shape test of family 3 and the routing audit tests.
+    command: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22867-ac1-family-hosted
+    description: Every job of each family workflow selects ubuntu-latest and each file is allowlisted with a reason.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_gates_omn22867.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac2-routing-audit
+    description: The routing audit controls and the public runner placement tests pass.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_gates_omn22867.py tests/ci/test_runner_routing_audit.py tests/ci/test_public_runner_placement_omn19998.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac3-family-hosted
+    description: Every job of each family workflow selects ubuntu-latest and each file is allowlisted with a reason.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac4-routing-audit
+    description: The routing audit controls and the lockfile autobump workflow test pass.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_sched_omn22867.py tests/ci/test_runner_routing_audit.py tests/ci/test_lockfile_cve_autobump.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac6-family-static
+    description: Every job of each static gate workflow selects ubuntu-latest and each file is allowlisted with a reason.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac7-routing-audit-static
+    description: The routing audit controls pass beside the family 3 test.
+    source: manual
+    binds_ac:
+      - AC7
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
