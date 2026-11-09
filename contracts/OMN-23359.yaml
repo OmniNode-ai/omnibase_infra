@@ -39,10 +39,10 @@ dod_evidence:
         check_value: uv run pytest -q tests/ci/test_runner_cache_volumes.py tests/ci/test_deploy_runners_registration_preflight.py tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23359-compose-declares-no-general-runner
-    description: The runner compose file holds no omninode-runner-N service key. At the merge base the same grep finds ten, so the check fails there.
+    description: docker compose reads the runner compose file and lists no omninode-runner-N service. At the merge base the same probe lists ten, so the check fails there.
     source: manual
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: bash -c '! grep -qE "^  omninode-runner-[0-9]+:" docker/docker-compose.runners.yml'
+        check_value: bash -c '! docker compose -f docker/docker-compose.runners.yml config --no-interpolate --services | grep -qE "^omninode-runner-[0-9]+$"'
         cwd: ${OMNI_HOME}/omnibase_infra
