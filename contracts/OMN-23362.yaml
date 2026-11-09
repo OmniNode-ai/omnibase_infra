@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-23362
 title: "The lane-deploy preflight finds the prod-promotion grant registry in omnibase_infra, so a governed refresh is not refused as unreadable"
 summary: >-
-  scripts/preflight_lane_deploy_attribution.py reads the prod-promotion grant registry from this repository at grants/prod_promotion_grants.yaml on origin/main. OMN-17427 (#5118) moved that read here and left the registry behind, so every governed-lane refresh failed closed with grant verdict UNREADABLE before it changed anything. This change restores the registry as the empty registry it replaced (entries: [], no grant and no approval), routes every change under grants/ to the platform leads through .github/CODEOWNERS, and adds grants to the public-repository hygiene top-level allowlist. The registry reaches origin/main, where the preflight reads it, with the next release.
+  scripts/preflight_lane_deploy_attribution.py reads the prod-promotion grant registry from this repository at config/prod_promotion_grants.yaml on origin/main. OMN-17427 (#5118) moved that read here and left the registry behind, so every governed-lane refresh failed closed with grant verdict UNREADABLE before it changed anything. This change restores the registry as the empty registry it replaced (entries: [], no grant and no approval), routes every change of the registry to the platform leads through .github/CODEOWNERS. The registry reaches origin/main, where the preflight reads it, with the next release.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -20,7 +20,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: >-
-      The registry is tracked at GRANTS_REPO_RELPATH, parses to exactly an empty entries list, evaluates as CLEAR with no live grant and no error through the preflight's own evaluate_grant_state, and changes to grants/ route to code owners.
+      The registry is tracked at GRANTS_REPO_RELPATH, parses to exactly an empty entries list, evaluates as CLEAR with no live grant and no error through the preflight's own evaluate_grant_state, and changes to the registry route to code owners.
     command: uv run --frozen pytest tests/unit/scripts/test_grant_registry_present_omn23362.py -q -n 0
 emergency_bypass:
   enabled: false
@@ -29,7 +29,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn23362-ac1-registry-present
     description: >-
-      The ticket's falsifier. At the merge base there is no file at GRANTS_REPO_RELPATH and no grants/ code-owner rule, so all four tests fail.
+      The ticket's falsifier. At the merge base there is no file at GRANTS_REPO_RELPATH and no code-owner rule for the registry, so all four tests fail.
     source: manual
     checks:
       - check_type: test_passes

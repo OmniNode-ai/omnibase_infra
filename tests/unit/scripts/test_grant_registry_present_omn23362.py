@@ -54,4 +54,7 @@ def test_grant_registry_present_changes_route_to_code_owners() -> None:
         for line in codeowners.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
-    assert any(parts[0] == "/grants/" and len(parts) > 1 for parts in owner_lines)
+    assert any(
+        parts[0] == f"/{GRANTS_REPO_RELPATH}" and len(parts) > 1
+        for parts in owner_lines
+    )

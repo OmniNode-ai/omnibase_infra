@@ -60,7 +60,6 @@ allowed_top_level:
   - "deploy"
   - "docker"
   - "docs"
-  - "grants"
   - "observability"
   - "pyproject.toml"
   - "scripts"
