@@ -240,6 +240,7 @@ jobs:
         uses: ./.github/actions/resolve-lab-lane
         with:
           lanes-json: ${{ vars.LAB_PROOF_LANES_JSON }}
+          lanes-var: LAB_PROOF_LANES_JSON
           require: ingress_url gateway_url bus_lane
           match: lane_role=stability
           # OMN-19811: run 37125721313 resolved the lane mid-deploy.
