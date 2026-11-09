@@ -39,7 +39,6 @@ _RUNTIME_CORE_SERVICES = frozenset(
         "skill-lifecycle-consumer",
         "context-audit-consumer",
         "omninode-contract-resolver",
-        "intelligence-api",
     }
 )
 
@@ -100,8 +99,12 @@ def _service_names(compose: dict[str, object]) -> set[str]:
 
 
 @pytest.mark.integration
-def test_generate_runtime_core_declares_seven_services(tmp_path: Path) -> None:
-    """`catalog.cli generate runtime-core` emits the 7 core runtime services."""
+def test_generate_runtime_core_declares_six_services(tmp_path: Path) -> None:
+    """`catalog.cli generate runtime-core` emits the 6 core runtime services.
+
+    OMN-22391: the intelligence API left this list when the runtime began
+    serving it through its own HTTP mount.
+    """
     output = tmp_path / "runtime-core.yml"
     result = _generate_to("runtime-core", output)
     assert result.returncode == 0, f"generate failed: {result.stderr}"
@@ -111,7 +114,7 @@ def test_generate_runtime_core_declares_seven_services(tmp_path: Path) -> None:
     services = _service_names(compose)
 
     # Subset check: the generator resolves `depends_on` transitively, so the
-    # compose contains more than the 7 declared services. We assert the 7 core
+    # compose contains more than the 6 declared services. We assert the 6 core
     # services are present; extra transitively-pulled services are expected.
     missing = _RUNTIME_CORE_SERVICES - services
     assert not missing, (
