@@ -92,7 +92,7 @@ class TestTheArrayIsFoundAtAll:
     """A positive control: an empty parse must never read as agreement."""
 
     def test_runtime_services_array_is_non_empty(self) -> None:
-        assert len(_bash_array("RUNTIME_SERVICES")) >= 8
+        assert len(_bash_array("RUNTIME_SERVICES")) >= 7
 
 
 class TestRuntimeServicesCannotDriftFromTheBashArray:

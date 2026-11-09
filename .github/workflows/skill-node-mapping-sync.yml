@@ -43,13 +43,7 @@ permissions:
 jobs:
   skill-node-mapping-sync:
     name: skill-node-mapping-sync
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     # OMN-14017: checkout/action download/setup retries can exceed 10 minutes
     # during runner-lane egress saturation.
     timeout-minutes: 30
@@ -64,7 +58,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f88570610657a307ccfbb80be6024635d99e5912 # .github/sibling-pins.yaml
+          ref: d059bd84147a96ed1e9765945cde7f2ffe6ffab0 # .github/sibling-pins.yaml
           path: omnimarket-src
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           # Sparse checkout: only the entry-point catalog source of truth.

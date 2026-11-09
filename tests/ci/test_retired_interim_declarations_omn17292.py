@@ -3,7 +3,7 @@
 
 """Interim table declarations retired by the omnimarket pin advance (OMN-17292).
 
-The pin advance to f88570610657 makes the supplemental declarations for these
+The omnimarket pin advance makes the supplemental declarations for these
 relations redundant; the entries must be gone from the tuple.
 """
 

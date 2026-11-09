@@ -361,7 +361,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # SELECT, INSERT, UPDATE. Retired when omnimarket's
     # node_projection_local_identity contract merges and the pin advances past
     # it; the expiry module names it.
-    *(_vendored_read_write(t, schema="public") for t in ("local_identity",)),
+    _vendored_read_write("local_identity", schema="public"),
     # OMN-21970: the same infra-first window. This repo vendors
     # node_projection_delegation 0067's projection_delegation_daily view ahead of
     # the omnimarket contract that declares it (access read, role aggregate_daily),

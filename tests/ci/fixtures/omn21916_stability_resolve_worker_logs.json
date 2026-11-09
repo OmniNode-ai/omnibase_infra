@@ -1,0 +1,51 @@
+{
+  "_provenance": {
+    "source": "Worker logs of the self-hosted verify runners that ran the failed scheduled runs (the step's own errorMessages entry as the runner printed it)",
+    "captured_utc": "2026-11-08T20:49:43Z",
+    "source_sha256": "e77ef1ecfdda6c90c62bffdde0ac6fab046189613ba7461a9b88ce7372a75568",
+    "note": "source_sha256 is that of the first run's worker log; the other two logs are named with their own sha256 in the response"
+  },
+  "response": {
+    "runs": [
+      {
+        "workflow": "chain-canary.yml",
+        "run_id": 42516551679,
+        "job_id": 128840721533,
+        "worker_log": "Worker_20261108-194440-utc.log",
+        "worker_log_sha256": "e77ef1ecfdda6c90c62bffdde0ac6fab046189613ba7461a9b88ce7372a75568",
+        "step": "Resolve the stability lane through the overlay's chain of responders",
+        "lanes_json_input_expression": "vars.LAB_PROOF_LANES_JSON",
+        "error_messages": [
+          "no lab lane is declared; set the repository variable LAB_LANES_JSON",
+          "Process completed with exit code 1."
+        ]
+      },
+      {
+        "workflow": "chain-canary-c16-receipt-identity.yml",
+        "run_id": 42495460460,
+        "job_id": 128776724141,
+        "worker_log": "Worker_20261108-153406-utc.log",
+        "worker_log_sha256": "e7f8100cd7ea58eb0bc5d4e698a9c3d3c35ed09deb1da9d8d5e88d343f8b8ab0",
+        "step": "Resolve the stability lane through the overlay's chain of responders",
+        "lanes_json_input_expression": "vars.LAB_PROOF_LANES_JSON",
+        "error_messages": [
+          "no lab lane is declared; set the repository variable LAB_LANES_JSON",
+          "Process completed with exit code 1."
+        ]
+      },
+      {
+        "workflow": "chain-canary-c28-consumer-flow.yml",
+        "run_id": 42518808233,
+        "job_id": 128847566539,
+        "worker_log": "Worker_20261108-201105-utc.log",
+        "worker_log_sha256": "be76b07ddca911498069e14cd85fac8850ced9c8686ed59f08b19663f0faef6c",
+        "step": "Resolve the lab lane through the overlay's chain of responders",
+        "lanes_json_input_expression": "vars.LAB_PROOF_LANES_JSON",
+        "error_messages": [
+          "no lab lane is declared; set the repository variable LAB_LANES_JSON",
+          "Process completed with exit code 1."
+        ]
+      }
+    ]
+  }
+}

@@ -161,7 +161,6 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
         "skill-lifecycle-consumer",
         "context-audit-consumer",
         "intelligence-migration",
-        "intelligence-api",
         "omninode-contract-resolver",
         "autoheal",
     ],
@@ -258,7 +257,6 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     "projection-savings-writer",
     "projection-tenant-credentials-writer",
     "projection-live-events-writer",
-    "infra-routing-decisions-consumer",
     "onex-api",
     # OMN-18114: the TENANT-domain projection carrier, for a reason that is the
     # OPPOSITE of the writers' reason above and is stated separately so the two
@@ -321,7 +319,6 @@ DEV_LANE_COMPOSED_RUNTIME_SERVICES: tuple[str, ...] = (
     "agent-actions-consumer",
     "skill-lifecycle-consumer",
     "context-audit-consumer",
-    "intelligence-api",
     "omninode-contract-resolver",
 )
 
