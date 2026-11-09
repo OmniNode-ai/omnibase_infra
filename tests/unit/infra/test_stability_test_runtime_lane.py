@@ -36,7 +36,6 @@ OUT_OF_LANE_SERVICES = {
     "agent-actions-consumer",
     "skill-lifecycle-consumer",
     "context-audit-consumer",
-    "intelligence-api",
     "omninode-contract-resolver",
     "phoenix",
     "autoheal",
@@ -53,7 +52,6 @@ PRODUCTION_CONTAINER_NAMES = {
     "omninode-agent-actions-consumer",
     "omninode-skill-lifecycle-consumer",
     "omninode-context-audit-consumer",
-    "omnibase-intelligence-api",
     "omnibase-intelligence-migration",
     "omninode-contract-resolver",
     "omnibase-infra-phoenix",
@@ -642,9 +640,10 @@ def test_stability_lane_volumes_do_not_reuse_production_names() -> None:
 @pytest.mark.unit
 def test_stability_lane_main_carries_effects_environment_and_networks() -> None:
     main = _load_overlay()["services"]["omninode-runtime"]
-    assert main["environment"]["CODING_AGENT_CRED_HOME"] == "/home/omniinfra"
+    cred_home = "/home/${RUNTIME_USER_NAME:-omniinfra}"
+    assert main["environment"]["CODING_AGENT_CRED_HOME"] == cred_home
     assert main["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"] == (
-        "/home/omniinfra/agent-workspaces"
+        f"{cred_home}/agent-workspaces"
     )
     assert main["environment"]["OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS"] == (
         "redpanda:9092"

@@ -6,6 +6,10 @@ inputs:
   lanes-json:
     description: 'The overlay list, normally vars.LAB_LANES_JSON.'
     required: true
+  lanes-var:
+    description: 'The name of the repository variable lanes-json was read from; error messages name it (OMN-21916).'
+    required: false
+    default: 'LAB_LANES_JSON'
   require:
     description: 'Space-separated fields a lane must declare; each *_url among them must answer.'
     required: true
@@ -39,6 +43,7 @@ runs:
       shell: bash
       env:
         LAB_LANES_JSON: ${{ inputs.lanes-json }}
+        LAB_LANES_VAR: ${{ inputs.lanes-var }}
         LANE_REQUIRE: ${{ inputs.require }}
         LANE_MATCH: ${{ inputs.match }}
         LANE_DEPLOY_WAIT_SECONDS: ${{ inputs.deploy-wait-seconds }}
