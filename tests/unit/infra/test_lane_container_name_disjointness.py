@@ -256,11 +256,6 @@ def test_judge_container_names_are_lane_scoped() -> None:
         ),
         (
             "stability-test",
-            "intelligence-api",
-            "omnibase-stability-test-intelligence-api",
-        ),
-        (
-            "stability-test",
             "omninode-contract-resolver",
             "omninode-stability-test-contract-resolver",
         ),
@@ -275,7 +270,6 @@ def test_judge_container_names_are_lane_scoped() -> None:
             "skill-lifecycle-consumer",
             "omninode-prod-skill-lifecycle-consumer",
         ),
-        ("prod", "intelligence-api", "omnibase-prod-intelligence-api"),
         (
             "prod",
             "omninode-contract-resolver",

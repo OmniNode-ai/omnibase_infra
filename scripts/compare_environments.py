@@ -557,7 +557,6 @@ CANONICAL_SERVICES = {
     "omninode-runtime",
     "omninode-runtime-effects",
     "omninode-agent-actions-consumer",
-    "omnibase-intelligence-api",
     "omninode-contract-resolver",
     "omninode-skill-lifecycle-consumer",
 }

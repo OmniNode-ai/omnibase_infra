@@ -193,7 +193,6 @@ readonly RUNTIME_SERVICES=(
     projection-api
     agent-actions-consumer
     skill-lifecycle-consumer
-    intelligence-api
     omninode-contract-resolver
 )
 
