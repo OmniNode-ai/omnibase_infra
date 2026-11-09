@@ -23,7 +23,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn23009-handover-reach-tests
-    description: The five handover reach tests pass on the branch; against the overlay at the merge base two of them fail (the name is missing from main's environment), and the test file is absent at the merge base.
+    description: The five handover reach tests pass on the branch; against the overlay at the merge base two of them fail (the name is missing from main's environment) and the required-names pin test fails too; a lab run of the head's tests over the merge base read 3 failed and 22 passed, and the file is absent at the merge base.
     source: manual
     binds_ac:
       - AC1
