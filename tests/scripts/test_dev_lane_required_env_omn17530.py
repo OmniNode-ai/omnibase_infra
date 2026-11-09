@@ -519,12 +519,14 @@ def test_tenant_fold_required_names_match_its_manifest() -> None:
     )
     # OMN-22930 (T8): the effects fold adds the effects host port and the folded
     # main's own store resolver config to the fold overlay's required names.
+    # OMN-23009: the fold handovers the policy renders reach main as a required name.
     assert (
         required
         == declared
         == {
             "DEV_RUNTIME_EFFECTS_PORT",
             "DEV_RUNTIME_MAIN_FOLDED_PROFILES",
+            "DEV_RUNTIME_MAIN_FOLD_HANDOVERS",
             "DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON",
         }
     )
