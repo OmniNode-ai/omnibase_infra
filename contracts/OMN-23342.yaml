@@ -52,3 +52,13 @@ dod_evidence:
       - check_type: command
         check_value: ssh "$RUNNER_PROBE_HOST" "docker exec hp053-ci-runner-1 sh -c 'ldd \"$RUNNER_TOOL_CACHE\"/Python/3.12.*/x64/bin/python3.12 | grep -v \"not found\"'"
         cwd: .
+  - id: dod-omn23342-pre-commit-passes-on-a-fixed-runner
+    description: The pre-commit check of this change's pull request reads success on a job that ran on one of the rebuilt runners. Pending the roll; read from the PR watcher after it.
+    source: manual
+    binds_ac:
+      - AC3
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-checks "OmniNode-ai/omnibase_infra#$PR_NUMBER" | grep -i 'pre-commit' | grep -i -E 'success|pass'
+        cwd: .
