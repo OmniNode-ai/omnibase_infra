@@ -11,6 +11,8 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: provisioners and the validator sharing the runtime start scan run the extractor once, provisioners with no shared scan still run it once each, a refresh and a new runtime start scan again -- falsifier: uv run pytest tests/unit/event_bus/test_contract_topic_scan_once_omn22607.py -q fails with the per-constructor scan restored'
+      - id: AC2
+        statement: 'AC2: a scan that runs logs one line carrying its run number, topic count and seconds, and a reused scan logs none -- falsifier: uv run pytest tests/unit/event_bus/test_contract_topic_scan_once_omn22607.py -q fails with the log line removed'
 evidence_requirements:
   - kind: tests
     description: The scan-once tests
@@ -36,3 +38,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/event_bus/test_contract_topic_scan_once_omn22607.py -q
         cwd: .
+    binds_ac:
+      - AC2
