@@ -109,14 +109,12 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_activations": "omnimarket OMN-21115 (node_context_install_confirm_trigger_effect)",
     "compaction_current_context": "omnimarket OMN-21090 (node_projection_compaction_current_context)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
-    "context_audit_events": "omnimarket OMN-21934 (node_projection_context_audit)",
     "agent_actions": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_transformation_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "router_performance_metrics": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_detection_failures": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_execution_logs": "omnimarket OMN-21920 (node_projection_agent_actions)",
     "agent_status_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
-    "local_alerts": "omnimarket OMN-19991 (node_projection_local_alerts)",
     "local_identity": "omnimarket OMN-19986 (node_projection_local_identity)",
     "projection_delegation_daily": "omnimarket OMN-21970 (node_projection_delegation)",
     "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
@@ -132,8 +130,6 @@ _INTERIM_ENTRIES: dict[str, str] = {
         ),
         "omnimarket OMN-22320 writer half (node_projection_work_questions)",
     ),
-    "overlay_store": "omnimarket OMN-22478 writer half (node_projection_overlay_store)",
-    "view_seam_readings": "omnimarket OMN-22020 writer half (node_view_seam_reading_reducer)",
 }
 
 _SKIP_REASON = (
