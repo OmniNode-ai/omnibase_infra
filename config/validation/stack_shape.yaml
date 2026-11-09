@@ -242,6 +242,20 @@ allowed_commands:
   - match: exact
     field: command
     services:
+      - lane-redpanda-scram-user
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: 9e31c71a6c7a71af6f65a7477b9e55778d5d8848b7de5f3613cbae84725565b8
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - lane-redpanda-sasl-enable
+    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
+    argv_sha256: aee75448ae34bf5c4b801b782914a74ff92f254eb8e847de1a98c9f7edd9961c
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
       - redpanda-sasl-enable
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
     argv_sha256: e3a2b10c6f1a4d35c677cd133b26f1f242689586efd400b0ea6e0f426a901a8e
@@ -323,6 +337,8 @@ allowed_commands:
       - sha256:a68f0d940a7928215b337b317984550c1f9130959159eddef27abe436e59a419
       - sha256:88d12b21011ce6ecc6a5db72ec53c093a45f5026c119b974d02b0a7c93e9e143
       - sha256:1311c9dd9bc027d732005196555d06fa3316d3ea1d7b743d40b40cdbd97e8e49
+      - lane-redpanda-sasl-enable
+      - lane-redpanda-scram-user
       - redpanda-partition-cap
       - redpanda-sasl-enable
       - redpanda-scram-user
