@@ -1740,3 +1740,16 @@ def test_every_market_module_uses_the_project_scoped_market_image_without_build(
         assert services[name]["image"] == expected
         assert "build" not in services[name]
     assert len(market_services) == expected_count
+
+
+def test_local_env_template_broker_holds_the_omnimarket_topic_set_omn21968() -> None:
+    # One partition replica per MiB of broker memory: the 2G template stopped at 2048
+    # replicas while the local-market runtime provisions 2187 topics of one partition.
+    (line,) = [
+        raw
+        for raw in _ENV_TEMPLATE.read_text(encoding="utf-8").splitlines()
+        if raw.startswith("REDPANDA_MEMORY=")
+    ]
+    value = line.partition("=")[2]
+    assert value.endswith("G"), value
+    assert int(value[:-1]) * 1024 >= 2187 + 512, value

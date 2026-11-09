@@ -66,7 +66,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn-17292-ac1-pin-advance-bridges-retired
-    description: The six supplemental table declarations the advanced omnimarket pin now carries stay deleted from this repository; the merge base has no such test.
+    description: The eight supplemental table declarations the advanced omnimarket pin now carries stay deleted from this repository; the merge base has no such test.
     source: manual
     checks:
       - check_type: test_passes

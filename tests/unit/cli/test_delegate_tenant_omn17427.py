@@ -36,6 +36,7 @@ from omnibase_infra.cli.cli_delegate import (
     TENANT_OVERLAY_ENV,
     DelegateTenantRefusedError,
     _write_payload,
+    read_lab_host_tenant,
     resolve_delegate_tenant,
     run_delegate,
 )
@@ -50,6 +51,8 @@ pytestmark = pytest.mark.unit
 _KAFKA_BOOTSTRAP = "localhost:19092"
 _MINTED = "0b2a6f1e-7c1d-4a39-8d55-3e8a4c9f1b27"
 _OVERLAY = "lab-house"
+# The lab_hosts overlay projection, relative to a host's HOME (OMN-23356).
+_PROJECTION = Path(".local/state/onex/overlay-store/lab_hosts/overlay.yaml")
 
 
 def _uninitialised_install(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,10 +352,8 @@ class TestLabHostTenant:
         alias = tmp_path / "Code" / "omni_home"
         alias.parent.mkdir()
         alias.symlink_to(registry, target_is_directory=True)
-        table = (
-            registry.parent
-            / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
-        )
+        home = tmp_path / "home"
+        table = home / _PROJECTION
         table.parent.mkdir(parents=True)
         house = "820272f9-4aaf-5add-a2df-0af942852ab2"
         table.write_text(
@@ -363,7 +364,44 @@ class TestLabHostTenant:
             cli_delegate, "_lab_target_is_local", lambda target: target == "lab.invalid"
         )
         assert (
-            resolve_delegate_tenant(in_process=False, environ={"OMNI_HOME": str(alias)})
+            resolve_delegate_tenant(
+                in_process=False, environ={"OMNI_HOME": str(alias), "HOME": str(home)}
+            )
+            == house
+        )
+
+    def test_projection_under_home_resolves_and_a_sibling_table_does_not(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # OMN-23356: the lab host table is the lab_hosts overlay's projection
+        # under HOME. A table beside the registry is not read.
+        registry = tmp_path / "registry" / "root"
+        registry.mkdir(parents=True)
+        house = "820272f9-4aaf-5add-a2df-0af942852ab2"
+        row = (
+            f"hosts:\n  - name: h201\n    target: lab.invalid\n    tenant_id: {house}\n"
+        )
+        monkeypatch.setattr(cli_delegate.socket, "gethostname", lambda: "h201")
+        monkeypatch.setattr(cli_delegate, "_lab_target_is_local", lambda _t: False)
+        old = registry.parent / "sibling_clone/src/sibling_clone"
+        old.mkdir(parents=True)
+        (old / "lab_run_hosts.yaml").write_text(row)
+
+        empty_home = tmp_path / "empty_home"
+        empty_home.mkdir()
+        assert (
+            read_lab_host_tenant(
+                {"OMNI_HOME": str(registry), "HOME": str(empty_home)},
+            )
+            is None
+        )
+
+        home = tmp_path / "home"
+        projection = home / _PROJECTION
+        projection.parent.mkdir(parents=True)
+        projection.write_text(row)
+        assert (
+            read_lab_host_tenant({"OMNI_HOME": str(registry), "HOME": str(home)})
             == house
         )
 
@@ -373,7 +411,8 @@ class TestLabHostTenant:
         monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: _MINTED)
         assert (
             resolve_delegate_tenant(
-                in_process=False, environ={"OMNI_HOME": str(tmp_path)}
+                in_process=False,
+                environ={"OMNI_HOME": str(tmp_path), "HOME": str(tmp_path / "home")},
             )
             == _MINTED
         )
@@ -411,8 +450,10 @@ class TestLabHostTenant:
     ) -> None:
         registry = tmp_path / "omni_home"
         registry.mkdir()
-        table = tmp_path / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+        home = tmp_path / "home"
+        table = home / _PROJECTION
         table.parent.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
         house = "820272f9-4aaf-5add-a2df-0af942852ab2"
         table.write_text(
             f"hosts:\n  - name: h202\n    target: lab.invalid\n    tenant_id: {house}\n"
