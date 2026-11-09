@@ -77,7 +77,6 @@ EXPECTED_PUBLISHED_PORTS = {
     "61091",  # contract resolver
     "61092",  # skill lifecycle consumer
     "61093",  # context audit consumer
-    "61053",  # intelligence API
     "61006",  # phoenix
     "61090",  # onex-api (disabled here, reserved)
     "61436",  # Postgres
@@ -131,7 +130,6 @@ DEV_TO_DEV_202 = {
     "omnibase-infra-cloud-migration": "omnibase-infra-dev-202-cloud-migration",
     "omnibase-infra-cloud-migration-files": "omnibase-infra-dev-202-cloud-migration-files",
     "onex-api": "onex-api-dev-202",
-    "omninode-infra-routing-decisions-consumer": "omninode-dev-202-infra-routing-decisions-consumer",
 }
 
 #: Declared but disabled on .202: the cloud image only the .201 lab-overlay pin
