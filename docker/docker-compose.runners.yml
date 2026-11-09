@@ -178,6 +178,14 @@ x-runner-base: &runner-base
     # so rather than inherit this lab's. Value lives beside the signing key in
     # `docker/.env` on the runner host.
     LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
+    # OMN-21685 -- which devpi pull-through cache the job-started hook wires into a
+    # job (docker/runners/runner-job-started.sh reads this name). The value is the
+    # lab's and lives in `docker/.env` on the runner host, set from the private lab
+    # overlay, so this public file names no cache host. Unset or empty means no cache
+    # is declared: the hook records a NOOP and jobs use direct pypi.org egress. Like
+    # every container env value it is frozen at creation, so a change reaches a
+    # runner only on its recreate (the serial, busy-checked --rolling roll).
+    OMNI_PYPI_CACHE_INDEX: ${OMNI_PYPI_CACHE_INDEX:-}
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh

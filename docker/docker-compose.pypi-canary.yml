@@ -36,7 +36,7 @@
 #
 # Verify the wiring actually landed (NEVER skip this — see reason 1 above):
 #   docker inspect omninode-runner-2 --format '{{range .Config.Env}}{{println .}}{{end}}' \
-#     | grep -E '^(UV_DEFAULT_INDEX|PIP_INDEX_URL)='
+#     | grep -E '^(UV_INDEX|PIP_INDEX_URL)='
 #
 # PyPI stays configured as the fallback index (PIP_EXTRA_INDEX_URL +
 # UV_INDEX_STRATEGY=unsafe-best-match) so a cache miss or a cache outage DEGRADES
@@ -44,10 +44,15 @@
 #
 # Endpoint source of truth: config/runner_fleet.yaml -> pypi_cache:
 # Rollout / rollback procedure: knowledge-base:runbooks/pypi-cache-egress-rollout.md
+# OMN-21685: the cache is named by OMNI_PYPI_CACHE_INDEX (runner host docker/.env, set
+# from the private lab overlay), so this public file names no cache host. Unset, the
+# canary runners point at PyPI itself, which is the same as no cache. UV_INDEX is the
+# EXTRA-index form the job-started hook measured (a default-index swap invalidates
+# every uv.lock); the host copy of this file already carried it.
 x-pypi-cache-env: &pypi-cache-env
-  UV_DEFAULT_INDEX: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
+  UV_INDEX: "${OMNI_PYPI_CACHE_INDEX:-https://pypi.org/simple/}"
   UV_INDEX_STRATEGY: "unsafe-best-match"
-  PIP_INDEX_URL: "http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/"
+  PIP_INDEX_URL: "${OMNI_PYPI_CACHE_INDEX:-https://pypi.org/simple/}"
   PIP_EXTRA_INDEX_URL: "https://pypi.org/simple/"
 services:
   omninode-runner-2:
