@@ -39,5 +39,5 @@ dod_evidence:
       - AC1
     checks:
       - check_type: command
-        check_value: sh -c 'onex --help >/dev/null && grep -q "overlay-store/lab_hosts/overlay.yaml" src/omnibase_infra/cli/cli_delegate.py && ! grep -q "lab_run_hosts" src/omnibase_infra/cli/cli_delegate.py'
+        check_value: env PATH="$PWD/../../venv/bin:$PATH" onex --help >/dev/null && grep -q "overlay-store/lab_hosts/overlay.yaml" src/omnibase_infra/cli/cli_delegate.py && ! grep -q "lab_run_hosts" src/omnibase_infra/cli/cli_delegate.py
         cwd: ${OMNI_HOME}/omnibase_infra
