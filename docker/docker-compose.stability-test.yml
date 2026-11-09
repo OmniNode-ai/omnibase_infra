@@ -241,8 +241,8 @@ services:
     environment:
       !!merge <<: [*stability_test_strict_wiring_env, *stability_test_lane_identity_env]
       # OMN-21288: carried over unchanged from runtime-effects.
-      CODING_AGENT_CRED_HOME: /home/omniinfra
-      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/omniinfra/agent-workspaces
+      CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}
+      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/${RUNTIME_USER_NAME:-omniinfra}/agent-workspaces
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
@@ -554,9 +554,6 @@ services:
     container_name: omninode-stability-test-skill-lifecycle-consumer
     profiles: !override ["stability-test-disabled"]
   context-audit-consumer:
-    profiles: !override ["stability-test-disabled"]
-  intelligence-api:
-    container_name: omnibase-stability-test-intelligence-api
     profiles: !override ["stability-test-disabled"]
   omninode-contract-resolver:
     container_name: omninode-stability-test-contract-resolver
