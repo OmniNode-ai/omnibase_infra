@@ -28,7 +28,7 @@ runtime-core:
   # OMN-19496: the "no env requirements" claim this description used to make was
   # false -- the resolved bundle requires 15 vars, lab model URLs among them.
   # The laptop profile is the `local` bundle below.
-  description: "ONEX runtime core — 7 runtime services plus their infrastructure dependencies (OMN-9332). Requires the operator env (POSTGRES_PASSWORD, VALKEY_PASSWORD, Keycloak and service-client secrets, model URLs); for a laptop use the `local` bundle."
+  description: "ONEX runtime core — 6 runtime services plus their infrastructure dependencies (OMN-9332). Requires the operator env (POSTGRES_PASSWORD, VALKEY_PASSWORD, Keycloak and service-client secrets, model URLs); for a laptop use the `local` bundle."
   services:
     - omninode-runtime
     - runtime-effects
@@ -36,7 +36,6 @@ runtime-core:
     - skill-lifecycle-consumer
     - context-audit-consumer
     - omninode-contract-resolver
-    - intelligence-api
   includes: []
   inject_env: {}
   inject_required_env: []

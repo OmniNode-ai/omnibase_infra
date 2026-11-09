@@ -1123,8 +1123,6 @@ services:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
-  intelligence-api:
-    build: *dev_lane_composed_runtime_build
   projection-api:
     build: *dev_lane_composed_runtime_build
     # OMN-21288 (T17): gated from the runtime policy like the folded writers and
@@ -1245,8 +1243,15 @@ services:
     build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: *dev_lane_broker_auth_env
+  # OMN-21933 (T12): primary dev runs the skill lifecycle projection inside main
+  # as node_projection_skill_lifecycle, which names this consumer's group under
+  # consumer_group_handover. The container of the previous revision starts under
+  # no profile a lane bring-up requests, and the deploy handler retires it by
+  # name (retired_services in the runtime policy). It stays declared here, not
+  # in the fold overlay, so the stack-shape baseline count does not grow.
   skill-lifecycle-consumer:
     build: *dev_lane_composed_runtime_build
+    profiles: !override ["folded-skill-lifecycle"]
     environment:
       !!merge <<: *dev_lane_broker_auth_env
   # context-audit-consumer is additionally the one dev-lane Kafka client that NO
@@ -1748,91 +1753,9 @@ services:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-17562"
       - "autoheal=true"
-  # ===========================================================================
-  # (6) OMN-16025 — the infra routing-decision projection consumer.
-  # ===========================================================================
-  #
-  # WHY IT IS HERE AND NOT IN docker-compose.infra.yml
-  # --------------------------------------------------
-  # Same reason as the six writers above. The base file is merged by every
-  # lane, and `onex-runtime-deploy` names RUNTIME_SERVICES verbatim in a
-  # lane-agnostic `up -d --no-deps`, so a service in the base plus an entry in
-  # that array is a change to the prod, stability-test and judge deploy paths.
-  # This service belongs to DEV_LANE_ONLY_RUNTIME_SERVICES and to this file, and
-  # a later decision to run it on another lane is that lane's own ticket.
-  #
-  # WHAT IT FIXES
-  # -------------
-  # `infra_routing_decisions` sat at 0 rows while
-  # `onex.evt.omnibase-infra.routing-decision.v1` stood at HIGH-WATERMARK 860 on
-  # this lane (measured 2026-09-06). Three independent breaks, all closed
-  # together by OMN-16025:
-  #
-  #   1. the consumer resolved `topic_keys.ROUTING_DECIDED`
-  #      (`onex.evt.omnibase-infra.routing-decided.v1`), which does not exist as
-  #      a topic on the broker at all;
-  #   2. it read each record as a flat decision dict, while live records are
-  #      ModelEventEnvelope-wrapped with the decision under `payload`;
-  #   3. and it was declared ONLY in docker/catalog (bundles.yaml +
-  #      services/infra-routing-decisions-consumer.yaml) and in NO compose file,
-  #      so it ran on zero lanes. This block is (3).
-  #
-  # It reads the omnibase_infra database, not omnidash_analytics, so it does NOT
-  # merge *dev_lane_analytics_env — infra_routing_decisions lives in
-  # omnibase_infra (migration 080) and the role_omnidash identity has no grant
-  # on it.
-  infra-routing-decisions-consumer:
-    build: *dev_lane_composed_runtime_build
-    container_name: omninode-infra-routing-decisions-consumer
-    profiles: ["runtime", "full"]
-    networks:
-      - omnibase-infra-network
-    restart: unless-stopped
-    depends_on:
-      migration-gate:
-        condition: service_healthy
-      redpanda:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    command:
-      - python
-      - -m
-      - omnibase_infra.services.observability.infra_routing_decisions.consumer
-    environment:
-      !!merge <<: *dev_lane_broker_auth_env
-      OMNIBASE_INFRA_ROUTING_DECISIONS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-      OMNIBASE_INFRA_ROUTING_DECISIONS_POSTGRES_DSN: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
-      OMNIBASE_INFRA_ROUTING_DECISIONS_HEALTH_CHECK_PORT: "8097"
-      OMNIBASE_INFRA_ROUTING_DECISIONS_HEALTH_CHECK_HOST: "0.0.0.0"
-      OMNIBASE_INFRA_ROUTING_DECISIONS_BATCH_SIZE: "100"
-      OMNIBASE_INFRA_ROUTING_DECISIONS_BATCH_TIMEOUT_MS: "1000"
-      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
-      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
-      PYTHONUNBUFFERED: "1"
-    stop_grace_period: 60s
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8097/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    logging: *dev_lane_logging
-    ulimits: *dev_lane_runtime_ulimits
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
-    labels:
-      - "com.omninode.service=infra-routing-decisions-consumer"
-      - "com.omninode.layer=runtime"
-      - "com.omninode.lane=dev"
-      - "com.omninode.ticket=OMN-16025"
-      - "autoheal=true"
+  # (6) The infra routing-decision projection consumer is retired (OMN-23072,
+  # one-runtime plan T14): node_projection_infra_routing_decisions runs in the
+  # runtime and takes over the consumer group through its contract's handover.
   # ===========================================================================
   # (8) THE TENANT-SCOPED CONTROL PLANE (OMN-17530, corpus OMN-17537)
   # ===========================================================================

@@ -1372,8 +1372,8 @@ _OTHER_BUNDLE_DIGESTS = {
     "omnidash": "c8ec69a7177b270479e795459ad901c7608bfe5dafee676d83706f0c4ad267ba",
     "omnimarket-projections": "2dddac4c21e6209ca3c09f04e43dc7a7f56b087e862fc565ed0315db3f5762e0",
     "omnimemory": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
-    "runtime": "df2dcc3c0faa9496325f55006f758b980875d37391c292ea30d7446feb8f9e25",
-    "runtime-core": "5ea725c69de13cbd3af0810ec7aabae39ca95c88d47e28e064ccea17bf5a976e",
+    "runtime": "2a29d35947310d7879bac4841de654502c9281957b24e205fae6cfd5b7191252",
+    "runtime-core": "23f329c99668fd6ef4137edee9c07f59e3f73c9a1542f73af12c1d9044db21bf",
     "runtime-infrastructure": "faf5e4ccaa9f09d9ccc9412a253d614573a865a31f274d6a68056ddd8538a78c",
     "runtime-integrations": "becf59c5917d835f5148c9449bcec688b593792c89b1d31d6a62666b31d6b623",
     "runtime-observability-projections": "843681c597dcf5ba7e0d1fd223c1bae557f8dc8a69c132f0c9376eb8365da052",
@@ -1401,6 +1401,8 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     # OMN-21279: only market image tags (projection-api included) changed in the
     # three updated digests. OMN-18087: the four runtime-bearing bundles moved
     # when main's memory limit and the runtime user's home came from the policy.
+    # OMN-22391: runtime and runtime-core moved when the intelligence API left
+    # their service lists for the runtime's own HTTP mount.
     assert sorted(
         set(bundles) - {"local", "local-market", "local-lane-mirror"}
     ) == sorted(_OTHER_BUNDLE_DIGESTS)
@@ -1738,3 +1740,16 @@ def test_every_market_module_uses_the_project_scoped_market_image_without_build(
         assert services[name]["image"] == expected
         assert "build" not in services[name]
     assert len(market_services) == expected_count
+
+
+def test_local_env_template_broker_holds_the_omnimarket_topic_set_omn21968() -> None:
+    # One partition replica per MiB of broker memory: the 2G template stopped at 2048
+    # replicas while the local-market runtime provisions 2187 topics of one partition.
+    (line,) = [
+        raw
+        for raw in _ENV_TEMPLATE.read_text(encoding="utf-8").splitlines()
+        if raw.startswith("REDPANDA_MEMORY=")
+    ]
+    value = line.partition("=")[2]
+    assert value.endswith("G"), value
+    assert int(value[:-1]) * 1024 >= 2187 + 512, value
