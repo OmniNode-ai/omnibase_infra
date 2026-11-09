@@ -58,6 +58,9 @@ CONTEXT_AUDIT_CONSUMER = "context-audit-consumer"
 # retired by name as well.
 INTELLIGENCE_API = "intelligence-api"
 SKILL_LIFECYCLE_CONSUMER = "skill-lifecycle-consumer"  # OMN-21933 (T12)
+# OMN-23043: the agent actions projection runs in main as a node, so the policy
+# retires its consumer container by name as well.
+AGENT_ACTIONS_CONSUMER = "agent-actions-consumer"
 
 
 def test_primary_dev_disables_the_tenant_carrier_only(
@@ -109,6 +112,7 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             # OMN-23324: the contract resolver is mounted in main.
             "omninode-contract-resolver",
             SKILL_LIFECYCLE_CONSUMER,
+            AGENT_ACTIONS_CONSUMER,
             # OMN-21288 (T17): the projection API is served by main as a mounted node.
             "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
@@ -174,6 +178,7 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         return
     censused = [c[-1] for c in calls if c[1] == "ps"]
     assert censused == [
+        f"label=com.docker.compose.service={AGENT_ACTIONS_CONSUMER}",
         f"label=com.docker.compose.service={CONTEXT_AUDIT_CONSUMER}",
         f"label=com.docker.compose.service={INTELLIGENCE_API}",
         "label=com.docker.compose.service=omninode-contract-resolver",
@@ -184,6 +189,8 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
     ]
     if failure is None:
         ids = [
+            f"{AGENT_ACTIONS_CONSUMER}-a",
+            f"{AGENT_ACTIONS_CONSUMER}-b",
             f"{CONTEXT_AUDIT_CONSUMER}-a",
             f"{CONTEXT_AUDIT_CONSUMER}-b",
             f"{INTELLIGENCE_API}-a",
@@ -303,6 +310,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         CONTEXT_AUDIT_CONSUMER,
         INTELLIGENCE_API,
         SKILL_LIFECYCLE_CONSUMER,
+        AGENT_ACTIONS_CONSUMER,
         "projection-api",  # OMN-21288 (T17)
         "omninode-contract-resolver",  # OMN-23324
     }
