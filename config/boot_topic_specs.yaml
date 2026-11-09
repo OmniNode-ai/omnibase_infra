@@ -36,5 +36,7 @@ lanes:
     # OMN-21923 adds the census command and result topics (2 more specs).
     # OMN-19998 adds the runner-tmp-prepare command and runner-tmp-prepared
     # terminal topics (2 more specs).
-    repo_specs: 221
+    # OMN-23176 adds the c16-pinned-backend-check command and -checked
+    # terminal topics (2 more specs).
+    repo_specs: 223
     repo_specs_measured_at: "bf76c6681c90088fb9ca6dbca626d226c327c529"
