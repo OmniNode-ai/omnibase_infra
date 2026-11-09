@@ -201,7 +201,6 @@ services:
   agent-actions-consumer: *prepr_fenced
   skill-lifecycle-consumer: *prepr_fenced
   context-audit-consumer: *prepr_fenced
-  infra-routing-decisions-consumer: *prepr_fenced
   # =========================================================================
   # The slot's forward migration. Its own profile, `prepr-migrate`, so it runs
   # as an explicit one-shot step of the entrypoint and never as part of a
