@@ -285,6 +285,7 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
         "projection-claude-hook-events-writer",
         "context-audit-consumer",
         "intelligence-api",
+        "omninode-contract-resolver",
     )
     assert _overlay_gates() == {
         SERVICE: "tenant-projection",
@@ -305,6 +306,7 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
     # overlay's gate keeps the inert carrier out of every bring-up.
     assert "projection-claude-hook-events-writer" not in dev_stack_services()
     assert "context-audit-consumer" not in dev_stack_services()
+    assert "omninode-contract-resolver" not in dev_stack_services()
 
 
 def test_deploy_handler_retires_exactly_the_policy_services() -> None:
