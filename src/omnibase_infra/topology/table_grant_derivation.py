@@ -534,11 +534,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # that change can merge. The table's own trigger refuses every UPDATE and
     # DELETE. Retired when the contract merges and the omnimarket pin advances
     # past it; the OMN-18863 expiry module names this bridge.
-    _vendored_read_write(
-        "ledger_line_citation",
-        "node_projection_work_ledger",
-        "0007_work_ledger_history_import.sql",
-        access="write",
+    *map(
+        _vendored_read_write,
+        ("ledger_line_citation", "work_ledger_seq_conflicts"),
+        ("node_projection_work_ledger",) * 2,
+        ("0007_work_ledger_history_import.sql", "0009_grant_runtime_seq_conflicts.sql"),
     ),
 )
 
