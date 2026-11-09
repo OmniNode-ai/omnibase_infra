@@ -280,6 +280,11 @@ profiles:
         # node_contract_resolver_bridge http_mount), so its container of the
         # previous revision is retired by name the same way. The deploy handler
         # no longer restarts it on the dev lane either.
+        # OMN-21933 (T12): the skill lifecycle projection node runs in main, so the
+        # skill-lifecycle-consumer container of the previous revision is retired the
+        # same way. The node's contract names the retired consumer's group under
+        # consumer_group_handover (from_group_id skill-lifecycle-postgres), and the
+        # consumer would otherwise hold that group live and fence the node's own.
         retired_services:
           - projection-claude-hook-events-writer
           - context-audit-consumer
@@ -288,6 +293,7 @@ profiles:
           # intelligence-api container of the previous revision is retired by name.
           - intelligence-api
           - omninode-contract-resolver
+          - skill-lifecycle-consumer
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof
