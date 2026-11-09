@@ -303,10 +303,6 @@ services:
     container_name: omninode-dev-105-context-audit-consumer
     ports: !override
       - "127.0.0.1:43093:8093"
-  intelligence-api:
-    container_name: omnibase-dev-105-intelligence-api
-    ports: !override
-      - "127.0.0.1:43053:8053"
   omninode-contract-resolver:
     container_name: omninode-dev-105-contract-resolver
     ports: !override
