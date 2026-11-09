@@ -37,6 +37,10 @@ from typing import Any
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "preflight_lane_deploy_attribution.py"
 
@@ -472,15 +476,20 @@ def test_grant_state_resolves_from_origin_main(tmp_path: Path) -> None:
     anti-self-issue property of the whole grant scheme) is exercised, without any
     network or a real onex_change_control.
     """
-    env = {
-        **os.environ,
-        "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
-        "GIT_CONFIG_SYSTEM": "/dev/null",
-    }
+    env = scrub_git_location_env(
+        {
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
+            "GIT_CONFIG_SYSTEM": "/dev/null",
+        }
+    )
 
     def git(cwd: Path, *args: str) -> None:
         subprocess.run(
-            ["git", "-C", str(cwd), *args], check=True, capture_output=True, env=env
+            ["git", "-C", str(cwd), *args],
+            check=True,
+            capture_output=True,
+            env=scrub_git_location_env(env),
         )
 
     upstream = tmp_path / "upstream"
@@ -488,7 +497,7 @@ def test_grant_state_resolves_from_origin_main(tmp_path: Path) -> None:
     git(upstream, "init", "--initial-branch=main")
     git(upstream, "config", "user.email", "test@omninode.ai")
     git(upstream, "config", "user.name", "test")
-    grants_dir = upstream / "grants"
+    grants_dir = upstream / "config"
     grants_dir.mkdir()
     _write_grants(grants_dir / "prod_promotion_grants.yaml", [LIVE_GRANT])
     git(upstream, "add", "-A")
@@ -499,12 +508,12 @@ def test_grant_state_resolves_from_origin_main(tmp_path: Path) -> None:
         ["git", "clone", str(upstream), str(clone)],
         check=True,
         capture_output=True,
-        env=env,
+        env=scrub_git_location_env(env),
     )
 
     # The working tree says "no grants"; origin/main says otherwise. The
     # interlock must follow origin/main.
-    _write_grants(clone / "grants" / "prod_promotion_grants.yaml", [])
+    _write_grants(clone / "config" / "prod_promotion_grants.yaml", [])
 
     raw, commit = _mod.fetch_grant_bytes_from_main(clone)
     assert commit
