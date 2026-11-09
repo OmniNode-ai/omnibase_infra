@@ -1,0 +1,49 @@
+schema_version: 1.0.0
+ticket_id: OMN-19127
+title: The endpoint health config never hands the prober the GLM Coding Plan, so no probe reads a 401 off the GLM rung
+summary: The GLM rung read 401 on every probe because the prober called z.ai's Coding Plan directly. The credential was fine (a completion call returned 200, OMN-19129) and the plan's terms bar the call, so the health config now drops any Coding Plan endpoint when it is built, whichever caller supplies it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19127-no-coding-plan-probe
+    statement: ModelLlmEndpointHealthConfig removes every endpoint that addresses the GLM Coding Plan before ServiceLlmEndpointHealth builds its probe set, status map and circuit breakers, and the model registry names a served probe path for every credentialed http backend.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: The cause is settled by a completion call, not by a health probe -- falsifier: a closing note that cites only `/health` or `/v1/models` status codes.'
+      - id: AC3
+        statement: 'AC3: The health prober probes a path the configured surface actually serves, for every backend and not only GLM -- falsifier: a backend whose declared `endpoint_url` path is absent from the set the prober requests.'
+evidence_requirements:
+  - kind: tests
+    description: The new Coding Plan guard tests, the catalog probe-path check with its planted failing control, and the existing prober suites still pass
+    command: uv run --frozen pytest tests/unit/services/test_service_llm_endpoint_health_coding_plan_omn19127.py tests/unit/services/test_service_llm_endpoint_health.py tests/unit/services/test_service_llm_endpoint_health_auth.py tests/unit/services/test_service_llm_endpoint_health_credential.py -q --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19127-no-coding-plan-probe
+    description: Runs the new guard tests. A config that hands the service a Coding Plan endpoint produces no request and no status entry (it requested the plan's /models path before the guard), and an endpoint beside it is still probed. The catalog test holds every credentialed http backend to a declared probe_path, with a planted entry as its failing control.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_service_llm_endpoint_health_coding_plan_omn19127.py -q --no-cov -p no:randomly
+        cwd: .
+  - id: dod-omn19127-completion-call
+    description: The credential half was settled by an authenticated POST to /chat/completions that returned 200, recorded in the prober credential suite's module docstring (OMN-19129); the grep goes red if that measurement is removed.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: 'grep -q "POST /chat/completions.. authenticated -> 200" tests/unit/services/test_service_llm_endpoint_health_credential.py'
+        cwd: .
+  - id: dod-omn19127-prober-regression
+    description: The prober's existing suites (status, auth classification, credential and declared path) still pass with the Coding Plan fixtures moved to the general API path. A regression check, binds no criterion.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_service_llm_endpoint_health.py tests/unit/services/test_service_llm_endpoint_health_auth.py tests/unit/services/test_service_llm_endpoint_health_credential.py tests/integration/services/test_llm_endpoint_probe_credential_omn19129.py -q --no-cov -p no:randomly
+        cwd: .
