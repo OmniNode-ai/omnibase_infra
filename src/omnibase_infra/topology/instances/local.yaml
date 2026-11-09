@@ -95,6 +95,8 @@ databases:
               - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
+              - goal_trace_events
+              - goal_traces
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions

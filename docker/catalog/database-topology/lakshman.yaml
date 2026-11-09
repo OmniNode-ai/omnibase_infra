@@ -95,6 +95,8 @@ databases:
               - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
+              - goal_trace_events
+              - goal_traces
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -465,5 +467,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: e92fd79821dde264dcb133ad5ad3fdb153ed6e5c1dae06667ec0090f1622e3db
+  sha256: 67cd85e96b94a4c1a1d80bc211ecc4628fba26d8903d094ba85976fca250a025
 topology_instance: local
