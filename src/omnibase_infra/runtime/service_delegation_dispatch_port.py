@@ -355,6 +355,7 @@ class RuntimeDelegationDispatchPort:
         named_tests: BaseModel | None = None,
         trace_id: UUID | None = None,
         queue_wait_ms: int | None = None,
+        probe_ladder: BaseModel | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -372,9 +373,7 @@ class RuntimeDelegationDispatchPort:
 
         # Refuse a spec the lane cannot run before any route is resolved or
         # anything is published.
-        named_tests_wire = (
-            None if named_tests is None else _named_tests_wire(named_tests)
-        )
+        tests_wire = None if named_tests is None else _named_tests_wire(named_tests)
 
         # OmniMarket's consumer-facing handler always supplies these optional
         # arguments. The deployed bus model does not expose the completion-shaping
@@ -387,6 +386,10 @@ class RuntimeDelegationDispatchPort:
             # OMN-20844: the customer's model choice runs only on omnimarket's
             # in-process BYOK route; the bus wire does not carry it.
             ("model", model),
+            # OMN-23162: a synthetic probe's ladder runs only in omnimarket's
+            # in-process port; the bus wire does not carry it, and running the
+            # probe as an ordinary delegation would hide that.
+            ("probe_ladder", probe_ladder),
         ):
             if feature_value is not None:
                 raise NotImplementedError(
@@ -496,10 +499,10 @@ class RuntimeDelegationDispatchPort:
         }
         if no_escalation:
             request_payload["no_escalation"] = True
-        if named_tests_wire is not None:
+        if tests_wire is not None:
             # OMN-17427: the tests ride the command, inline, so the consumer
             # can run them in its sandbox against the answer it is about to gate.
-            request_payload["named_tests"] = named_tests_wire
+            request_payload["named_tests"] = tests_wire
 
         command = ModelDispatchBusCommand(
             command_name=selected.alias,

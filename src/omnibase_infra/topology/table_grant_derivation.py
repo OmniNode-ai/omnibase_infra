@@ -333,29 +333,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ("compaction_current_context", None),
         )
     ),
-    # OMN-21920: infra vendors node_projection_agent_actions/0000-0001 ahead of the
-    # omnimarket node contract that declares the six agent_* relations the retired
-    # agent-actions consumer wrote. The source contract declares each relation for
-    # write in the public schema of the application database; 0001 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE on all six. Retired when
-    # node_projection_agent_actions merges in omnimarket and the pin advances past
-    # it; the OMN-18863 expiry module names these bridges.
-    *(
-        _vendored_read_write(
-            table,
-            "node_projection_agent_actions",
-            "0000_create_agent_observability_tables.sql",
-            schema="public",
-        )
-        for table in (
-            "agent_actions",
-            "agent_transformation_events",
-            "router_performance_metrics",
-            "agent_detection_failures",
-            "agent_execution_logs",
-            "agent_status_events",
-        )
-    ),
     # OMN-19986: the same window for node_projection_local_identity/0000-0002,
     # the API Keys page's local identity. 0001 grants tenant_projection_writer
     # SELECT, INSERT, UPDATE. Retired when omnimarket's
