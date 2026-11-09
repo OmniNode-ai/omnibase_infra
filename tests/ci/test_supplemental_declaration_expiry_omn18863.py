@@ -131,6 +131,10 @@ _INTERIM_ENTRIES: dict[str, str] = {
         ),
         "omnimarket OMN-22320 writer half (node_projection_work_questions)",
     ),
+    "gate_store_reservations": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
+    "gate_store_safety": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
+    "gate_store_state": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
+    "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "overlay_store": "omnimarket OMN-22478 writer half (node_projection_overlay_store)",
     "view_seam_readings": "omnimarket OMN-22020 writer half (node_view_seam_reading_reducer)",
 }

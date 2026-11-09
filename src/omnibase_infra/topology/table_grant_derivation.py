@@ -330,6 +330,16 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0001_create_view_seam_readings.sql",
         schema="public",
     ),
+    # OMN-23055: node_gate_store_effect/0000 creates the four gate store relations and
+    # 0001 grants omninode_runtime on them ahead of the omnimarket node contract
+    # reaching the pin (the node's contract declares no db_io binding: the store opens
+    # its own connection); expire this bridge when that contract reaches the pin.
+    *(
+        _vendored_read_write(
+            f"gate_store_{s}", "node_gate_store_effect", "0000_create_gate_store.sql"
+        )
+        for s in ("state", "reservations", "safety", "steps")
+    ),
     # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
@@ -648,66 +658,47 @@ def derive_table_grants(
     required: dict[tuple[str, str, str], set[EnumDatabasePrivilege]] = {}
     unmappable: dict[tuple[str, str, str], UnmappableDeclaration] = {}
 
+    def refuse(declaration: ContractTableDeclaration, reason: str) -> None:
+        table = declaration.table
+        unmappable.setdefault(
+            (table.database_ref, table.schema, table.name),
+            UnmappableDeclaration(
+                node=declaration.node,
+                database_ref=table.database_ref,
+                schema=table.schema,
+                name=table.name,
+                reason=reason,
+            ),
+        )
+
     for declaration in declarations:
         table = declaration.table
-        key = (table.database_ref, table.schema, table.name)
         if table.database_ref != database_ref:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=(
-                        f"database_ref {table.database_ref!r} is not declared in "
-                        "the application topology"
-                    ),
-                ),
+            refuse(
+                declaration,
+                f"database_ref {table.database_ref!r} is not declared in "
+                "the application topology",
             )
             continue
         schema = database.schemas.get(table.schema)
         if schema is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=f"schema {table.schema!r} is not declared in the topology",
-                ),
+            refuse(
+                declaration,
+                f"schema {table.schema!r} is not declared in the topology",
             )
             continue
         binding_ref = DOMAIN_PROJECTION_BINDINGS.get(schema.domain)
         if binding_ref is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=(
-                        f"domain {schema.domain.value} requires an explicit "
-                        "caller-supplied binding and cannot be derived from a "
-                        "contract declaration alone"
-                    ),
-                ),
+            refuse(
+                declaration,
+                f"domain {schema.domain.value} requires an explicit "
+                "caller-supplied binding and cannot be derived from a "
+                "contract declaration alone",
             )
             continue
         binding = database.bindings.get(binding_ref)
         if binding is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=f"topology declares no binding {binding_ref!r}",
-                ),
-            )
+            refuse(declaration, f"topology declares no binding {binding_ref!r}")
             continue
         grant_schema = physical_grant_schema_for_table(table.schema, table.name)
         entry = required.setdefault(
