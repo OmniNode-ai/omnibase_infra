@@ -47,6 +47,14 @@ dod_evidence:
       - check_type: test_passes
         check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect tests/ci/test_c28_consumer_flow_probe.py -q -p no:cacheprovider"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21916-lane-resolver-names-variable
+    description: "The lane resolver's error messages name the repository variable its caller read, and the three stability proof workflows pass LAB_PROOF_LANES_JSON. Fails at the merge base, where every message names LAB_LANES_JSON."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ci/test_resolve_lab_lane_names_its_variable_omn21916.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21916-deploy-probe
     description: "Post-deploy point read on the dev lane: the consumer-flow exposure answers with rows, so the ledger projection rows the audit kind grades are readable. Hosted CI has no lane container, so only the local Done gate runs it; it binds no criterion."
     source: manual

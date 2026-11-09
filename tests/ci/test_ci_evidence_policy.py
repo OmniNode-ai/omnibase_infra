@@ -67,6 +67,8 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "c11-negative-paths",
     # OMN-19195: the C12 provider-catalogue record.
     "c12-provider-catalogue",
+    # OMN-23176: the C16 pinned-backend record (dispatch only).
+    "c16-pinned-backends",
     # OMN-19181: the C16 receipt-identity record.
     "c16-receipt-identity",
     # OMN-19812: the C28 consumer-flow record.
