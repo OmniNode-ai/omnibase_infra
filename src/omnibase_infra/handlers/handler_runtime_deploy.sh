@@ -193,7 +193,6 @@ readonly RUNTIME_SERVICES=(
     projection-api
     agent-actions-consumer
     skill-lifecycle-consumer
-    intelligence-api
     omninode-contract-resolver
 )
 
@@ -209,12 +208,8 @@ readonly RUNTIME_SERVICES=(
 # consumes every message, commits every offset, and writes nothing, silently.
 # The onex-dev k8s overlay has run these as Deployments since OMN-15905; the
 # compose lane ran zero of them until this ticket.
-# OMN-16025 adds infra-routing-decisions-consumer to the same array for the same
-# reason: it is declared only in docker/docker-compose.dev-lane.yml. It is not a
-# standalone projection RUNNER -- it is the observability consumer that owns
-# infra_routing_decisions -- but it shares the property that makes membership
-# here mandatory and membership in RUNTIME_SERVICES fatal: the service name does
-# not exist in the prod, stability-test or judge merged compose.
+# The infra routing-decision consumer (OMN-16025) left this array when it was
+# retired into the runtime (OMN-23072, one-runtime plan T14).
 #
 # OMN-17530 adds onex-api for a third reason, stated separately because it is
 # not the writers' reason. It is TAG-REFERENCED, not lane-built, so it cannot go
@@ -257,7 +252,6 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
-    infra-routing-decisions-consumer
     onex-api
     cost-estimator-web
 )
