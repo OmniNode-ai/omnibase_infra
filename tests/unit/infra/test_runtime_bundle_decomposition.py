@@ -40,12 +40,11 @@ _RUNTIME_CORE_SERVICES = frozenset(
         "skill-lifecycle-consumer",
         "context-audit-consumer",
         "omninode-contract-resolver",
-        "intelligence-api",
     }
 )
 
 # Env vars considered "pre-growth baseline" for the runtime-core set. These
-# are the vars that the 7 runtime-core services already relied on at the last
+# are the vars that the runtime-core services already relied on at the last
 # good .201 deploy (0.34.0) AND are known to be present in `~/.omnibase/.env`
 # on every operator's machine. Anything outside this set indicates drift
 # that could block a redeploy.
@@ -99,7 +98,7 @@ def test_all_four_sub_bundles_exist() -> None:
 
 
 @pytest.mark.unit
-def test_runtime_core_has_the_seven_original_services() -> None:
+def test_runtime_core_has_the_six_runtime_services() -> None:
     bundles = _load_bundles()
     declared = set(bundles["runtime-core"]["services"])
     assert declared == _RUNTIME_CORE_SERVICES, (
