@@ -124,7 +124,6 @@ class TestDockerComposeIntegration:
             "omninode-runtime",
             "agent-actions-consumer",
             "skill-lifecycle-consumer",
-            "intelligence-api",
         ]
         for service in services_needing_gate:
             # Check that somewhere after the service definition, migration-gate

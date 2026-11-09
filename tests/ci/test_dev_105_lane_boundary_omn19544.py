@@ -73,7 +73,6 @@ EXPECTED_PUBLISHED_PORTS = {
     "43091",  # contract resolver
     "43092",  # skill lifecycle consumer
     "43093",  # context audit consumer
-    "43053",  # intelligence API
     "43006",  # phoenix
     "43090",  # onex-api (disabled here, reserved)
     "43436",  # Postgres

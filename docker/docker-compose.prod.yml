@@ -284,9 +284,6 @@ services:
     profiles: !override ["prod-disabled"]
   context-audit-consumer:
     profiles: !override ["prod-disabled"]
-  intelligence-api:
-    container_name: omnibase-prod-intelligence-api
-    profiles: !override ["prod-disabled"]
   omninode-contract-resolver:
     container_name: omninode-prod-contract-resolver
     profiles: !override ["prod-disabled"]
