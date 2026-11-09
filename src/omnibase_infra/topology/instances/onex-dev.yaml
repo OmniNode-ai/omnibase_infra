@@ -111,6 +111,7 @@ databases:
               - lab_lane_health
               - lab_proof_receipts
               - lane_drift_and_stalls
+              - ledger_line_citation
               - live_events
               - log_entries
               - open_obligations

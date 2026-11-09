@@ -982,6 +982,17 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   runtime-effects:
     build: *dev_lane_composed_runtime_build
+    # OMN-22930 (T8): gated from the runtime policy like the folded writers. On
+    # primary dev the policy folds the effects role into main and these render
+    # as folded-effects-*, so no bring-up that requests `runtime` or `full`
+    # starts this service; every other dev instance renders `runtime` and
+    # `full` and keeps its own effects container. `!override` because a plain
+    # list would merge with the base service's `runtime` and `full` profiles
+    # and keep the container up. Rolling back to a revision before this change
+    # restores the service by revision, with the image and overlay together.
+    profiles: !override
+      - "${DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_RUNTIME_PROFILE:-runtime}"
+      - "${DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_FULL_PROFILE:-full}"
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
       ONEX_BOOT_READY_BOUND_SECONDS: ${DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS:?runtime policy contract must set DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS}
@@ -1133,6 +1144,17 @@ services:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
   runtime-worker:
     build: *dev_lane_composed_runtime_build
+    # OMN-21288 (T9): gated from the runtime policy like runtime-effects and the
+    # folded writers. On primary dev the policy folds the workers role into main
+    # and these render as folded-workers-*, so no bring-up that requests
+    # `runtime` or `full` starts this service; every other dev instance renders
+    # `runtime` and `full` and keeps its own worker container. `!override`
+    # because a plain list would merge with the base service's profiles and
+    # keep the container up. Rolling back to a revision before this change
+    # restores the service by revision, with the image and overlay together.
+    profiles: !override
+      - "${DEV_RUNTIME_MAIN_RUNTIME_WORKER_RUNTIME_PROFILE:-runtime}"
+      - "${DEV_RUNTIME_MAIN_RUNTIME_WORKER_FULL_PROFILE:-full}"
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
     # Base runtime-worker inherits interval 30s / timeout 10s / retries 5 but
@@ -1235,8 +1257,15 @@ services:
   # environment -- so the deploy script gains DEV_LANE_EXTRA_BROKER_CLIENTS in
   # the same change. Guarded by
   # tests/unit/scripts/test_omn18012_dev_lane_broker_client_restart_coverage.py.
+  # OMN-23066 (T13): primary dev runs the context audit projection inside main
+  # as node_projection_context_audit, which names this consumer's group under
+  # consumer_group_handover. The container of the previous revision starts under
+  # no profile a lane bring-up requests, and the deploy handler retires it by
+  # name (retired_services in the runtime policy). It stays declared here, not
+  # in the fold overlay, so the stack-shape baseline count does not grow.
   context-audit-consumer:
     build: *dev_lane_composed_runtime_build
+    profiles: !override ["folded-context-audit"]
     environment:
       !!merge <<: *dev_lane_broker_auth_env
   # ===========================================================================

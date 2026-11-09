@@ -127,7 +127,7 @@ def test_the_shared_declaration_helper_keeps_each_entry_shape() -> None:
         d.node: d
         for d in (*STATE_IO_TABLE_DECLARATIONS, *LEGACY_MIGRATION_TABLE_DECLARATIONS)
     }
-    credentials = by_node["legacy_migration:tenant_inference_credentials"]
+    credentials = by_node["legacy_migration:ledger_line_citation"]
     assert credentials.table.access == "write"
     assert credentials.table.database_ref == "application"
     state_io = [d for node, d in by_node.items() if node.startswith("state_io:")]

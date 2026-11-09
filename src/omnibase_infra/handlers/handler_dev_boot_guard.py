@@ -17,7 +17,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
@@ -326,6 +326,80 @@ def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> se
     return {*(mapping[profile] for profile in folded), *retired}
 
 
+#: ``docker inspect`` states of a lane container that mean it is down.
+DOWN_STATES = frozenset({"created", "exited", "dead"})
+
+
+def lane_runtime_containers(
+    health_targets: Sequence[tuple[str, int]], disabled_services: frozenset[str]
+) -> tuple[str, ...]:
+    """The containers a dev lane needs running to serve delegation, main first (OMN-22845).
+
+    The runtime-effects container is the only consumer of the delegate-skill
+    command topic, so a lane with main running and effects absent accepts every
+    request and answers none. The effects container is ``<main>-effects`` on
+    every lane. A lane that folds effects into main (its effects health target
+    then names the main container) or retires the service expects main alone.
+    """
+    main = health_targets[0][0]
+    effects_target = health_targets[1][0] if len(health_targets) > 1 else main
+    if effects_target == main or "runtime-effects" in disabled_services:
+        return (main,)
+    return (main, f"{main}-effects")
+
+
+def read_lane_presence(
+    health_targets: Sequence[tuple[str, int]],
+    disabled_services: frozenset[str],
+    *,
+    run: Callable[..., ModelSubprocessOutcome],
+    unreadable: tuple[type[Exception], ...],
+) -> tuple[str, str]:
+    """``(state, detail)`` of the lane's containers: running, down, companion_down or unknown.
+
+    Main reads on its own: absent, created, exited or dead is ``down``. With
+    main running, a down container beside it is ``companion_down`` and one that
+    cannot be read is ``unknown``, which never restores. ``unreadable`` is what
+    ``run`` raises when docker does not answer.
+    """
+    states: list[tuple[str, str]] = []
+    for container in lane_runtime_containers(health_targets, disabled_services):
+        try:
+            result = run(
+                ["docker", "inspect", "--format", "{{.State.Status}}", container],
+                timeout=DOCKER_READ_SECONDS,
+            )
+        except unreadable as exc:
+            states.append(("unknown", f"docker inspect {container}: {exc}"))
+            continue
+        said = (result.stderr or result.stdout).strip()
+        if result.returncode != 0:
+            if "no such object" in said.lower() or "no such container" in said.lower():
+                states.append(("down", f"no container named {container}"))
+            else:
+                states.append(
+                    (
+                        "unknown",
+                        f"docker inspect {container} exited {result.returncode}: {said[:200]}",
+                    )
+                )
+        else:
+            state = result.stdout.strip().lower()
+            states.append(
+                (
+                    "down" if state in DOWN_STATES else "running",
+                    f"{container} is {state}",
+                )
+            )
+    if states[0][0] != "running":
+        return states[0]
+    for wanted in ("down", "unknown"):
+        named = [detail for state, detail in states[1:] if state == wanted]
+        if named:
+            return ("companion_down" if wanted == "down" else wanted), "; ".join(named)
+    return "running", "; ".join(detail for _, detail in states)
+
+
 def fold_compose_env(policy: Mapping[str, str], primary: bool) -> dict[str, str]:
     """Keep compose activation aligned with retirement after all env overlays."""
     selected = {}
@@ -368,6 +442,13 @@ def _refuse_cross_fold_pairing(point: ModelDevBootPoint, execution: ModuleType) 
         )
 
 
+def _dev_lane_services(disabled_services: Collection[str]) -> tuple[str, ...]:
+    """The DEV boot services a lane runs, given the services its policy disables."""
+    return tuple(
+        service for service in DEV_BOOT_SERVICES if service not in disabled_services
+    )
+
+
 class HandlerDevBootGuard:
     """Supervise only the selected DEV compose project under its caller's lock."""
 
@@ -385,11 +466,8 @@ class HandlerDevBootGuard:
         self.config_hashes = config_hashes
         self.verify_recovery = verify_recovery
         self.config = self.execution.lane_config_for(self.execution.EnumRuntimeLane.DEV)
-        self.services = tuple(
-            service
-            for service in DEV_BOOT_SERVICES
-            if service not in self.config.disabled_services
-        )
+        self.services = _dev_lane_services(self.config.disabled_services)
+        self._retained_services = self.services
         self.root = state_dir / "dev-boot-guard" / self.config.compose_project
         self.snapshot_path = self.root / "last-healthy.json"
         self.point: ModelValueHolder[ModelDevBootPoint] = ModelValueHolder()
@@ -459,8 +537,24 @@ class HandlerDevBootGuard:
             )
         return containers
 
-    def wait(self) -> None:
-        """All replicas must be Docker healthy; exhausted boots fail immediately."""
+    def wait(self, *, deployed_generation: bool = False) -> None:
+        """All replicas must be Docker healthy; exhausted boots fail immediately.
+
+        ``deployed_generation`` is the post-roll wait of a deploy: it adopts the
+        service list of the generation just rolled before it reads containers.
+        """
+        if deployed_generation:
+            # The guard is built before git_pull, from the previous
+            # generation's policy, so recovery knows what that generation ran.
+            # A deploy that folds a role (OMN-22930: runtime-effects into main)
+            # retires a service the pre-pull list still names; re-read the
+            # list of the generation just rolled and retain the previous one
+            # for the recovery path.
+            self._retained_services = self.services
+            self.config = self.execution.lane_config_for(
+                self.execution.EnumRuntimeLane.DEV
+            )
+            self.services = _dev_lane_services(self.config.disabled_services)
         started = self.execution._dev_boot_clock()
         containers = self._containers()
         window = max(_window(c) for c in containers)
@@ -719,6 +813,9 @@ class HandlerDevBootGuard:
             yield
             self.point.hold(self._capture())
         except Exception as exc:
+            # Recovery restores the retained generation, which ran the services
+            # the guard was built with, not the ones the failed candidate runs.
+            self.services = self._retained_services
             boot_causes: list[str] = []
             try:
                 for container in self._containers():

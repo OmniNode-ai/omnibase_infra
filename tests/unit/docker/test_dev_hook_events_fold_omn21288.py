@@ -127,8 +127,11 @@ def test_deploy_handler_retires_the_previous_writer_before_main_restarts(
     # The retirement list is the policy's, rendered once: the handler declares none.
     assert "RETIRED_NODE_CARRIER_SERVICES" not in DEPLOY.read_text(encoding="utf-8")
     process = load_contract().profiles["dev"].processes["main"]
-    assert list(process.retired_services) == [WRITER]
-    assert render_env(load_contract())["DEV_RUNTIME_MAIN_RETIRED_SERVICES"] == WRITER
+    # OMN-23066 (T13) added the context audit consumer to the same list.
+    assert list(process.retired_services) == [WRITER, "context-audit-consumer"]
+    assert render_env(load_contract())["DEV_RUNTIME_MAIN_RETIRED_SERVICES"] == (
+        f"{WRITER},context-audit-consumer"
+    )
     harness = (
         _harness("", DEV_PROJECT, dev_profiles="projection-writer-savings")
         + f"\nDEV_RUNTIME_MAIN_RETIRED_SERVICES={shlex.quote(WRITER)}\n"

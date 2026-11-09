@@ -530,7 +530,8 @@ def test_capture_resolves_dev_effects_by_compose_labels(
 def test_capture_folded_effects_resolves_the_main_service(
     monkeypatch: pytest.MonkeyPatch, command_runner: Mock
 ) -> None:
-    # Only the lab proof lane folds effects; primary dev's fold is its own overlay's.
+    # Pins the stability lane's fold; primary dev's effects fold (OMN-22930) is
+    # read through its own policy in test_dev_effects_health_target_omn22930.py.
     monkeypatch.setattr(
         executor_mod,
         "lane_folded_profiles",

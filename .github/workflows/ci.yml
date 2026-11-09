@@ -4788,25 +4788,33 @@ jobs:
           set -uo pipefail
           deadline=$(( $(date +%s) + DEADLINE_MINUTES * 60 ))
           attempt=0
-          # OMN-23027: reads of this run's OWN job listing that failed, and
-          # whether any ever succeeded. The deadline branch below needs both so
-          # it can say WHICH condition it died of. On 2026-11-07 an API outage
-          # failed 90 consecutive reads across the whole 90m window, and the
-          # deadline then printed 91 finished, green gates as "missing/pending"
-          # because the only input it could read was a jobs.json that the failed
-          # fetch had already truncated.
+          # OMN-23027: reads of this run's OWN job listing that failed since the
+          # last one that succeeded, and whether any ever succeeded. The deadline
+          # branch below needs both so it can say WHICH condition it died of. On
+          # 2026-11-07 an API outage failed 90 consecutive reads across the whole
+          # 90m window, and the deadline then printed 91 finished, green gates as
+          # "missing/pending" because the only input it could read was a jobs.json
+          # that the failed fetch had already truncated. A success resets the
+          # count, so a non-zero count at the deadline means the CURRENT
+          # observation is unavailable; a listing retained from an earlier read
+          # is a snapshot, not evidence of what the gates are doing now.
           jobs_fetch_failures=0
           jobs_fetch_ever_ok=false
           while true; do
             if [ "$(date +%s)" -ge "${deadline}" ]; then
-              if [ "${jobs_fetch_ever_ok}" = "false" ]; then
-                # No listing was ever read, so there is nothing to report ON:
-                # every gate would print as pending whatever its real state.
+              if [ "${jobs_fetch_failures}" -gt 0 ]; then
+                # The newest read failed, so there is nothing current to report
+                # ON: every gate would print as pending whatever its real state.
                 # Name the unreadable input instead of blaming the gates.
-                echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached after ${jobs_fetch_failures} consecutive failed read(s) of this run's own job listing and no successful read — the GitHub API was unreachable from this job, NOT a gating job red; failing closed (OMN-23027). The gate list is omitted because it would be an artefact of the unread input; rerun once the API answers."
+                if [ "${jobs_fetch_ever_ok}" = "false" ]; then
+                  last_good="and no successful read"
+                else
+                  last_good="since the last successful read, whose listing is stale and is not evidence of current state"
+                fi
+                echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached after ${jobs_fetch_failures} consecutive failed read(s) of this run's own job listing ${last_good} — the GitHub API was unreachable from this job, NOT a gating job red; failing closed (OMN-23027). The gate list is omitted because it would be an artefact of the unread input; rerun once the API answers."
                 exit 1
               fi
-              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs or external contexts still pending — failing closed (job-listing read failures during this poll: ${jobs_fetch_failures})"
+              echo "::error::CI Summary poll deadline (${DEADLINE_MINUTES}m) reached with gating jobs or external contexts still pending — failing closed"
               python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" --report-only 2>/dev/null || true
               exit 1
             fi
@@ -4829,6 +4837,7 @@ jobs:
               continue
             fi
             mv jobs.json.tmp jobs.json
+            jobs_fetch_failures=0
             jobs_fetch_ever_ok=true
             # Cross-workflow check-runs for the exact head. On a failed fetch the
             # file is REMOVED, not left stale: the gate reads an absent file as

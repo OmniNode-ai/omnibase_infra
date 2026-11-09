@@ -52,11 +52,5 @@
     "ticket": "OMN-19218",
     "added": "2026-09-22",
     "expires": "2026-12-20"
-  },
-  "Tessl Reviewer": {
-    "reason": "The operator ruled on 2026-11-05 that the automated review holds no merge.",
-    "ticket": "OMN-22478",
-    "added": "2026-11-05",
-    "expires": "2027-02-03"
   }
 }

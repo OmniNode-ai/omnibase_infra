@@ -61,7 +61,7 @@ from deploy_agent.idle_converge import (
     EnumRuntimePresence,
     ModelIdleRestoreInputs,
     decide_restore,
-    read_runtime_presence,
+    read_lane_presence,
 )
 from deploy_agent.job_state import JobStore
 from deploy_agent.routing import ModelLaneFlags, ModelLaneFreeze
@@ -629,7 +629,11 @@ def test_read_runtime_presence(
     def run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
         return _completed(cmd, returncode=returncode, stdout=stdout, stderr=stderr)
 
-    assert read_runtime_presence("omninode-runtime", run=run)[0] is presence
+    main_only = DEV.model_copy(
+        update={"disabled_services": frozenset({"runtime-effects"})}
+    )
+
+    assert read_lane_presence(main_only, run=run)[0] is presence
 
 
 class _FakeExecutor:

@@ -634,7 +634,9 @@ def run_health_gate(
         require_digest_change=require_digest_change,
     )
 
-    for service in CORE_SERVICE_NAMES:
+    # OMN-22930: the caller names the containers it expects (a lane that folds the
+    # effects role into main has no runtime-effects container); none named, the full set.
+    for service in container_ids or CORE_SERVICE_NAMES:
         report.services.append(
             check_service_digest(
                 service,
