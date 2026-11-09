@@ -82,5 +82,3 @@ dod_evidence:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-22391 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_strip_runtime_entry_points.py -q -n 0 --no-cov
         cwd: .
-    binds_ac:
-      - AC4
