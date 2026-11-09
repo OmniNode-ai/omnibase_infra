@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-21288 (plan T16): the dev stack runs no contract resolver container.
+"""OMN-23324 (plan T16): the dev stack runs no contract resolver container.
 
 The runtime mounts the resolver (``node_contract_resolver_bridge`` declares an
 ``http_mount``), so the ``omninode-contract-resolver`` container of the
@@ -51,7 +51,7 @@ def _overlay_services(path: Path) -> dict[str, dict[str, object]]:
     return services
 
 
-def test_the_policy_retires_the_resolver_by_name() -> None:
+def test_contract_resolver_retired_by_name_in_policy() -> None:
     process = load_contract().profiles["dev"].processes["main"]
     assert CONSUMER in process.retired_services
     assert CONSUMER not in process.foldable_services.values()
@@ -59,7 +59,7 @@ def test_the_policy_retires_the_resolver_by_name() -> None:
     assert CONSUMER in rendered.split(",")
 
 
-def test_the_checked_in_policy_env_carries_the_retirement() -> None:
+def test_contract_resolver_retired_in_checked_in_policy_env() -> None:
     env_text = (DOCKER / "runtime-policy.env").read_text("utf-8")
     line = next(
         item
@@ -69,24 +69,24 @@ def test_the_checked_in_policy_env_carries_the_retirement() -> None:
     assert CONSUMER in line.split("=", 1)[1].split(",")
 
 
-def test_dev_lane_stanza_gates_the_resolver_under_a_folded_profile() -> None:
+def test_contract_resolver_retired_by_folded_profile_gate() -> None:
     services = _overlay_services(DOCKER / "docker-compose.dev-lane.yml")
     assert services[CONSUMER]["profiles"] == ["folded-contract-resolver"]
 
 
-def test_the_fold_overlay_does_not_add_a_declaration() -> None:
+def test_contract_resolver_retired_fold_overlay_adds_no_declaration() -> None:
     # The stack-shape baseline counts compose files that declare the service and
     # only shrinks, so the gate lives in the stanza dev-lane already holds.
     assert CONSUMER not in _overlay_services(FOLD_OVERLAY)
 
 
-def test_dev_stack_renders_no_contract_resolver() -> None:
+def test_contract_resolver_retired_dev_stack_renders_none() -> None:
     stack = dev_stack_services()
     assert "omninode-runtime" in stack  # positive control: the stack really rendered
     assert CONSUMER not in stack
 
 
-def test_other_dev_instances_keep_their_own_resolver() -> None:
+def test_contract_resolver_retired_only_on_primary_dev() -> None:
     keepers = [
         overlay
         for overlay in OTHER_DEV_INSTANCES
