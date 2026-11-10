@@ -386,6 +386,15 @@ LANDING_SNAPSHOT_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         for prefix in LANDING_SNAPSHOT_GROUP_PREFIXES
     ),
 )
+# The tick orchestrator's compared events (OMN-23458): the tick orchestrator publishes each
+# tick's compared result and its compare failure through the declared bus publisher. The
+# principal writes both and reads neither: nothing on this principal consumes them.
+LANDING_TICK_COMPARED = "onex.evt.omnimarket.pr-landing-tick-compared.v1"
+LANDING_TICK_COMPARE_FAILED = "onex.evt.omnimarket.pr-landing-tick-compare-failed.v1"
+LANDING_TICK_COMPARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", LANDING_TICK_COMPARED, "literal", ("write", "describe")),
+    ("topic", LANDING_TICK_COMPARE_FAILED, "literal", ("write", "describe")),
+)
 # The lane ticket mint (OMN-23410): a lab lane's principal asks the ticket node for the child
 # ticket its pull request needs. It writes the node's command topic and reads the completed and
 # failed terminals; it gets no write on either terminal, so it cannot answer for the node.
@@ -515,6 +524,7 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
             + DECLARED_GRANTS
             + LANDING_DECISION_GRANTS
             + LANDING_SNAPSHOT_GRANTS
+            + LANDING_TICK_COMPARED_GRANTS
             + TICKET_WRITE_GRANTS
             + FLOOR_PROJECTION_GRANTS
             + FLOOR_TASK_TICKET_GRANTS
@@ -809,6 +819,26 @@ def test_the_landing_snapshot_grants_are_declared_and_nothing_wider() -> None:
     runtime_group = "local.omnimarket.node_pr_landing_tick_orchestrator.consume.v1"
     assert not any(
         runtime_group.startswith(prefix) for prefix in LANDING_SNAPSHOT_GROUP_PREFIXES
+    )
+
+
+def test_the_tick_compared_grants_are_produce_only_and_nothing_wider() -> None:
+    """The tick orchestrator writes its compared and compare-failed events; no read."""
+    rows = derive(shipped_bindings())
+    compared = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "pr-landing-tick-compare" in resource
+    }
+    assert compared == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in LANDING_TICK_COMPARED_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] in (LANDING_TICK_COMPARED, LANDING_TICK_COMPARE_FAILED)
+        and row[4] == "READ"
+        for row in rows
     )
 
 

@@ -573,7 +573,8 @@ class DeployAgent:
             _read_dev_tags
         )
         self._idle_running_contains: Callable[[str, str, str], bool] = _running_contains
-        self._dev_tag_behind_since: dict[str, datetime] = {}
+        self._dev_tag_behind_since: dict[str, datetime | None] = {}
+        self._dev_tag_heartbeat_send: threading.Thread | None = None
         self._dev_tag_heartbeat: dict[str, ModelDevTagHeartbeat] = {}
         self._dev_tag_heartbeat_published_at: dict[str, datetime] = {}
         self._idle_read_running_image: Callable[[], str] = lambda: read_running_image(
@@ -1711,10 +1712,7 @@ class DeployAgent:
                 and self._idle_running_contains(repository, newest.sha, running_ref)
             ),
         )
-        if behind_since is None:
-            self._dev_tag_behind_since.pop(repository, None)
-        else:
-            self._dev_tag_behind_since[repository] = behind_since
+        self._dev_tag_behind_since[repository] = behind_since
         beat = dev_tag_heartbeat(
             instance=self._router.instance.name,
             repository=repository,
@@ -1739,14 +1737,23 @@ class DeployAgent:
                 beat.alarm_after_seconds,
             )
         last = self._dev_tag_heartbeat_published_at.get(repository)
-        alarm_changed = previous is None or previous.alarm != beat.alarm
-        if (
-            not alarm_changed
-            and last is not None
-            and now - last < DEV_TAG_HEARTBEAT_INTERVAL
-        ):
+        held = last is not None and now - last < DEV_TAG_HEARTBEAT_INTERVAL
+        if held and previous is not None and previous.alarm == beat.alarm:
             return
-        publish_dev_tag_heartbeat(beat.model_dump(mode="json"), self._kafka_config)
+        # OMN-23540: off the tick, and never two at once. The send is a synchronous
+        # Kafka send and flush that a broker which accepts and never answers holds
+        # for 60 seconds, so it runs on its own daemon thread: a blocked send holds
+        # neither the tick nor a stop. While one is still running no second starts,
+        # and the published time is cleared so the next tick sends the newest beat
+        # at once (an alarm change is not lost behind a hung send). One attempt, no
+        # retry: the next heartbeat replaces a lost one.
+        if (send := self._dev_tag_heartbeat_send) is not None and send.is_alive():
+            self._dev_tag_heartbeat_published_at.pop(repository, None)
+            return
+        job = (beat.model_dump(mode="json"), self._kafka_config)
+        send = threading.Thread(target=publish_dev_tag_heartbeat, args=job, daemon=True)
+        send.start()
+        self._dev_tag_heartbeat_send = send
         self._dev_tag_heartbeat_published_at[repository] = now
 
     def _latest_dev_tag_heartbeat(self) -> dict[str, object]:

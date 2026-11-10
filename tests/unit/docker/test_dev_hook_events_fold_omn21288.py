@@ -129,7 +129,8 @@ def test_deploy_handler_retires_the_previous_writer_before_main_restarts(
     process = load_contract().profiles["dev"].processes["main"]
     # OMN-23066 (T13) added the context audit consumer, OMN-22391 (T15) the
     # intelligence API, OMN-21288 (T16) the contract resolver, OMN-21933 (T12)
-    # the skill lifecycle consumer and OMN-23043 the agent actions consumer.
+    # the skill lifecycle consumer, OMN-23043 the agent actions consumer and
+    # OMN-23525 the infra routing decisions consumer.
     assert list(process.retired_services) == [
         WRITER,
         "context-audit-consumer",
@@ -137,10 +138,11 @@ def test_deploy_handler_retires_the_previous_writer_before_main_restarts(
         "omninode-contract-resolver",
         "skill-lifecycle-consumer",
         "agent-actions-consumer",
+        "infra-routing-decisions-consumer",
     ]
     assert render_env(load_contract())["DEV_RUNTIME_MAIN_RETIRED_SERVICES"] == (
         f"{WRITER},context-audit-consumer,intelligence-api,omninode-contract-resolver,"
-        "skill-lifecycle-consumer,agent-actions-consumer"
+        "skill-lifecycle-consumer,agent-actions-consumer,infra-routing-decisions-consumer"
     )
     harness = (
         _harness("", DEV_PROJECT, dev_profiles="projection-writer-savings")
