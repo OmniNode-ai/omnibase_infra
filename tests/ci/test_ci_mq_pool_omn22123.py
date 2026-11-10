@@ -51,14 +51,11 @@ def test_every_merge_queue_runner_carries_the_reserved_label_and_no_shared_one(
     for name, service in services.items():
         labels = set(str(service["environment"]["RUNNER_LABELS"]).split(","))
         assert labels == RESERVED, name
-        if host == "h053":
-            # OMN-23156: the h053 pool registers into the private-only group the host names, never the shared one.
-            assert service["environment"]["RUNNER_GROUP"].startswith(
-                "${MQ_RUNNER_GROUP:?"
-            ), name
-            assert "omnibase-ci" not in service["environment"]["RUNNER_GROUP"], name
-        else:
-            assert service["environment"]["RUNNER_GROUP"] == "omnibase-ci"
+        # OMN-23156, OMN-23387: both pools register into the private-only group the host names, never the shared one.
+        assert service["environment"]["RUNNER_GROUP"].startswith(
+            "${MQ_RUNNER_GROUP:?"
+        ), name
+        assert "omnibase-ci" not in service["environment"]["RUNNER_GROUP"], name
         assert service["environment"]["ONEX_LANE_HOST"] == host
         assert service["environment"]["RUNNER_NAME"] == name
         assert service["container_name"] == name
@@ -326,3 +323,37 @@ def test_the_merge_queue_pools_move_no_other_class_count() -> None:
         assert host.declared_count("merge-queue") == COUNT
         assert host.declared_count("action") == action
         assert host.declared_count("verify") == 0
+
+
+def _merge_queue_hosts(document: dict[str, Any]) -> set[str]:
+    """The hosts of the fleet declaration that carry a pool of the ``merge-queue`` class."""
+    return {
+        str(row["host"])
+        for row in document["hosts"]
+        for pool in row.get("pools", [])
+        if "merge-queue" in pool["classes"]
+    }
+
+
+def _assert_spans_two_hosts(document: dict[str, Any]) -> None:
+    hosts = _merge_queue_hosts(document)
+    assert len(hosts) >= 2, f"merge-queue runners resolve to {sorted(hosts)}"
+
+
+def test_the_merge_queue_runners_are_declared_on_at_least_two_hosts() -> None:
+    """OMN-23387 AC1: every merge-queue runner of a private repository sat on h053 on 2026-11-09; the declaration spans two hosts."""
+    document = yaml.safe_load(FLEET.read_text(encoding="utf-8"))
+    _assert_spans_two_hosts(document)
+    assert _merge_queue_hosts(document) == set(POOLS)
+
+
+def test_a_merge_queue_declaration_on_one_host_is_refused() -> None:
+    """The failing control: the same fleet with the h051 pool removed resolves the merge-queue label to one host."""
+    document = yaml.safe_load(FLEET.read_text(encoding="utf-8"))
+    for row in document["hosts"]:
+        if row["host"] == "h051":
+            row["pools"] = [
+                p for p in row["pools"] if "merge-queue" not in p["classes"]
+            ]
+    with pytest.raises(AssertionError, match=r"resolve to \['h053'\]"):
+        _assert_spans_two_hosts(document)

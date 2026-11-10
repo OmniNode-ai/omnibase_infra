@@ -11,6 +11,34 @@
     {
       "broker": "dev",
       "resource_type": "GROUP",
+      "resource": "landing-chain-controller-",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "landing-chain-controller-",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "landing-chain-node-",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "landing-chain-node-",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
       "resource": "local.omnibase_core.runtime_local_",
       "operation": "DESCRIBE",
       "pattern": "PREFIXED"
@@ -285,6 +313,27 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimarket.pr-handoff-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.pr-landing-decision-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.pr-landing-decision-requested.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.pr-landing-decision-requested.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },
@@ -1042,6 +1091,27 @@
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.pr-handoff-handed-off.v1",
       "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-landing-decision-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-landing-decision-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-landing-decision-completed.v1",
+      "operation": "WRITE",
       "pattern": "LITERAL"
     },
     {
