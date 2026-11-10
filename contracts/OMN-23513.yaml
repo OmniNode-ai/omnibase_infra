@@ -8,7 +8,6 @@ is_seam_ticket: true
 interface_change: true
 interfaces_touched:
   - public_api
-  - infrastructure
 requirements:
   - id: "req-omn23513-folded-services-expected-absent"
     statement: "The lane census treats services the runtime policy folds into the main runtime as expected absent on the lane of the policy's compose project, and still reports one that runs."
@@ -22,7 +21,7 @@ requirements:
 evidence_requirements:
   - kind: "tests"
     description: "The folded-services planner tests and the existing planner tests pass."
-    command: "uv run pytest tests/unit/scripts/test_lane_census_folded_services_omn23509.py tests/unit/scripts/test_lane_census_plan.py -q --no-cov"
+    command: "uv run pytest tests/unit/scripts/test_lane_census_folded_services_omn23509.py tests/unit/scripts/test_lane_census_plan.py tests/integration/scripts/test_lane_census_folded_services_integration_omn23513.py -q --no-cov"
 emergency_bypass:
   enabled: false
   justification: ""
