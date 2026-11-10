@@ -195,6 +195,10 @@
 # the principal produces and consumes the record topic, produces the failure topic, and
 # the two group prefixes below are the grant. The lab runtime's own groups start with
 # `<env>.` / `local.` and match neither prefix.
+# TICK COMPARED EVENTS (OMN-23458): the tick orchestrator publishes each tick's compared
+# result on `onex.evt.omnimarket.pr-landing-tick-compared.v1` and a failure on
+# `onex.evt.omnimarket.pr-landing-tick-compare-failed.v1` (its contract's publish topics)
+# through the declared bus publisher, so the principal produces both; nothing here reads them.
 # Machine-only writes live in machine-principal-bindings.yaml (OMN-21622).
 principal: "{principal}"
 bindings:
@@ -304,6 +308,8 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, direction: consume, consumer_group: landing-snapshot-join-call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, direction: consume, consumer_group: landing-tick-orchestrator-call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-snapshot-failed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-compared.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-compare-failed.v1, direction: produce}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
