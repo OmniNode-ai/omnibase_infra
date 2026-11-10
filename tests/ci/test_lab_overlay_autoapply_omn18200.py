@@ -28,26 +28,23 @@ READER = REPO_ROOT / "scripts" / "ci" / "fetch_lab_overlay_record.py"
 SHA = "a" * 40
 
 
-def test_the_apply_itself_is_wired_in_the_agent() -> None:
-    """The host-side half. The overlay record is written by the deploy
-    agent, and the agent must actually call the overlay's own apply script --
-    never a retyped kubectl sequence, which is the drift k8s/onex-lab exists to
-    refuse."""
+def test_the_retired_apply_is_not_wired_in_the_agent() -> None:
+    """OMN-23521. The cluster apply is retired and deleted: the applier no
+    longer runs the overlay's apply script, the agent's settle no longer calls
+    an apply, and the onex-api image the pin delivery needs is built by the
+    effect node's handler instead."""
     applier = (
         REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "lab_overlay.py"
     ).read_text(encoding="utf-8")
-    assert "apply_lab_lane.sh" in applier
+    assert '"apply_lab_lane.sh"' not in applier
+    assert "    def apply(" not in applier
 
     agent = (
         REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "agent.py"
     ).read_text(encoding="utf-8")
-    assert "_apply_lab_overlay" in agent, (
-        "the applier exists but nothing in the agent's deploy path calls it, "
-        "which is the same zero-callers shape AC7 names"
-    )
-    # OMN-19501: the call now passes the settle worker's own sha, stamp and
-    # capture as keywords, so count the call site, not one argument spelling.
-    assert agent.count("self._apply_lab_overlay(") == 1
+    assert "_apply_lab_overlay" not in agent
+    assert agent.count("self._build_onex_api_image(") == 1
+    assert '"handler_onex_api_image_build"' in agent
 
 
 # --------------------------------------------------------------------------- #
