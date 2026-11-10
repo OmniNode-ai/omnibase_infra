@@ -61,7 +61,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: >-
-          onex node node_onex_api_image_build_effect --help
+          uv run --frozen onex node node_onex_api_image_build_effect --help
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23521-integration-proof-lab
     description: >-
