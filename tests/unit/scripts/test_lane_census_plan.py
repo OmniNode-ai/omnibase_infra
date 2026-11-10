@@ -1541,6 +1541,9 @@ def _run_planner(
     manifest.write_text(yaml.safe_dump(_frozen_manifest()), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if k != "LANE_CENSUS_DESIRED_STATE"}
     env["LANE_MANIFEST"] = str(manifest)
+    # OMN-23513: these captures predate the one-runtime fold, so they run without
+    # the runtime policy that reads the folded dev services as expected absent.
+    env["LANE_CENSUS_RUNTIME_POLICY"] = str(tmp_path / "no-runtime-policy.env")
     registry = tmp_path / "overlay.yaml"
     registry.write_text(yaml.safe_dump({"registry": _REGISTRY_ROWS}), encoding="utf-8")
     env["LANE_CENSUS_REGISTRY"] = str(registry)

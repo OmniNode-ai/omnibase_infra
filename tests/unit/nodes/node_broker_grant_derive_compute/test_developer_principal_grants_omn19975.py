@@ -163,7 +163,7 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "topic",
         "onex.cmd.omnimarket.work-ledger-query-requested.v1",
         "literal",
-        ("write", "describe"),
+        ("read", "write", "describe"),
     ),
     (
         "topic",
@@ -410,6 +410,20 @@ FLOOR_PROJECTION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("topic", FLOOR_OVERLAY_STORE_FLEET, "literal", ("read", "write", "describe")),
     ("group", FLOOR_PROJECTION_GROUP_PREFIX, "prefixed", ("read", "describe")),
 )
+# The floor task ticket mint (OMN-23471): a lab lane's principal asks the floor task
+# ticket node (omnimarket node_floor_task_ticket_effect) for the one ticket of a floor
+# task. It writes the node's command topic and reads the completed terminal under the
+# per-call group `local.omnibase_core.cli_run_node.consume.v1.<id>` that run-node
+# derives; it gets no write on the terminal, so it cannot answer for the node, and
+# no grant on any Linear credential.
+FLOOR_TASK_TICKET_COMMAND = "onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1"
+FLOOR_TASK_TICKET_COMPLETED = "onex.evt.omnimarket.floor-task-ticket-mint-completed.v1"
+FLOOR_TASK_TICKET_GROUP_PREFIX = "local.omnibase_core.cli_run_node.consume.v1."
+FLOOR_TASK_TICKET_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", FLOOR_TASK_TICKET_COMMAND, "literal", ("write", "describe")),
+    ("topic", FLOOR_TASK_TICKET_COMPLETED, "literal", ("read", "describe")),
+    ("group", FLOOR_TASK_TICKET_GROUP_PREFIX, "prefixed", ("read", "describe")),
+)
 # The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
 # its own hook events to the dev lane, so the lab projections (claude_hook_events among
 # them) see every person's sessions and not only the operator's. These are the
@@ -503,6 +517,7 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
             + LANDING_SNAPSHOT_GRANTS
             + TICKET_WRITE_GRANTS
             + FLOOR_PROJECTION_GRANTS
+            + FLOOR_TASK_TICKET_GRANTS
             + HOOK_EDGE_GRANTS
         )
         for operation in operations
@@ -819,6 +834,31 @@ def test_the_lane_ticket_mint_grants_are_declared_and_nothing_wider() -> None:
     )
 
 
+def test_the_floor_task_ticket_grants_are_declared_and_nothing_wider() -> None:
+    """A lane may write the node's command and read its completed terminal, and no more.
+
+    The principal gets no write on the terminal, so it cannot answer a request for the
+    node, and the lab runtime's own group for the node does not start with the prefix.
+    """
+    rows = derive(shipped_bindings())
+    floor_task_ticket = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "floor-task-ticket-mint" in resource
+        or resource.startswith(FLOOR_TASK_TICKET_GROUP_PREFIX)
+    }
+    assert floor_task_ticket == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in FLOOR_TASK_TICKET_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] == FLOOR_TASK_TICKET_COMPLETED and row[4] == "WRITE" for row in rows
+    )
+    runtime_group = "local.omnimarket.node_floor_task_ticket_effect.consume.v1"
+    assert not runtime_group.startswith(FLOOR_TASK_TICKET_GROUP_PREFIX)
+
+
 def test_the_floor_projection_grants_are_declared_and_nothing_wider() -> None:
     """The lane may read and write the two floor snapshot topics and nothing wider.
 
@@ -1126,7 +1166,12 @@ def test_compaction_replies_are_not_implicitly_granted_to_other_principals() -> 
 
 
 def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> None:
-    """A query writes one request and reads one terminal under its own prefix."""
+    """A query writes one request and reads one terminal under its own prefix.
+
+    OMN-23418: the same prefix reads the request topic too (READ is the one added row), so
+    the seam deadline probe can measure when a request reached the broker; the client still
+    produces no result and the runtime's own group is not under the prefix.
+    """
     bindings = shipped_bindings()
     prefix = "local.omnimarket.work_ledger_query_client.consume.v1."
     request = "onex.cmd.omnimarket.work-ledger-query-requested.v1"
@@ -1146,6 +1191,7 @@ def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> N
         for binding in query_bindings
     } == {
         (BROKER, request, "produce", None),
+        (BROKER, request, "consume", prefix + "call"),
         (BROKER, terminal, "consume", prefix + "call"),
     }
     before = bindings.model_copy(
@@ -1158,6 +1204,7 @@ def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> N
     )
     expected = {
         (BROKER, "TOPIC", request, "LITERAL", "WRITE"),
+        (BROKER, "TOPIC", request, "LITERAL", "READ"),
         (BROKER, "TOPIC", request, "LITERAL", "DESCRIBE"),
         (BROKER, "TOPIC", terminal, "LITERAL", "READ"),
         (BROKER, "TOPIC", terminal, "LITERAL", "DESCRIBE"),
