@@ -7,4 +7,4 @@
 # omnidash line is moved by hand, so this fixture is edited in the same PR that
 # moves it. It is a test-side path, which is what lets the Repo Evidence Gate
 # overlay it at the merge base, where the pins still carry the old sha.
-omnidash_ref: 42e51834d00067d325686a404f6391dd1fe0b9fd
+omnidash_ref: 495717931612719c29d22cce5578a53e93441462

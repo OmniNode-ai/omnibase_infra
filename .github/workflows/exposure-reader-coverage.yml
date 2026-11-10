@@ -108,7 +108,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnidash
-          ref: 42e51834d00067d325686a404f6391dd1fe0b9fd # .github/sibling-pins.yaml
+          ref: 495717931612719c29d22cce5578a53e93441462 # .github/sibling-pins.yaml
           path: omnidash
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           persist-credentials: false
