@@ -33,7 +33,8 @@ def test_client_operations_are_exactly_the_derived_dev_grant() -> None:
     expected = (
         {
             ("dev", "TOPIC", config.command_topic, "LITERAL", op)
-            for op in ("WRITE", "DESCRIBE")
+            # OMN-23418: READ too, so the seam deadline probe can read the request topic.
+            for op in ("READ", "WRITE", "DESCRIBE")
         }
         | {
             ("dev", "TOPIC", config.completed_topic, "LITERAL", op)
