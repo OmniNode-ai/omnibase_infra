@@ -266,6 +266,8 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # The landing decision chain (OMN-23395) adds write on the decision node's command topic and
     # its success terminal, which the chain tests serve themselves; the failure terminal is not
     # granted.
+    # The lane ticket mint (OMN-23410) adds write on the ticket node's command topic only; the
+    # principal cannot write either terminal.
     writable = [g for g in declaration.grants if "write" in g.operations]
     hook_edge = {g.name for g in writable if g.name.startswith("onex.evt.omniclaude.")}
     assert len(hook_edge) == 29
@@ -306,6 +308,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.cmd.omniintelligence.context-compaction-requested.v1",
         "onex.cmd.omnimarket.pr-landing-decision-requested.v1",
         "onex.evt.omnimarket.pr-landing-decision-completed.v1",
+        "onex.cmd.omnimarket.linear-ticket-write-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 

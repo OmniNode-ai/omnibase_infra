@@ -366,6 +366,17 @@ LANDING_DECISION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         for prefix in LANDING_DECISION_GROUP_PREFIXES
     ),
 )
+# The lane ticket mint (OMN-23410): a lab lane's principal asks the ticket node for the child
+# ticket its pull request needs. It writes the node's command topic and reads the completed and
+# failed terminals; it gets no write on either terminal, so it cannot answer for the node.
+TICKET_WRITE_COMMAND = "onex.cmd.omnimarket.linear-ticket-write-requested.v1"
+TICKET_WRITE_COMPLETED = "onex.evt.omnimarket.linear-ticket-write-completed.v1"
+TICKET_WRITE_FAILED = "onex.evt.omnimarket.linear-ticket-write-failed.v1"
+TICKET_WRITE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", TICKET_WRITE_COMMAND, "literal", ("write", "describe")),
+    ("topic", TICKET_WRITE_COMPLETED, "literal", ("read", "describe")),
+    ("topic", TICKET_WRITE_FAILED, "literal", ("read", "describe")),
+)
 # The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
 # its own hook events to the dev lane, so the lab projections (claude_hook_events among
 # them) see every person's sessions and not only the operator's. These are the
@@ -453,7 +464,11 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
     return {
         (BROKER, resource.upper(), name, pattern.upper(), operation.upper())
         for resource, name, pattern, operations in (
-            TYPED_GRANTS + DECLARED_GRANTS + LANDING_DECISION_GRANTS + HOOK_EDGE_GRANTS
+            TYPED_GRANTS
+            + DECLARED_GRANTS
+            + LANDING_DECISION_GRANTS
+            + TICKET_WRITE_GRANTS
+            + HOOK_EDGE_GRANTS
         )
         for operation in operations
     }
@@ -708,6 +723,28 @@ def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
     runtime_group = "local.omnimarket.node_pr_landing_decision_compute.consume.v1"
     assert not any(
         runtime_group.startswith(prefix) for prefix in LANDING_DECISION_GROUP_PREFIXES
+    )
+
+
+def test_the_lane_ticket_mint_grants_are_declared_and_nothing_wider() -> None:
+    """A lane may write the ticket node's command and read its two terminals, and no more.
+
+    The principal gets no write on either terminal, so it cannot answer a request for the node.
+    """
+    rows = derive(shipped_bindings())
+    ticket = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "linear-ticket-write" in resource
+    }
+    assert ticket == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in TICKET_WRITE_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] in (TICKET_WRITE_COMPLETED, TICKET_WRITE_FAILED) and row[4] == "WRITE"
+        for row in rows
     )
 
 
