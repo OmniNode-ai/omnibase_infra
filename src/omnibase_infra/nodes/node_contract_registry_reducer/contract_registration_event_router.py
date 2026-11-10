@@ -88,12 +88,16 @@ class ProtocolIntentEffect(Protocol):
     by the payload's intent_type field (e.g., "postgres.upsert_contract").
     """
 
-    async def handle(self, payload: object, correlation_id: UUID) -> object:
+    async def handle(self, request: object) -> object:
         """Execute the intent.
 
+        The handler takes the one typed payload model (e.g.,
+        ModelPayloadUpsertContract) and reads its correlation id from it
+        (canonical handle(request) shape, OMN-23524).
+
         Args:
-            payload: The typed payload model (e.g., ModelPayloadUpsertContract).
-            correlation_id: Correlation ID for distributed tracing.
+            request: The typed payload model (e.g., ModelPayloadUpsertContract)
+                carrying its own correlation id.
 
         Returns:
             Result from the effect executor (typically ModelBackendResult).
@@ -644,12 +648,7 @@ class ContractRegistrationEventRouter:
                 handler = self._effect_handlers[intent_type]
                 handler_start_time = self._clock()
 
-                # Extract correlation_id from payload if available
-                payload_correlation_id = getattr(
-                    payload, "correlation_id", correlation_id
-                )
-
-                result = await handler.handle(payload, payload_correlation_id)
+                result = await handler.handle(payload)
                 handler_duration = self._clock() - handler_start_time
 
                 # Check if handler returned a result with success field
