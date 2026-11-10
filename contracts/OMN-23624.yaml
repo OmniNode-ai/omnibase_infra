@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-23624"
+title: "The dev runtime reads the overlays repository as a second settings source"
+summary: >
+  The dev runtime's container reads its overlays from /etc/onex/skill-overlays, a read-only mount of a frozen private repository's overlay folder, so overlays merged to the overlays repository (the work-state projection schedule among them) are invisible to it, and two scheduled effects fail on every tick. The dev compose files (docker-compose.dev-lane.yml for runtime-effects and docker-compose.dev-tenant-fold.yml for the one runtime service) now name a second overlay root, /etc/onex/skill-overlays-store, appended after the existing one in ONEX_SKILL_OVERLAY_ROOTS, mounted read-only from DEV_LANE_OVERLAY_STORE_ROOTS_DIR, which defaults to the overlays folder of the registry root's overlays clone beside this checkout. The first root still wins for a document both hold, so nothing that resolves today stops resolving. The lanes that blank the variable still carry neither mount.
+
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - infrastructure
+requirements:
+  - id: "req-omn23624-second-overlay-root"
+    statement: "The rendered dev runtime compose carries the frozen overlay root first and the overlays repository root second, the second as a read-only mount."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the rendered dev runtime compose carries ONEX_SKILL_OVERLAY_ROOTS with the frozen root first and the overlays-repository root second, and the second root is a read-only mount -- falsifier: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k overlay_store_root fails at the merge base"
+      - id: "AC2"
+        statement: "AC2: the overlays repository holds the floor schedule overlay, valid through the node's own schedule model, so the floor effect's overlay resolves -- falsifier: python -m pytest tests/test_floor_schedule_overlay.py -q in the overlays repository fails at the merge base"
+      - id: "AC3"
+        statement: "AC3: integrated: on the dev runtime on h201 after the deploy agent's roll carrying the change, the lines \"is not configured\" for the work-state projection and floor schedule effects over 10 minutes are at most one per node per tick -- falsifier: the container log on h201 counted per minute for 10 minutes (before the change: 850 lines per node in 10 minutes)"
+evidence_requirements:
+  - kind: "tests"
+    description: "The compose render tests for the second overlay root."
+    command: "uv run --frozen pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -p no:cacheprovider -k overlay_store_root"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn23624-second-root-render"
+    description: "The render tests: with both host variables set the runtime service's roots are the frozen target then the store target and the store mount is a read-only bind; unset, the store mount defaults to the overlays folder beside this checkout; the tenant fold carries the same pair on the one runtime service; the lanes that blank the variable carry neither mount. At the merge base the env value holds one root and the new tests fail."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -p no:cacheprovider -k overlay_store_root"
+        cwd: "."
+  - id: "dod-omn23624-floor-overlay-in-overlays-repo"
+    description: "The floor schedule overlay and its test live in the overlays repository (a separate pull request, OMN-23624); this repository's render test does not read it. The criterion is bound there; the hosted check here is the render test."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -p no:cacheprovider -k overlay_store_root"
+        cwd: "."
+  - id: "dod-omn23624-deploy-probe"
+    description: "The rendered dev runtime compose (infra, dev lane and tenant fold files, runtime profile) carries the frozen root then the store root in ONEX_SKILL_OVERLAY_ROOTS; the probe exits 0 with the change and 1 at the merge base ce19820cd."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.dev-lane.yml -f docker/docker-compose.dev-tenant-fold.yml --profile runtime config --no-interpolate | grep -qF \"/etc/onex/skill-overlays:/etc/onex/skill-overlays-store\"'"
+        cwd: "."
+  - id: "dod-omn23624-live-h201-proof"
+    description: "On h201 after the deploy agent's roll carrying the change, the running dev runtime container has the store root mounted. The container log counted per minute for 10 minutes then shows at most one overlay error line per scheduled node per tick (read from the container log and recorded in the pull request). It needs the lab and the deploy agent's roll, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: ["AC3"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'ssh h201 \"docker inspect omninode-runtime --format \\\"{{range .Mounts}}{{println .Destination}}{{end}}\\\"\" | grep -qx /etc/onex/skill-overlays-store'"
+        cwd: "."
