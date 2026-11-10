@@ -133,6 +133,13 @@ class _Lab:
                 return subprocess.run(
                     argv, capture_output=True, text=True, check=False, timeout=timeout
                 )
+            if cmd[:2] == ["docker", "run"]:
+                # OMN-23039: the candidate image's import check. These tests are
+                # about WHETHER a recreate happens, so the image imports cleanly;
+                # test_onex_api_import_check_omn23039.py drives the refusals.
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout='{"checked": [], "missing": []}\n', stderr=""
+                )
             self.compose_calls.append(cmd)
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 

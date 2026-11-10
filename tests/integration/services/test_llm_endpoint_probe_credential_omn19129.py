@@ -43,7 +43,7 @@ pytestmark = pytest.mark.integration
 
 # Assembled at runtime so no credential-shaped literal exists in the source.
 _GOOD_SECRET = "-".join(("integration", "probe", "credential"))
-_BASE_PATH = "/api/coding/paas/v4"
+_BASE_PATH = "/api/paas/v4"
 
 
 class _SurfaceHandler(BaseHTTPRequestHandler):

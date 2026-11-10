@@ -174,6 +174,8 @@ def test_overlay_ceiling_of_600_lets_a_300_second_request_wait_300_plus_margin(
         "task_class_timeout_ceiling_seconds": _OVERLAY_CEILING_SECONDS,
         "execution_timeout_seconds": _REQUESTED_SECONDS,
         "terminal_delivery_margin_seconds": _MARGIN_SECONDS,
+        "ceiling_overlay_ref": None,
+        "ceiling_source": "packaged",
     }
     assert "timeout_exceeds_task_class_ceiling" not in receipt_text
 
