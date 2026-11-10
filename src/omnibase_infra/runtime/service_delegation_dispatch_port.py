@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Runtime-owned dispatch port for consumer-facing delegation handlers."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import threading
@@ -355,6 +353,7 @@ class RuntimeDelegationDispatchPort:
         named_tests: BaseModel | None = None,
         trace_id: UUID | None = None,
         queue_wait_ms: int | None = None,
+        probe_ladder: object | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -372,9 +371,7 @@ class RuntimeDelegationDispatchPort:
 
         # Refuse a spec the lane cannot run before any route is resolved or
         # anything is published.
-        named_tests_wire = (
-            None if named_tests is None else _named_tests_wire(named_tests)
-        )
+        named_tests_wire = named_tests and _named_tests_wire(named_tests)
 
         # OmniMarket's consumer-facing handler always supplies these optional
         # arguments. The deployed bus model does not expose the completion-shaping
@@ -387,6 +384,9 @@ class RuntimeDelegationDispatchPort:
             # OMN-20844: the customer's model choice runs only on omnimarket's
             # in-process BYOK route; the bus wire does not carry it.
             ("model", model),
+            # OMN-23162: a synthetic probe's ladder is never run as an ordinary
+            # delegation; the bus wire does not carry it.
+            ("probe_ladder", probe_ladder),
         ):
             if feature_value is not None:
                 raise NotImplementedError(

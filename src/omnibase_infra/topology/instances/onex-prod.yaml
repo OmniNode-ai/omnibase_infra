@@ -75,6 +75,11 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - gate_store_reservations
+            privileges: [DELETE, SELECT]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
               - alert_channel_liveness_verdicts
               - automation_alarm_episodes
               - automation_liveness_state
@@ -94,6 +99,10 @@ databases:
               - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
+              - gate_store_reservations
+              - gate_store_safety
+              - gate_store_state
+              - gate_store_steps
               - gateway_link_health
               - lab_container_memory_window
               - lab_job_state

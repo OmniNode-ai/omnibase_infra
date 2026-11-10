@@ -90,6 +90,15 @@ PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
     {EnumDatabasePrivilege.SELECT, EnumDatabasePrivilege.DELETE}
 )
 
+# Relations whose vendored migration also grants DELETE, which no ``access`` mode
+# derives. The reservations table is released or expired by deleting its rows
+# (OMN-23055, node_gate_store_effect/0001). Each is declared as a separate
+# PRUNE_PRIVILEGES grant beside the derived one, so no grant carries a
+# non-canonical privilege set; expire with the gate store bridge.
+PRUNED_RELATIONS: frozenset[tuple[str, str]] = frozenset(
+    {("omninode_internal", "gate_store_reservations")}
+)
+
 # Mirrors ``_projection_operation_bindings``. PLATFORM_CATALOG is absent by
 # design: that domain requires a caller-supplied read/write binding, so a
 # contract declaration alone cannot name the principal. Such declarations are
@@ -311,6 +320,16 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
     ),
+    # OMN-23055: node_gate_store_effect/0000 creates the four gate store relations and
+    # 0001 grants omninode_runtime on them ahead of the omnimarket node contract
+    # reaching the pin (the node's contract declares no db_io binding: the store opens
+    # its own connection); expire this bridge when that contract reaches the pin.
+    *(
+        _vendored_read_write(
+            f"gate_store_{s}", "node_gate_store_effect", "0000_create_gate_store.sql"
+        )
+        for s in ("state", "reservations", "safety", "steps")
+    ),
     # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
@@ -331,50 +350,18 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ("compaction_current_context", None),
         )
     ),
-    # OMN-21920: infra vendors node_projection_agent_actions/0000-0001 ahead of the
-    # omnimarket node contract that declares the six agent_* relations the retired
-    # agent-actions consumer wrote. The source contract declares each relation for
-    # write in the public schema of the application database; 0001 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE on all six. Retired when
-    # node_projection_agent_actions merges in omnimarket and the pin advances past
-    # it; the OMN-18863 expiry module names these bridges.
-    *(
-        _vendored_read_write(
-            table,
-            "node_projection_agent_actions",
-            "0000_create_agent_observability_tables.sql",
-            schema="public",
-        )
-        for table in (
-            "agent_actions",
-            "agent_transformation_events",
-            "router_performance_metrics",
-            "agent_detection_failures",
-            "agent_execution_logs",
-            "agent_status_events",
-        )
-    ),
     # OMN-19986: the same window for node_projection_local_identity/0000-0002,
     # the API Keys page's local identity. 0001 grants tenant_projection_writer
     # SELECT, INSERT, UPDATE. Retired when omnimarket's
     # node_projection_local_identity contract merges and the pin advances past
     # it; the expiry module names it.
     _vendored_read_write("local_identity", schema="public"),
-    # OMN-21970: the same infra-first window. This repo vendors
-    # node_projection_delegation 0067's projection_delegation_daily view ahead of
-    # the omnimarket contract that declares it (access read, role aggregate_daily),
-    # which lands after this release: the node's wiring check refuses a contract
-    # whose relation no release grants. 0067 grants tenant_projection_writer
-    # SELECT. Retired when that contract merges and the pin advances past it; the
-    # expiry module names it.
-    _vendored_read_write(
-        "projection_delegation_daily",
-        "node_projection_delegation",
-        "0067_delegation_daily_view.sql",
-        schema="public",
-        access="read",
-        role="aggregate_daily",
-    ),
+    # OMN-21920 and OMN-21970: the six agent_* bridges
+    # (node_projection_agent_actions) and projection_delegation_daily were
+    # DELETED by the pin advance to e7258b346065, which declares all seven in
+    # the node contracts. Same mechanism and same proof as the entries above:
+    # the expiry module went red naming them and the regeneration must write
+    # nothing.
     # OMN-22320: node_projection_work_questions/0000 creates five
     # omninode_internal tables ahead of the omnimarket writer's contract and
     # 0001 grants omninode_runtime SELECT, INSERT, UPDATE on each. Retired
@@ -626,73 +613,57 @@ def derive_table_grants(
     # contract that declares the same relation.
     required: dict[tuple[str, str, str], set[EnumDatabasePrivilege]] = {}
     unmappable: dict[tuple[str, str, str], UnmappableDeclaration] = {}
+    pruned: set[tuple[str, str, str]] = set()
+
+    def refuse(declaration: ContractTableDeclaration, reason: str) -> None:
+        table = declaration.table
+        unmappable.setdefault(
+            (table.database_ref, table.schema, table.name),
+            UnmappableDeclaration(
+                node=declaration.node,
+                database_ref=table.database_ref,
+                schema=table.schema,
+                name=table.name,
+                reason=reason,
+            ),
+        )
 
     for declaration in declarations:
         table = declaration.table
-        key = (table.database_ref, table.schema, table.name)
         if table.database_ref != database_ref:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=(
-                        f"database_ref {table.database_ref!r} is not declared in "
-                        "the application topology"
-                    ),
-                ),
+            refuse(
+                declaration,
+                f"database_ref {table.database_ref!r} is not declared in "
+                "the application topology",
             )
             continue
         schema = database.schemas.get(table.schema)
         if schema is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=f"schema {table.schema!r} is not declared in the topology",
-                ),
+            refuse(
+                declaration,
+                f"schema {table.schema!r} is not declared in the topology",
             )
             continue
         binding_ref = DOMAIN_PROJECTION_BINDINGS.get(schema.domain)
         if binding_ref is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=(
-                        f"domain {schema.domain.value} requires an explicit "
-                        "caller-supplied binding and cannot be derived from a "
-                        "contract declaration alone"
-                    ),
-                ),
+            refuse(
+                declaration,
+                f"domain {schema.domain.value} requires an explicit "
+                "caller-supplied binding and cannot be derived from a "
+                "contract declaration alone",
             )
             continue
         binding = database.bindings.get(binding_ref)
         if binding is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=f"topology declares no binding {binding_ref!r}",
-                ),
-            )
+            refuse(declaration, f"topology declares no binding {binding_ref!r}")
             continue
         grant_schema = physical_grant_schema_for_table(table.schema, table.name)
         entry = required.setdefault(
             (binding.principal, grant_schema, table.name), set()
         )
         entry.update(_privileges_for_access(table.access))
+        if (table.schema, table.name) in PRUNED_RELATIONS:
+            pruned.add((binding.principal, grant_schema, table.name))
 
     grants: dict[str, tuple[ModelDeploymentTopologyDatabaseGrant, ...]] = {}
     # Group by (principal, schema, privilege set) so each principal carries at
@@ -702,6 +673,12 @@ def derive_table_grants(
         privilege_key = tuple(sorted(privilege.value for privilege in privileges))
         grouped.setdefault(principal, {}).setdefault(
             (schema_name, privilege_key), []
+        ).append(table_name)
+
+    prune_key = tuple(sorted(privilege.value for privilege in PRUNE_PRIVILEGES))
+    for principal, schema_name, table_name in pruned:
+        grouped.setdefault(principal, {}).setdefault(
+            (schema_name, prune_key), []
         ).append(table_name)
 
     for principal in sorted(grouped):

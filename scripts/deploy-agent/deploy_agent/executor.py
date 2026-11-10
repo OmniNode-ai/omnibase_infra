@@ -172,6 +172,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
     for relative in (
         "models/coding_agent/model_subprocess_outcome.py",
         "models/handlers/model_value_holder.py",
+        "models/model_dev_boot_health_probe.py",
         "models/model_dev_boot_health_status.py",
         "models/model_dev_boot_state.py",
         "models/model_dev_boot_healthcheck.py",
@@ -5854,9 +5855,7 @@ class DeployExecutor:
         that profile would start.
         """
         config = lane_config_for(lane)
-        cmd = [
-            *_compose_argv(lane),
-        ]
+        cmd = [*_compose_argv(lane)]
         # OMN-18143: `up` enables the profile of a service named on its
         # command line; `config --hash` does not. Naming `cost-estimator-web`
         # (profile `cost-estimator`) under `--profile runtime` aborted job

@@ -349,8 +349,8 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 )
 # The landing decision chain (OMN-23395): the piece 9 chain tests serve the landing decision
 # node over the dev lane as the machine's issued principal, so it produces and consumes the
-# node's command topic and its success terminal, each read under a run-named group prefix.
-# The failure terminal is not used by the chain and is not granted.
+# node's command topic, its success terminal and (OMN-23459) its failure terminal, each read
+# under a run-named group prefix.
 LANDING_DECISION_COMMAND = "onex.cmd.omnimarket.pr-landing-decision-requested.v1"
 LANDING_DECISION_SUCCESS = "onex.evt.omnimarket.pr-landing-decision-completed.v1"
 LANDING_DECISION_FAILURE = "onex.evt.omnimarket.pr-landing-decision-failed.v1"
@@ -361,6 +361,7 @@ LANDING_DECISION_GROUP_PREFIXES: tuple[str, ...] = (
 LANDING_DECISION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("topic", LANDING_DECISION_COMMAND, "literal", ("read", "write", "describe")),
     ("topic", LANDING_DECISION_SUCCESS, "literal", ("read", "write", "describe")),
+    ("topic", LANDING_DECISION_FAILURE, "literal", ("read", "write", "describe")),
     *(
         ("group", prefix, "prefixed", ("read", "describe"))
         for prefix in LANDING_DECISION_GROUP_PREFIXES
@@ -376,6 +377,19 @@ TICKET_WRITE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("topic", TICKET_WRITE_COMMAND, "literal", ("write", "describe")),
     ("topic", TICKET_WRITE_COMPLETED, "literal", ("read", "describe")),
     ("topic", TICKET_WRITE_FAILED, "literal", ("read", "describe")),
+)
+# The floor projection snapshots (OMN-23402): the controller host's owner map publisher
+# and each host's overlay store fleet reader publish a snapshot of their projection on
+# the two topics, and the floor's projection reader reads both from the earliest
+# retained offset under a fresh group per pass. The prefix is the grant for those
+# groups, and no other onex.snapshot.projection.* topic is granted.
+FLOOR_OWNER_MAP = "onex.snapshot.projection.floor-owner-map.v1"
+FLOOR_OVERLAY_STORE_FLEET = "onex.snapshot.projection.floor-overlay-store-fleet.v1"
+FLOOR_PROJECTION_GROUP_PREFIX = "node_floor_projection_read_effect."
+FLOOR_PROJECTION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", FLOOR_OWNER_MAP, "literal", ("read", "write", "describe")),
+    ("topic", FLOOR_OVERLAY_STORE_FLEET, "literal", ("read", "write", "describe")),
+    ("group", FLOOR_PROJECTION_GROUP_PREFIX, "prefixed", ("read", "describe")),
 )
 # The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
 # its own hook events to the dev lane, so the lab projections (claude_hook_events among
@@ -468,6 +482,7 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
             + DECLARED_GRANTS
             + LANDING_DECISION_GRANTS
             + TICKET_WRITE_GRANTS
+            + FLOOR_PROJECTION_GRANTS
             + HOOK_EDGE_GRANTS
         )
         for operation in operations
@@ -703,10 +718,11 @@ def test_the_dod_closeout_grants_are_declared_and_nothing_wider() -> None:
 
 
 def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
-    """The chain may produce and consume the decision command and its success terminal.
+    """The chain may produce and consume the decision command, its success terminal
+    and its failure terminal.
 
     A prefix is the grant for the run-named groups, and the lab runtime's own group for
-    the node starts with neither prefix. The failure terminal is not granted.
+    the node starts with neither prefix.
     """
     rows = derive(shipped_bindings())
     landing = {
@@ -719,7 +735,11 @@ def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
         for resource, name, _, operations in LANDING_DECISION_GRANTS
         for operation in operations
     }
-    assert not any(row[2] == LANDING_DECISION_FAILURE for row in rows)
+    assert {row[4] for row in rows if row[2] == LANDING_DECISION_FAILURE} == {
+        "READ",
+        "WRITE",
+        "DESCRIBE",
+    }
     runtime_group = "local.omnimarket.node_pr_landing_decision_compute.consume.v1"
     assert not any(
         runtime_group.startswith(prefix) for prefix in LANDING_DECISION_GROUP_PREFIXES
@@ -746,6 +766,35 @@ def test_the_lane_ticket_mint_grants_are_declared_and_nothing_wider() -> None:
         row[2] in (TICKET_WRITE_COMPLETED, TICKET_WRITE_FAILED) and row[4] == "WRITE"
         for row in rows
     )
+
+
+def test_the_floor_projection_grants_are_declared_and_nothing_wider() -> None:
+    """The lane may read and write the two floor snapshot topics and nothing wider.
+
+    The prefix is the grant for the reader's fresh per-pass groups, and the lab
+    runtime's own group for the reader does not start with it. No other
+    onex.snapshot.projection.* topic is granted.
+    """
+    rows = derive(shipped_bindings())
+    floor = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "projection.floor-" in resource
+        or "node_floor_projection_read_effect" in resource
+    }
+    assert floor == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in FLOOR_PROJECTION_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        resource_type == "TOPIC"
+        and resource.startswith("onex.snapshot.projection.")
+        and resource not in (FLOOR_OWNER_MAP, FLOOR_OVERLAY_STORE_FLEET)
+        for _, resource_type, resource, _, _ in rows
+    )
+    runtime_group = "local.omnimarket.node_floor_projection_read_effect.consume.v1"
+    assert not runtime_group.startswith(FLOOR_PROJECTION_GROUP_PREFIX)
 
 
 def test_committed_derived_grants_are_the_nodes_output() -> None:
