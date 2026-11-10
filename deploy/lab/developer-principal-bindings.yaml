@@ -154,8 +154,10 @@
 # `landing-chain-node-<run id>` and `landing-chain-controller-<run id>`, so the two group
 # prefixes below are the grant. The lab runtime's own group for the node, `<env>.omnimarket.
 # node_pr_landing_decision_compute...`, does not start with either prefix, so a developer
-# principal cannot join it and take real commands. The failure terminal is not used by the
-# chain (a node error travels on the success topic) and is not granted.
+# principal cannot join it and take real commands. The failure terminal
+# `onex.evt.omnimarket.pr-landing-decision-failed.v1` is granted for produce and consume as
+# well (OMN-23459): the decision node publishes it and the controller side reads it; the
+# chain tests themselves still do not use it, and the same two group prefixes cover its reads.
 # LANE TICKET MINT (OMN-23410): a lab lane's principal asks the ticket node for the child ticket its
 # pull request's contract needs, with `onex ticket create` (omnimarket `onex.cli` entry point). The
 # call publishes one request on the node's command topic and reads its completed or failed terminal,
@@ -276,6 +278,8 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-landing-decision-requested.v1, direction: consume, consumer_group: landing-chain-node-call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-completed.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-completed.v1, direction: consume, consumer_group: landing-chain-controller-call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-failed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-failed.v1, direction: consume, consumer_group: landing-chain-controller-call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.linear-ticket-write-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.linear-ticket-write-completed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.linear-ticket-write-failed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}

@@ -349,8 +349,8 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 )
 # The landing decision chain (OMN-23395): the piece 9 chain tests serve the landing decision
 # node over the dev lane as the machine's issued principal, so it produces and consumes the
-# node's command topic and its success terminal, each read under a run-named group prefix.
-# The failure terminal is not used by the chain and is not granted.
+# node's command topic, its success terminal and (OMN-23459) its failure terminal, each read
+# under a run-named group prefix.
 LANDING_DECISION_COMMAND = "onex.cmd.omnimarket.pr-landing-decision-requested.v1"
 LANDING_DECISION_SUCCESS = "onex.evt.omnimarket.pr-landing-decision-completed.v1"
 LANDING_DECISION_FAILURE = "onex.evt.omnimarket.pr-landing-decision-failed.v1"
@@ -361,6 +361,7 @@ LANDING_DECISION_GROUP_PREFIXES: tuple[str, ...] = (
 LANDING_DECISION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("topic", LANDING_DECISION_COMMAND, "literal", ("read", "write", "describe")),
     ("topic", LANDING_DECISION_SUCCESS, "literal", ("read", "write", "describe")),
+    ("topic", LANDING_DECISION_FAILURE, "literal", ("read", "write", "describe")),
     *(
         ("group", prefix, "prefixed", ("read", "describe"))
         for prefix in LANDING_DECISION_GROUP_PREFIXES
@@ -737,10 +738,11 @@ def test_the_dod_closeout_grants_are_declared_and_nothing_wider() -> None:
 
 
 def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
-    """The chain may produce and consume the decision command and its success terminal.
+    """The chain may produce and consume the decision command, its success terminal
+    and its failure terminal.
 
     A prefix is the grant for the run-named groups, and the lab runtime's own group for
-    the node starts with neither prefix. The failure terminal is not granted.
+    the node starts with neither prefix.
     """
     rows = derive(shipped_bindings())
     landing = {
@@ -753,7 +755,11 @@ def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
         for resource, name, _, operations in LANDING_DECISION_GRANTS
         for operation in operations
     }
-    assert not any(row[2] == LANDING_DECISION_FAILURE for row in rows)
+    assert {row[4] for row in rows if row[2] == LANDING_DECISION_FAILURE} == {
+        "READ",
+        "WRITE",
+        "DESCRIBE",
+    }
     runtime_group = "local.omnimarket.node_pr_landing_decision_compute.consume.v1"
     assert not any(
         runtime_group.startswith(prefix) for prefix in LANDING_DECISION_GROUP_PREFIXES
