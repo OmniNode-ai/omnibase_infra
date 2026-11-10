@@ -5,7 +5,7 @@ summary: The publisher's lane model (ModelCiBusLane in scripts/trigger_rebuild_o
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:
-  - models
+  - public_api
 requirements:
   - id: req-omn23613-tenant-key
     statement: The lane model accepts an optional tenant_id on a lane, leaves its shape to the reader that acts on it, and still refuses every other unknown key.
@@ -35,12 +35,11 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/test_trigger_learns_tenant_key_omn23613.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn23613-ac3-parity
-    description: The parity gate in omnimarket reads this model from the pinned release. The read is the gate on the omnimarket pull request that adds the key after the release is pinned, so only the local Done gate runs this unbound check.
+    description: The parity gate in omnimarket reads this model from the pinned release. The read is the gate on the omnimarket pull request that adds the key after the release is pinned, so this check reads the model for the key, which the merge base lacks.
     source: manual
     binds_ac:
       - AC2
       - AC3
-    execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: 'grep -q "tenant_id: str | None" scripts/trigger_rebuild_on_merge.py'
