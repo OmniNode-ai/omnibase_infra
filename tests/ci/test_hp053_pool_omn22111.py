@@ -115,11 +115,12 @@ def test_the_fleet_declares_h053_with_the_general_class() -> None:
     assert host is not None and host.host == "h053"
     assert host.declared_count("action") == COUNT
     assert host.declared_count("verify") == 0
-    # The action fleet now spans three hosts, so no required context relies on fewer than two.
+    # The action fleet spanned three hosts; OMN-22898 retired the primary host's general
+    # runners, so it spans the two that remain, still no fewer than two for any required context.
     assert [h.host for h in config.hosts if h.declared_count("action") > 0].count(
         "h053"
     ) == 1
-    assert len([h for h in config.hosts if h.declared_count("action") > 0]) >= 3
+    assert len([h for h in config.hosts if h.declared_count("action") > 0]) >= 2
 
 
 def test_the_pool_slice_bounds_the_whole_pool() -> None:

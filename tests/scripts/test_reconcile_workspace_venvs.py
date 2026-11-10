@@ -55,6 +55,10 @@ pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "reconcile-workspace-venvs.sh"
+_ATOMIC_TOOL = (
+    _REPO_ROOT
+    / "src/omnibase_infra/nodes/node_venv_atomic_install/runtime_venv_atomic_install.py"
+)
 
 _EXIT_OK = 0
 _EXIT_DRIFT = 1
@@ -135,6 +139,7 @@ def _make_uv_shim(
     sync_exit: int = 0,
     check_exit: int = 0,
     venv_relocatable: bool = True,
+    check_exit_after_first: int | None = None,
 ) -> Path:
     """A ``uv`` on PATH that logs argv and returns canned exit statuses.
 
@@ -232,7 +237,18 @@ def _make_uv_shim(
         'printf "env=%s %s\\n" "${UV_PROJECT_ENVIRONMENT:--}" "$*" >> "$UV_SHIM_LOG"\n'
         'printf "uv env=%s %s\\n" "${UV_PROJECT_ENVIRONMENT:--}" "$*" >> "$ORDER_LOG"\n'
         'for a in "$@"; do\n'
-        '  if [[ "$a" == "--check" ]]; then exit ' + str(check_exit) + "; fi\n"
+        '  if [[ "$a" == "--check" ]]; then\n'
+        + (
+            '    _n="$(cat "$UV_SHIM_LOG.checks" 2>/dev/null || echo 0)"\n'
+            '    printf "%s\\n" "$((_n + 1))" > "$UV_SHIM_LOG.checks"\n'
+            f'    if [[ "$_n" -ge 1 ]]; then exit {check_exit_after_first}; fi\n'
+            if check_exit_after_first is not None
+            else ""
+        )
+        + "    exit "
+        + str(check_exit)
+        + "\n"
+        "  fi\n"
         "done\n"
         "exit " + str(sync_exit) + "\n",
         encoding="utf-8",
@@ -254,6 +270,7 @@ def _make_install_shim(path: Path, *, exit_code: int = 0) -> Path:
         # layer was composed into is the whole OMN-17819 question.
         'printf "%s\\n" "$*" >> "$INSTALL_ARGV_LOG"\n'
         'printf "install %s\\n" "${OMNIMARKET_REF:-<unset>}" >> "$ORDER_LOG"\n'
+        'printf "%s\\n" "${ONEX_ATOMIC_INSTALL:-<unset>}" >> "${INSTALL_ATOMIC_LOG:-/dev/null}"\n'
         "exit " + str(exit_code) + "\n",
         encoding="utf-8",
     )
@@ -340,6 +357,8 @@ class _Workspace:
             "INSTALL_SHIM_LOG": str(self.install_log),
             "INSTALL_ARGV_LOG": str(self.install_argv_log),
             "ORDER_LOG": str(self.order_log),
+            "INSTALL_ATOMIC_LOG": str(self.root / "install-atomic.log"),
+            "CP_LOG": str(self.root / "cp.log"),
             "ONEX_RECONCILE_INSTALL_SCRIPT": str(self.install_script),
             # Keep the hook-venv surface deterministic: the plugin-data venv is
             # host state, not workspace state, and must not leak into a test.
@@ -2239,7 +2258,7 @@ def test_the_swap_exchanges_the_directories_in_one_syscall(tmp_path: Path) -> No
         [
             "bash",
             "-c",
-            f'{text[start:end]}\nexchange_dirs_atomically "$1" "$2"',
+            f'_ATOMIC_TOOL="{_ATOMIC_TOOL}"\n{text[start:end]}\nexchange_dirs_atomically "$1" "$2"',
             "_",
             str(staging),
             str(live),
@@ -2266,7 +2285,7 @@ def test_the_swap_falls_back_when_the_exchange_is_unavailable(tmp_path: Path) ->
         [
             "bash",
             "-c",
-            f'{text[start:end]}\nexchange_dirs_atomically "$1" "$2"',
+            f'_ATOMIC_TOOL="{_ATOMIC_TOOL}"\n{text[start:end]}\nexchange_dirs_atomically "$1" "$2"',
             "_",
             str(staging),
             str(tmp_path / "absent"),
@@ -2278,3 +2297,156 @@ def test_the_swap_falls_back_when_the_exchange_is_unavailable(tmp_path: Path) ->
 
     assert result.returncode != 0
     assert staging.is_dir()
+
+
+# --------------------------------------------------------------------------- #
+# OMN-22712: a provider-only additive pass updates the moved packages in place.
+# --------------------------------------------------------------------------- #
+#
+# The pass that runs once per omnimarket merge (about 45 a day on a lab Mac)
+# cloned the whole live dispatch venv (about 57,000 files), installed into the
+# clone, swapped it in and deleted the old tree: 57,000 creates and 57,000
+# removes, which is what grows fseventsd without bound. These tests read the
+# collaborators the script runs (`cp` for the clone, the install script for the
+# co-install), so a regression to the clone reads RED here.
+
+
+def _cp_shim(ws: _Workspace) -> None:
+    """A `cp` that logs its argv and then runs the real one."""
+    cp = ws.bin_dir / "cp"
+    cp.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$CP_LOG"\nexec /bin/cp "$@"\n',
+        encoding="utf-8",
+    )
+    cp.chmod(0o755)
+
+
+def _cp_calls(ws: _Workspace) -> list[str]:
+    log = ws.root / "cp.log"
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+def _cloned_the_dispatch_venv(ws: _Workspace) -> bool:
+    return any(str(ws.dispatch_venv) in call for call in _cp_calls(ws))
+
+
+def _make_dispatch_venv_relocatable(ws: _Workspace) -> None:
+    cfg = ws.dispatch_venv / "pyvenv.cfg"
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8") + "relocatable = true\n", encoding="utf-8"
+    )
+
+
+def _atomic_flags(ws: _Workspace) -> list[str]:
+    log = ws.root / "install-atomic.log"
+    return log.read_text(encoding="utf-8").split() if log.exists() else []
+
+
+def test_a_provider_only_pass_updates_in_place_without_cloning_the_venv(
+    ws: _Workspace,
+) -> None:
+    """The common tick (omnimarket moved, the lock did not) clones nothing."""
+    _cp_shim(ws)
+    ws.set_installed_commit("0" * _SHA_LEN)
+    _make_dispatch_venv_relocatable(ws)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert not _cloned_the_dispatch_venv(ws), (
+        f"a provider-only pass cloned the whole live venv: {_cp_calls(ws)!r}"
+    )
+    staging = Path(str(ws.dispatch_venv) + _UV_STAGING_SUFFIX)
+    assert not staging.exists()
+    assert str(staging) not in _mutating_uv_targets(ws), (
+        "a provider-only pass still synced into a staged clone"
+    )
+    argv = ws.install_argv_log.read_text(encoding="utf-8")
+    assert str(ws.dispatch_venv / "bin" / "python") in argv, (
+        f"the co-install did not target the live interpreter: {argv!r}"
+    )
+    assert _atomic_flags(ws) == ["1"], (
+        "the co-install was not asked for the atomic in-place install: "
+        f"{_atomic_flags(ws)!r}"
+    )
+    assert "additive pass in place" in result.stdout, result.stdout
+
+
+def test_a_lock_layer_pass_still_clones_the_venv(ws: _Workspace) -> None:
+    """Positive control for the test above: a pass that moves the LOCK clones.
+
+    The same fixture with a lock layer that reads behind must take the clone
+    path, so the zero clone calls above come from the new branch and not from a
+    shim that never records one.
+    """
+    _cp_shim(ws)
+    _make_uv_shim(ws.bin_dir, check_exit=1)
+    ws.set_installed_commit("0" * _SHA_LEN)
+    _make_dispatch_venv_relocatable(ws)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert _cloned_the_dispatch_venv(ws), (
+        f"the lock-layer pass did not clone the venv: {_cp_calls(ws)!r}"
+    )
+    assert _atomic_flags(ws) == ["0"], _atomic_flags(ws)
+
+
+def test_a_venv_that_is_not_relocatable_is_not_updated_in_place(
+    ws: _Workspace,
+) -> None:
+    """Scripts staged for an in-place exchange need the self-locating form."""
+    _cp_shim(ws)
+    ws.set_installed_commit("0" * _SHA_LEN)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert _cloned_the_dispatch_venv(ws), _cp_calls(ws)
+    assert _atomic_flags(ws) == ["0"], _atomic_flags(ws)
+
+
+def test_a_co_install_that_moved_the_lock_layer_applies_it_on_a_clone(
+    tmp_path: Path,
+) -> None:
+    """The lock pass after an in-place co-install is a read; drift clones.
+
+    The first `uv sync --check` (the pre-pass probe) reads in sync, the second
+    (after the co-install) reads behind. The lock is then applied on a staged
+    clone of the venv that now carries the new provider layer, and swapped in.
+    """
+    ws = _Workspace(tmp_path)
+    _cp_shim(ws)
+    _make_uv_shim(ws.bin_dir, check_exit_after_first=1)
+    ws.set_installed_commit("0" * _SHA_LEN)
+    _make_dispatch_venv_relocatable(ws)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert _atomic_flags(ws) == ["1"], _atomic_flags(ws)
+    assert "moved the lock layer" in result.stdout, result.stdout
+    assert _cloned_the_dispatch_venv(ws), _cp_calls(ws)
+    staging = Path(str(ws.dispatch_venv) + _UV_STAGING_SUFFIX)
+    assert str(staging) in _mutating_uv_targets(ws)
+    assert not staging.exists(), "the staged clone survived the swap"
+
+
+def test_a_failed_in_place_co_install_refuses_and_leaves_the_venv_alone(
+    ws: _Workspace,
+) -> None:
+    """The refusal path is unchanged: the install fails, the venv is untouched."""
+    _cp_shim(ws)
+    _make_install_shim(ws.install_script, exit_code=1)
+    ws.set_installed_commit("0" * _SHA_LEN)
+    _make_dispatch_venv_relocatable(ws)
+    before = (ws.dispatch_venv / "bin" / "python").read_text(encoding="utf-8")
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert "still serving" in result.stdout, result.stdout
+    assert not _cloned_the_dispatch_venv(ws)
+    after = (ws.dispatch_venv / "bin" / "python").read_text(encoding="utf-8")
+    assert after == before

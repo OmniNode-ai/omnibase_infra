@@ -442,6 +442,12 @@ RUN set -eu; \
 # non-market packages or domain plugins to the runtime kernel.
 RUN /app/.venv/bin/python -m omnibase_infra.runtime.strip_runtime_entry_points
 
+# OMN-22391: the strip above keeps omninode-intelligence's onex.nodes entry points,
+# because the runtime serves the intelligence API through the http_mount that its
+# node contract declares and finds that contract through them. The build fails here
+# if the installed dist lists none.
+RUN /app/.venv/bin/python -c 'from importlib.metadata import entry_points; dists = {(ep.dist.name or "").lower().replace("_", "-") for ep in entry_points(group="onex.nodes") if ep.dist}; assert "omninode-intelligence" in dists, "omninode-intelligence lists no onex.nodes entry points: " + repr(sorted(dists))'
+
 # Install CPU-only PyTorch (~2GB savings over CUDA wheels).
 # K8s runtime has no GPU; inference offloads to LLM servers via HTTP.
 # --no-deps prevents torch from pulling its own transitive deps (already

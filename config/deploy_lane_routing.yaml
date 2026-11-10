@@ -140,7 +140,11 @@ instances:
       projection_url: http://host.docker.internal:8085/projection-api
       compose_project: omnibase-infra
       runtime_container: omninode-runtime
-      effects_container: omninode-runtime-effects
+      # OMN-23333: the dev lane folds the effects role into main (DEV_RUNTIME_MAIN_FOLDED_PROFILES,
+      # docker/runtime-policy.env), so no omninode-runtime-effects container runs here. The receipt
+      # writer's converge step read that name, ended INDETERMINATE and wrote no PASS receipt. The
+      # effects role is read on main's container, as the deploy agent's own health target does.
+      effects_container: omninode-runtime
       postgres_container: omnibase-infra-postgres
       broker_container: omnibase-infra-redpanda
   dev-202:
