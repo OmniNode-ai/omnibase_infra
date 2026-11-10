@@ -70,6 +70,7 @@ from deploy_agent.executor import (
     capture_rollback_point,
     lane_config_for,
     lane_runs_phase,
+    load_dev_boot_guard,
     read_applied_migration_fingerprint,
     read_checkout_migration_fingerprint,
     resolve_prod_target_service,
@@ -126,7 +127,13 @@ from deploy_agent.idle_converge import decide as decide_idle_converge
 from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
 from deploy_agent.kafka_config import load_deploy_agent_kafka_config_from_env
 from deploy_agent.lab_overlay import (
-    DEFAULT_APPLY_BUDGET_SECONDS,
+    API_BUILD_TIMEOUT_SECONDS,
+    API_CONTEXT,
+    API_DOCKERFILE,
+    API_IMAGE_NAME,
+    API_REVISION_LABEL,
+    API_RUNTIME_IMAGE_BUILD_ARG,
+    API_SOURCE_LABEL,
     LabOverlayApplier,
     ModelLabOverlayCapture,
 )
@@ -346,9 +353,6 @@ BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 #: (OMN-19501; before it, the single-flight lock and the dev lane), and a
 #: disabled run says so in the journal rather than being silent.
 LAB_OVERLAY_ENABLED = os.environ.get("DEPLOY_AGENT_LAB_OVERLAY", "on").lower() != "off"
-LAB_OVERLAY_BUDGET_SECONDS = int(
-    os.environ.get("DEPLOY_AGENT_LAB_OVERLAY_BUDGET", str(DEFAULT_APPLY_BUDGET_SECONDS))
-)
 #: The ``omninode_infra`` clone the overlay is archived from. Derived from
 #: ``REPO_DIR``'s parent rather than written out, because the two are siblings in
 #: the same ``omni_home`` clone by construction and a second literal path is a
@@ -415,11 +419,6 @@ LAG_POOL_MAX_WORKERS = 1
 #: lock, a pin that re-acquires the lane lock), was model-checked before it was
 #: built: OMN-19421's ``LabReconcile.tla`` extended on OMN-19501.
 SETTLE_POOL_MAX_WORKERS = 1
-
-#: OMN-19501. The lock the k3s overlay apply holds instead of the compose lane's.
-#: Same helper, same lock directory, its own file: a writer that applies the
-#: onex-lab overlay by another path excludes this one only by taking it.
-LAB_OVERLAY_SURFACE_LOCK = "onex-lab-k3s"
 
 #: OMN-19501. How long the onex-api pin delivery waits for the dev lane lock.
 #:
@@ -2136,7 +2135,10 @@ class DeployAgent:
                 # sha-keyed record and receipt. Only the dev lane: the fence
                 # below refuses every other lane.
                 lab_sha = self._resolve_lab_overlay_sha(
-                    cmd, action="re-apply", sha=self._current_git_sha
+                    cmd,
+                    action="onex-api build",
+                    sha=self._current_git_sha,
+                    phase=EnumInstancePhase.ONEX_API_PIN,
                 )
                 self.job_store.complete(
                     cid,
@@ -2362,7 +2364,7 @@ class DeployAgent:
         cid = cmd.correlation_id
         delivery: ModelOnexApiDelivery | None = None
         try:
-            manifest_sha = self._apply_lab_overlay(
+            manifest_sha = self._build_onex_api_image(
                 cmd, sha=sha, stamp=stamp, capture=capture
             )
             self.job_store.set_settling(cid, EnumJobSettlingStage.ONEX_API_PIN)
@@ -2459,7 +2461,7 @@ class DeployAgent:
                 compose_version_error=reason,
             )
 
-    def _apply_lab_overlay(
+    def _build_onex_api_image(
         self,
         cmd: ModelRebuildRequested,
         *,
@@ -2467,104 +2469,68 @@ class DeployAgent:
         stamp: str,
         capture: ModelLabOverlayCapture,
     ) -> str | None:
-        """Re-apply the k3s onex-lab overlay for this merge (OMN-18200 AC5).
+        """Build the onex-api image the pin delivery advances to (OMN-23521).
 
-        OMN-19501: runs on the settle worker, AFTER the dev lane lock is
-        released, under the k3s surface lock instead. ``sha`` is the fence's
-        answer taken on the job thread and ``capture`` the compose-lane inputs
-        taken under the lane lock; nothing here reads the lane again.
+        Runs on the settle worker after the dev lane lock is released: the
+        overlay source is archived, then ``node_onex_api_image_build_effect`` runs one
+        host ``docker build`` against the runtime image ``capture`` took under
+        the lock. No cluster apply runs any more: that step is retired.
 
-        Called on the SUCCESS path only. The failing path takes the narrower
-        ``_build_lab_repair_image`` instead (OMN-18545), because the apply
-        promotes the runtime pin on a premise a failed job can falsify.
-
-        Swallows every exception by design. The record the applier writes is the
-        channel this result travels on; a raise here would convert a lab finding
-        into a failed compose deploy, which is the opposite of what the two
-        separate lane values exist to keep apart. An exception that escapes the
-        applier is itself logged and then dropped, because the applier's own
-        contract is that it writes a record on both outcomes -- so an escape is a
-        defect in the applier, reported as one, not a reason to lose the deploy.
-
-        Swallowing also protects the TERMINAL PUBLISH, which the settle runs
-        after this: an exception escaping here would skip it, and a job whose
-        verdict is durable but never published has no ``result_publish_pending``
-        either, so the retry loop would not replay it.
-
-        A contended surface lock is logged and swallowed the same way. No record
-        is written, so the onex-lab-k3s reader waits out its window and emits a
-        FAIL for the missing record -- the fail-closed path, unchanged.
+        Returns the overlay source commit the image is keyed by, or ``None``
+        when the source could not be archived, which the delivery records as a
+        named non-attempt. A refused or failed build still returns its commit,
+        so the delivery refuses for THAT lineage instead of saying nothing.
+        Swallows, because the terminal publish after the settle must always run.
         """
-        applier: LabOverlayApplier | None = None
         try:
-            with lane_lock(
-                LAB_OVERLAY_SURFACE_LOCK,
-                lane="onex-lab",
-                ref=sha,
-                timeout=float(LAB_OVERLAY_BUDGET_SECONDS),
-            ):
-                applier = self._lab_overlay_applier()
-                path = applier.apply(
-                    sha=sha,
-                    stamp=stamp,
-                    correlation_id=str(cmd.correlation_id),
-                    capture=capture,
-                )
-            logger.info("lab overlay re-apply recorded at %s", path)
-        except Exception:
-            logger.exception(
-                "lab overlay re-apply raised instead of recording for %s; the "
-                "onex-lab-k3s receipt for this sha will report a missing record",
-                sha,
+            applier = self._lab_overlay_applier()
+            tree = applier.state_dir / "lab-overlay" / "work" / "overlay-source"
+            revision = applier.archive_overlay(tree)
+            request = load_dev_boot_guard(
+                "models.model_onex_api_image_build_request"
+            ).ModelOnexApiImageBuildRequest(
+                sha=sha,
+                stamp=stamp,
+                capture_sha=capture.sha,
+                runtime_image=capture.runtime_image,
+                capture_error=capture.pin_error,
+                source_tree=tree,
+                source_revision=revision,
+                image_name=API_IMAGE_NAME,
+                dockerfile=API_DOCKERFILE,
+                context=API_CONTEXT,
+                runtime_image_build_arg=API_RUNTIME_IMAGE_BUILD_ARG,
+                revision_label=API_REVISION_LABEL,
+                source_label=API_SOURCE_LABEL,
+                source_repo=LAB_OVERLAY_SOURCE_DIR.name,
+                timeout_seconds=API_BUILD_TIMEOUT_SECONDS,
             )
-        # Read AFTER the try/except, deliberately: an apply that raised partway
-        # may still have resolved its source, and the image built from that
-        # lineage is on the host either way. Returning it is what lets the
-        # delivery say "refused for THIS lineage" instead of nothing.
-        #
-        # In a try of its own for the same reason the apply is: this method
-        # runs inside the deploy job's own `try`, with the terminal publish
-        # after it, so ANY escape from here costs a published result. An
-        # applier that cannot report the commit it resolved is a defect in the
-        # applier, reported as one -- never a reason to lose the deploy, and
-        # never a reason to deliver an image of unknown lineage.
-        if applier is None:
-            return None
-        try:
-            return applier.manifest_sha
+            result = load_dev_boot_guard(
+                "handler_onex_api_image_build"
+            ).build_onex_api_image(applier._run, request)
         except Exception:
             logger.exception(
-                "the lab-overlay applier did not report the omninode_infra "
-                "commit it resolved for %s; the onex-api pin delivery will "
-                "record a named non-attempt rather than pin an image whose "
-                "lineage this job cannot name",
+                "onex-api image build for %s raised; the pin delivery will "
+                "record a named non-attempt",
                 sha,
             )
             return None
+        log = logger.info if result.built else logger.error
+        log("onex-api image build for %s: %s", sha, result.reason)
+        built_from: str | None = result.source_revision
+        return built_from
 
     def _deliver_onex_api_pin(
         self, cmd: ModelRebuildRequested, *, sha: str, manifest_sha: str | None
     ) -> ModelOnexApiDelivery | None:
-        """Advance ``ONEX_API_IMAGE`` to the image the apply just built (OMN-18572).
+        """Advance ``ONEX_API_IMAGE`` to the image the settle just built (OMN-18572).
 
-        The applier makes a correct onex-api image EXIST on this host. This is
-        the step that makes the lane RUN it. Without it the two facts diverge
-        silently and stay diverged until somebody delivers by hand -- which is
-        what a fix merged at 09:00:53Z on 2026-09-17 waited until 11:20Z for,
-        with tenant creation on the lab impossible throughout.
-
-        ``manifest_sha`` IS THE OMNINODE_INFRA COMMIT, AND THAT IS THE WHOLE
-        CORRECTION HERE. ``_resolve_lab_overlay_sha`` answers a different
-        question -- may this job touch the lab at all -- and its answer is the
-        merged **omnibase_infra** sha the record is keyed by. The lab image tags
-        are ``<omninode_infra sha8>-<stamp>``, so passing the fence's sha as
-        ``--sha`` searched for a lineage no image has ever carried. Every
-        delivery between the merge on 2026-09-17 and 2026-09-19 refused on that,
-        thirty consecutive canary runs stayed red behind it, and the refusal
-        text read "none of them for omninode_infra sha <an omnibase_infra sha>"
-        -- which describes an applier that produced nothing, not a caller that
-        asked for the wrong repository. The fence is still consulted, for the
-        question it actually answers; the lineage now comes from the apply.
+        The build makes a correct onex-api image EXIST on this host; this is the
+        step that makes the lane RUN it. ``manifest_sha`` is the overlay SOURCE
+        commit the image was built from (its tags are ``<sha8>-<stamp>``), not
+        the merged omnibase_infra sha the fence answered: passing the fence's
+        sha searched for a lineage no image ever carried, and thirty deliveries
+        refused on that between 2026-09-17 and 2026-09-19.
 
         A MISSING LINEAGE IS A NAMED NON-DELIVERY, NEVER A FALLBACK. The repoint
         script will happily take the newest resident image of any lineage when
@@ -2606,8 +2572,8 @@ class DeployAgent:
                     result=EnumOnexApiDeliveryResult.NOT_ATTEMPTED,
                     raw_result=EnumOnexApiDeliveryResult.NOT_ATTEMPTED.value,
                     reason=(
-                        "the lab-overlay apply for omnibase_infra "
-                        f"{fence_sha} resolved no omninode_infra overlay "
+                        "the onex-api image build for omnibase_infra "
+                        f"{fence_sha} resolved no overlay source "
                         "commit, so no image was built from any lineage this "
                         "job can name. Delivering the newest resident image "
                         "regardless of lineage would pin another merge's "
@@ -2709,7 +2675,7 @@ class DeployAgent:
         for why the failing path must not take the full apply, and the call site
         for the loop this opens.
 
-        Swallows for the same two reasons ``_apply_lab_overlay`` does, and the
+        Swallows for the same two reasons ``_build_onex_api_image`` does, and the
         second one binds harder here: this runs inside the deploy job's
         ``except`` block, so an escape would skip the terminal publish of a job
         that has ALREADY been recorded as failed.
@@ -2735,7 +2701,12 @@ class DeployAgent:
             )
 
     def _resolve_lab_overlay_sha(
-        self, cmd: ModelRebuildRequested, *, action: str, sha: str
+        self,
+        cmd: ModelRebuildRequested,
+        *,
+        action: str,
+        sha: str,
+        phase: EnumInstancePhase = EnumInstancePhase.LAB_OVERLAY,
     ) -> str | None:
         """The fence both lab-overlay paths pass through, or ``None`` to skip.
 
@@ -2752,12 +2723,14 @@ class DeployAgent:
         """
         if cmd.runtime_lane != EnumRuntimeLane.DEV:
             return None
-        if not lane_runs_phase(cmd.runtime_lane, EnumInstancePhase.LAB_OVERLAY):
-            # OMN-19522: the k3s onex-lab overlay lives on the .201 host only.
+        if not lane_runs_phase(cmd.runtime_lane, phase):
+            # OMN-19522, OMN-23521: the settle asks for the onex-api pin phase,
+            # the repair build for the lab-overlay phase.
             logger.info(
-                "lab overlay %s skipped: instance %s has no k3s onex-lab overlay",
+                "lab overlay %s skipped: instance %s disables the %s phase",
                 action,
                 active_dev_instance(),
+                phase.value,
             )
             return None
         if not LAB_OVERLAY_ENABLED:
@@ -2784,7 +2757,6 @@ class DeployAgent:
             repo_dir=Path(REPO_DIR),
             overlay_source_dir=LAB_OVERLAY_SOURCE_DIR,
             env=os.environ,
-            budget_seconds=LAB_OVERLAY_BUDGET_SECONDS,
         )
 
     def _publish_rejected(

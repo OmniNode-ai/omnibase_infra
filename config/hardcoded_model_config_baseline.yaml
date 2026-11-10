@@ -1499,9 +1499,6 @@ entries:
   - path: scripts/deploy-agent/deploy_agent/lab_overlay.py
     family: O
     content_sha1: 3905f7df64208d7dd68a89f5a7ac9873871787a0
-  - path: scripts/deploy-agent/deploy_agent/lab_overlay.py
-    family: O
-    content_sha1: 745efc1abc5a3df2533d98014591159278bc1275
   - path: scripts/deploy-agent/deploy_agent/lane_lock_client.py
     family: O
     content_sha1: c9ab5f4389ee14205fef958db0b9e528e69d5992
@@ -1544,12 +1541,6 @@ entries:
   - path: scripts/deploy-agent/tests/unit/test_deploy_agent_service_source.py
     family: E-LAN
     content_sha1: 6f60fd4395db87927e6de93962135b7465141f6a
-  - path: scripts/deploy-agent/tests/unit/test_lab_overlay_omn18200.py
-    family: E-LAN
-    content_sha1: 43acc706402a3e8b7cd88f7bfd40635e97e81147
-  - path: scripts/deploy-agent/tests/unit/test_lab_overlay_omn18200.py
-    family: E-LAN
-    content_sha1: 59b2a00605b57633a32c9c94637511640bc9c4bb
   - path: scripts/deploy-agent/tests/unit/test_llm_endpoint_env_contract_guard.py
     family: E-LAN
     content_sha1: 38228ea7db2f79a941cf00ef2f171ce9e393270c
