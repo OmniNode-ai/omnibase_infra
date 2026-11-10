@@ -349,8 +349,8 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 )
 # The landing decision chain (OMN-23395): the piece 9 chain tests serve the landing decision
 # node over the dev lane as the machine's issued principal, so it produces and consumes the
-# node's command topic and its success terminal, each read under a run-named group prefix.
-# The failure terminal is not used by the chain and is not granted.
+# node's command topic, its success terminal and (OMN-23459) its failure terminal, each read
+# under a run-named group prefix.
 LANDING_DECISION_COMMAND = "onex.cmd.omnimarket.pr-landing-decision-requested.v1"
 LANDING_DECISION_SUCCESS = "onex.evt.omnimarket.pr-landing-decision-completed.v1"
 LANDING_DECISION_FAILURE = "onex.evt.omnimarket.pr-landing-decision-failed.v1"
@@ -361,9 +361,29 @@ LANDING_DECISION_GROUP_PREFIXES: tuple[str, ...] = (
 LANDING_DECISION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("topic", LANDING_DECISION_COMMAND, "literal", ("read", "write", "describe")),
     ("topic", LANDING_DECISION_SUCCESS, "literal", ("read", "write", "describe")),
+    ("topic", LANDING_DECISION_FAILURE, "literal", ("read", "write", "describe")),
     *(
         ("group", prefix, "prefixed", ("read", "describe"))
         for prefix in LANDING_DECISION_GROUP_PREFIXES
+    ),
+)
+# The landing snapshot record (OMN-23458): the snapshot step runs on the controller's
+# host as the host's issued principal, so it produces the record topic each tick and its
+# failure terminal; the tick orchestrator and the snapshot-to-orchestrator join test
+# consume the record topic under their run-named groups. The principal holds no read on
+# the failure terminal.
+LANDING_SNAPSHOT_RECORD = "onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1"
+LANDING_SNAPSHOT_FAILED = "onex.evt.omnimarket.pr-landing-snapshot-failed.v1"
+LANDING_SNAPSHOT_GROUP_PREFIXES: tuple[str, ...] = (
+    "landing-snapshot-join-",
+    "landing-tick-orchestrator-",
+)
+LANDING_SNAPSHOT_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", LANDING_SNAPSHOT_RECORD, "literal", ("read", "write", "describe")),
+    ("topic", LANDING_SNAPSHOT_FAILED, "literal", ("write", "describe")),
+    *(
+        ("group", prefix, "prefixed", ("read", "describe"))
+        for prefix in LANDING_SNAPSHOT_GROUP_PREFIXES
     ),
 )
 # The lane ticket mint (OMN-23410): a lab lane's principal asks the ticket node for the child
@@ -480,6 +500,7 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
             TYPED_GRANTS
             + DECLARED_GRANTS
             + LANDING_DECISION_GRANTS
+            + LANDING_SNAPSHOT_GRANTS
             + TICKET_WRITE_GRANTS
             + FLOOR_PROJECTION_GRANTS
             + HOOK_EDGE_GRANTS
@@ -717,10 +738,11 @@ def test_the_dod_closeout_grants_are_declared_and_nothing_wider() -> None:
 
 
 def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
-    """The chain may produce and consume the decision command and its success terminal.
+    """The chain may produce and consume the decision command, its success terminal
+    and its failure terminal.
 
     A prefix is the grant for the run-named groups, and the lab runtime's own group for
-    the node starts with neither prefix. The failure terminal is not granted.
+    the node starts with neither prefix.
     """
     rows = derive(shipped_bindings())
     landing = {
@@ -733,10 +755,45 @@ def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
         for resource, name, _, operations in LANDING_DECISION_GRANTS
         for operation in operations
     }
-    assert not any(row[2] == LANDING_DECISION_FAILURE for row in rows)
+    assert {row[4] for row in rows if row[2] == LANDING_DECISION_FAILURE} == {
+        "READ",
+        "WRITE",
+        "DESCRIBE",
+    }
     runtime_group = "local.omnimarket.node_pr_landing_decision_compute.consume.v1"
     assert not any(
         runtime_group.startswith(prefix) for prefix in LANDING_DECISION_GROUP_PREFIXES
+    )
+
+
+def test_the_landing_snapshot_grants_are_declared_and_nothing_wider() -> None:
+    """The snapshot step may publish the record topic and its failure terminal.
+
+    The orchestrator and the join test read the record under run-named groups, so the
+    two prefixes are the grant for their reads. The lab runtime's own group for the
+    tick orchestrator starts with neither prefix. The principal holds no read on the
+    failure terminal.
+    """
+    rows = derive(shipped_bindings())
+    snapshot = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "pr-landing-tick-facts" in resource
+        or "pr-landing-snapshot" in resource
+        or "landing-snapshot-join" in resource
+        or "landing-tick-orchestrator" in resource
+    }
+    assert snapshot == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in LANDING_SNAPSHOT_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] == LANDING_SNAPSHOT_FAILED and row[4] == "READ" for row in rows
+    )
+    runtime_group = "local.omnimarket.node_pr_landing_tick_orchestrator.consume.v1"
+    assert not any(
+        runtime_group.startswith(prefix) for prefix in LANDING_SNAPSHOT_GROUP_PREFIXES
     )
 
 

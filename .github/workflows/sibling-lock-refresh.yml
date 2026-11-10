@@ -12,7 +12,7 @@
 #
 # This workflow is the Dependabot-shaped, sibling-release-triggered fix the
 # ticket asks for, implemented as the ticket-sanctioned "scheduled workflow per
-# repo". On a schedule (and on demand) it runs `uv lock --upgrade-package` for
+# repo". On demand (workflow_dispatch only, since OMN-18594) it runs `uv lock --upgrade-package` for
 # each omninode sibling and, if uv.lock changed, opens a bot PR with the
 # refreshed lock. Repos whose siblings are pinned to an immutable git rev/tag in
 # `[tool.uv.sources]` (e.g. omnibase-infra here, per OMN-13878) are left
@@ -25,10 +25,9 @@
 
 name: Sibling lock refresh
 
+# RULING 2026-11-09T21:54:25Z lane=orchestrator-31d9 (OMN-18594): downstream pins move only when the downstream needs something new; run by workflow_dispatch
+# The daily cron (17 6 * * *) that ran `uv lock --upgrade-package` on its own is removed.
 on:
-  schedule:
-    # Daily at 06:17 UTC — after the overnight release window, before the day's work.
-    - cron: "17 6 * * *"
   workflow_dispatch:
     inputs:
       packages:
