@@ -143,6 +143,19 @@
 # that name only). The issuer creates each such topic for its principal: the broker
 # does not auto-create topics. The three shared consume bindings above stay until the
 # omnimarket switch is proven live on the dev lane; removing them is that follow-up.
+# LANDING DECISION CHAIN (OMN-23395): the piece 9 golden, error and whole-flow chain tests
+# (omnimarket tests/chain, OMN-22922) serve the landing decision node over the dev lane as the
+# machine's issued principal: they publish a facts request on the node's command topic and read
+# it back as the node, then publish the decision on its success terminal and read it back as
+# the controller. Both sides run in the test process, so the principal produces and consumes
+# both topics (`onex.cmd.omnimarket.pr-landing-decision-requested.v1`,
+# `onex.evt.omnimarket.pr-landing-decision-completed.v1`, the node's contract
+# runtime_dispatch). Each side reads under an explicit group named for the run:
+# `landing-chain-node-<run id>` and `landing-chain-controller-<run id>`, so the two group
+# prefixes below are the grant. The lab runtime's own group for the node, `<env>.omnimarket.
+# node_pr_landing_decision_compute...`, does not start with either prefix, so a developer
+# principal cannot join it and take real commands. The failure terminal is not used by the
+# chain (a node error travels on the success topic) and is not granted.
 # Machine-only writes live in machine-principal-bindings.yaml (OMN-21622).
 principal: "{principal}"
 bindings:
@@ -232,6 +245,10 @@ bindings:
     physical_topic: onex.evt.omnimarket.context-compaction-fallback-for-{principal}.v1
     direction: consume
     consumer_group: receipt-mode-client.call
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-landing-decision-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-landing-decision-requested.v1, direction: consume, consumer_group: landing-chain-node-call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-completed.v1, direction: consume, consumer_group: landing-chain-controller-call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
@@ -243,5 +260,7 @@ group_prefixes:
   - {broker: dev, prefix: local.rr.friction-run-}
   - {broker: dev, prefix: local.omnimarket.dod_closeout_probe.consume.v1.}
   - {broker: dev, prefix: receipt-mode-client.}
+  - {broker: dev, prefix: landing-chain-node-}
+  - {broker: dev, prefix: landing-chain-controller-}
 described_groups:
   - {broker: dev, group: "*"}

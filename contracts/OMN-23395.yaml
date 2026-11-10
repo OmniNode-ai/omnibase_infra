@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-23395
+title: The dev lane principal can read and write the landing decision topics, so piece 9's chain tests run on the real broker
+summary: >-
+  The developer principal wire bindings (deploy/lab/developer-principal-bindings.yaml) declare the landing decision node's command topic and its success terminal as produce and consume bindings, with two run-named consumer group prefixes (landing-chain-node-, landing-chain-controller-). The derived grants file is regenerated from the derivation node, never typed. The failure terminal is not granted. The grants take effect on the dev broker when the issuer's apply-grants runs the derived file; that step needs the operator's broker admin credential and is recorded in the pull request, not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23395-landing-decision-grants
+    statement: The dev lane principal's declared grants include the landing decision topics, and the derived grants file is the derivation node's output over the bindings.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev-lane principal's declared grants include the landing decision topics, applied on the dev broker through the declared path, and the redpanda-profile landing golden test runs without TopicAuthorizationFailedError -- falsifier: uv run pytest tests/chain/test_landing_golden.py -q -m redpanda on a lab host reports no TopicAuthorizationFailedError"
+evidence_requirements:
+  - kind: tests
+    description: The derivation and issuer tests over the landing decision bindings.
+    command: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23395-ac1-declared-grants
+    description: >-
+      The bindings declare the landing decision command and success topics (READ, WRITE, DESCRIBE) and two run-named group prefixes (READ, DESCRIBE); the committed derived grants JSON is byte-equal to the derivation node's output; the failure terminal and the lab runtime's own group are not covered. On the parent commit the committed derivation holds no landing decision topic.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
