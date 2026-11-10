@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Docker's boot health verdict."""
 
-from typing_extensions import TypedDict
+from typing import Any
 
-from omnibase_infra.models.model_dev_boot_health_probe import ModelDevBootHealthProbe
+from typing_extensions import TypedDict
 
 
 class ModelDevBootHealthStatus(TypedDict, total=False):
     Status: str
     FailingStreak: int
-    Log: list[ModelDevBootHealthProbe]
+    Log: list[dict[str, Any]]

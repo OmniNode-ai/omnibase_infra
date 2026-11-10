@@ -28,7 +28,7 @@ from omnibase_infra.handlers import handler_dev_boot_guard as guard_mod
 from omnibase_infra.models.model_dev_boot_report_config import ModelDevBootReportConfig
 from omnibase_infra.models.model_dev_boot_request import ModelDevBootRequest
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 PROJECT = "omnibase-infra"
 OLD_REVISION = "a" * 40
