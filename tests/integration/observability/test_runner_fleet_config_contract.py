@@ -7,6 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
+from pydantic import ValidationError
 
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     default_runner_fleet_config_path,
@@ -44,3 +46,24 @@ def test_deploy_runner_config_path_is_propagated_to_sync_and_cron() -> None:
     assert "RUNNER_FLEET_CONFIG_PATH=${repo_root}/config/runner_fleet.yaml" not in (
         deploy_script
     )
+
+
+@pytest.mark.integration
+def test_primary_host_general_pool_retired_in_committed_config(
+    tmp_path: Path,
+) -> None:
+    """OMN-23359: the committed fleet declares no general runner on the primary
+    host, the loader accepts that zero, and a negative count is still refused.
+    """
+    config_path = REPO_ROOT / "config" / "runner_fleet.yaml"
+    config = load_runner_fleet_config(config_path)
+    assert config.expected_count == 0
+    assert config.burst_count == 0
+    assert config.primary_host().expected_count == 0
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["expected_count"] = -1
+    broken = tmp_path / "runner_fleet.yaml"
+    broken.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValidationError):
+        load_runner_fleet_config(broken)

@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23324
+title: The dev stack retires the contract-resolver container now that the runtime mounts contract resolution
+summary: The contract resolver is mounted in the dev main runtime (the node_contract_resolver_bridge http_mount) but the deploy agent still started the separate omninode-contract-resolver container on the dev lane. This change names the container in the runtime policy retired_services, gates its dev-lane stanza under the folded-contract-resolver profile and re-renders the policy env, so the deploy agent stops it and leaves it out of the restart set. The container leaves the dev lane on the next deploy-agent run.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23324-retire-contract-resolver
+    statement: The dev compose declares no running contract-resolver service and the runtime serves contract resolution from its mount; the deploy agent removes the container from the dev lane.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev compose no longer declares the contract-resolver service and the runtime serves contract resolution from its mount -- falsifier: uv run pytest tests -q -k contract_resolver_retired in omnibase_infra, failing with the service restored"
+      - id: AC2
+        statement: "AC2: after the next deploy-agent run, h201's dev lane runs no contract-resolver container -- falsifier: docker ps on h201's dev lane lists no contract-resolver"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+evidence_requirements:
+  - kind: tests
+    description: The runtime policy retires the resolver by name, the checked-in policy env carries it, the dev-lane stanza sits under a profile no bring-up requests, and the rendered dev stack holds no resolver service; each reading fails with the gate or the retirement removed.
+    command: uv run --frozen pytest tests/unit/docker/test_dev_contract_resolver_retired_omn23324.py -q --no-cov -p no:randomly -k contract_resolver_retired
+dod_evidence:
+  - id: dod-omn23324-ac1-compose-retired
+    description: The policy retires the resolver by name, the policy env carries the retirement, the dev-lane stanza is gated under folded-contract-resolver and the rendered dev stack lists no resolver service; run on lab host h202 at the pushed head, and red with the gate and the retirement removed.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests -q --no-cov -p no:randomly -k contract_resolver_retired
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23324-ac1-gate-committed
+    description: Hosted-runner probe that reads the committed dev-lane compose at the checked-out commit and requires the folded-contract-resolver profile gate and the retirement in the runtime policy.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: >-
+          docker run --rm -v "$PWD/docker:/d:ro" alpine:3 sh -c 'grep -A2 "^  omninode-contract-resolver:" /d/docker-compose.dev-lane.yml | grep -q folded-contract-resolver'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23324-ac2-container-gone
+    description: Read of h201's dev lane after the next deploy-agent run with docker ps; pending until that run completes, recorded in the lane TERMINAL and on the ticket.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_contract_resolver_retired_omn23324.py -q --no-cov -p no:randomly -k contract_resolver_retired_dev_stack_renders_none
+        cwd: ${OMNI_HOME}/omnibase_infra

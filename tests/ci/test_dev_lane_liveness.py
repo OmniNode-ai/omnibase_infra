@@ -439,6 +439,105 @@ def test_missing_runtime_containers_are_advisory_without_keepalive(
 
 
 # ---------------------------------------------------------------------------
+# Primary dev folds the effects role into main (OMN-22930): its container is
+# retired by design, so its absence is not a defect.
+# ---------------------------------------------------------------------------
+
+FOLDED_LANE_ROWS = "\n".join(
+    row for row in LIVE_LANE_ROWS.splitlines() if "runtime-effects" not in row
+)
+FOLDED_RUNNING_NAMES = "\n".join(
+    name for name in RUNTIME_CONTAINER_NAMES.splitlines() if "effects" not in name
+)
+FOLDED_KEY = "DEV_RUNTIME_MAIN_FOLDED_PROFILES"
+
+
+def test_folded_effects_container_absent_is_green(
+    tmp_path: Path,
+    open_broker_port: int,
+    health_server: tuple[int, type[_HealthHandler]],
+) -> None:
+    """The shipped policy folds ``effects`` into main on primary dev.
+
+    The probe ran against that lane and demanded ``omninode-runtime-effects``,
+    a container the fold retired, so ``runtime_containers`` was red on a lane
+    that was serving. The expectation comes from the shipped policy file, not
+    from a list in this test.
+    """
+    policy = (REPO_ROOT / "docker" / "runtime-policy.env").read_text()
+    folded = next(
+        line.split("=", 1)[1]
+        for line in policy.splitlines()
+        if line.startswith(f"{FOLDED_KEY}=")
+    )
+    assert "effects" in folded.split(","), "the shipped policy no longer folds effects"
+
+    main_port, _ = health_server
+    result = _run_lane_gate(
+        tmp_path,
+        FOLDED_LANE_ROWS,
+        open_broker_port,
+        main_port,
+        running_names=FOLDED_RUNNING_NAMES,
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert '"overall": "green"' in result.stdout
+    assert "all runtime containers running (1/1)" in result.stdout
+
+
+def _gate_with_policy(
+    tmp_path: Path, policy_text: str, broker_port: int, main_port: int
+) -> subprocess.CompletedProcess[str]:
+    """Run a copy of the real gate beside a policy file this test controls."""
+    scripts = tmp_path / "repo" / "scripts"
+    docker_dir = tmp_path / "repo" / "docker"
+    scripts.mkdir(parents=True)
+    docker_dir.mkdir(parents=True)
+    (scripts / "system_health_check.sh").write_text(HEALTH_GATE.read_text())
+    (docker_dir / "runtime-policy.env").write_text(policy_text)
+    bin_dir = _install_docker_stub(
+        tmp_path, FOLDED_LANE_ROWS, running_names=FOLDED_RUNNING_NAMES
+    )
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["LANE_PROBE_HOST"] = "127.0.0.1"
+    env["DEV_LANE_BROKER_PORT"] = str(broker_port)
+    env["DEV_LANE_MAIN_PORT"] = str(main_port)
+    env["ONEX_LANE_KEEPALIVE"] = "1"
+    return subprocess.run(
+        ["bash", str(scripts / "system_health_check.sh"), "--lane", "--ci"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_unfolded_effects_container_absent_is_red(
+    tmp_path: Path,
+    open_broker_port: int,
+    health_server: tuple[int, type[_HealthHandler]],
+) -> None:
+    """Negative control: a policy that does not fold effects still requires it.
+
+    Same census as the green case above; only the policy differs, so the
+    green there comes from the fold and not from the probe ignoring effects.
+    """
+    main_port, _ = health_server
+    result = _gate_with_policy(
+        tmp_path,
+        f"{FOLDED_KEY}=tenant-projection,workers\n",
+        open_broker_port,
+        main_port,
+    )
+
+    assert result.returncode == 1, result.stdout
+    assert "missing: omninode-runtime-effects" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # Enforcement wiring: detection that does not fire is not a control.
 # ---------------------------------------------------------------------------
 

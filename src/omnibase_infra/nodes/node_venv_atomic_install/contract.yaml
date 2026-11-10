@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_venv_atomic_install
+contract_name: node_venv_atomic_install
+node_name: node_venv_atomic_install
+node_type: EFFECT_GENERIC
+runtime_profiles: [local-dev]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: Install only the packages a dispatch-venv pass moves, in place, with a journal that restores them on a failure.
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+input_model:
+  name: ModelVenvAtomicInstallRequest
+  module: omnibase_infra.models.model_venv_atomic_install_request
+  description: One step of the install and the paths it works on.
+output_model:
+  name: ModelVenvAtomicInstallResult
+  module: omnibase_infra.models.model_venv_atomic_install_result
+  description: The step's verdict, exit code and output.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: venv.atomic_install
+      handler:
+        name: HandlerVenvAtomicInstall
+        module: omnibase_infra.handlers.venv_atomic_install.handler_venv_atomic_install
+      event_model:
+        name: ModelVenvAtomicInstallRequest
+        module: omnibase_infra.models.model_venv_atomic_install_request
+      supported_operations: [venv.atomic_install]
+io_operations:
+  - operation: venv.atomic_install
+    description: Stage, commit, roll back or finalize the moved packages of a venv pass.
+    input_fields: [command, python_bin, stage_dir, requirements, no_deps, label, paths]
+    output_fields: [status, exit_code, output]
+capabilities:
+  - name: venv.atomic_install
+    description: Atomic in-place package update with rollback.
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  author: OmniNode Team
+  license: MIT
+  description: The host reconcile invokes this local effect from a shell before dispatch is available; it has no broker consumer or publisher.
+  related_tickets: [OMN-22712]

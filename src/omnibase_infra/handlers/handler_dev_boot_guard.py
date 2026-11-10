@@ -158,6 +158,16 @@ def run_compose_up_steps(
     """
     env = execution._compose_env(extra_env)
     result = ModelSubprocessOutcome(returncode=0, stdout="", stderr="", timed_out=False)
+    if (
+        rolling
+        and lane is execution.EnumRuntimeLane.DEV
+        and any(step[-1] == execution.ONEX_API_SERVICE for step in steps)
+    ):
+        # OMN-23039: a pin that is already a broken image would stop this roll at onex-api.
+        guard = execution.load_dev_boot_guard("handler_onex_api_image_import_check")
+        healed = guard.heal_pin(execution._run, execution.operator_env_file())
+        if healed is not None:
+            logger.warning("onex-api pin heal before the roll: %s", healed)
     for step in steps:
         if rolling and lane is execution.EnumRuntimeLane.DEV:
             try:
