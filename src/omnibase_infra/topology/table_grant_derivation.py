@@ -332,6 +332,16 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         )
         for s in ("state", "reservations", "safety", "steps")
     ),
+    # OMN-23341: node_projection_goal_trace/0000 creates goal_trace_events and
+    # goal_traces and 0001 grants omninode_runtime SELECT, INSERT, UPDATE on both,
+    # ahead of the omnimarket node contract reaching the pin; expire this bridge
+    # when that contract reaches the pin.
+    *(
+        _vendored_read_write(
+            t, "node_projection_goal_trace", "0000_create_goal_trace_events.sql"
+        )
+        for t in ("goal_trace_events", "goal_traces")
+    ),
     # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
@@ -660,12 +670,10 @@ def derive_table_grants(
             refuse(declaration, f"topology declares no binding {binding_ref!r}")
             continue
         grant_schema = physical_grant_schema_for_table(table.schema, table.name)
-        entry = required.setdefault(
-            (binding.principal, grant_schema, table.name), set()
-        )
-        entry.update(_privileges_for_access(table.access))
+        key = (binding.principal, grant_schema, table.name)
+        required.setdefault(key, set()).update(_privileges_for_access(table.access))
         if (table.schema, table.name) in PRUNED_RELATIONS:
-            pruned.add((binding.principal, grant_schema, table.name))
+            pruned.add(key)
 
     grants: dict[str, tuple[ModelDeploymentTopologyDatabaseGrant, ...]] = {}
     # Group by (principal, schema, privilege set) so each principal carries at
@@ -684,26 +692,21 @@ def derive_table_grants(
         ).append(table_name)
 
     for principal in sorted(grouped):
-        principal_grants: list[ModelDeploymentTopologyDatabaseGrant] = []
-        for schema_name, privilege_key in sorted(grouped[principal]):
-            names = sorted(grouped[principal][(schema_name, privilege_key)])
-            principal_grants.append(
-                ModelDeploymentTopologyDatabaseGrant(
-                    object_type=EnumDatabaseGrantObjectType.TABLE,
-                    schema=schema_name,
-                    objects=tuple(names),
-                    privileges=tuple(
-                        EnumDatabasePrivilege(value) for value in privilege_key
-                    ),
-                )
+        grants[principal] = tuple(
+            ModelDeploymentTopologyDatabaseGrant(
+                object_type=EnumDatabaseGrantObjectType.TABLE,
+                schema=schema_name,
+                objects=tuple(sorted(grouped[principal][(schema_name, privilege_key)])),
+                privileges=tuple(
+                    EnumDatabasePrivilege(value) for value in privilege_key
+                ),
             )
-        grants[principal] = tuple(principal_grants)
+            for schema_name, privilege_key in sorted(grouped[principal])
+        )
 
     return DerivedTableGrants(
         grants=grants,
-        unmappable=tuple(
-            unmappable[key] for key in sorted(unmappable, key=lambda item: item)
-        ),
+        unmappable=tuple(unmappable[key] for key in sorted(unmappable)),
     )
 
 
