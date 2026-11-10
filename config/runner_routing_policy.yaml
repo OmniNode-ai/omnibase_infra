@@ -741,7 +741,6 @@ repositories:
   - omnibase_infra
   - omniclaude
   - omnimarket
-  - onex_change_control
   # OMN-18205 phase 2, 2026-09-12: added so this repository is audited at all.
   # The audit loop iterates this list; a repository absent from it is never
   # queried, whatever the policy declares about it. This repository pins 44 of
@@ -1127,7 +1126,6 @@ route:
     # required-context probe's own repo set.
     fleet_repos:
       - omnibase_core
-      - omnibase_compat
       - omnibase_infra
       - omnibase_spi
       - omniclaude
@@ -1138,7 +1136,6 @@ route:
       - omni_home
       - omninode_infra
       - omniweb
-      - onex_change_control
       - omnibase_internal
       - omniclaude-internal
       - omnicursor

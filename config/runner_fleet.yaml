@@ -360,7 +360,6 @@ git_mirror:
     - omniclaude
     - omniweb
     - omnimemory
-    - omnibase_compat
     - knowledge_base
     - knowledge-base-internal
   # Space-separated RUNNER_NAME allowlist consumed by the pre-seed, or ALL.
