@@ -653,9 +653,7 @@ def _supplemental_ownership_identities(
     Manifest ownership takes over when the downstream declaration arrives;
     the existing supplemental-expiry gate then requires retiring the bridge.
     """
-    manifest_locations = {
-        (identity.schema, identity.name) for identity in authoritative
-    }
+    manifest_locations = {(item.schema, item.name) for item in authoritative}
     supplemental: dict[
         tuple[str, str, EnumApplicationInventoryObjectKind, str | None],
         ModelApplicationDatabaseCatalogIdentity,
@@ -663,7 +661,7 @@ def _supplemental_ownership_identities(
     root = repository.resolve()
     for declaration in declarations:
         table = declaration.table
-        if table.database_ref != "application":
+        if table.database_ref not in {"application", "omnibase_infra"}:
             continue
         migration = (root / table.migration).resolve()
         if not migration.is_relative_to(root) or not migration.is_file():
@@ -687,6 +685,9 @@ def _supplemental_ownership_identities(
                 f"duplicate supplemental ownership declaration: {identity.identity!r}"
             )
         supplemental[identity.identity] = identity
+        # A state_io migration owns every object it creates (its trigger function too).
+        for item in created if table.database_ref == "omnibase_infra" else ():
+            supplemental.setdefault(item.identity, item)
     return tuple(supplemental.values())
 
 

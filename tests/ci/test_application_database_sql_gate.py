@@ -974,3 +974,47 @@ def test_ci_workflow_sql_steps_guard_pull_request_merge_ref() -> None:
         run_block = step.split("run: >-", maxsplit=1)[1]
         assert "github.event_name == 'pull_request'" in run_block
         assert "--pull-request-merge-ref" in run_block
+
+
+def test_state_io_migration_owns_every_object_it_creates(tmp_path: Path) -> None:
+    """OMN-23002: a state_io table's declared migration is its own ownership.
+
+    The omnibase_infra service database has no application ownership manifest;
+    the STATE_IO declaration names the migration, and that migration owns the
+    table and the updated_at trigger function it creates.
+    """
+    from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
+        ModelDbTableDeclaration,
+    )
+    from omnibase_infra.topology.table_grant_derivation import ContractTableDeclaration
+    from scripts.ci.check_application_database_sql import (
+        _supplemental_ownership_identities,
+    )
+
+    migration = Path("migrations/113_create_floor_fill_state.sql")
+    (tmp_path / migration).parent.mkdir()
+    (tmp_path / migration).write_text(
+        "CREATE TABLE IF NOT EXISTS public.floor_fill_state (scope TEXT PRIMARY KEY);\n"
+        "CREATE OR REPLACE FUNCTION public.refresh_floor_fill_state_updated_at()\n"
+        "RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;\n",
+        encoding="utf-8",
+    )
+    declaration = ContractTableDeclaration(
+        node="state_io:floor_fill_state",
+        contract_path=migration,
+        table=ModelDbTableDeclaration(
+            name="floor_fill_state",
+            database_ref="omnibase_infra",
+            schema="public",
+            migration=str(migration),
+            access="read_write",
+            role="state",
+        ),
+    )
+    resolved = _supplemental_ownership_identities(
+        tmp_path, (), declarations=(declaration,)
+    )
+    assert {item.name for item in resolved} == {
+        "floor_fill_state",
+        "refresh_floor_fill_state_updated_at",
+    }
