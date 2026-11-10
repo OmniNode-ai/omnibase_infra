@@ -265,6 +265,22 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_c16_pinned_backend_effect.HandlerC16PinnedBackend.c16_pinned_backend_check_b2266919": {
+      "category": "command",
+      "contract_name": "node_c16_pinned_backend_effect",
+      "event_model_module": "omnibase_infra.models.model_c16_pinned_backend_request",
+      "event_model_name": "ModelC16PinnedBackendRequest",
+      "handler_id": "dispatcher.auto.node_c16_pinned_backend_effect.HandlerC16PinnedBackend.c16_pinned_backend_check_b2266919",
+      "handler_module": "omnibase_infra.handlers.handler_c16_pinned_backend",
+      "handler_name": "HandlerC16PinnedBackend",
+      "message_types": [
+        "ModelC16PinnedBackendRequest",
+        "${topic:contract:platform.CMD_C16_PINNED_BACKEND_CHECK_V1}",
+        "platform.c16-pinned-backend-check"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_chain_canary_effect.HandlerBoardProbeResultPublisher.board_probe_publish_result_4c512134": {
       "category": "event",
       "contract_name": "node_chain_canary_effect",
@@ -3811,15 +3827,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 151
+        "omnibase_infra": 154
       },
-      "contracts_discovered": 172,
+      "contracts_discovered": 175,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 102,
-      "probe_count": 1134,
-      "registered_dispatchers": 137,
-      "registered_routes": 120,
-      "type_scoped_dispatchers": 84
+      "distinct_subscribe_topics": 103,
+      "probe_count": 1137,
+      "registered_dispatchers": 138,
+      "registered_routes": 121,
+      "type_scoped_dispatchers": 85
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3865,7 +3881,7 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-08T09:59:19.765884+00:00",
+    "generated_at_utc": "2026-11-09T23:54:40.792658+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.69",
       "omnibase-infra": "0.38.77",
@@ -4467,6 +4483,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_ARCHITECTURE_VALIDATE_V1}"
+    },
+    "P1a::${topic:contract:platform.CMD_C16_PINNED_BACKEND_CHECK_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.c16-pinned-backend-check",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.c16-pinned-backend-check",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_C16_PINNED_BACKEND_CHECK_V1}"
     },
     "P1a::${topic:contract:platform.CMD_CI_LIVE_CONTACT_CHECK_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -6026,6 +6057,21 @@
       },
       "topic": "${topic:contract:platform.CMD_ARCHITECTURE_VALIDATE_V1}"
     },
+    "P1b::${topic:contract:platform.CMD_C16_PINNED_BACKEND_CHECK_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_C16_PINNED_BACKEND_CHECK_V1}"
+    },
     "P1b::${topic:contract:platform.CMD_CI_LIVE_CONTACT_CHECK_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -7228,6 +7274,26 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnibase-core.CMD_SHARED_TOKEN_POLICY_REQUESTED_V1}"
+    },
+    "P4::dispatcher.auto.node_c16_pinned_backend_effect.HandlerC16PinnedBackend.c16_pinned_backend_check_b2266919::${topic:contract:platform.CMD_C16_PINNED_BACKEND_CHECK_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_c16_pinned_backend_effect.HandlerC16PinnedBackend.c16_pinned_backend_check_b2266919",
+      "event_model": "omnibase_infra.models.model_c16_pinned_backend_request.ModelC16PinnedBackendRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.c16-pinned-backend-check",
+        "payload": "ModelC16PinnedBackendRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_c16_pinned_backend_effect.HandlerC16PinnedBackend.c16_pinned_backend_check_b2266919"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.c16-pinned-backend-check",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_C16_PINNED_BACKEND_CHECK_V1}"
     },
     "P4::dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate::${topic:contract:omnibase-infra.CMD_CHAIN_LEARN_V1}": {
       "construct_only": true,
@@ -25720,6 +25786,16 @@
       "topic": "${topic:contract:omnibase-infra.CMD_BUILD_LOOP_APPEND_V1}",
       "topic_pattern": "*.cmd.omnibase-infra.build-loop-append.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_c16_pinned_backend_effect",
+      "dispatcher_id": "dispatcher.auto.node_c16_pinned_backend_effect.HandlerC16PinnedBackend.c16_pinned_backend_check_b2266919",
+      "handler_id": "dispatcher.auto.node_c16_pinned_backend_effect.HandlerC16PinnedBackend.c16_pinned_backend_check_b2266919",
+      "message_category": "command",
+      "route_id": "route.auto.node_c16_pinned_backend_effect.HandlerC16PinnedBackend.c16_pinned_backend_check_b2266919.onex_cmd_platform_c16_pinned_backend_check_v1",
+      "topic": "${topic:contract:platform.CMD_C16_PINNED_BACKEND_CHECK_V1}",
+      "topic_pattern": "*.cmd.platform.c16-pinned-backend-check.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_chain_orchestrator",

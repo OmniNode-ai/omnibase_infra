@@ -232,6 +232,16 @@ RUN tmp_dir="$(mktemp -d)" \
 # GitHub is already a hard dependency of this build; Launchpad no longer is.
 # The interpreter lives under /opt/uv-python (root-owned, world-readable), and
 # /usr/local/bin/python3.12 is what `uv sync` in the bake below discovers.
+#
+# OMN-23342: the deadsnakes package this replaced also put libpython3.12.so.1.0
+# on the system loader path, and the Actions tool-cache CPython 3.12
+# (actions/python-versions, _work/_tool/Python/3.12.x/x64) relied on that: its
+# python3.12 links a shared libpython and has no RPATH. With the package gone,
+# ldd of the tool-cache python3.12 read "libpython3.12.so.1.0 => not found" on
+# hp053-ci-runner-1 to -5 (2026-11-09) and any step that ran it, or a venv
+# built from it, without setup-python's LD_LIBRARY_PATH died with "error while
+# loading shared libraries". The uv-managed build ships the same shared library
+# in its lib directory, so that directory is registered with the loader here.
 RUN export UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     && uv python install 3.12 \
     && py="$(uv python find --managed-python 3.12)" \
@@ -241,6 +251,8 @@ RUN export UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     && ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3 \
     && ln -sf /usr/local/bin/python3.12 /usr/local/bin/python \
     && ln -sf "${py_bin}/pip3.12" /usr/local/bin/pip3.12 \
+    && echo "$(dirname "${py_bin}")/lib" > /etc/ld.so.conf.d/onex-uv-python-libpython.conf \
+    && ldconfig \
     && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip3 \
     && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip \
     && python3.12 -c 'import sys, ssl, sqlite3, venv; assert sys.version_info[:2] == (3, 12), sys.version' \

@@ -134,8 +134,7 @@ jobs:
       || github.event.pull_request.merged == true
     # Trusted runner required: needs LINEAR_API_KEY.
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest
-    runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
@@ -208,7 +207,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f3a5bdd8113eb381ce9392635709fcc9d60f4df5 # .github/sibling-pins.yaml
+          ref: d059bd84147a96ed1e9765945cde7f2ffe6ffab0 # .github/sibling-pins.yaml
           # Deliberately `dev`, not a pinned SHA: a fix to the note takes effect
           # on the next merge without a companion PR here. The trade is that an
           # omnimarket regression reaches this trigger immediately — acceptable

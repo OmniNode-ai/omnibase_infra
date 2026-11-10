@@ -153,7 +153,7 @@ POOL_LANES: frozenset[str] = frozenset({"prepr-1", "prepr-2"})
 REASON_REQUIRED_LANES: frozenset[str] = GOVERNED_LANES | POOL_LANES
 
 #: The grant registry path inside the ``omnibase_infra`` repo.
-GRANTS_REPO_RELPATH = "grants/prod_promotion_grants.yaml"
+GRANTS_REPO_RELPATH = "config/prod_promotion_grants.yaml"
 
 #: The ref the grant registry is resolved from. Never a PR branch (OMN-13418).
 GRANTS_REF = "main"

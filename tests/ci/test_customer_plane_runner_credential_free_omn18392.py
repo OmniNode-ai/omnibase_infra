@@ -34,7 +34,11 @@ from typing import Any, cast
 import pytest
 import yaml
 
-from tests.ci._runner_compose_text import RUNNER_HOME, read_runner_compose
+from tests.ci._runner_compose_text import (
+    RUNNER_HOME,
+    general_pool_control,
+    read_runner_compose,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -54,7 +58,10 @@ SERVICE_FILES: dict[str, Path] = {
 }
 CUSTOMER_PLANE_SERVICES = tuple(SERVICE_FILES)
 # The general pool, used only as the positive control for every absence below.
-CONTROL_SERVICE = "omninode-runner-1"
+# OMN-22898 retired the primary host's own general pool, so the control is the
+# first runner of the largest general pool on another host, which carries the
+# same fleet-wide wiring.
+CONTROL_SERVICE, CONTROL_FILE = general_pool_control()
 
 # OMN-17477 added `arch-amd64`: the fleet's own architecture vocabulary, the one
 # that matches Docker's TARGETARCH and the host inventory, so a workflow pins a
@@ -90,7 +97,9 @@ def _compose(path: Path = COMPOSE_FILE) -> dict[str, Any]:
 
 
 def _service(name: str) -> dict[str, Any]:
-    path = SERVICE_FILES.get(name, COMPOSE_FILE)
+    path = SERVICE_FILES.get(
+        name, CONTROL_FILE if name == CONTROL_SERVICE else COMPOSE_FILE
+    )
     services = _compose(path)["services"]
     assert name in services, f"{name} is not defined in {path}"
     return cast("dict[str, Any]", services[name])
