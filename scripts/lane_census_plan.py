@@ -376,9 +376,8 @@ def default_snapshot_path() -> Path:
     return _required_file(SNAPSHOT_NAME)
 
 
-def _registry_model() -> Any:
-    """The registry model, loaded by path: this script runs without the package."""
-    name = "model_lane_census_registry"
+def _census_model(name: str = "model_lane_census_registry") -> Any:
+    """A lane census model, loaded by path: this script runs without the package."""
     if name not in sys.modules:
         root = Path(__file__).resolve().parents[1] / "src" / "omnibase_infra"
         spec = importlib.util.spec_from_file_location(
@@ -393,9 +392,9 @@ def _registry_model() -> Any:
 def load_registry(path: Path | None = None) -> Any:
     """The host registry, from ``$LANE_CENSUS_REGISTRY`` or the node's overlay (OMN-22152)."""
     try:
-        found = path or _registry_model().registry_path(os.environ)
+        found = path or _census_model().registry_path(os.environ)
         data = yaml.safe_load(Path(found).read_text(encoding="utf-8"))
-        return _registry_model().ModelLaneCensusRegistry.from_overlay(data)
+        return _census_model().ModelLaneCensusRegistry.from_overlay(data)
     except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
         raise LaneCensusConfigError(
             f"the lane census host registry is not configured: {exc}; set "
@@ -413,7 +412,8 @@ def load_manifest(path: Path | None = None) -> dict[str, Any]:
     if not isinstance(data, dict) or "lanes" not in data:
         raise ValueError(f"lane manifest missing 'lanes': {manifest_path}")
     validate_service_bounds(data)
-    return data
+    fold = _census_model("model_lane_census_fold_policy")
+    return fold.fold_manifest(data, os.environ)
 
 
 def validate_service_bounds(manifest: dict[str, Any]) -> None:
