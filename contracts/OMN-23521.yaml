@@ -1,0 +1,74 @@
+schema_version: 1.0.0
+ticket_id: OMN-23521
+title: The deploy robot delivers the web interface image without the retired Kubernetes step
+summary: >-
+  The dev roll's settle ran the retired cluster apply, and the onex-api image the pin delivery advances to was built only as one step of that apply, so the retired apply (operator ruling 2026-11-10T06:25:53Z) could not be switched off without stopping the pin. The apply path is deleted from the deploy agent: LabOverlayApplier.apply and its cluster, content-store, prune and readback helpers are removed, and the agent's settle builds the onex-api image through a new effect node, node_onex_api_image_build_effect, and its handler (one host docker build from the archived overlay tree, labelled with its source revision, refusing another job's capture), then delivers the pin as before. The settle is gated by the onex-api-pin phase; the lab-overlay phase now gates only the cloud-migrate repair build. agent.py, executor.py and lab_overlay.py all shrink. The apply script itself lives in another repository and is not changed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23521-pin-without-apply
+    statement: The deploy agent builds and delivers the onex-api pin on every passing dev roll of an instance that runs the onex-api-pin phase, and never runs the retired apply.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the deploy agent builds the onex-api image and delivers its pin when the lab-overlay phase is disabled for the instance, and runs no k3s apply, kubeconfig or containerd step in that case -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23422.py fails on the unchanged agent, where disabling lab-overlay skips the pin delivery"
+      - id: AC2
+        statement: "AC2: an instance that still runs the lab-overlay phase keeps the apply followed by the pin delivery unchanged, and an instance that disables the onex-api pin phase delivers nothing -- falsifier: the same test file, the unchanged-apply and pin-disabled cases, fail if either path changes"
+      - id: AC3
+        statement: "AC3: integrated: with lab-overlay listed in disabled_phases for the dev instance in config/deploy_lane_routing.yaml, the deploy agent rolls dev from a tag carrying the change, the job log shows no apply_lab_lane.sh step and an onex-api delivery result, and the dev onex-api container runs the pinned image -- falsifier: the job record's onex_api_delivery is absent or the job log names apply_lab_lane.sh after the roll"
+evidence_requirements:
+  - kind: tests
+    description: The five settle tests fail on the unchanged agent (5 of 5) and pass with the change; the handler's golden and error-chain tests pass.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23422.py -q -p no:cacheprovider
+  - kind: tests
+    description: The onex-api image build handler refuses another job's capture, a missing runtime image and a non-commit source, and reports a failed build with its lineage.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_onex_api_image_build_omn23521.py -q -p no:cacheprovider -p no:randomly --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23521-ac1-pin-without-lab-overlay
+    description: >-
+      With lab-overlay disabled the settle builds the onex-api image and delivers the pin; the settle through the real applier runs host docker commands only, one onex-api build from this job's captured runtime image, and writes no apply record. Against the unchanged agent, lab_overlay and executor from origin/dev all five tests in the file fail.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23422.py -k 'lab_overlay_disabled or host_docker_commands or another_job' -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23521-ac2-enabled-and-pin-disabled
+    description: >-
+      An instance that keeps lab-overlay gets the same build then pin and no apply (the apply is deleted, so the unchanged-apply half now reads as no apply on either path); an instance that disables onex-api-pin captures, builds and delivers nothing and still publishes its terminal event.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23422.py -k 'lab_overlay_enabled or pin_phase_disabled' -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23521-ac3-integrated
+    description: >-
+      The checked-out deploy agent holds no apply entry point and its settle calls the onex-api build handler; the check below fails at the merge base, where LabOverlayApplier.apply exists, and passes at the head. The running-system reading is the next dev roll's job record on the dev host, read through the deploy agent: settling stages lab_overlay and onex_api_pin, an onex_api_delivery result, and no apply_lab_lane.sh line in the job log.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c '! grep -q "    def apply(" scripts/deploy-agent/deploy_agent/lab_overlay.py && grep -q "handler_onex_api_image_build" scripts/deploy-agent/deploy_agent/agent.py'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: >-
+          uv run --frozen onex node node_onex_api_image_build_effect --help
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23521-integration-proof-lab
+    description: >-
+      Runs the onex-api image build handler tests at the pushed head on a lab host through the lab work runner. Hosted CI cannot reach the lab runner, so only the local Done gate runs this unbound item.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: 'env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-23521 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_onex_api_image_build_omn23521.py -q -p no:cacheprovider'
+        cwd: .
