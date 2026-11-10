@@ -355,6 +355,7 @@ class RuntimeDelegationDispatchPort:
         named_tests: BaseModel | None = None,
         trace_id: UUID | None = None,
         queue_wait_ms: int | None = None,
+        probe_ladder: BaseModel | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -387,6 +388,10 @@ class RuntimeDelegationDispatchPort:
             # OMN-20844: the customer's model choice runs only on omnimarket's
             # in-process BYOK route; the bus wire does not carry it.
             ("model", model),
+            # OMN-23162: a probe that carries a ladder is never run without it,
+            # so the deployed bus path refuses rather than dispatching an
+            # ordinary delegation.
+            ("probe_ladder", probe_ladder),
         ):
             if feature_value is not None:
                 raise NotImplementedError(
@@ -445,8 +450,7 @@ class RuntimeDelegationDispatchPort:
                     bus_broker, str
                 ):
                     raise InfraUnavailableError(
-                        "a delegation backend pin requires a runtime bus that exposes "
-                        "its configured broker and environment identity"
+                        "a delegation backend pin requires a runtime bus that exposes its configured broker and environment identity"
                     )
                 fault_route = resolve_dogfood_delegation_fault_route(
                     environment=bus_environment,
@@ -459,8 +463,7 @@ class RuntimeDelegationDispatchPort:
                     )
                 if timeout != fault_route.requested_timeout_seconds:
                     raise InfraUnavailableError(
-                        "declared dogfood fault backend pin requires its exact timeout "
-                        "policy"
+                        "declared dogfood fault backend pin requires its exact timeout policy"
                     )
         request_payload: dict[str, object] = {
             "prompt": prompt,
