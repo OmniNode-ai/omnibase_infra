@@ -300,6 +300,12 @@ profiles:
           - omninode-contract-resolver
           - skill-lifecycle-consumer
           - agent-actions-consumer
+          # OMN-23525: omnibase_infra#5803 (OMN-23072) dropped the infra routing
+          # decisions consumer from the dev compose files, but its container of the
+          # previous revision kept running and holding its group
+          # (infra-routing-decisions-postgres), which fences the attach of
+          # projection_infra_routing_decisions in main. It is retired by name too.
+          - infra-routing-decisions-consumer
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof

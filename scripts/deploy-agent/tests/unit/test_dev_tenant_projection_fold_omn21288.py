@@ -61,6 +61,9 @@ SKILL_LIFECYCLE_CONSUMER = "skill-lifecycle-consumer"  # OMN-21933 (T12)
 # OMN-23043: the agent actions projection runs in main as a node, so the policy
 # retires its consumer container by name as well.
 AGENT_ACTIONS_CONSUMER = "agent-actions-consumer"
+# OMN-23525: the infra routing decisions projection runs in main as a node
+# (OMN-23072 dropped the consumer from compose), so its container is retired by name.
+ROUTING_DECISIONS_CONSUMER = "infra-routing-decisions-consumer"
 
 
 def test_primary_dev_disables_the_tenant_carrier_only(
@@ -113,6 +116,7 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             "omninode-contract-resolver",
             SKILL_LIFECYCLE_CONSUMER,
             AGENT_ACTIONS_CONSUMER,
+            ROUTING_DECISIONS_CONSUMER,
             # OMN-21288 (T17): the projection API is served by main as a mounted node.
             "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
@@ -180,6 +184,7 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
     assert censused == [
         f"label=com.docker.compose.service={AGENT_ACTIONS_CONSUMER}",
         f"label=com.docker.compose.service={CONTEXT_AUDIT_CONSUMER}",
+        f"label=com.docker.compose.service={ROUTING_DECISIONS_CONSUMER}",
         f"label=com.docker.compose.service={INTELLIGENCE_API}",
         "label=com.docker.compose.service=omninode-contract-resolver",
         f"label=com.docker.compose.service={HOOK_EVENTS_WRITER}",
@@ -193,6 +198,8 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
             f"{AGENT_ACTIONS_CONSUMER}-b",
             f"{CONTEXT_AUDIT_CONSUMER}-a",
             f"{CONTEXT_AUDIT_CONSUMER}-b",
+            f"{ROUTING_DECISIONS_CONSUMER}-a",
+            f"{ROUTING_DECISIONS_CONSUMER}-b",
             f"{INTELLIGENCE_API}-a",
             f"{INTELLIGENCE_API}-b",
             "omninode-contract-resolver-a",
@@ -311,6 +318,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         INTELLIGENCE_API,
         SKILL_LIFECYCLE_CONSUMER,
         AGENT_ACTIONS_CONSUMER,
+        ROUTING_DECISIONS_CONSUMER,  # OMN-23525
         "projection-api",  # OMN-21288 (T17)
         "omninode-contract-resolver",  # OMN-23324
     }
