@@ -291,6 +291,20 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.linear-ticket-write-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.linear-ticket-write-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimarket.morning-ground-state-start.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
@@ -1006,6 +1020,34 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.github-repo-gateway-read-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.linear-ticket-write-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.linear-ticket-write-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.linear-ticket-write-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.linear-ticket-write-failed.v1",
       "operation": "READ",
       "pattern": "LITERAL"
     },
