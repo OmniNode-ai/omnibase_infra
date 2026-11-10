@@ -1,0 +1,62 @@
+schema_version: 1.0.0
+ticket_id: OMN-23508
+title: The dead lab test-cluster step is removed from the checks run after each change
+summary: >-
+  The Runtime Rebuild Trigger workflow carried a post-merge job, verify-lab-overlay-converged, that polled the dev deploy agent for 1800 s for a record of the k3s overlay apply and then emitted that lane's lab-pass receipt. The agent's latest overlay record (sha 5097b1249919) reads lab_overlay_applied ok=false (apply_lab_lane.sh exited 3, kube-apiserver 127.0.0.1:6443 connection reset by peer) and deployed_image ok=false (the one pod runs an image stamped 20261102T201026Z-b8716191); later merges get 404 no record. Operator ruling 2026-11-10 retired the step. This change removes the job, its evidence-policy entry and the needs edge of rerun-refused-deliveries, and drops the lane flag from the staging gate step so it reads the gate's default any-of lanes (the all-of proof-subject requirement is unchanged). The deploy agent's own overlay apply code and the k3s lane enum value are not removed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23508-retire-k3s-step
+    statement: No workflow carries, waits on or selects the retired k3s overlay step or its receipt lane.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the Runtime Rebuild Trigger workflow no longer carries the verify-lab-overlay-converged job, nothing in any workflow names a job that does not exist, and the evidence policy no longer declares the k3s receipt -- falsifier: uv run pytest tests/ci/test_retired_k3s_lab_overlay_job_omn23422.py fails on the unchanged workflow files with the retired job still present"
+      - id: AC2
+        statement: "AC2: the staging delivery gate no longer selects the k3s lane and no gate selects a lane no step emits -- falsifier: uv run pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py fails if the gate step still passes the k3s lane flag"
+      - id: AC3
+        statement: "AC3: integrated: after the merge, the first Runtime Rebuild Trigger run on dev lists no k3s overlay job and its staging re-read job finishes without waiting on it -- falsifier: the run's job list read through onex scm run-view still shows the Verify the k3s overlay job, or the re-read job is skipped for waiting on it"
+evidence_requirements:
+  - kind: tests
+    description: The retired job and its policy entry are gone and no needs edge dangles; the retired-job and policy tests fail against the pre-change workflow and policy files.
+    command: uv run --frozen pytest tests/ci/test_retired_k3s_lab_overlay_job_omn23422.py -q -p no:cacheprovider -p no:randomly --no-cov
+  - kind: tests
+    description: The staging gate step names no lane flag and the delivery re-read no longer needs the retired job.
+    command: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q -p no:cacheprovider -p no:randomly --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23508-ac1-retired-job-gone
+    description: >-
+      The Runtime Rebuild Trigger workflow defines trigger-rebuild, verify-lane-converged, reemit-queued-receipts and rerun-refused-deliveries only; every needs target in every workflow names a job in the same workflow; the evidence policy declares no producer for the retired job. Against the pre-change workflow and policy files from origin/dev, test_the_retired_job_is_gone and test_the_evidence_policy_names_no_producer_for_the_retired_job fail.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_retired_k3s_lab_overlay_job_omn23422.py -q -p no:cacheprovider -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23508-ac2-gate-selects-no-retired-lane
+    description: >-
+      The own-sha-gate step of the lab-pass-gate job in deliver-dev-candidate-to-staging.yml names no lane flag and no k3s lane, and keeps --require-lane and --resolve-runtime-ancestor; rerun-refused-deliveries needs verify-lane-converged and not the retired job. A default any-of gate read with only the dev lane's receipt present passes and notes the k3s lane unreadable.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q -p no:cacheprovider -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23508-ac3-integrated
+    description: >-
+      Integrated read after the merge: the dev branch's Runtime Rebuild Trigger workflow defines no verify-lab-overlay-converged job. The check below fails while the dev branch still defines it. The running-system reading is the next Runtime Rebuild Trigger run on dev read with onex scm run-view: its job list holds no job named Verify the k3s overlay applied the merged sha and Re-run staging deliveries is not skipped for waiting on it.
+    source: manual
+    binds_ac:
+      - AC3
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c '! git show origin/dev:.github/workflows/runtime-rebuild-trigger.yml | grep -q "^  verify-lab-overlay-converged:"'
+        cwd: ${OMNI_HOME}/omnibase_infra
