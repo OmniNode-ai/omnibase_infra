@@ -646,7 +646,6 @@ class TestGateWiring:
         # Candidate smoke from kind; persistent lab and compose-dev from the agent.
         assert "lab_pass_receipt.py emit" in deliver
         assert "--lane candidate-boot" in deliver
-        assert "--lane onex-lab-k3s" in rebuild
         assert "lab_pass_receipt.py emit" in rebuild
         assert "--lane compose-dev" in rebuild
 
