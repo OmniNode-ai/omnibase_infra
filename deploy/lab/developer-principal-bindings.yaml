@@ -154,8 +154,10 @@
 # `landing-chain-node-<run id>` and `landing-chain-controller-<run id>`, so the two group
 # prefixes below are the grant. The lab runtime's own group for the node, `<env>.omnimarket.
 # node_pr_landing_decision_compute...`, does not start with either prefix, so a developer
-# principal cannot join it and take real commands. The failure terminal is not used by the
-# chain (a node error travels on the success topic) and is not granted.
+# principal cannot join it and take real commands. The failure terminal
+# `onex.evt.omnimarket.pr-landing-decision-failed.v1` is granted for produce and consume as
+# well (OMN-23459): the decision node publishes it and the controller side reads it; the
+# chain tests themselves still do not use it, and the same two group prefixes cover its reads.
 # LANE TICKET MINT (OMN-23410): a lab lane's principal asks the ticket node for the child ticket its
 # pull request's contract needs, with `onex ticket create` (omnimarket `onex.cli` entry point). The
 # call publishes one request on the node's command topic and reads its completed or failed terminal,
@@ -173,6 +175,16 @@
 # below is the grant for those groups. The lab runtime's own group for that reader,
 # `<env>.omnimarket.node_floor_projection_read_effect.consume.v1`, does not start with
 # the prefix, so a developer principal cannot join it.
+# LANDING SNAPSHOT RECORD (OMN-23458): the landing snapshot step (omnimarket
+# node_pr_landing_snapshot_effect) runs on the controller's host as the host's issued
+# principal and publishes each tick's record on `onex.evt.omnimarket.
+# pr-landing-tick-facts-recorded.v1` and a failure on `onex.evt.omnimarket.
+# pr-landing-snapshot-failed.v1`. The tick orchestrator (node_pr_landing_tick_orchestrator)
+# reads the record topic under a group named `landing-tick-orchestrator-<run>`, and the
+# snapshot-to-orchestrator join test reads it under `landing-snapshot-join-<run id>`, so
+# the principal produces and consumes the record topic, produces the failure topic, and
+# the two group prefixes below are the grant. The lab runtime's own groups start with
+# `<env>.` / `local.` and match neither prefix.
 # Machine-only writes live in machine-principal-bindings.yaml (OMN-21622).
 principal: "{principal}"
 bindings:
@@ -266,6 +278,8 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-landing-decision-requested.v1, direction: consume, consumer_group: landing-chain-node-call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-completed.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-completed.v1, direction: consume, consumer_group: landing-chain-controller-call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-failed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-decision-failed.v1, direction: consume, consumer_group: landing-chain-controller-call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.linear-ticket-write-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.linear-ticket-write-completed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.linear-ticket-write-failed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
@@ -273,6 +287,10 @@ bindings:
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-owner-map.v1, direction: consume, consumer_group: node_floor_projection_read_effect.call}
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-overlay-store-fleet.v1, direction: produce}
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-overlay-store-fleet.v1, direction: consume, consumer_group: node_floor_projection_read_effect.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, direction: consume, consumer_group: landing-snapshot-join-call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, direction: consume, consumer_group: landing-tick-orchestrator-call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-snapshot-failed.v1, direction: produce}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
@@ -287,5 +305,7 @@ group_prefixes:
   - {broker: dev, prefix: landing-chain-node-}
   - {broker: dev, prefix: landing-chain-controller-}
   - {broker: dev, prefix: node_floor_projection_read_effect.}
+  - {broker: dev, prefix: landing-snapshot-join-}
+  - {broker: dev, prefix: landing-tick-orchestrator-}
 described_groups:
   - {broker: dev, group: "*"}

@@ -75,6 +75,13 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - gate_store_reservations
+            privileges:
+              - DELETE
+              - SELECT
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
               - alert_channel_liveness_verdicts
               - automation_alarm_episodes
               - automation_liveness_state
@@ -94,6 +101,10 @@ databases:
               - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
+              - gate_store_reservations
+              - gate_store_safety
+              - gate_store_state
+              - gate_store_steps
               - gateway_link_health
               - lab_container_memory_window
               - lab_job_state
@@ -466,5 +477,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 7544a24ddda11f8bc6915008c9d88003bf07b8a4e22c0aecac99cc49429a25b5
+  sha256: c92e1a360fb4a1218c70f56233959bc9bf86234f666f61ce9f92b7d12fcb3626
 topology_instance: local
