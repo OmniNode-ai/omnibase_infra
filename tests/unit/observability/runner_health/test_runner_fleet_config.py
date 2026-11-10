@@ -333,7 +333,6 @@ def test_runner_fleet_config_git_mirror_covers_every_ci_repo() -> None:
         "omniclaude",
         "omniweb",
         "omnimemory",
-        "omnibase_compat",
         "knowledge_base",
         "knowledge-base-internal",
     }

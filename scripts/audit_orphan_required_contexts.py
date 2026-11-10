@@ -127,7 +127,6 @@ REPOS: tuple[str, ...] = (
     "omnimemory",
     "omninode_infra",
     "omniweb",
-    "onex_change_control",
 )
 
 
