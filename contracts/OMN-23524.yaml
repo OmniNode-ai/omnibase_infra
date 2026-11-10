@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-23524"
+title: "Contract registry router calls its database handlers with one typed request"
+summary: >
+  omnibase_infra#5496 (OMN-21697) moved the six node_contract_persistence_effect handlers to the canonical handle(request) shape and read the correlation id from the request; ContractRegistrationEventRouter._execute_intents still called handle(payload, correlation_id), so every intent failed with "HandlerPostgresMarkStale.handle() takes 2 positional arguments but 3 were given", logged as "Error executing intent" on each tick of the dev runtime. The router's ProtocolIntentEffect now declares handle(request) and the router passes the one typed payload. A test dispatches a mark_stale intent through the router into the real handler over a fake pool, and a seam test pins the parameter list of all six handlers and the protocol.
+
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - protocols
+requirements:
+  - id: "req-omn23524-one-typed-request"
+    statement: "The router calls each intent effect handler with the one typed payload the handler declares."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: ContractRegistrationEventRouter calls each intent effect handler with the one typed payload, and its ProtocolIntentEffect declares handle(request)"
+      - id: "AC2"
+        statement: "AC2: a unit test dispatches a postgres.mark_stale intent through the router to the real HandlerPostgresMarkStale over a fake pool and sees the update executed with no Error executing intent warning, and it fails on the unchanged router"
+      - id: "AC3"
+        statement: "AC3: integrated: on the next dev roll whose image carries the change, the omninode-runtime log shows no Error executing intent TypeError line from contract_registration_event_router for 15 minutes"
+evidence_requirements:
+  - kind: "tests"
+    description: "The typed-request router test and the existing router tests pass."
+    command: "uv run pytest tests/unit/nodes/node_contract_registry_reducer/test_router_calls_typed_request_handlers_omn23524.py tests/unit/nodes/node_contract_registry_reducer/test_contract_registration_event_router.py -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn23524-router-real-handler"
+    description: "A mark_stale intent reaches the real handler through the router; fails at the merge base, where the call raises TypeError."
+    source: "manual"
+    binds_ac: ["AC1", "AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_contract_registry_reducer/test_router_calls_typed_request_handlers_omn23524.py -q --no-cov"
+        cwd: "."
+  - id: "dod-omn23524-call-shape-probe"
+    description: "Hosted structural smoke: the router source passes no second positional argument to handler.handle."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'grep -q \"await handler.handle(payload)$\" src/omnibase_infra/nodes/node_contract_registry_reducer/contract_registration_event_router.py'"
+        cwd: "."
+  - id: "dod-omn23524-integration-proof"
+    description: "After the deploy agent rolls dev from a ref carrying the change, the dev runtime log holds no Error executing intent TypeError line for 15 minutes. Hosted CI cannot reach the lab, so only the local Done gate runs this check."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_contract_registry_reducer/test_router_calls_typed_request_handlers_omn23524.py -q --no-cov"
+        cwd: "."
