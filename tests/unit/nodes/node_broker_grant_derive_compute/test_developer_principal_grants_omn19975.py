@@ -386,6 +386,15 @@ LANDING_SNAPSHOT_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         for prefix in LANDING_SNAPSHOT_GROUP_PREFIXES
     ),
 )
+# The tick orchestrator's compared events (OMN-23458): the tick orchestrator publishes each
+# tick's compared result and its compare failure through the declared bus publisher. The
+# principal writes both and reads neither: nothing on this principal consumes them.
+LANDING_TICK_COMPARED = "onex.evt.omnimarket.pr-landing-tick-compared.v1"
+LANDING_TICK_COMPARE_FAILED = "onex.evt.omnimarket.pr-landing-tick-compare-failed.v1"
+LANDING_TICK_COMPARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", LANDING_TICK_COMPARED, "literal", ("write", "describe")),
+    ("topic", LANDING_TICK_COMPARE_FAILED, "literal", ("write", "describe")),
+)
 # The lane ticket mint (OMN-23410): a lab lane's principal asks the ticket node for the child
 # ticket its pull request needs. It writes the node's command topic and reads the completed and
 # failed terminals; it gets no write on either terminal, so it cannot answer for the node.
@@ -409,6 +418,20 @@ FLOOR_PROJECTION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("topic", FLOOR_OWNER_MAP, "literal", ("read", "write", "describe")),
     ("topic", FLOOR_OVERLAY_STORE_FLEET, "literal", ("read", "write", "describe")),
     ("group", FLOOR_PROJECTION_GROUP_PREFIX, "prefixed", ("read", "describe")),
+)
+# The floor task ticket mint (OMN-23471): a lab lane's principal asks the floor task
+# ticket node (omnimarket node_floor_task_ticket_effect) for the one ticket of a floor
+# task. It writes the node's command topic and reads the completed terminal under the
+# per-call group `local.omnibase_core.cli_run_node.consume.v1.<id>` that run-node
+# derives; it gets no write on the terminal, so it cannot answer for the node, and
+# no grant on any Linear credential.
+FLOOR_TASK_TICKET_COMMAND = "onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1"
+FLOOR_TASK_TICKET_COMPLETED = "onex.evt.omnimarket.floor-task-ticket-mint-completed.v1"
+FLOOR_TASK_TICKET_GROUP_PREFIX = "local.omnibase_core.cli_run_node.consume.v1."
+FLOOR_TASK_TICKET_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", FLOOR_TASK_TICKET_COMMAND, "literal", ("write", "describe")),
+    ("topic", FLOOR_TASK_TICKET_COMPLETED, "literal", ("read", "describe")),
+    ("group", FLOOR_TASK_TICKET_GROUP_PREFIX, "prefixed", ("read", "describe")),
 )
 # The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
 # its own hook events to the dev lane, so the lab projections (claude_hook_events among
@@ -501,8 +524,10 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
             + DECLARED_GRANTS
             + LANDING_DECISION_GRANTS
             + LANDING_SNAPSHOT_GRANTS
+            + LANDING_TICK_COMPARED_GRANTS
             + TICKET_WRITE_GRANTS
             + FLOOR_PROJECTION_GRANTS
+            + FLOOR_TASK_TICKET_GRANTS
             + HOOK_EDGE_GRANTS
         )
         for operation in operations
@@ -797,6 +822,26 @@ def test_the_landing_snapshot_grants_are_declared_and_nothing_wider() -> None:
     )
 
 
+def test_the_tick_compared_grants_are_produce_only_and_nothing_wider() -> None:
+    """The tick orchestrator writes its compared and compare-failed events; no read."""
+    rows = derive(shipped_bindings())
+    compared = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "pr-landing-tick-compare" in resource
+    }
+    assert compared == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in LANDING_TICK_COMPARED_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] in (LANDING_TICK_COMPARED, LANDING_TICK_COMPARE_FAILED)
+        and row[4] == "READ"
+        for row in rows
+    )
+
+
 def test_the_lane_ticket_mint_grants_are_declared_and_nothing_wider() -> None:
     """A lane may write the ticket node's command and read its two terminals, and no more.
 
@@ -817,6 +862,31 @@ def test_the_lane_ticket_mint_grants_are_declared_and_nothing_wider() -> None:
         row[2] in (TICKET_WRITE_COMPLETED, TICKET_WRITE_FAILED) and row[4] == "WRITE"
         for row in rows
     )
+
+
+def test_the_floor_task_ticket_grants_are_declared_and_nothing_wider() -> None:
+    """A lane may write the node's command and read its completed terminal, and no more.
+
+    The principal gets no write on the terminal, so it cannot answer a request for the
+    node, and the lab runtime's own group for the node does not start with the prefix.
+    """
+    rows = derive(shipped_bindings())
+    floor_task_ticket = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "floor-task-ticket-mint" in resource
+        or resource.startswith(FLOOR_TASK_TICKET_GROUP_PREFIX)
+    }
+    assert floor_task_ticket == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in FLOOR_TASK_TICKET_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] == FLOOR_TASK_TICKET_COMPLETED and row[4] == "WRITE" for row in rows
+    )
+    runtime_group = "local.omnimarket.node_floor_task_ticket_effect.consume.v1"
+    assert not runtime_group.startswith(FLOOR_TASK_TICKET_GROUP_PREFIX)
 
 
 def test_the_floor_projection_grants_are_declared_and_nothing_wider() -> None:

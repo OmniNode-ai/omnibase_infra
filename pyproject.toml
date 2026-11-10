@@ -47,7 +47,10 @@ dependencies = [
     # `omnibase_core.validation.checker_stack_shape` and `validator_stack_shape`
     # at module import, and 0.47.62 is the first release that ships them.
     "omnibase-core>=0.47.62,<0.48.0",
-    "omnibase-spi>=0.23.12,<0.24.0",
+    # FLOOR raised to 0.23.15: the floor fill orchestrator (omnimarket) imports
+    # ModelLaneProcessRunResult, which 0.23.14 does not carry. The lab dispatch
+    # venv is built from this lock, so the lock must resolve 0.23.15.
+    "omnibase-spi>=0.23.15,<0.24.0",
     # ============================================================================
     # External Dependency Security Guidance
     # ============================================================================
@@ -263,7 +266,7 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "omnibase-spi>=0.23.12,<0.24.0",
+    "omnibase-spi>=0.23.15,<0.24.0",
 ]
 
 [tool.uv.sources]
