@@ -39,6 +39,34 @@
     {
       "broker": "dev",
       "resource_type": "GROUP",
+      "resource": "landing-snapshot-join-",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "landing-snapshot-join-",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "landing-tick-orchestrator-",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "landing-tick-orchestrator-",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
       "resource": "local.omnibase_core.cli_run_node.consume.v1.",
       "operation": "DESCRIBE",
       "pattern": "PREFIXED"
@@ -1230,6 +1258,41 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.pr-landing-decision-failed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-landing-snapshot-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-landing-snapshot-failed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },

@@ -272,6 +272,9 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # owner map publisher and the overlay store fleet reader publish.
     # The floor task ticket mint (OMN-23471) adds write on the ticket node's command topic
     # only; the principal cannot write its completed terminal.
+    # The landing snapshot record (OMN-23458) adds write on the record topic the snapshot step
+    # publishes and on its failure terminal, which no test process consumes; the principal
+    # holds no read on the failure terminal.
     writable = [g for g in declaration.grants if "write" in g.operations]
     hook_edge = {g.name for g in writable if g.name.startswith("onex.evt.omniclaude.")}
     assert len(hook_edge) == 29
@@ -317,6 +320,8 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1",
         "onex.snapshot.projection.floor-owner-map.v1",
         "onex.snapshot.projection.floor-overlay-store-fleet.v1",
+        "onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1",
+        "onex.evt.omnimarket.pr-landing-snapshot-failed.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 
