@@ -21,7 +21,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/test_package_announcer_active_package_omn22958.py tests/unit/runtime/test_boot_step0_catalog.py -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/handlers/test_package_announcer_active_package_omn22958.py tests/unit/runtime/test_boot_step0_catalog.py tests/integration/runtime/test_announcer_active_import_package_omn22958.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
@@ -31,7 +31,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_package_announcer.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q '_entry_point_is_active'
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_package_announcer.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep '_entry_point_is_active' >/dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
