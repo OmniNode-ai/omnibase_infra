@@ -13,6 +13,7 @@ behind that tag for two hours.
 from __future__ import annotations
 
 import subprocess
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -156,6 +157,13 @@ class TestHeartbeat:
         assert TOPIC_DEV_TAG_HEARTBEAT == "onex.evt.deploy.dev-tag-heartbeat.v1"
 
 
+def _join(agent: Any) -> None:
+    """Wait for the heartbeat publish the idle tick handed to its own thread (OMN-23540)."""
+    for thread in threading.enumerate():
+        if isinstance(thread, threading.Timer):
+            thread.join(timeout=5.0)
+
+
 class TestInTheAgent:
     def test_omnimarket_is_the_tag_followed_repository(self) -> None:
         assert DEV_TAG_FOLLOWED_REPOSITORIES == ("omnimarket",)
@@ -205,6 +213,7 @@ class TestInTheAgent:
 
         with caplog.at_level("ERROR", logger=agent_mod.logger.name):
             agent._maybe_idle_converge()
+            _join(agent)
 
         assert len(published) == 1
         beat = ModelDevTagHeartbeat.model_validate(published[0])
@@ -240,6 +249,7 @@ class TestInTheAgent:
         agent._idle_converge_now = lambda: NEW_CUT + timedelta(minutes=5)
 
         agent._maybe_idle_converge()
+        _join(agent)
 
         assert len(published) == 1
         assert published[0]["running_ref"] is None
@@ -265,6 +275,7 @@ class TestInTheAgent:
         def check() -> None:
             agent._idle_converge_last_check = None
             agent._maybe_idle_converge()
+            _join(agent)
 
         check()  # first beat
         clock["now"] += timedelta(minutes=1)

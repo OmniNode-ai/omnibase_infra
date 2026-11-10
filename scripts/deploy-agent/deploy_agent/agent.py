@@ -1712,9 +1712,8 @@ class DeployAgent:
                 and self._idle_running_contains(repository, newest.sha, running_ref)
             ),
         )
-        if behind_since is None:
-            self._dev_tag_behind_since.pop(repository, None)
-        else:
+        self._dev_tag_behind_since.pop(repository, None)
+        if behind_since is not None:
             self._dev_tag_behind_since[repository] = behind_since
         beat = dev_tag_heartbeat(
             instance=self._router.instance.name,
@@ -1747,7 +1746,14 @@ class DeployAgent:
             and now - last < DEV_TAG_HEARTBEAT_INTERVAL
         ):
             return
-        publish_dev_tag_heartbeat(beat.model_dump(mode="json"), self._kafka_config)
+        # OMN-23540: off the tick. The send is a synchronous Kafka send and flush that
+        # a broker which accepts and never answers holds for 60 seconds. A Timer of
+        # 0 seconds is a one-shot thread that outlives the tick; at worst it delays
+        # a stop by the producer's own bound. One attempt, no retry (the next
+        # heartbeat replaces a lost one); the published time set below holds the
+        # next send back for the interval, unless the alarm changes.
+        job = (beat.model_dump(mode="json"), self._kafka_config)
+        threading.Timer(0, publish_dev_tag_heartbeat, job).start()
         self._dev_tag_heartbeat_published_at[repository] = now
 
     def _latest_dev_tag_heartbeat(self) -> dict[str, object]:
