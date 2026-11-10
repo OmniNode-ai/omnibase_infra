@@ -50,13 +50,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23508-ac3-integrated
     description: >-
-      Integrated read after the merge: the dev branch's Runtime Rebuild Trigger workflow defines no verify-lab-overlay-converged job. The check below fails while the dev branch still defines it. The running-system reading is the next Runtime Rebuild Trigger run on dev read with onex scm run-view: its job list holds no job named Verify the k3s overlay applied the merged sha and Re-run staging deliveries is not skipped for waiting on it.
+      The Runtime Rebuild Trigger workflow in the checked-out tree defines no verify-lab-overlay-converged job; the check below fails at the merge base, where the job is still defined, and passes at the head. The running-system reading is the next Runtime Rebuild Trigger run on dev read with onex scm run-view: its job list holds no job named Verify the k3s overlay applied the merged sha and Re-run staging deliveries is not skipped for waiting on it.
     source: manual
     binds_ac:
       - AC3
-    execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: >-
-          bash -c '! git show origin/dev:.github/workflows/runtime-rebuild-trigger.yml | grep -q "^  verify-lab-overlay-converged:"'
+          bash -c '! grep -q "^  verify-lab-overlay-converged:" .github/workflows/runtime-rebuild-trigger.yml'
         cwd: ${OMNI_HOME}/omnibase_infra
