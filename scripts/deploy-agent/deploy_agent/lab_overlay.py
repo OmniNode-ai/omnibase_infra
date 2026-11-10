@@ -1381,6 +1381,61 @@ class LabOverlayApplier:
             checks=checks,
         )
 
+    def build_onex_api_image(
+        self, *, sha: str, stamp: str, capture: ModelLabOverlayCapture
+    ) -> str:
+        """Build the onex-api image ALONE, for the pin delivery (OMN-23521).
+
+        An instance that disables the ``lab-overlay`` phase runs no k3s apply,
+        yet still delivers the onex-api pin, and the pin delivery needs an image
+        that exists on the host Docker daemon. ``apply`` builds that image as one
+        step of its pins; this builds the same image, from the same Dockerfile,
+        runtime image build argument and provenance labels, and does nothing
+        else: no kubeconfig, no k3s content store, no apply script, no readback,
+        and no record, because no record reader exists for a lane that does not
+        apply.
+
+        Returns the omninode_infra commit the image was built from, the lineage
+        the delivery restricts its pin to. Raises (``LabOverlayRefusalError`` or
+        the ``OSError`` and ``SubprocessError`` of a build) so the caller can
+        name a non-delivery; it never falls back to another lineage.
+        """
+        if capture.sha != sha:
+            msg = (
+                f"the captured compose-lane inputs belong to {capture.sha[:12]}, "
+                f"not to {sha[:12]}; refusing to build the onex-api image on "
+                "another job's runtime image"
+            )
+            raise LabOverlayRefusalError(msg)
+        if capture.pin_error is not None:
+            msg = (
+                "the runtime image was not captured under the dev lane lock: "
+                f"{capture.pin_error}"
+            )
+            raise LabOverlayRefusalError(msg)
+        overlay_tree = self.state_dir / "lab-overlay" / "work" / "omninode_infra"
+        # Cleared per build, as ``apply`` does: a stale value would let the
+        # delivery pin the previous merge's image as this one's.
+        self._manifest_sha = None
+        manifest_sha = self.archive_overlay(overlay_tree)
+        self._manifest_sha = manifest_sha
+        self.build_and_import(
+            tree=overlay_tree,
+            dockerfile=API_DOCKERFILE,
+            context=API_CONTEXT,
+            target=f"{API_IMAGE_NAME}:{manifest_sha[:8]}-{stamp}",
+            timeout=API_BUILD_TIMEOUT_SECONDS,
+            # The compose dev lane reads the host Docker daemon; nothing here
+            # pins a k3s pod, so the k3s content store is not touched.
+            import_into_containerd=False,
+            build_args={API_RUNTIME_IMAGE_BUILD_ARG: capture.runtime_image},
+            labels={
+                API_REVISION_LABEL: manifest_sha,
+                API_SOURCE_LABEL: "omninode_infra",
+            },
+        )
+        return manifest_sha
+
     def build_repair_migrate_image(
         self, *, sha: str, stamp: str, correlation_id: str | None
     ) -> Path:

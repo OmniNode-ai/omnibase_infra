@@ -2138,19 +2138,33 @@ class DeployAgent:
                 lab_sha = self._resolve_lab_overlay_sha(
                     cmd, action="re-apply", sha=self._current_git_sha
                 )
+                # OMN-23521. The k3s apply and the onex-api pin delivery are two
+                # phases, and an instance that disables ``lab-overlay`` (the
+                # retired Kubernetes step) still runs ``onex-api-pin``. The
+                # settle runs whenever EITHER has work: the apply only for
+                # ``lab_sha``, the pin for ``settle_sha``.
+                settle_sha = (
+                    lab_sha
+                    if lab_sha is not None
+                    else self._resolve_onex_api_pin_sha(
+                        cmd, sha=self._current_git_sha
+                    )
+                )
                 self.job_store.complete(
                     cid,
                     status="success",
                     settling_stage=(
                         EnumJobSettlingStage.LAB_OVERLAY
                         if lab_sha is not None
+                        else EnumJobSettlingStage.ONEX_API_PIN
+                        if settle_sha is not None
                         else EnumJobSettlingStage.PUBLISH
                     ),
                     verify_recreate=self.executor.verify_recreate,
                     oneshot_reruns=self.executor.oneshot_reruns,
                 )
 
-                if lab_sha is not None:
+                if settle_sha is not None:
                     # OMN-19501. THE LANE IS RELEASED HERE, NOT AFTER THE SETTLE.
                     #
                     # Until now the overlay apply and the onex-api pin delivery
@@ -2172,17 +2186,20 @@ class DeployAgent:
                     # The pin recreate DOES mutate this compose project, so the
                     # settle re-acquires this same lock for it.
                     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-                    capture = self._capture_lab_overlay_inputs(sha=lab_sha, stamp=stamp)
+                    capture = self._capture_lab_overlay_inputs(
+                        sha=settle_sha, stamp=stamp
+                    )
                     facts = self._terminal_facts(
                         health_checks, services_restarted, lane_mirror
                     )
                     settle = functools.partial(
                         self._settle_success,
                         cmd,
-                        sha=lab_sha,
+                        sha=settle_sha,
                         stamp=stamp,
                         capture=capture,
                         facts=facts,
+                        apply_lab_overlay=lab_sha is not None,
                     )
                     logger.info(
                         "Job %s completed successfully; lane released, settling "
@@ -2348,12 +2365,18 @@ class DeployAgent:
         stamp: str,
         capture: ModelLabOverlayCapture,
         facts: _TerminalFacts,
+        apply_lab_overlay: bool = True,
     ) -> None:
         """The passing dev job's tail, on the settle worker (OMN-19501).
 
         Overlay apply under its own surface lock, then the onex-api pin under a
         RE-ACQUIRED dev lane lock, then the terminal publish. Every argument is
         this job's own: nothing here reads a field the next job resets.
+
+        OMN-23521: ``apply_lab_overlay`` is False for an instance that disables
+        the ``lab-overlay`` phase. The k3s apply, its surface lock and its
+        record are then skipped, the onex-api image the pin delivers is built
+        on its own, and the pin delivery runs as always.
 
         Swallows, because the publish at the bottom is the one step that must
         always run: a job whose verdict is durable but never published has no
@@ -2362,9 +2385,14 @@ class DeployAgent:
         cid = cmd.correlation_id
         delivery: ModelOnexApiDelivery | None = None
         try:
-            manifest_sha = self._apply_lab_overlay(
-                cmd, sha=sha, stamp=stamp, capture=capture
-            )
+            if apply_lab_overlay:
+                manifest_sha = self._apply_lab_overlay(
+                    cmd, sha=sha, stamp=stamp, capture=capture
+                )
+            else:
+                manifest_sha = self._build_onex_api_image(
+                    cmd, sha=sha, stamp=stamp, capture=capture
+                )
             self.job_store.set_settling(cid, EnumJobSettlingStage.ONEX_API_PIN)
             delivery = self._deliver_onex_api_pin(
                 cmd, sha=sha, manifest_sha=manifest_sha
@@ -2541,6 +2569,41 @@ class DeployAgent:
                 sha,
             )
             return None
+
+    def _build_onex_api_image(
+        self,
+        cmd: ModelRebuildRequested,
+        *,
+        sha: str,
+        stamp: str,
+        capture: ModelLabOverlayCapture,
+    ) -> str | None:
+        """Build the onex-api image for the pin when no k3s apply runs (OMN-23521).
+
+        Returns the omninode_infra commit the image was built from, or ``None``
+        when the build could not run, which the delivery records as a named
+        non-attempt. Swallows for the same reason ``_apply_lab_overlay`` does:
+        the terminal publish after the settle must always run.
+        """
+        try:
+            manifest_sha = self._lab_overlay_applier().build_onex_api_image(
+                sha=sha, stamp=stamp, capture=capture
+            )
+        except Exception:
+            logger.exception(
+                "onex-api image build for %s raised; the pin delivery will "
+                "record a named non-attempt",
+                sha,
+            )
+            return None
+        logger.info(
+            "onex-api image built from omninode_infra %s for %s (no k3s apply: "
+            "instance %s disables the lab-overlay phase)",
+            manifest_sha,
+            cmd.correlation_id,
+            active_dev_instance(),
+        )
+        return manifest_sha
 
     def _deliver_onex_api_pin(
         self, cmd: ModelRebuildRequested, *, sha: str, manifest_sha: str | None
@@ -2773,6 +2836,31 @@ class DeployAgent:
                 "lab overlay %s skipped: the resolved deploy sha is %r, and a "
                 "record must be keyed by an exact 40-character sha",
                 action,
+                sha,
+            )
+            return None
+        return sha
+
+    def _resolve_onex_api_pin_sha(
+        self, cmd: ModelRebuildRequested, *, sha: str
+    ) -> str | None:
+        """The sha the onex-api pin delivery runs for when no k3s apply does (OMN-23521).
+
+        Dev lane only, and only on an instance that runs the ``onex-api-pin``
+        phase. ``DEPLOY_AGENT_LAB_OVERLAY=off`` keeps its older meaning, no
+        overlay work of any kind. The sha must be an exact 40-character one,
+        because the image tags and the delivery's lineage are keyed by it.
+        """
+        if cmd.runtime_lane != EnumRuntimeLane.DEV:
+            return None
+        if not lane_runs_phase(cmd.runtime_lane, EnumInstancePhase.ONEX_API_PIN):
+            return None
+        if not LAB_OVERLAY_ENABLED:
+            return None
+        if not sha or len(sha) != 40:
+            logger.warning(
+                "onex-api pin delivery skipped: the resolved deploy sha is %r, "
+                "and the image lineage must be keyed by an exact 40-character sha",
                 sha,
             )
             return None

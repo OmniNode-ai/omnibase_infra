@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-23521"
+title: "The deploy robot delivers the web interface image without the retired Kubernetes step"
+summary: >
+  The deploy agent's job tail (the settle) ran only when the lab-overlay phase was enabled for the instance, because its resolver answered None for a disabled phase, and the settle is where both the k3s onex-lab apply and the onex-api pin delivery run. Disabling lab-overlay in config/deploy_lane_routing.yaml, the declared switch the operator's 2026-11-10 retirement of the Kubernetes pod step needs, would therefore also have stopped the onex-api pin delivery, which is its own phase (onex-api-pin) and which the compose dev lane still needs. The agent now settles when either phase has work: with lab-overlay off it builds the onex-api image on its own (LabOverlayApplier.build_onex_api_image: the one docker build, no kubeconfig, no k3s content store, no apply script, no record) and delivers the pin; with lab-overlay on the apply followed by the pin is unchanged; with onex-api-pin off nothing is built or delivered. The routing table is not changed here: the flip of lab-overlay for the dev instance follows once this code runs on the dev agent.
+
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: "req-omn23521-pin-without-lab-overlay"
+    statement: "The deploy agent delivers the onex-api pin on an instance that disables the lab-overlay phase, and runs no k3s apply there."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the deploy agent builds the onex-api image and delivers its pin when the lab-overlay phase is disabled for the instance, and runs no k3s apply, kubeconfig or containerd step in that case -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23521.py fails on the unchanged agent, where disabling lab-overlay skips the pin delivery"
+      - id: "AC2"
+        statement: "AC2: an instance that still runs the lab-overlay phase keeps the apply followed by the pin delivery unchanged, and an instance that disables the onex-api pin phase delivers nothing -- falsifier: the same test file, the unchanged-apply and pin-disabled cases, fail if either path changes"
+      - id: "AC3"
+        statement: "AC3: integrated: with lab-overlay listed in disabled_phases for the dev instance in config/deploy_lane_routing.yaml, the deploy agent rolls dev from a tag carrying the change, the job log shows no apply_lab_lane.sh step and an onex-api delivery result, and the dev onex-api container runs the pinned image -- falsifier: the job record's onex_api_delivery is absent or the job log names apply_lab_lane.sh after the roll"
+evidence_requirements:
+  - kind: "tests"
+    description: "The new pin tests and the settle, applier and instance tests pass."
+    command: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23521.py scripts/deploy-agent/tests/unit/test_settle_releases_dev_lane_omn19501.py scripts/deploy-agent/tests/unit/test_lab_overlay_omn18200.py scripts/deploy-agent/tests/unit/test_lab_overlay_repair_build_omn18545.py -q -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn23521-ac1-pin-without-overlay"
+    description: "With lab-overlay disabled the settle builds the onex-api image and delivers the pin, and runs no apply; the applier method runs one docker build and no k3s step. Fails on the unchanged agent (3 of 5 fail)."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23521.py -k 'disabled_still_delivers or runs_only_the_api or refuses_another' -q -p no:cacheprovider"
+        cwd: "."
+  - id: "dod-omn23521-ac2-unchanged-paths"
+    description: "The apply-then-pin path and the pin-phase-disabled path are unchanged."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23521.py -k 'keeps_apply_then_pin or pin_phase_disabled' -q -p no:cacheprovider"
+        cwd: "."
+  - id: "dod-omn23521-ac3-integration-proof"
+    description: "After the routing table turns lab-overlay off for the dev instance and the dev agent rolls a tag carrying this change, the job record carries an onex_api_delivery and the job log has no apply_lab_lane.sh. Read on the dev host through the deploy agent; hosted CI cannot reach it, so only the local Done gate runs this unbound check."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "command"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_pin_without_lab_overlay_omn23521.py -q -p no:cacheprovider"
+        cwd: "."
