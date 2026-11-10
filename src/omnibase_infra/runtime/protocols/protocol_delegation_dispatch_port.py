@@ -96,7 +96,7 @@ class ProtocolDelegationDispatchPort(Protocol):
         # OMN-19448 / omnimarket#4252: consumer trace and queue-wait context.
         # Defaulted, per the note above, so a consumer that never passes them
         # keeps working.
-        trace_id: UUID | None = None,
+        trace_id: "UUID | None" = None,
         queue_wait_ms: int | None = None,
         # OMN-23162: a synthetic probe's ladder. The consumer passes it only
         # when the request carries one; defaulted, per the note above. The

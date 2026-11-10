@@ -18,13 +18,13 @@ requirements:
       The omnidash sibling pin carries a commit whose page documents declare a reader for onex.snapshot.projection.local-alerts.v1, so exposure-reader-coverage reads the reader omnidash#498 wrote instead of the surface at the OMN-20331 pin of 2026-10-02, and the sha is the same in the pins file and in every inline omnidash checkout ref.
     acceptance:
       - id: AC2
-        statement: "AC2: the omnidash sibling pin and every inline omnidash checkout ref carry 42e51834d00067d325686a404f6391dd1fe0b9fd -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnidash_sibling_pin_advance_omn19991.py tests/ci/test_sibling_reads_pinned_omn20331.py -q"
+        statement: "AC2: the omnidash sibling pin and every inline omnidash checkout ref carry 495717931612719c29d22cce5578a53e93441462 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnidash_sibling_pin_advance_omn19991.py tests/ci/test_sibling_reads_pinned_omn20331.py -q"
 evidence_requirements:
   - kind: tests
     description: Infra deployment half only; the vendored bytes, ledger checksums, classes, fence and interim declaration match the pinned omnimarket source.
     command: uv run pytest tests/unit/migrations/test_omn19986_omn19991_local_identity_alerts_vendor.py -q
   - kind: tests
-    description: The omnidash sibling pin and every inline omnidash checkout ref carry 42e51834d00067d325686a404f6391dd1fe0b9fd.
+    description: The omnidash sibling pin and every inline omnidash checkout ref carry 495717931612719c29d22cce5578a53e93441462.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnidash_sibling_pin_advance_omn19991.py tests/ci/test_sibling_reads_pinned_omn20331.py -q"
 emergency_bypass:
   enabled: false
@@ -40,7 +40,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn19991-ac2-omnidash-pin-42e51834d000
-    description: The omnidash sibling pin and every inline omnidash checkout ref carry 42e51834d00067d325686a404f6391dd1fe0b9fd, the commit whose System status page document declares the local-alerts reader. It does not prove the reader renders; that is omnidash's own contract.
+    description: The omnidash sibling pin and every inline omnidash checkout ref carry 495717931612719c29d22cce5578a53e93441462, the commit whose Overview reads delegation.daily.v1 (OMN-21970), the reader the omnimarket pin's projection exposure needs. It does not prove the reader renders; that is omnidash's own contract.
     source: manual
     checks:
       - check_type: test_passes
