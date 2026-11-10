@@ -163,7 +163,7 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "topic",
         "onex.cmd.omnimarket.work-ledger-query-requested.v1",
         "literal",
-        ("write", "describe"),
+        ("read", "write", "describe"),
     ),
     (
         "topic",
@@ -989,7 +989,12 @@ def test_compaction_replies_are_not_implicitly_granted_to_other_principals() -> 
 
 
 def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> None:
-    """A query writes one request and reads one terminal under its own prefix."""
+    """A query writes one request and reads one terminal under its own prefix.
+
+    OMN-23418: the same prefix reads the request topic too (READ is the one added row), so
+    the seam deadline probe can measure when a request reached the broker; the client still
+    produces no result and the runtime's own group is not under the prefix.
+    """
     bindings = shipped_bindings()
     prefix = "local.omnimarket.work_ledger_query_client.consume.v1."
     request = "onex.cmd.omnimarket.work-ledger-query-requested.v1"
@@ -1009,6 +1014,7 @@ def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> N
         for binding in query_bindings
     } == {
         (BROKER, request, "produce", None),
+        (BROKER, request, "consume", prefix + "call"),
         (BROKER, terminal, "consume", prefix + "call"),
     }
     before = bindings.model_copy(
@@ -1021,6 +1027,7 @@ def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> N
     )
     expected = {
         (BROKER, "TOPIC", request, "LITERAL", "WRITE"),
+        (BROKER, "TOPIC", request, "LITERAL", "READ"),
         (BROKER, "TOPIC", request, "LITERAL", "DESCRIBE"),
         (BROKER, "TOPIC", terminal, "LITERAL", "READ"),
         (BROKER, "TOPIC", terminal, "LITERAL", "DESCRIBE"),

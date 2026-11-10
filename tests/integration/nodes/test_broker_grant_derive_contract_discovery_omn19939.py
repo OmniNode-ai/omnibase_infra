@@ -166,7 +166,8 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
     # OMN-22103: plus READ and DESCRIBE on the three per-principal reply topics.
     # OMN-23395: plus READ, WRITE and DESCRIBE on the two landing decision topics
     # and READ and DESCRIBE on the two chain group prefixes.
-    assert len(rows) == 175
+    # OMN-23418: plus READ on the work-ledger query command topic.
+    assert len(rows) == 176
     assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
     assert {row.operation for row in rows if row.name == "*"} == {"describe"}
     scoped_expected = {
