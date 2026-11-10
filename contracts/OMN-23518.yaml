@@ -4,9 +4,7 @@ title: The lab environment's shared library moves to the version the automatic w
 summary: 'omnibase_infra raises its omnibase-spi floor from 0.23.12 to 0.23.15 in the dependency list and the uv override, and uv.lock resolves 0.23.15 from the package index (omnibase-core unchanged). The reason: the floor fill orchestrator in omnimarket imports ModelLaneProcessRunResult, which 0.23.14 does not carry, and the lab dispatch venv is built from this lock. The fallback version matrix, the runner image identity and the pin tests move with it. No release is cut.'
 is_seam_ticket: true
 interface_change: false
-interfaces_touched:
-  - public_api
-  - infrastructure
+interfaces_touched: []
 requirements:
   - id: req-omn23518-spi-lock
     statement: The omnibase_infra lock resolves an omnibase-spi that carries the lane process types the floor fill orchestrator imports, and every follower of the pin agrees.
