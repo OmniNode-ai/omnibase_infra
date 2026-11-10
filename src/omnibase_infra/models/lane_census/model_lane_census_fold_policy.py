@@ -23,7 +23,6 @@ import copy
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 __all__ = ["ENV_RUNTIME_POLICY", "fold_manifest", "folded_service_names"]
 
@@ -62,7 +61,7 @@ def folded_service_names(path: Path) -> tuple[str, frozenset[str]]:
     profiles = [p.strip() for p in values.get(_FOLDED_KEY, "").split(",") if p.strip()]
     foldable_raw = values.get(_FOLDABLE_KEY, "")
     try:
-        foldable: Any = json.loads(foldable_raw) if foldable_raw else {}
+        foldable: object = json.loads(foldable_raw) if foldable_raw else {}
     except ValueError as exc:
         raise ValueError(f"{_FOLDABLE_KEY} is not valid JSON: {exc}") from exc
     if not isinstance(foldable, dict) or not all(
@@ -78,20 +77,30 @@ def folded_service_names(path: Path) -> tuple[str, frozenset[str]]:
 
 
 def fold_manifest(
-    manifest: dict[str, Any], environ: Mapping[str, str]
-) -> dict[str, Any]:
+    manifest: dict[str, object], environ: Mapping[str, str]
+) -> dict[str, object]:
     """A copy of ``manifest`` with the policy's folded services read as profile_gated."""
     explicit = environ.get(ENV_RUNTIME_POLICY, "").strip()
     project, shorts = folded_service_names(
         Path(explicit) if explicit else _DEFAULT_POLICY
     )
     folded = copy.deepcopy(manifest)
-    for spec in folded.get("lanes", {}).values():
-        if not project or spec.get("compose_project") != project:
+    lanes = folded.get("lanes")
+    if not isinstance(lanes, dict):
+        return folded
+    for spec in lanes.values():
+        if not isinstance(spec, dict) or not project:
             continue
-        for svc in spec.get("services", []):
-            if svc.get("kind", "service") == "service" and any(
-                svc["name"].endswith(f"-{short}") for short in shorts
+        if spec.get("compose_project") != project:
+            continue
+        services = spec.get("services")
+        if not isinstance(services, list):
+            continue
+        for svc in services:
+            if (
+                isinstance(svc, dict)
+                and svc.get("kind", "service") == "service"
+                and any(str(svc["name"]).endswith(f"-{short}") for short in shorts)
             ):
                 svc["kind"] = "profile_gated"
     return folded
