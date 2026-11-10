@@ -264,8 +264,8 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # The machine profile (OMN-21622) adds write on the twelve work-ledger row events the
     # hook-emit drainer publishes and on credential registration, and on no command topic.
     # The landing decision chain (OMN-23395) adds write on the decision node's command topic and
-    # its success terminal, which the chain tests serve themselves; the failure terminal is not
-    # granted.
+    # its success terminal, which the chain tests serve themselves; the failure terminal is
+    # granted too (OMN-23459), so the principal may publish the node's decision or error.
     # The lane ticket mint (OMN-23410) adds write on the ticket node's command topic only; the
     # principal cannot write either terminal.
     # The floor projection snapshots (OMN-23402) add write on the two snapshot topics the
@@ -310,6 +310,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.cmd.omniintelligence.context-compaction-requested.v1",
         "onex.cmd.omnimarket.pr-landing-decision-requested.v1",
         "onex.evt.omnimarket.pr-landing-decision-completed.v1",
+        "onex.evt.omnimarket.pr-landing-decision-failed.v1",
         "onex.cmd.omnimarket.linear-ticket-write-requested.v1",
         "onex.snapshot.projection.floor-owner-map.v1",
         "onex.snapshot.projection.floor-overlay-store-fleet.v1",
