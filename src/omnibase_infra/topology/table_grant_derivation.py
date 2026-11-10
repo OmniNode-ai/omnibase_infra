@@ -93,6 +93,15 @@ PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
     }
 )
 
+# Relations whose vendored migration also grants DELETE, which no ``access`` mode
+# derives. The reservations table is released or expired by deleting its rows
+# (OMN-23055, node_gate_store_effect/0001). Each is declared as a separate
+# PRUNE_PRIVILEGES grant beside the derived one, so no grant carries a
+# non-canonical privilege set; expire with the gate store bridge.
+PRUNED_RELATIONS: frozenset[tuple[str, str]] = frozenset(
+    {("omninode_internal", "gate_store_reservations")}
+)
+
 # Mirrors ``_projection_operation_bindings``. PLATFORM_CATALOG is absent by
 # design: that domain requires a caller-supplied read/write binding, so a
 # contract declaration alone cannot name the principal. Such declarations are
@@ -312,6 +321,16 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "node_projection_demo_readiness",
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
+    ),
+    # OMN-23055: node_gate_store_effect/0000 creates the four gate store relations and
+    # 0001 grants omninode_runtime on them ahead of the omnimarket node contract
+    # reaching the pin (the node's contract declares no db_io binding: the store opens
+    # its own connection); expire this bridge when that contract reaches the pin.
+    *(
+        _vendored_read_write(
+            f"gate_store_{s}", "node_gate_store_effect", "0000_create_gate_store.sql"
+        )
+        for s in ("state", "reservations", "safety", "steps")
     ),
     # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
@@ -596,73 +615,57 @@ def derive_table_grants(
     # contract that declares the same relation.
     required: dict[tuple[str, str, str], set[EnumDatabasePrivilege]] = {}
     unmappable: dict[tuple[str, str, str], UnmappableDeclaration] = {}
+    pruned: set[tuple[str, str, str]] = set()
+
+    def refuse(declaration: ContractTableDeclaration, reason: str) -> None:
+        table = declaration.table
+        unmappable.setdefault(
+            (table.database_ref, table.schema, table.name),
+            UnmappableDeclaration(
+                node=declaration.node,
+                database_ref=table.database_ref,
+                schema=table.schema,
+                name=table.name,
+                reason=reason,
+            ),
+        )
 
     for declaration in declarations:
         table = declaration.table
-        key = (table.database_ref, table.schema, table.name)
         if table.database_ref != database_ref:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=(
-                        f"database_ref {table.database_ref!r} is not declared in "
-                        "the application topology"
-                    ),
-                ),
+            refuse(
+                declaration,
+                f"database_ref {table.database_ref!r} is not declared in "
+                "the application topology",
             )
             continue
         schema = database.schemas.get(table.schema)
         if schema is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=f"schema {table.schema!r} is not declared in the topology",
-                ),
+            refuse(
+                declaration,
+                f"schema {table.schema!r} is not declared in the topology",
             )
             continue
         binding_ref = DOMAIN_PROJECTION_BINDINGS.get(schema.domain)
         if binding_ref is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=(
-                        f"domain {schema.domain.value} requires an explicit "
-                        "caller-supplied binding and cannot be derived from a "
-                        "contract declaration alone"
-                    ),
-                ),
+            refuse(
+                declaration,
+                f"domain {schema.domain.value} requires an explicit "
+                "caller-supplied binding and cannot be derived from a "
+                "contract declaration alone",
             )
             continue
         binding = database.bindings.get(binding_ref)
         if binding is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=f"topology declares no binding {binding_ref!r}",
-                ),
-            )
+            refuse(declaration, f"topology declares no binding {binding_ref!r}")
             continue
         grant_schema = physical_grant_schema_for_table(table.schema, table.name)
         entry = required.setdefault(
             (binding.principal, grant_schema, table.name), set()
         )
         entry.update(_privileges_for_access(table.access))
+        if (table.schema, table.name) in PRUNED_RELATIONS:
+            pruned.add((binding.principal, grant_schema, table.name))
 
     grants: dict[str, tuple[ModelDeploymentTopologyDatabaseGrant, ...]] = {}
     # Group by (principal, schema, privilege set) so each principal carries at
@@ -672,6 +675,12 @@ def derive_table_grants(
         privilege_key = tuple(sorted(privilege.value for privilege in privileges))
         grouped.setdefault(principal, {}).setdefault(
             (schema_name, privilege_key), []
+        ).append(table_name)
+
+    prune_key = tuple(sorted(privilege.value for privilege in PRUNE_PRIVILEGES))
+    for principal, schema_name, table_name in pruned:
+        grouped.setdefault(principal, {}).setdefault(
+            (schema_name, prune_key), []
         ).append(table_name)
 
     for principal in sorted(grouped):
