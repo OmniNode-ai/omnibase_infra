@@ -32,11 +32,13 @@ RO = "dev-ro-lab-host"
 GITHUB_WRITE_TOPIC = "onex.cmd.omnimarket.github-repo-write-requested.v1"
 # Command topics whose consumers append ledger rows or change a pull request on the
 # publisher's behalf: a write on them is a ledger or GitHub mutation by another route. The
-# ticket node's command (OMN-23410) mints a Linear ticket on the publisher's behalf.
+# ticket node's command (OMN-23410) mints a Linear ticket on the publisher's behalf, as does
+# the floor task ticket node's command (OMN-23471).
 CONSUMER_WRITES = (
     "onex.cmd.omnimarket.pr-handoff-requested.v1",
     "onex.cmd.omnimarket.pr-polish-start.v1",
     "onex.cmd.omnimarket.linear-ticket-write-requested.v1",
+    "onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1",
 )
 READ_ONLY_ROW = {
     "principal": "dev-ro-lab-host",
