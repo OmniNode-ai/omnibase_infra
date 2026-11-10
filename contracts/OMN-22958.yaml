@@ -1,0 +1,37 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22958
+title: The package announcer admits an entry point whose import package the lane lists as active, so the dev runtime serves GET /api/v1/patterns
+summary: ONEX_ACTIVE_RUNTIME_PACKAGES names import packages (omniintelligence) while the package ships as the distribution omninode-intelligence. The announcer compared the distribution name alone, so every omniintelligence entry point was left out of the boot catalog and the runtime never mounted the http_mount of node_pattern_storage_effect; GET /api/v1/patterns stayed 404 on the dev runtime after the entry points were kept in the image. The announcer now admits an entry point when either its distribution or the import package it loads is listed. The live dev read follows the deploy agent's roll of the merged tag.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22958-announce
+    statement: An entry point whose import package the lane lists as active is announced even when its distribution carries another name, and a package the lane does not list stays out.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the announcer admits omniintelligence under the distribution omninode-intelligence when the lane lists omniintelligence, and excludes it when the lane does not -- falsifier: uv run pytest tests/unit/handlers/test_package_announcer_active_package_omn22958.py -q, which fails on the merge base's announcer"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22958-ac1-announce
+    description: The announcer's inventory read keeps the omniintelligence entry point listed by import package and still drops a package the lane does not list; the first case fails on the merge base. The live read of GET /api/v1/patterns on the dev runtime follows the deploy agent's roll of the merged tag.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_package_announcer_active_package_omn22958.py tests/unit/runtime/test_boot_step0_catalog.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22958-deploy-probe
+    description: Hosted-runner probe reads the announcer from GitHub at the checked-out commit and requires the helper that matches an entry point by its import package. The live read of GET /api/v1/patterns on the dev runtime follows the deploy agent's roll of the merged tag.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_package_announcer.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q '_entry_point_is_active'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
