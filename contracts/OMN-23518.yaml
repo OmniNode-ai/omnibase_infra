@@ -1,0 +1,58 @@
+schema_version: 1.0.0
+ticket_id: OMN-23518
+title: The lab environment's shared library moves to the version the automatic work-filler needs
+summary: 'omnibase_infra raises its omnibase-spi floor from 0.23.12 to 0.23.15 in the dependency list and the uv override, and uv.lock resolves 0.23.15 from the package index (omnibase-core unchanged). The reason: the floor fill orchestrator in omnimarket imports ModelLaneProcessRunResult, which 0.23.14 does not carry, and the lab dispatch venv is built from this lock. The fallback version matrix, the runner image identity and the pin tests move with it. No release is cut.'
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - public_api
+  - infrastructure
+requirements:
+  - id: req-omn23518-spi-lock
+    statement: The omnibase_infra lock resolves an omnibase-spi that carries the lane process types the floor fill orchestrator imports, and every follower of the pin agrees.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra''s pyproject carries omnibase-spi>=0.23.15,<0.24.0 in the dependency list and the uv override, uv.lock resolves omnibase-spi 0.23.15 from the package index with omnibase-core unchanged, and the runner image identity and fallback version matrix agree -- falsifier: run tests/ci/test_uv_lock_spi_pin_omn13902.py and scripts/ci/runner_image_identity.py --mode verify at the merge base; the test fails there (lock names 0.23.14)'
+      - id: AC2
+        statement: 'AC2: the lock''s omnibase-spi provides ModelLaneProcessRunResult, the type the floor fill orchestrator imports -- falsifier: import it from an environment built from the merge-base lock; the import raises ImportError'
+      - id: AC3
+        statement: 'AC3: integrated: after the change merges, the host-reconcile repair tick on h051 brings the dispatch venv to omnibase_spi 0.23.15 by itself, and the fill''s shadow tick on h051 runs without the import error -- falsifier: read omnibase_spi''s version in the dispatch venv on h051 and the unit''s journal line; 0.23.14 or the ImportError means not done'
+evidence_requirements:
+  - kind: tests
+    description: The pin tests and the seam import test pass at the head and fail at the merge base.
+    command: uv run --frozen pytest tests/ci/test_uv_lock_spi_pin_omn13902.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23518-ac1-pin
+    description: AC1. The pyproject floor, the lock, the fallback matrix and the runner image identity agree on omnibase-spi 0.23.15; the pin tests fail at the merge base, whose lock names 0.23.14.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_uv_lock_spi_pin_omn13902.py -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify && uv run --frozen python scripts/update_version_matrix.py --check
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23518-ac2-import-seam
+    description: AC2. The locked omnibase-spi provides the three names node_floor_fill_orchestrator/orchestration/ports.py imports; the seam test raises ImportError in an environment holding 0.23.14.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_uv_lock_spi_pin_omn13902.py -q --no-cov -p no:cacheprovider -k lane_process
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23518-ac3-integrated
+    description: 'Integrated: after the merge, the host-reconcile repair tick on h051 moves the dispatch venv to 0.23.15 and the fill''s shadow tick runs without the import error; read on h051 and recorded in the pull request comment that names the head. Not claimed by the pull request itself.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_uv_lock_spi_pin_omn13902.py -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
