@@ -948,7 +948,9 @@ def health_probe_reading(container: ModelDevBootContainer) -> dict[str, JsonValu
             "end": probe.get("End"),
             "exit_code": probe.get("ExitCode"),
             "output": " ".join(
-                sanitize_error_string(probe.get("Output", "")).replace("|", " ").split()
+                sanitize_error_string(str(probe.get("Output", "")))
+                .replace("|", " ")
+                .split()
             ),
         }
         for probe in health.get("Log", [])
