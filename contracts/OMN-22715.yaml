@@ -1,0 +1,34 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22715
+title: The local_environment delete grant is vendored in omnibase_infra ahead of the observer retirement change in omnimarket
+summary: >-
+  Vendors node_projection_local_environment migration 0003 (the tenant_projection_writer DELETE grant on public.local_environment) with its checksum-bound ledger row and its migration class, and extends the vendoring test to pin 0003 to the digest of the omnimarket node copy. omnimarket's Sibling Release Compatibility Gate refuses the retirement change until the pinned omnibase_infra revision carries this file byte-identical.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22715-vendor-0003
+    statement: >-
+      The omnibase_infra vendored copy of node_projection_local_environment migration 0003 is byte-identical to the omnimarket node copy and is bound by a ledger row and a migration class.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the vendored 0003 hashes to the digest of the omnimarket node copy, has exactly one checksum-bound ledger row and the expand-only class -- falsifier: uv run pytest tests/unit/migrations/test_omn19988_local_environment_vendor.py -q --no-cov fails for the 0003 cases at the merge base and when one byte is appended to the vendored file
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0003 bytes, ledger row and class, and its digest pinned to the omnimarket copy.
+    command: uv run pytest tests/unit/migrations/test_omn19988_local_environment_vendor.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22715-ac1-vendor-binding
+    description: The vendoring test binds the 0003 bytes to the ledger row and the expand-only class; with one line appended to the vendored 0003 it fails, restored it passes.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn19988_local_environment_vendor.py -q --no-cov
+        cwd: .

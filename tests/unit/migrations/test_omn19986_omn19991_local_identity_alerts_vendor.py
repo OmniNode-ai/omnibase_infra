@@ -123,7 +123,18 @@ def test_only_the_force_step_is_fenced(table: str, node: str) -> None:
     assert f"node:{node}:0001_grant_tenant_projection_writer_{table}.sql" not in ids
 
 
-@pytest.mark.parametrize(("table", "node"), _TABLES)
+#: local_alerts left the interim declarations when the pinned omnimarket
+#: contract began declaring the relation; only local_identity is still bridged.
+_STILL_BRIDGED = [(table, node) for table, node in _TABLES if table != "local_alerts"]
+
+
+def test_the_retired_local_alerts_interim_declaration_is_gone() -> None:
+    declared = {entry.table.name for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS}
+    assert "local_alerts" not in declared
+    assert "local_identity" in declared
+
+
+@pytest.mark.parametrize(("table", "node"), _STILL_BRIDGED)
 def test_the_interim_grant_declaration_names_the_vendored_create(
     table: str, node: str
 ) -> None:

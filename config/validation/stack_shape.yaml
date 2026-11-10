@@ -71,7 +71,6 @@ not_a_stack:
   - docker/docker-compose.model-review-canary.yml
   - docker/docker-compose.principal-issuer.yml
   - docker/docker-compose.pypi-cache.yml
-  - docker/docker-compose.pypi-canary.yml
   - docker/docker-compose.runners*.yml
 # Commands extend the same gate. Exact argv fingerprints are SHA256 of compact,
 # ASCII JSON argv arrays; the full command and entrypoint remain in compose.
@@ -374,16 +373,6 @@ command_baseline:
     files: 1
     argv_sha256: c89680a1c95ad0b0bd8e2a571a6a28930c64c4c0e68c382a2a2b1c47d2b18b25
     command_hint: python /app/dogfood_delegation_fault_provider.py
-  - service: infra-routing-decisions-consumer
-    field: command
-    files: 1
-    argv_sha256: 00ad7d712962e4c395883d778505ef04524dda86a61ceaf293d61e8332659948
-    command_hint: python -m
-  - service: intelligence-api
-    field: command
-    files: 1
-    argv_sha256: b6b340a065b2ac1f0ab85864a12148dc1320ea9d86e5b57646b53c170a1ebd7f
-    command_hint: uvicorn omniintelligence.api.app:create_app
   - service: omninode-contract-resolver
     field: command
     files: 1
@@ -734,12 +723,6 @@ baseline:
     ticket: OMN-21288
   - service: factory-floor-web
     files: 1
-    ticket: OMN-21288
-  - service: infra-routing-decisions-consumer
-    files: 4
-    ticket: OMN-21288
-  - service: intelligence-api
-    files: 7
     ticket: OMN-21288
   - service: omninode-contract-resolver
     files: 7

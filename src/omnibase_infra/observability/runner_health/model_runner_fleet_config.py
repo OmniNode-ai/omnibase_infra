@@ -41,10 +41,11 @@ class ModelRunnerFleetConfig(BaseModel):
     runner_host: str = Field(..., min_length=1)
     runner_group: str = Field(..., min_length=1)
     runner_name_prefix: str = Field(..., min_length=1)
-    expected_count: int = Field(..., ge=1)
+    # OMN-22898: zero is legal. The host then declares no general pool, only its other pools.
+    expected_count: int = Field(..., ge=0)
     burst_count: int | None = Field(
         default=None,
-        ge=1,
+        ge=0,
         description="Optional maximum runner count enabled only by the compose burst profile.",
     )
     network_pool_capacity: int = Field(

@@ -167,6 +167,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
 )
 
 
+# A vendored relation whose role, node dir and create file follow the table.
 def _vendored_read_write(
     table: str,
     node_dir: str | None = None,
@@ -177,7 +178,6 @@ def _vendored_read_write(
     access: Literal["read", "write", "read_write"] = "read_write",
     role: str | None = None,
 ) -> ContractTableDeclaration:
-    """A vendored relation whose role, node dir and create file follow the table."""
     migration = f"docker/migrations/forward/nodes/{node_dir or f'node_projection_{table}'}/{create_file or f'0000_create_{table}.sql'}"
     return ContractTableDeclaration(
         node=node or f"legacy_migration:{table}",
@@ -333,29 +333,12 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ("compaction_current_context", None),
         )
     ),
-    # OMN-19991: the local_alerts bridge was DELETED by the pin advance to
-    # 6eb582222a76, which declares the relation.
     # OMN-19986: the same window for node_projection_local_identity/0000-0002,
     # the API Keys page's local identity. 0001 grants tenant_projection_writer
     # SELECT, INSERT, UPDATE. Retired when omnimarket's
     # node_projection_local_identity contract merges and the pin advances past
     # it; the expiry module names it.
-    *(_vendored_read_write(t, schema="public") for t in ("local_identity",)),
-    # OMN-21970: the same infra-first window. This repo vendors
-    # node_projection_delegation 0067's projection_delegation_daily view ahead of
-    # the omnimarket contract that declares it (access read, role aggregate_daily),
-    # which lands after this release: the node's wiring check refuses a contract
-    # whose relation no release grants. 0067 grants tenant_projection_writer
-    # SELECT. Retired when that contract merges and the pin advances past it; the
-    # expiry module names it.
-    _vendored_read_write(
-        "projection_delegation_daily",
-        "node_projection_delegation",
-        "0067_delegation_daily_view.sql",
-        schema="public",
-        access="read",
-        role="aggregate_daily",
-    ),
+    _vendored_read_write("local_identity", schema="public"),
     # OMN-22320: node_projection_work_questions/0000 creates five
     # omninode_internal tables ahead of the omnimarket writer's contract and
     # 0001 grants omninode_runtime SELECT, INSERT, UPDATE on each. Retired
@@ -484,11 +467,21 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # that change can merge. The table's own trigger refuses every UPDATE and
     # DELETE. Retired when the contract merges and the omnimarket pin advances
     # past it; the OMN-18863 expiry module names this bridge.
-    _vendored_read_write(
-        "ledger_line_citation",
-        "node_projection_work_ledger",
-        "0007_work_ledger_history_import.sql",
-        access="write",
+    # OMN-23152: infra vendors the work-ledger sequence migrations (0007 creates
+    # work_ledger_seq_conflicts and the unique ledger_seq index, 0008 grants the
+    # runtime SELECT, INSERT, UPDATE and never DELETE) ahead of the omnimarket
+    # change whose node_projection_work_ledger contract declares the relation
+    # with write access. Its auto-wiring refuses a principal with no declared
+    # privilege, so this grant must exist before that change can merge. The
+    # writer only inserts a conflict row. Retired when the contract merges and
+    # the omnimarket pin advances past it; the OMN-18863 expiry module names
+    # this bridge.
+    *(
+        _vendored_read_write(t, "node_projection_work_ledger", f, access="write")
+        for t, f in (
+            ("ledger_line_citation", "0007_work_ledger_history_import.sql"),
+            ("work_ledger_seq_conflicts", "0009_work_ledger_seq_unique.sql"),
+        )
     ),
 )
 

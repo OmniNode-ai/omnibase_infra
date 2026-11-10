@@ -49,8 +49,21 @@ runner_name_prefix: omninode-runner
 # surplus runners are removed by `deploy-runners.sh --retire-surplus`
 # (idle-checked, one at a time, creds volumes kept), never by a recreate that
 # could kill a job.
-expected_count: 10
-burst_count: 10
+#
+# OMN-22898 (operator, 2026-11-09 about 15:10Z, "h201 swaps all the time, take
+# its CI runners off first"): the primary host's general pool is cut 10 -> 0.
+# The action fleet is the 16-runner CI pool on the second amd64 host (declared
+# below) and the five `hp053-ci-runner` runners on h053, which carry the same labels
+# (`omnibase-ci`, `omnibase-ci-multiarch`, `arch-amd64`). The host keeps its
+# verify, deploy, prod-deploy and customer-plane runners: they are pinned by
+# label to this host's docker daemon and lanes. The primary host's repair timer
+# (docker/runners/runner-monitor.sh) recreates a missing runner only up to
+# these counts, so the removal is made here and in the compose file, not by
+# hand; `deploy-runners.sh --retire-surplus` then retires the ten that are
+# still running, idle-checked, one at a time. `declared_total("action")` was 31
+# before this cut (10 + 16 + 5) and is 21 after it (16 on the second amd64 host, 5 on h053).
+expected_count: 0
+burst_count: 0
 # OMN-17477 — DECLARED HOST INVENTORY.
 #
 # The five scalar fields above describe ONE host, which is what the fleet was
@@ -103,7 +116,11 @@ hosts:
   - host: omninode-pc.tail75df5e.ts.net
     arch: amd64
     runner_name_prefix: omninode-runner
-    expected_count: 10
+    # OMN-22898: no general runner on this host any more. The row stays because
+    # the scalar fields above describe it and the pools below hang from it; the
+    # classes stay so a general runner added back here counts toward the right
+    # fleets, and at zero they add nothing to `declared_total`.
+    expected_count: 0
     # OMN-19998: `omnibase-ci-multiarch` is in this pool's RUNNER_LABELS too.
     classes: [action, action-multiarch]
     # OMN-19895 -- the primary host's other runner families, declared so the
@@ -133,6 +150,15 @@ hosts:
     runner_name_prefix: omnipc2-verify-runner
     expected_count: 1
     classes: [verify]
+    # OMN-22898 -- the action pool below is now the largest share of the action
+    # fleet (16 of 21). A three-runner merge-queue project also ran on this
+    # host from a compose file kept in a lane directory; it is declared nowhere
+    # in this inventory on purpose. The merge-queue class is declared on h051
+    # and h053 only, and this host's verify and customer-plane runners stay
+    # declared here: the verify runner is pinned by its host label to the
+    # docker daemon of this host's own dev lane, and the customer-plane runner
+    # is the second host `runner-pool-spread.yml` needs for that label.
+    #
     # OMN-19895 -- .202 takes a share of the action fleet and a second
     # customer-plane runner, so neither label relies on the primary host alone.
     # The earlier "verify class only" rule above protected the model server and
@@ -252,9 +278,12 @@ network_pool_warn_ratio: 0.8
 # STATUS 2026-08-14: cache SERVICE LIVE, canary WIRED, fleet NOT yet activated.
 #   - devpi service is up and healthy on the runner host (container
 #     omninode-pypi-cache, 22G warmed corpus, index HTTP 200).
-#   - A 3-runner canary (omninode-runner-2/4/5) is wired via
+#   - A 3-runner canary (omninode-runner-2/4/5) was wired via
 #     docker/docker-compose.pypi-canary.yml and verified by container-env
-#     readback. Runbook step 3 is DONE.
+#     readback (runbook step 3). OMN-22898 retired those runners with the rest
+#     of the primary host's general pool, which ended the canary: the override
+#     file and its compose-overrides.list entry are removed and canary_runners
+#     is empty. The soak this gate needs restarts on a runner that still exists.
 #   - `active` stays false because it means FLEET-ACTIVE. Runbook step 5 gates
 #     the fleet on measured canary acceptance (hit rate >= target_hit_rate, p95
 #     `uv sync` wall time, zero UV_HTTP_TIMEOUT failures under high-concurrency
@@ -269,12 +298,9 @@ network_pool_warn_ratio: 0.8
 # Runbook: knowledge-base:runbooks/pypi-cache-egress-rollout.md.
 pypi_cache:
   active: false
-  # Runners currently wired at the cache via docker/docker-compose.pypi-canary.yml.
-  # Empty once the canary graduates to the fleet or is rolled back.
-  canary_runners:
-    - omninode-runner-2
-    - omninode-runner-4
-    - omninode-runner-5
+  # Runners wired at the cache by a canary compose override. Empty: the canary
+  # ended when its runners were retired (OMN-22898).
+  canary_runners: []
   # Tailscale MagicDNS host + published port, matching runner_host above so the
   # endpoint does not depend on the runner host's current LAN/Tailscale IP.
   host: omninode-pc.tail75df5e.ts.net

@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to 6eb582222a76dd2f42c61e5cd3f6f19c5a0d0417"
+title: "The omnimarket contract pin advances to 03400eb9131c19bb1333ee65a1ad20cb86125ead"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,7 +10,7 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 6eb582222a76dd2f42c61e5cd3f6f19c5a0d0417 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 03400eb9131c19bb1333ee65a1ad20cb86125ead -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
@@ -32,7 +32,7 @@ requirements:
     statement: The runtime image upgrades filelock and npm's bundled undici past their HIGH CVEs, so the Trivy scan in Build runtime stability-candidate no longer fails on dev.
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 6eb582222a76dd2f42c61e5cd3f6f19c5a0d0417.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 03400eb9131c19bb1333ee65a1ad20cb86125ead.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
@@ -58,7 +58,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 6eb582222a76dd2f42c61e5cd3f6f19c5a0d0417.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 03400eb9131c19bb1333ee65a1ad20cb86125ead.
     source: manual
     checks:
       - check_type: test_passes
@@ -66,7 +66,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn-17292-ac1-pin-advance-bridges-retired
-    description: The six supplemental table declarations the advanced omnimarket pin now carries stay deleted from this repository; the merge base has no such test.
+    description: The eight supplemental table declarations the advanced omnimarket pin now carries stay deleted from this repository; the merge base has no such test.
     source: manual
     checks:
       - check_type: test_passes
@@ -171,3 +171,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_contract_retired_labels_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2, AC3, AC4]
+  - id: dod-omn-17292-interim-entries-retired-at-pin
+    description: The omnimarket pin advance makes the supplemental table declarations for context_audit_events, local_alerts, overlay_store and view_seam_readings redundant, so they are absent from the declaration tuple and the expiry test passes against the pinned contracts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py tests/ci/test_retired_interim_declarations_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

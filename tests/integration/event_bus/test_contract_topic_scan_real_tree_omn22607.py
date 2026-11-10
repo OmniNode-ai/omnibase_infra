@@ -17,6 +17,7 @@ provisioner or the validator sees.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -116,3 +117,23 @@ def test_a_kafka_start_scans_the_real_tree_once_per_distinct_request(
     assert required == tuple(sorted({entry.topic for entry in fresh})), (
         "the stored scan must hand the validator exactly the topics a fresh scan finds"
     )
+
+
+def test_the_real_tree_scan_logs_one_line_and_a_reused_scan_logs_none(
+    real_extract_calls: list[Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    nodes = Path(omnibase_infra.__file__).resolve().parent / "nodes"
+    with caplog.at_level(
+        logging.INFO, logger="omnibase_infra.models.event_bus.model_contract_topic_scan"
+    ):
+        TopicProvisioner(bootstrap_servers=_BOOTSTRAP, contracts_root=nodes)
+        TopicProvisioner(bootstrap_servers=_BOOTSTRAP, contracts_root=nodes)
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if "contract topic scan ran" in r.getMessage()
+    ]
+    assert len(real_extract_calls) == 1
+    assert len(lines) == 1, lines
+    assert "topics=" in lines[0]
