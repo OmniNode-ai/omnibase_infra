@@ -36,7 +36,10 @@ from omnibase_infra.models.model_dev_boot_point import ModelDevBootPoint
 from omnibase_infra.models.model_dev_boot_report_config import ModelDevBootReportConfig
 from omnibase_infra.models.model_dev_boot_request import ModelDevBootRequest
 from omnibase_infra.models.model_dev_boot_result import ModelDevBootResult
-from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
+)
 
 logger = logging.getLogger(__name__)
 DEV_BOOT_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
@@ -827,8 +830,16 @@ class HandlerDevBootGuard:
             # the guard was built with, not the ones the failed candidate runs.
             self.services = self._retained_services
             boot_causes: list[str] = []
+            # OMN-23431: recovery recreates the failed container, which destroys
+            # Docker's probe history; keep it on the incident first.
+            health_probes: list[JsonValue] = []
             try:
                 for container in self._containers():
+                    reading = health_probe_reading(container)
+                    health_probes.append(reading)
+                    summary = health_probe_summary(reading)
+                    if summary is not None:
+                        boot_causes.append(summary)
                     logs = _checked(
                         ["docker", "logs", "--tail", "80", container["Id"]],
                         execution=self.execution,
@@ -863,6 +874,7 @@ class HandlerDevBootGuard:
                 "recovery_verified": False,
                 "ledger_pending": True,
                 "exception_pending": True,
+                "health_probes": health_probes,
             }
             path = self.root / f"incident-{job}.json"
             # Best effort reporting must never get in front of lane recovery.
@@ -923,6 +935,61 @@ class HandlerDevBootGuard:
                 f"commit={commit}: {reason}; forward redeploy revision={self.point.current.revision} "
                 f"verified={incident['recovery_verified']}"
             ) from exc
+
+
+def health_probe_reading(container: ModelDevBootContainer) -> dict[str, JsonValue]:
+    """Docker's own record of one container's boot health, as inspect reported it."""
+    state = container.get("State", {})
+    health = state.get("Health", {})
+    declared = container["Config"].get("Healthcheck", {})
+    probes: list[JsonValue] = [
+        {
+            "start": probe.get("Start"),
+            "end": probe.get("End"),
+            "exit_code": probe.get("ExitCode"),
+            "output": " ".join(
+                sanitize_error_string(probe.get("Output", "")).replace("|", " ").split()
+            ),
+        }
+        for probe in health.get("Log", [])
+    ]
+    return {
+        "service": container["Config"]["Labels"].get("com.docker.compose.service"),
+        "container": container["Id"][:12],
+        "status": state.get("Status"),
+        "started_at": state.get("StartedAt"),
+        "exit_code": state.get("ExitCode"),
+        "oom_killed": state.get("OOMKilled"),
+        "restart_count": container.get("RestartCount"),
+        "health_status": health.get("Status"),
+        "failing_streak": health.get("FailingStreak"),
+        "healthcheck": {
+            "start_period_ns": declared.get("StartPeriod"),
+            "interval_ns": declared.get("Interval"),
+            "retries": declared.get("Retries"),
+            "timeout_ns": declared.get("Timeout"),
+        },
+        "probes": probes,
+    }
+
+
+def health_probe_summary(reading: Mapping[str, JsonValue]) -> str | None:
+    """One line naming a not-healthy container's last probe, or None when healthy."""
+    if reading.get("health_status") == "healthy":
+        return None
+    line = (
+        f"{reading.get('service')} health={reading.get('health_status')} "
+        f"streak={reading.get('failing_streak')} started={reading.get('started_at')} "
+        f"restarts={reading.get('restart_count')} oom={reading.get('oom_killed')}"
+    )
+    probes = reading.get("probes")
+    last = probes[-1] if isinstance(probes, list) and probes else None
+    if not isinstance(last, dict):
+        return f"{line} last_probe=none"
+    return (
+        f"{line} last_probe={last.get('start')} exit={last.get('exit_code')} "
+        f"{last.get('output')}"
+    )
 
 
 def causes_from_logs(logs: str) -> str:

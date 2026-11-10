@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-23431
+title: A failed dev roll keeps Docker's probe reading of each runtime container on its boot-guard incident
+summary: >-
+  Deploy agent job 0135046e failed with "Waiting container omninode-runtime is unhealthy" 171 s after the new container started under a 1800 s start period; the boot guard then recreated the container on the retained image, destroying Docker's health log, and the incident kept only compose stderr, so the failing probe could not be read. The guard now records, before recovery, each runtime container's health status, failing streak, every probe's start, end, exit code and output, StartedAt, exit code, OOM flag, restart count and declared healthcheck timings in the incident's health_probes, and names a not-healthy container's last probe in the failure reason. The cause of the 0135046e unhealthy verdict is not named by this change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23431-probe-reading
+    statement: A failed dev roll's incident carries the Docker probe reading of each runtime container, taken before recovery replaces it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the reason omninode-runtime went unhealthy in job 0135046e is named from the deploy agent's job record and a reproduction of the boot at that ref (the failing health probe and the error line), and whether the absent runtime-effects service is by design (RULING 2026-11-02T15:02:01Z, one runtime) or a loss, read from the lane manifest and its history -- falsifier: the boot of the same ref in a scratch compose project"
+evidence_requirements:
+  - kind: tests
+    description: The boot guard keeps the probe reading on a failed roll's incident; the same tests fail on the parent commit.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_probe_reading_omn23431.py tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23431-ac1-probe-reading
+    description: >-
+      A failed roll whose runtime container reports unhealthy with five failing probes writes an incident whose health_probes holds that container's streak, StartedAt and the five probe outputs, and whose error names the last probe's output; an unreadable docker logs call still keeps the reading. On the parent commit the four tests fail (no health_probe_reading; the error ends "is unhealthy;; forward redeploy").
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_probe_reading_omn23431.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

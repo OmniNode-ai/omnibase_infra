@@ -17,3 +17,4 @@ class ModelDevBootContainer(TypedDict):
     Image: str
     Config: ModelDevBootContainerConfig
     State: NotRequired[ModelDevBootState]
+    RestartCount: NotRequired[int]
