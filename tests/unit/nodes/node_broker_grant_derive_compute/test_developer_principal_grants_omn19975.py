@@ -347,6 +347,36 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ),
     ("group", "receipt-mode-client.", "prefixed", ("read", "describe")),
 )
+# The landing decision chain (OMN-23395): the piece 9 chain tests serve the landing decision
+# node over the dev lane as the machine's issued principal, so it produces and consumes the
+# node's command topic and its success terminal, each read under a run-named group prefix.
+# The failure terminal is not used by the chain and is not granted.
+LANDING_DECISION_COMMAND = "onex.cmd.omnimarket.pr-landing-decision-requested.v1"
+LANDING_DECISION_SUCCESS = "onex.evt.omnimarket.pr-landing-decision-completed.v1"
+LANDING_DECISION_FAILURE = "onex.evt.omnimarket.pr-landing-decision-failed.v1"
+LANDING_DECISION_GROUP_PREFIXES: tuple[str, ...] = (
+    "landing-chain-node-",
+    "landing-chain-controller-",
+)
+LANDING_DECISION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", LANDING_DECISION_COMMAND, "literal", ("read", "write", "describe")),
+    ("topic", LANDING_DECISION_SUCCESS, "literal", ("read", "write", "describe")),
+    *(
+        ("group", prefix, "prefixed", ("read", "describe"))
+        for prefix in LANDING_DECISION_GROUP_PREFIXES
+    ),
+)
+# The lane ticket mint (OMN-23410): a lab lane's principal asks the ticket node for the child
+# ticket its pull request needs. It writes the node's command topic and reads the completed and
+# failed terminals; it gets no write on either terminal, so it cannot answer for the node.
+TICKET_WRITE_COMMAND = "onex.cmd.omnimarket.linear-ticket-write-requested.v1"
+TICKET_WRITE_COMPLETED = "onex.evt.omnimarket.linear-ticket-write-completed.v1"
+TICKET_WRITE_FAILED = "onex.evt.omnimarket.linear-ticket-write-failed.v1"
+TICKET_WRITE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", TICKET_WRITE_COMMAND, "literal", ("write", "describe")),
+    ("topic", TICKET_WRITE_COMPLETED, "literal", ("read", "describe")),
+    ("topic", TICKET_WRITE_FAILED, "literal", ("read", "describe")),
+)
 # The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
 # its own hook events to the dev lane, so the lab projections (claude_hook_events among
 # them) see every person's sessions and not only the operator's. These are the
@@ -434,7 +464,11 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
     return {
         (BROKER, resource.upper(), name, pattern.upper(), operation.upper())
         for resource, name, pattern, operations in (
-            TYPED_GRANTS + DECLARED_GRANTS + HOOK_EDGE_GRANTS
+            TYPED_GRANTS
+            + DECLARED_GRANTS
+            + LANDING_DECISION_GRANTS
+            + TICKET_WRITE_GRANTS
+            + HOOK_EDGE_GRANTS
         )
         for operation in operations
     }
@@ -666,6 +700,52 @@ def test_the_dod_closeout_grants_are_declared_and_nothing_wider() -> None:
         ("TOPIC", "onex.evt.omnimarket.dod-closeout-sweep-decided.v1", "READ"),
         ("TOPIC", "onex.evt.omnimarket.dod-closeout-sweep-decided.v1", "DESCRIBE"),
     }
+
+
+def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
+    """The chain may produce and consume the decision command and its success terminal.
+
+    A prefix is the grant for the run-named groups, and the lab runtime's own group for
+    the node starts with neither prefix. The failure terminal is not granted.
+    """
+    rows = derive(shipped_bindings())
+    landing = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "pr-landing-decision" in resource or "landing-chain" in resource
+    }
+    assert landing == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in LANDING_DECISION_GRANTS
+        for operation in operations
+    }
+    assert not any(row[2] == LANDING_DECISION_FAILURE for row in rows)
+    runtime_group = "local.omnimarket.node_pr_landing_decision_compute.consume.v1"
+    assert not any(
+        runtime_group.startswith(prefix) for prefix in LANDING_DECISION_GROUP_PREFIXES
+    )
+
+
+def test_the_lane_ticket_mint_grants_are_declared_and_nothing_wider() -> None:
+    """A lane may write the ticket node's command and read its two terminals, and no more.
+
+    The principal gets no write on either terminal, so it cannot answer a request for the node.
+    """
+    rows = derive(shipped_bindings())
+    ticket = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "linear-ticket-write" in resource
+    }
+    assert ticket == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in TICKET_WRITE_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] in (TICKET_WRITE_COMPLETED, TICKET_WRITE_FAILED) and row[4] == "WRITE"
+        for row in rows
+    )
 
 
 def test_committed_derived_grants_are_the_nodes_output() -> None:
