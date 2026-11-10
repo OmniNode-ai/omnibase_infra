@@ -172,7 +172,8 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
     # OMN-23459: plus READ, WRITE and DESCRIBE on the landing decision failure terminal.
     # OMN-23458: plus READ, WRITE and DESCRIBE on the landing snapshot record topic, WRITE and
     # DESCRIBE on its failure topic, and READ and DESCRIBE on the two snapshot group prefixes.
-    assert len(rows) == 201
+    # OMN-23418: plus READ on the work-ledger query command topic.
+    assert len(rows) == 202
     assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
     assert {row.operation for row in rows if row.name == "*"} == {"describe"}
     scoped_expected = {

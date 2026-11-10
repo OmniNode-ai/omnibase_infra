@@ -432,6 +432,13 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimarket.work-ledger-query-requested.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.work-ledger-query-requested.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },
