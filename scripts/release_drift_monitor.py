@@ -105,34 +105,12 @@ class RepoConfig:
     release_synced_note: str = ""
 
 
-# Default monitor set. onex_change_control publishes nothing to PyPI, so its
-# PyPI-based checks are skipped (pypi_package=None) -- only override-drift and
-# workflow health apply there.
+# Default monitor set.
 DEFAULT_REPOS: tuple[RepoConfig, ...] = (
     RepoConfig("omnibase_core", "omnibase-core"),
     RepoConfig("omnibase_infra", "omnibase-infra"),
     RepoConfig("omnibase_spi", "omnibase-spi"),
-    RepoConfig("omnibase_compat", "omnibase-compat"),
     RepoConfig("omnimarket", "omnimarket"),
-    # OMN-18348: onex_change_control is NOT release-synced. It carries no
-    # release.yml on dev or on main (verified 2026-09-18 against both refs),
-    # and its `main` is a deliberately separate lineage -- the CODEOWNERS-gated
-    # grants anchor the prod-promotion gate resolves from, which is why
-    # compare/main...dev reports diverged (dev ahead 7019, main ahead 90)
-    # rather than a fast-forward. Nothing promotes dev to main there, so
-    # MAIN_BEHIND_RELEASED and DEV_AHEAD_OF_MAIN fired on every run since the
-    # monitor was built and could never be cleared by any release. The repo
-    # stays in the monitor set: its PyPI, override-drift and workflow-health
-    # checks still apply and still fire.
-    RepoConfig(
-        "onex_change_control",
-        None,
-        release_synced=False,
-        release_synced_note=(
-            "no release.yml on dev or main; main is a separate CODEOWNERS-gated "
-            "lineage (the prod-promotion grants anchor), not the last release"
-        ),
-    ),
 )
 
 
