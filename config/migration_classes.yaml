@@ -142,6 +142,8 @@ migrations:
   forward/nodes/node_deployment_evidence_reducer/0002_grant_omninode_runtime_deployment_evidence_tables.sql: expand-only
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
   forward/nodes/node_evidence_dashboard_reducer/0002_grant_omninode_runtime_evidence_dashboard_tables.sql: expand-only
+  forward/nodes/node_gate_store_effect/0000_create_gate_store.sql: forward-only # CREATE TABLE IF NOT EXISTS, CREATE INDEX IF NOT EXISTS and one seeded singleton row for the four gate store relations
+  forward/nodes/node_gate_store_effect/0001_grant_omninode_runtime_gate_store.sql: expand-only # GRANT to omninode_runtime on the four gate store relations
   forward/nodes/node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql: forward-only # ALTER TABLE ALTER COLUMN; CREATE OR REPLACE
   forward/nodes/node_gateway_link_health_write_effect/0002_revoke_omninode_runtime_gateway_link_health_status.sql: forward-only # REVOKE
   forward/nodes/node_gateway_link_health_write_effect/0003_grant_omninode_runtime_gateway_link_health.sql: expand-only
@@ -286,6 +288,7 @@ migrations:
   forward/nodes/node_projection_delegation/0066_delegation_events_projection_cursor.sql: forward-only # ALTER TABLE ADD COLUMN (BIGSERIAL numbers existing rows); SET NOT NULL; CREATE UNIQUE INDEX; GRANT USAGE ON SEQUENCE
   forward/nodes/node_projection_delegation/0067_delegation_daily_view.sql: forward-only # CREATE OR REPLACE VIEW (new); ALTER VIEW SET (security_invoker); GRANT SELECT
   forward/nodes/node_projection_delegation/0068_delegation_summary_excludes_experiment.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
+  forward/nodes/node_projection_delegation/0069_delegation_events_turn_count.sql: expand-only
   forward/nodes/node_projection_delegation_capability_map/0000_create_delegation_capability_cells.sql: forward-only
   forward/nodes/node_projection_delegation_capability_map/0001_grant_tenant_projection_writer_delegation_capability_cells.sql: expand-only
   forward/nodes/node_projection_delegation_capability_map/0002_force_rls_delegation_capability_cells.sql: forward-only
