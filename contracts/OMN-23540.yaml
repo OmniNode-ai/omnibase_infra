@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-23540"
 title: "The update agent sends its liveness message in the background so a silent broker cannot stall it"
 summary: >
-  The deploy agent's idle tick published the dev-tag heartbeat (omnibase_infra#5028, OMN-19998) with a synchronous KafkaProducer send and flush, so a broker that accepts the connection and never answers held the tick for the producer's 60 second metadata wait. On h201, where the dev lane's broker listens on localhost:19092, the deploy-agent dependency convergence test timed out at its 10 second wait for that reason. DeployAgent._record_dev_tag_heartbeat now starts the publish on its own one-shot thread (threading.Timer of 0 seconds) and records the published time at once, so the tick returns and the 15 minute interval holds the next send back; one attempt, no retry, as the publisher documents. No timeout, topic or interval changed. The change is net zero in code lines in agent.py, a baselined file (canonical-file-shape ratchet): the dev-tag lag bookkeeping above it is two lines shorter.
+  The deploy agent's idle tick published the dev-tag heartbeat (omnibase_infra#5028, OMN-19998) with a synchronous KafkaProducer send and flush, so a broker that accepts the connection and never answers held the tick for the producer's 60 second metadata wait. On h201, where the dev lane's broker listens on localhost:19092, the deploy-agent dependency convergence test timed out at its 10 second wait for that reason. DeployAgent._record_dev_tag_heartbeat now starts the publish on its own daemon thread and records the published time at once, so the tick returns and the 15 minute interval holds the next send back; while a send is still running no second one starts, and the published time is cleared so an alarm change that arrived meanwhile goes out at the next tick after the hung send ends; the thread is a daemon, so a hung send cannot hold the process at exit; one attempt, no retry, as the publisher documents. No timeout, topic or interval changed. The change is net zero in code lines in agent.py, a baselined file (canonical-file-shape ratchet): the dev-tag lag bookkeeping above it is two lines shorter.
 
 is_seam_ticket: true
 interface_change: false
@@ -30,7 +30,7 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn23540-off-tick-publish"
-    description: "The new test file: with the publish blocked on an event the idle tick returns within 5 seconds (it fails at the merge base, where the tick is held by the publish; that hold is what timed out the dependency convergence test on h201), a second tick inside the interval starts no second publish, a published heartbeat is recorded, and a refused send does not stop the tick."
+    description: "The new test file: with the publish blocked on an event the idle tick returns within 5 seconds (it fails at the merge base, where the tick is held by the publish; that hold is what timed out the dependency convergence test on h201), a second tick inside the interval starts no second publish, an alarm change while a send hangs starts no second send and is sent once the first ends, the send runs on a daemon thread, a published heartbeat is recorded, and a refused send does not stop the tick."
     source: "manual"
     binds_ac: ["AC1", "AC2", "AC3", "AC4"]
     checks:

@@ -4,7 +4,9 @@
 
 The synchronous Kafka send+flush used to run on the tick; where a broker
 accepts the TCP connection and never answers it blocks 60 seconds. The send
-now runs on its own daemon thread, so a blocked publish cannot hold the tick.
+now runs on its own daemon thread, so a blocked publish cannot hold the tick or a
+stop, and while one is still running no second send starts (and an alarm change
+that arrived meanwhile is sent as soon as the first one ends).
 """
 
 from __future__ import annotations
@@ -141,3 +143,62 @@ def test_a_failed_publish_does_not_stop_the_tick_and_the_next_interval_sends_aga
     agent._maybe_idle_converge()
     _join(agent)
     assert calls == 2
+
+
+def test_the_publish_runs_on_a_daemon_thread(
+    agent: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    daemon_flags: list[bool] = []
+
+    def publish(payload: dict[str, Any], config: Any) -> bool:
+        daemon_flags.append(threading.current_thread().daemon)
+        return True
+
+    monkeypatch.setattr(agent_mod, "publish_dev_tag_heartbeat", publish)
+    agent._idle_converge_now = lambda: NEW_CUT + timedelta(hours=2, minutes=5)
+    agent._idle_read_running_ref = lambda repo: "2" * 40
+    agent._idle_read_dev_tags = lambda repo: TAGS
+    agent._idle_running_contains = lambda repo, ancestor, running: False
+
+    agent._maybe_idle_converge()
+    _join(agent)
+
+    assert daemon_flags == [True]  # a non-daemon thread would hold the process at exit
+
+
+def test_an_alarm_change_while_a_send_hangs_starts_no_second_send_and_is_sent_after(
+    agent: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = threading.Event()
+    payloads: list[dict[str, Any]] = []
+    running = {"ref": "2" * 40}
+
+    def publish(payload: dict[str, Any], config: Any) -> bool:
+        payloads.append(payload)
+        if len(payloads) == 1:
+            release.wait(30.0)  # the broker accepts the connection and never answers
+        return True
+
+    monkeypatch.setattr(agent_mod, "publish_dev_tag_heartbeat", publish)
+    now = NEW_CUT + timedelta(hours=2, minutes=5)
+    agent._idle_converge_now = lambda: now
+    agent._idle_read_running_ref = lambda repo: running["ref"]
+    agent._idle_read_dev_tags = lambda repo: TAGS
+    agent._idle_running_contains = lambda repo, ancestor, running_ref: False
+
+    try:
+        agent._maybe_idle_converge()  # the alarm is raised: the first send hangs
+        running["ref"] = TAGS[-1].sha  # the lane catches up: the alarm clears
+        agent._idle_converge_last_check = None
+        agent._idle_converge_now = lambda: now + timedelta(minutes=1)
+        agent._maybe_idle_converge()  # the change must not start a second send
+        assert len(payloads) == 1
+    finally:
+        release.set()
+        _join(agent)
+
+    agent._idle_converge_last_check = None
+    agent._idle_converge_now = lambda: now + timedelta(minutes=2)
+    agent._maybe_idle_converge()  # the hung send ended: the cleared alarm goes out
+    _join(agent)
+    assert [p["alarm"] for p in payloads] == [True, False]

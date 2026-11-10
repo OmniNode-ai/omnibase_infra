@@ -159,8 +159,9 @@ class TestHeartbeat:
 
 def _join(agent: Any) -> None:
     """Wait for the heartbeat publish the idle tick handed to its own thread (OMN-23540)."""
+    send = getattr(agent, "_dev_tag_heartbeat_send", None)
     for thread in threading.enumerate():
-        if isinstance(thread, threading.Timer):
+        if thread is send or isinstance(thread, threading.Timer):
             thread.join(timeout=5.0)
 
 
