@@ -322,6 +322,8 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.snapshot.projection.floor-overlay-store-fleet.v1",
         "onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1",
         "onex.evt.omnimarket.pr-landing-snapshot-failed.v1",
+        "onex.evt.omnimarket.pr-landing-tick-compared.v1",
+        "onex.evt.omnimarket.pr-landing-tick-compare-failed.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 
