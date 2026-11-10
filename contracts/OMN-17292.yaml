@@ -188,7 +188,7 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn-17292-omnidash-pin-carries-delegation-daily-reader
+  - id: dod-omn-17292-omnidash-pin-delegation-daily-reader
     description: The omnidash sibling pin and its inline checkout refs carry 495717931612719c29d22cce5578a53e93441462, the commit whose Overview reads delegation.daily.v1, so exposure-reader-coverage finds a reader for the exposure the omnimarket pin declares.
     source: manual
     checks:
