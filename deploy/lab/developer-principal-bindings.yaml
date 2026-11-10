@@ -41,10 +41,13 @@
 # THE LEDGER READ PATH: a machine publishes the query node's request and reads its
 # completed terminal. Query replies use `local.omnimarket.work_ledger_query_client.consume.v1.`
 # plus a per-call suffix, separate from runtime command-consumer groups. The caller
-# cannot consume query commands or produce query results.
+# cannot produce query results. OMN-23418: it reads the query command topic only to
+# measure when a request arrived (the seam deadline probe reads the responder's
+# receive time); the lab runtime's own consumer group for the query node does not start with the
+# client prefix, so a developer principal cannot join it and take commands.
 # OMN-20740: `onex ledger query --bus-lane dev --stdin` is the caller for
 # ONEX_LEDGER_BUS_READ_COMMAND (ledger-ask and catchup --source db). Its packaged
-# work_ledger_query_client.contract.yaml is checked against these six grants;
+# work_ledger_query_client.contract.yaml is checked against these seven grants;
 # apply-grants can install them for an existing issued identity without rotation.
 #
 # PR HANDOFF: `onex work-ledger handoff` publishes one request and reads acceptance or
@@ -175,6 +178,13 @@
 # below is the grant for those groups. The lab runtime's own group for that reader,
 # `<env>.omnimarket.node_floor_projection_read_effect.consume.v1`, does not start with
 # the prefix, so a developer principal cannot join it.
+# FLOOR TASK TICKET MINT (OMN-23471): a lab lane's principal asks the floor task ticket node
+# (omnimarket node_floor_task_ticket_effect) for the one ticket of a floor task with
+# `onex run-node node_floor_task_ticket_effect`. It writes the node's command topic and reads the
+# completed terminal, under the per-call group `local.omnibase_core.cli_run_node.consume.v1.<id>`
+# that run-node derives (the group prefix below is the grant; the lab runtime's own group for the node,
+# `<env>.omnimarket.node_floor_task_ticket_effect.consume.v1`, does not start with it). The principal
+# gets no write on the terminal, so it cannot answer for the node, and no grant on any Linear credential.
 # LANDING SNAPSHOT RECORD (OMN-23458): the landing snapshot step (omnimarket
 # node_pr_landing_snapshot_effect) runs on the controller's host as the host's issued
 # principal and publishes each tick's record on `onex.evt.omnimarket.
@@ -199,6 +209,7 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-append-completed.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_append_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-append-failed.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_append_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.work-ledger-query-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.work-ledger-query-requested.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_query_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-query-completed.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_query_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-handoff-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-handoff-accepted.v1, direction: consume, consumer_group: pr-handoff-request.call}
@@ -287,6 +298,8 @@ bindings:
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-owner-map.v1, direction: consume, consumer_group: node_floor_projection_read_effect.call}
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-overlay-store-fleet.v1, direction: produce}
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-overlay-store-fleet.v1, direction: consume, consumer_group: node_floor_projection_read_effect.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.floor-task-ticket-mint-completed.v1, direction: consume, consumer_group: local.omnibase_core.cli_run_node.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, direction: consume, consumer_group: landing-snapshot-join-call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, direction: consume, consumer_group: landing-tick-orchestrator-call}
@@ -305,6 +318,7 @@ group_prefixes:
   - {broker: dev, prefix: landing-chain-node-}
   - {broker: dev, prefix: landing-chain-controller-}
   - {broker: dev, prefix: node_floor_projection_read_effect.}
+  - {broker: dev, prefix: local.omnibase_core.cli_run_node.consume.v1.}
   - {broker: dev, prefix: landing-snapshot-join-}
   - {broker: dev, prefix: landing-tick-orchestrator-}
 described_groups:
