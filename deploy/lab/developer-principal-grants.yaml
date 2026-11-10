@@ -48,6 +48,7 @@ read_only_withholds:
   - onex.cmd.omnimarket.pr-handoff-requested.v1
   - onex.cmd.omnimarket.pr-polish-start.v1
   - onex.cmd.omnimarket.linear-ticket-write-requested.v1
+  - onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1
 # OPERATOR-CONSENT 2026-10-25T02:09:09Z, rolling ledger line 3204:
 # h105 only; dev only; terminal reads, no command writes or credential changes.
 principal_grants_from:
