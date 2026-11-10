@@ -268,6 +268,8 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # granted.
     # The lane ticket mint (OMN-23410) adds write on the ticket node's command topic only; the
     # principal cannot write either terminal.
+    # The floor projection snapshots (OMN-23402) add write on the two snapshot topics the
+    # owner map publisher and the overlay store fleet reader publish.
     writable = [g for g in declaration.grants if "write" in g.operations]
     hook_edge = {g.name for g in writable if g.name.startswith("onex.evt.omniclaude.")}
     assert len(hook_edge) == 29
@@ -309,6 +311,8 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.cmd.omnimarket.pr-landing-decision-requested.v1",
         "onex.evt.omnimarket.pr-landing-decision-completed.v1",
         "onex.cmd.omnimarket.linear-ticket-write-requested.v1",
+        "onex.snapshot.projection.floor-owner-map.v1",
+        "onex.snapshot.projection.floor-overlay-store-fleet.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 
