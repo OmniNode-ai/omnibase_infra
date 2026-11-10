@@ -1,18 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-18200 AC7 -- the rebuild trigger actually contains the lab-overlay caller.
+"""OMN-18200 lab-overlay record reader, after the k3s overlay job was retired.
 
-AC7 is written the way it is because the defect being closed is *a rule that only
-a runbook implements*. Rule 24(a) said the k3s ``onex-lab`` overlay is re-applied
-from every runtime-affecting merge; ``k8s/onex-lab/apply_lab_lane.sh`` had zero
-callers in the org, so the sentence was true of nothing. A test that asserted the
-applier module's behaviour alone would have passed just as happily with the module
-wired to nothing at all.
-
-So this file asserts the GRAPH: that the workflow has a job which reads the
-agent's record and emits the receipt, that the artifact name it uploads is the one
-the gate queries, and that the emitter cannot be skipped. Each assertion names the
-specific way the 2026-09-11 state stayed invisible.
+The ``verify-lab-overlay-converged`` job that called the reader, and the k3s
+receipt it emitted, were removed from the rebuild trigger on the operator's
+2026-11-10 ruling that the dead lab Kubernetes pod step is retired (OMN-23508).
+The graph assertions that pinned that job live on as the absence assertions in
+``test_retired_k3s_lab_overlay_job_omn23422.py``. What stays here is what still
+exists: the deploy agent's own overlay apply, the reader script, and the
+distinct artifact keys of the receipt lanes.
 """
 
 from __future__ import annotations
@@ -21,76 +17,19 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
-import yaml
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "runtime-rebuild-trigger.yml"
 READER = REPO_ROOT / "scripts" / "ci" / "fetch_lab_overlay_record.py"
-JOB = "verify-lab-overlay-converged"
-LANE = "onex-lab-k3s"
 SHA = "a" * 40
 
 
-@pytest.fixture(scope="module")
-def workflow() -> dict[str, Any]:
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-
-
-@pytest.fixture(scope="module")
-def job(workflow: dict[str, Any]) -> dict[str, Any]:
-    jobs = workflow["jobs"]
-    assert JOB in jobs, (
-        f"{WORKFLOW.name} carries no {JOB!r} job. Rule 24(a)'s onex-lab half is "
-        "then documentation again: apply_lab_lane.sh had zero callers on "
-        "2026-09-11 and the lane sat three days stale under a green trigger."
-    )
-    return jobs[JOB]
-
-
-def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
-    return list(job["steps"])
-
-
-def _step_text(job: dict[str, Any]) -> str:
-    return json.dumps(_steps(job))
-
-
-# --------------------------------------------------------------------------- #
-# AC7 -- the caller exists in the graph                                       #
-# --------------------------------------------------------------------------- #
-def test_the_job_invokes_the_record_reader(job: dict[str, Any]) -> None:
-    """The job must call the reader by path. Without this the receipt would be
-    emitted from checks nothing produced."""
-    assert "scripts/ci/fetch_lab_overlay_record.py" in _step_text(job)
-
-
-def test_the_job_passes_repo_and_a_token_for_descendant_tolerance(
-    job: dict[str, Any],
-) -> None:
-    """OMN-18399: the reader's descendant-tolerance fallback resolves ancestry
-    via `gh api compare`, which needs both a repo slug and a token -- without
-    either, an intermediate merge sha under a busy dev branch can never obtain
-    a record and the onex-lab job times out (measured: runs 34966998273,
-    34969084464, 34976826412)."""
-    text = _step_text(job)
-    assert "--repo" in text
-    assert "github.repository" in text
-    assert "GH_TOKEN" in text
-
-
-def test_the_job_emits_the_receipt_on_the_k3s_lane(job: dict[str, Any]) -> None:
-    text = _step_text(job)
-    assert "lab_pass_receipt.py emit" in text
-    assert f"--lane {LANE}" in text
-
-
-def test_the_apply_itself_is_wired_in_the_agent(job: dict[str, Any]) -> None:
-    """The host-side half. The record this job reads is written by the deploy
+def test_the_apply_itself_is_wired_in_the_agent() -> None:
+    """The host-side half. The overlay record is written by the deploy
     agent, and the agent must actually call the overlay's own apply script --
     never a retyped kubectl sequence, which is the drift k8s/onex-lab exists to
     refuse."""
@@ -109,96 +48,6 @@ def test_the_apply_itself_is_wired_in_the_agent(job: dict[str, Any]) -> None:
     # OMN-19501: the call now passes the settle worker's own sha, stamp and
     # capture as keywords, so count the call site, not one argument spelling.
     assert agent.count("self._apply_lab_overlay(") == 1
-
-
-def test_the_uploaded_artifact_name_matches_what_the_gate_queries(
-    job: dict[str, Any],
-) -> None:
-    """The name IS the key. A receipt uploaded under any other name is a receipt
-    the gate cannot find, which reads exactly like one that was never emitted."""
-    sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
-    try:
-        from lab_pass_receipt import EnumLabLane, artifact_name
-    finally:
-        sys.path.pop(0)
-
-    expected = artifact_name(EnumLabLane.ONEX_LAB_K3S, SHA)
-    assert expected == f"lab-pass-receipt-{LANE}-{SHA}"
-
-    uploads = [
-        step for step in _steps(job) if "upload-artifact" in str(step.get("uses", ""))
-    ]
-    assert len(uploads) == 1
-    name = uploads[0]["with"]["name"]
-    assert name.startswith(f"lab-pass-receipt-{LANE}-")
-    assert "source_sha" in name, "the artifact must be keyed by the merged sha"
-    assert uploads[0]["with"]["if-no-files-found"] == "error"
-
-
-# --------------------------------------------------------------------------- #
-# AC2's shape on this lane -- the emitter cannot be skipped                    #
-# --------------------------------------------------------------------------- #
-def test_the_emit_and_upload_steps_run_on_both_outcomes(job: dict[str, Any]) -> None:
-    """The regressed condition in run 34657547387 was a SKIPPED verify job under a
-    green run. A skipped emitter produces "nobody ran it" while meaning "it
-    failed", and those are the two states the receipt exists to tell apart."""
-    for step in _steps(job):
-        name = str(step.get("name", ""))
-        if "Emit" in name or "Upload" in name or "Read the deploy agent" in name:
-            assert step.get("if") == "always()", name
-
-
-def test_the_job_runs_even_when_compose_convergence_failed(job: dict[str, Any]) -> None:
-    condition = " ".join(str(job["if"]).split())
-    assert condition.startswith("always()"), (
-        "without always() a failed compose convergence guard skips this job, and "
-        "the lab lane's state goes unrecorded in exactly the window it matters"
-    )
-    # Still scoped: a no-op trigger has nothing to wait for, and a merge to main
-    # targets stability-test, which is not a lab surface.
-    assert "published == 'true'" in condition
-    assert "runtime_lane == 'dev'" in condition
-
-
-def test_the_job_waits_for_the_compose_convergence_guard(job: dict[str, Any]) -> None:
-    """Ordering is load-bearing. The agent applies the overlay only after its own
-    verify, so polling before the convergence guard returns would poll a record
-    that cannot exist yet."""
-    assert job["needs"] == ["trigger-rebuild", "verify-lane-converged"]
-
-
-def test_the_job_runs_on_the_overlay_pool_and_reads_the_overlay_agent(
-    job: dict[str, Any],
-) -> None:
-    """The agent's HTTP surface is on the lab LAN, so hosted compute cannot see it.
-
-    OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify` (the
-    35-minute ceiling is OMN-18200 AC1's budget and competed with the
-    release-train deploy there). It then carried `host-201` and read the agent
-    through that runner's `host.docker.internal` alias. OMN-19894 (operator
-    rulings 2026-09-28T01:58:06Z and 01:58:17Z) removed that host pin. The job
-    runs on the overlay's lab pool and reads the agent at the `deploy_agent_url`
-    that the overlay declares for the lane whose agent applies the onex-lab
-    overlay. A loopback or gateway alias would name a different machine on every
-    runner, and the resolver refuses both.
-    """
-    assert job["runs-on"] == "${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}"
-    text = _step_text(job)
-    assert "host.docker.internal" not in text
-    assert "localhost" not in text
-    assert "./.github/actions/resolve-lab-lane" in text
-    assert "${{ env.LANE_DEPLOY_AGENT_URL }}" in text
-
-
-def test_the_checkout_is_pinned_to_the_trusted_base_ref(job: dict[str, Any]) -> None:
-    """Never the merge ref: a merged fork PR would put fork-authored code on the
-    self-hosted fleet."""
-    checkouts = [
-        step for step in _steps(job) if "actions/checkout" in str(step.get("uses", ""))
-    ]
-    assert len(checkouts) == 1
-    assert checkouts[0]["with"]["ref"] == "${{ github.event.pull_request.base.ref }}"
-    assert checkouts[0]["with"]["persist-credentials"] is False
 
 
 # --------------------------------------------------------------------------- #

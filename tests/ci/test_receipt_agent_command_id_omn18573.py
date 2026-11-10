@@ -74,11 +74,10 @@ OBSERVED_SHA = "78bbba2f9b28cf11ef8dccf45e07a251381700d4"
 EMITTING_JOBS: dict[Path, set[str]] = {
     REPO_ROOT / ".github/workflows/runtime-rebuild-trigger.yml": {
         "verify-lane-converged",
-        "verify-lab-overlay-converged",
     },
-    # One emitter, not two: the reusable has no onex-lab-k3s job at all. The lab
-    # overlay is applied by omnibase_infra's own caller, so there is no second
-    # invocation here that could deliberately omit the argument (AC2).
+    # One emitter in the reusable. The k3s lab overlay job (OMN-23422) is
+    # retired, so there is no second invocation here that could deliberately
+    # omit the argument (AC2).
     REPO_ROOT / ".github/workflows/runtime-rebuild-trigger-reusable.yml": {
         "verify-sibling-converged",
     },
