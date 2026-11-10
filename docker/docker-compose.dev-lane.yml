@@ -1173,8 +1173,15 @@ services:
       - "com.omninode.service=runtime-worker"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # OMN-21288 (T16): primary dev serves the contract resolver from main (the
+  # node_contract_resolver_bridge http_mount). The container of the previous
+  # revision starts under no profile a lane bring-up requests, and the deploy
+  # handler retires it by name (retired_services in the runtime policy). It
+  # stays declared here, not in the fold overlay, so the stack-shape baseline
+  # count does not grow.
   omninode-contract-resolver:
     build: *dev_lane_composed_runtime_build
+    profiles: !override ["folded-contract-resolver"]
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
   # ===========================================================================
@@ -1239,12 +1246,26 @@ services:
   #
   # A stanza here and not a base edit: the base is merged by four other lanes
   # whose brokers offer no SASL handshake.
+  # OMN-23043: primary dev runs the agent actions projection inside main as
+  # node_projection_agent_actions, which names this consumer's group under
+  # consumer_group_handover. The container of the previous revision starts under
+  # no profile a lane bring-up requests, and the deploy handler retires it by
+  # name (retired_services in the runtime policy). It stays declared here, not
+  # in the fold overlay, so the stack-shape baseline count does not grow.
   agent-actions-consumer:
     build: *dev_lane_composed_runtime_build
+    profiles: !override ["folded-agent-actions"]
     environment:
       !!merge <<: *dev_lane_broker_auth_env
+  # OMN-21933 (T12): primary dev runs the skill lifecycle projection inside main
+  # as node_projection_skill_lifecycle, which names this consumer's group under
+  # consumer_group_handover. The container of the previous revision starts under
+  # no profile a lane bring-up requests, and the deploy handler retires it by
+  # name (retired_services in the runtime policy). It stays declared here, not
+  # in the fold overlay, so the stack-shape baseline count does not grow.
   skill-lifecycle-consumer:
     build: *dev_lane_composed_runtime_build
+    profiles: !override ["folded-skill-lifecycle"]
     environment:
       !!merge <<: *dev_lane_broker_auth_env
   # context-audit-consumer is additionally the one dev-lane Kafka client that NO
