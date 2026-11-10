@@ -377,6 +377,19 @@ TICKET_WRITE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("topic", TICKET_WRITE_COMPLETED, "literal", ("read", "describe")),
     ("topic", TICKET_WRITE_FAILED, "literal", ("read", "describe")),
 )
+# The floor projection snapshots (OMN-23402): the controller host's owner map publisher
+# and each host's overlay store fleet reader publish a snapshot of their projection on
+# the two topics, and the floor's projection reader reads both from the earliest
+# retained offset under a fresh group per pass. The prefix is the grant for those
+# groups, and no other onex.snapshot.projection.* topic is granted.
+FLOOR_OWNER_MAP = "onex.snapshot.projection.floor-owner-map.v1"
+FLOOR_OVERLAY_STORE_FLEET = "onex.snapshot.projection.floor-overlay-store-fleet.v1"
+FLOOR_PROJECTION_GROUP_PREFIX = "node_floor_projection_read_effect."
+FLOOR_PROJECTION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", FLOOR_OWNER_MAP, "literal", ("read", "write", "describe")),
+    ("topic", FLOOR_OVERLAY_STORE_FLEET, "literal", ("read", "write", "describe")),
+    ("group", FLOOR_PROJECTION_GROUP_PREFIX, "prefixed", ("read", "describe")),
+)
 # The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
 # its own hook events to the dev lane, so the lab projections (claude_hook_events among
 # them) see every person's sessions and not only the operator's. These are the
@@ -468,6 +481,7 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
             + DECLARED_GRANTS
             + LANDING_DECISION_GRANTS
             + TICKET_WRITE_GRANTS
+            + FLOOR_PROJECTION_GRANTS
             + HOOK_EDGE_GRANTS
         )
         for operation in operations
@@ -746,6 +760,35 @@ def test_the_lane_ticket_mint_grants_are_declared_and_nothing_wider() -> None:
         row[2] in (TICKET_WRITE_COMPLETED, TICKET_WRITE_FAILED) and row[4] == "WRITE"
         for row in rows
     )
+
+
+def test_the_floor_projection_grants_are_declared_and_nothing_wider() -> None:
+    """The lane may read and write the two floor snapshot topics and nothing wider.
+
+    The prefix is the grant for the reader's fresh per-pass groups, and the lab
+    runtime's own group for the reader does not start with it. No other
+    onex.snapshot.projection.* topic is granted.
+    """
+    rows = derive(shipped_bindings())
+    floor = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "projection.floor-" in resource
+        or "node_floor_projection_read_effect" in resource
+    }
+    assert floor == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in FLOOR_PROJECTION_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        resource_type == "TOPIC"
+        and resource.startswith("onex.snapshot.projection.")
+        and resource not in (FLOOR_OWNER_MAP, FLOOR_OVERLAY_STORE_FLEET)
+        for _, resource_type, resource, _, _ in rows
+    )
+    runtime_group = "local.omnimarket.node_floor_projection_read_effect.consume.v1"
+    assert not runtime_group.startswith(FLOOR_PROJECTION_GROUP_PREFIX)
 
 
 def test_committed_derived_grants_are_the_nodes_output() -> None:

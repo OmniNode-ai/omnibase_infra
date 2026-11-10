@@ -167,8 +167,10 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
     # OMN-23395: plus READ, WRITE and DESCRIBE on the two landing decision topics
     # and READ and DESCRIBE on the two chain group prefixes.
     # OMN-23410: plus WRITE and DESCRIBE on the ticket node's request, READ and DESCRIBE on its two terminals.
+    # OMN-23402: plus READ, WRITE and DESCRIBE on the two floor snapshot topics
+    # and READ and DESCRIBE on the projection read group prefix.
     # OMN-23418: plus READ on the work-ledger query command topic.
-    assert len(rows) == 182
+    assert len(rows) == 190
     assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
     assert {row.operation for row in rows if row.name == "*"} == {"describe"}
     scoped_expected = {

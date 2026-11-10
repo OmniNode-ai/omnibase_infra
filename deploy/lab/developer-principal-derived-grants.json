@@ -151,6 +151,20 @@
     {
       "broker": "dev",
       "resource_type": "GROUP",
+      "resource": "node_floor_projection_read_effect.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "node_floor_projection_read_effect.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
       "resource": "pr-handoff-request.",
       "operation": "DESCRIBE",
       "pattern": "PREFIXED"
@@ -1273,6 +1287,48 @@
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimemory.memory-expired.v1",
       "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.snapshot.projection.floor-overlay-store-fleet.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.snapshot.projection.floor-overlay-store-fleet.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.snapshot.projection.floor-overlay-store-fleet.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.snapshot.projection.floor-owner-map.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.snapshot.projection.floor-owner-map.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.snapshot.projection.floor-owner-map.v1",
+      "operation": "WRITE",
       "pattern": "LITERAL"
     }
   ]
