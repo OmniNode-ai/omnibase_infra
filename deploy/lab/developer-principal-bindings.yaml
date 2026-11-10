@@ -175,6 +175,13 @@
 # below is the grant for those groups. The lab runtime's own group for that reader,
 # `<env>.omnimarket.node_floor_projection_read_effect.consume.v1`, does not start with
 # the prefix, so a developer principal cannot join it.
+# FLOOR TASK TICKET MINT (OMN-23471): a lab lane's principal asks the floor task ticket node
+# (omnimarket node_floor_task_ticket_effect) for the one ticket of a floor task with
+# `onex run-node node_floor_task_ticket_effect`. It writes the node's command topic and reads the
+# completed terminal, under the per-call group `local.omnibase_core.cli_run_node.consume.v1.<id>`
+# that run-node derives (the group prefix below is the grant; the lab runtime's own group for the node,
+# `<env>.omnimarket.node_floor_task_ticket_effect.consume.v1`, does not start with it). The principal
+# gets no write on the terminal, so it cannot answer for the node, and no grant on any Linear credential.
 # Machine-only writes live in machine-principal-bindings.yaml (OMN-21622).
 principal: "{principal}"
 bindings:
@@ -277,6 +284,8 @@ bindings:
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-owner-map.v1, direction: consume, consumer_group: node_floor_projection_read_effect.call}
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-overlay-store-fleet.v1, direction: produce}
   - {broker: dev, physical_topic: onex.snapshot.projection.floor-overlay-store-fleet.v1, direction: consume, consumer_group: node_floor_projection_read_effect.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.floor-task-ticket-mint-completed.v1, direction: consume, consumer_group: local.omnibase_core.cli_run_node.consume.v1.call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
@@ -291,5 +300,6 @@ group_prefixes:
   - {broker: dev, prefix: landing-chain-node-}
   - {broker: dev, prefix: landing-chain-controller-}
   - {broker: dev, prefix: node_floor_projection_read_effect.}
+  - {broker: dev, prefix: local.omnibase_core.cli_run_node.consume.v1.}
 described_groups:
   - {broker: dev, group: "*"}
