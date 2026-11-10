@@ -29,7 +29,9 @@ class ModelOnexApiImageBuildRequest(BaseModel):
     source_revision: str = Field(
         description="The 40-char commit the tree was archived from."
     )
-    image_name: str = Field(min_length=1, description="The image name to tag.")
+    image_repository: str = Field(
+        min_length=1, description="The image repository to tag."
+    )
     dockerfile: str = Field(description="The Dockerfile to build from.")
     context: str = Field(description="The build context path.")
     runtime_image_build_arg: str = Field(

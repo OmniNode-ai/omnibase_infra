@@ -2496,7 +2496,7 @@ class DeployAgent:
                 capture_error=capture.pin_error,
                 source_tree=tree,
                 source_revision=revision,
-                image_name=API_IMAGE_NAME,
+                image_repository=API_IMAGE_NAME,
                 dockerfile=API_DOCKERFILE,
                 context=API_CONTEXT,
                 runtime_image_build_arg=API_RUNTIME_IMAGE_BUILD_ARG,

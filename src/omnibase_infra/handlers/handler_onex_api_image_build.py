@@ -85,7 +85,9 @@ class HandlerOnexApiImageBuild:
                     f"{request.source_revision!r} is not a 40-char commit"
                 ),
             )
-        target = f"{request.image_name}:{request.source_revision[:8]}-{request.stamp}"
+        target = (
+            f"{request.image_repository}:{request.source_revision[:8]}-{request.stamp}"
+        )
         argv = [
             "docker",
             "build",

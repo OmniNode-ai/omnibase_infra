@@ -39,7 +39,7 @@ def _request(**overrides: Any) -> ModelOnexApiImageBuildRequest:
         "capture_error": None,
         "source_tree": _TREE,
         "source_revision": _SHA,
-        "image_name": "onex-api",
+        "image_repository": "onex-api",
         "dockerfile": "Dockerfile",
         "context": ".",
         "runtime_image_build_arg": "RUNTIME_IMAGE",

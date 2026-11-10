@@ -83,7 +83,7 @@ def _request(tree: Path) -> ModelOnexApiImageBuildRequest:
         capture_error=None,
         source_tree=tree,
         source_revision=_REVISION,
-        image_name="onex-api-image",
+        image_repository="onex-api-image",
         dockerfile="docker/onex-api/Dockerfile",
         context="docker/onex-api",
         runtime_image_build_arg="RUNTIME_IMAGE",
