@@ -328,13 +328,18 @@ profiles:
           ready_bound_seconds: 600
           max_concurrent_contract_attach: 4
           # Delegation and hook-event consumers subscribe before every other
-          # contract's, in this order.
+          # contract's, in this order. The work-ledger query node answers the
+          # board's readings and the seam probe by bus request, with a 30 s
+          # deadline; discovered 1225th of 1243 contracts it joined 197 s and
+          # 318 s after the container started on 2026-11-10, so a request sent
+          # during a roll waited unconsumed and was answered 151 s to 211 s late.
           priority_contracts:
             - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
             - node_delegation_chain_ledger_effect
             - projection_claude_hook_events
             - projection_hook_ledger
+            - work_ledger_query_effect
           memory_limit: 3072M
         # OMN-22930 (T8): the BYOK credential READ that only the separate
         # effects service resolved (OMN-20533) now happens in main, because the

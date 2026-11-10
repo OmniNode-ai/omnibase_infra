@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-23535
+title: Ledger query answerer joins first when the dev runtime starts
+summary: >-
+  The dev main runtime attaches about 316 consumers four at a time, each join taking about 3 to 4 seconds. The work-ledger query node (work_ledger_query_effect) is discovered 1225th of 1243 contracts, so its request-topic consumer attached 197 s and 318 s after the container started on 2026-11-10 (group Empty with lag 1 while a request waited), and a query sent during a roll was answered 151 s to 211 s late against a 30 s deadline. The runtime policy contract's boot priority list for dev main now names the node, and the committed policy env is rendered from it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23535-ledger-query-boot-priority
+    statement: The dev main runtime joins the work-ledger query node's consumer in the first waves of the boot, ahead of every non-priority contract.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev main runtime's boot priority list names the work-ledger query node, and the rendered policy env carries it -- falsifier: uv run pytest tests/unit/runtime/test_omn18087_boot_bound_and_policy.py fails when the node is removed from contracts/services/runtime_policy.contract.yaml"
+      - id: AC2
+        statement: "AC2: with the node on the priority list, its consumer is among the first wave of joins, ahead of every non-priority contract -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py fails when the list is empty"
+      - id: AC3
+        statement: "AC3: integrated: after the next dev runtime roll, the work-ledger query consumer's Started-consumer line is within 60 s of the container start in the runtime log, and a ledger query sent at the roll gets its answer inside 30 s -- falsifier: the same read on a roll without the change shows the line 190 s or more after start (measured 197 s and 318 s on 2026-11-10)"
+evidence_requirements:
+  - kind: tests
+    description: The boot policy and the bounded contract attach tests.
+    command: uv run --frozen pytest tests/unit/runtime/test_omn18087_boot_bound_and_policy.py tests/unit/runtime/auto_wiring/test_omn18087_bounded_contract_attach.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23535-ac1-policy-names-the-node
+    description: >-
+      The dev main boot priority list in runtime_policy.contract.yaml ends with work_ledger_query_effect and the committed docker/runtime-policy.env renders from it; the policy test fails on the parent commit.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23535-ac2-first-wave
+    description: >-
+      With the real dev main boot policy and the node discovered last behind twelve fillers, its topic is inside the priority waves and ahead of every filler; the test fails on the parent commit.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_bounded_contract_attach.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23535-ac3-integrated
+    description: >-
+      Deploy check the hosted runner can run: the committed policy env equals the render of the policy contract. The runtime read of the consumer start line after the next roll is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python scripts/render_runtime_policy_env.py --check-env-file docker/runtime-policy.env
+        cwd: ${OMNI_HOME}/omnibase_infra
