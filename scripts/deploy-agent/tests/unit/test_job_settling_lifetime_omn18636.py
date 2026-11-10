@@ -70,6 +70,8 @@ from deploy_agent.events import (
 )
 from deploy_agent.job_state import EnumJobSettlingStage, JobStore
 
+from .test_lab_overlay_omn18200 import build_passes, captured
+
 pytestmark = pytest.mark.unit
 
 SHA = "b" * 40
@@ -178,36 +180,28 @@ class _FastExecutor:
 class _BlockingApplier:
     """A lab-overlay applier that holds the job thread while the test reads.
 
-    The real one shells out to ``k3s ctr images import`` four times; what
+    The real settle archives the overlay source and runs a docker build; what
     matters here is only that it takes time and that it runs after the terminal
     write, both of which a gated wait reproduces exactly.
     """
 
+    state_dir = Path("/state")
+    _run = staticmethod(build_passes)
+
     def __init__(self, gate: threading.Event, running: threading.Event) -> None:
         self.gate = gate
         self.running = running
-        self.manifest_sha: str | None = None
 
-    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> Any:
         # OMN-19501: the compose-lane half, taken under the lane lock. Opaque
-        # to the agent, which only hands it back to ``apply``.
-        return {"sha": sha, "stamp": stamp}
+        # to the agent, which only hands it back to the onex-api build.
+        return captured(sha, stamp)
 
-    def apply(
-        self,
-        *,
-        sha: str,
-        stamp: str,
-        correlation_id: str,
-        capture: object = None,
-    ) -> str:
-        # OMN-18572: the real applier resolves this before anything that can
-        # block or fail, and the agent reads it after the apply returns.
-        self.manifest_sha = "b" * 40
+    def archive_overlay(self, destination: Path) -> str:
         self.running.set()
         self.gate.wait(timeout=BLOCK_SECONDS * 4)
         self.running.clear()
-        return f"/records/{sha}.json"
+        return "b" * 40
 
 
 class _OneShotConsumer:

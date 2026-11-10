@@ -3827,9 +3827,9 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 154
+        "omnibase_infra": 155
       },
-      "contracts_discovered": 175,
+      "contracts_discovered": 176,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 103,
       "probe_count": 1137,
@@ -3881,9 +3881,9 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-09T23:54:40.792658+00:00",
+    "generated_at_utc": "2026-11-10T18:09:41.849127+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.69",
+      "omnibase-core": "0.47.72",
       "omnibase-infra": "0.38.77",
       "omniclaude": null,
       "omniintelligence": null,

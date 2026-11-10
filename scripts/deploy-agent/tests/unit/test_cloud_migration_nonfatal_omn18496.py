@@ -282,7 +282,7 @@ async def test_agent_verifies_runtime_before_cloud_failure_verdict(
         assert executor.calls.index("rebuild_scope") < executor.calls.index("verify")
         assert job.status == ("failed" if failure else "success")
         assert [(entry["entry"], entry["sha"]) for entry in _FakeApplier.calls] == [
-            ("repair" if failure else "apply", SHA)
+            ("repair" if failure else "build", SHA)
         ]
         if failure:
             assert any(failure in error for error in job.errors)

@@ -64,6 +64,8 @@ from deploy_agent.executor import (
 from deploy_agent.job_state import JobStore
 from deploy_agent.routing import load_routing_table
 
+from .test_lab_overlay_omn18200 import build_passes, captured
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -318,21 +320,18 @@ class _FakeApplier:
     def __init__(self, **kwargs: Any) -> None:
         self.manifest_sha: str | None = "c" * 40
 
-    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> Any:
         # OMN-19501: the compose-lane half, taken under the lane lock; opaque
-        # to the agent, which hands it back to ``apply``.
-        return {"sha": sha, "stamp": stamp}
+        # to the agent, which hands it back to the onex-api build.
+        return captured(sha, stamp)
 
-    def apply(
-        self,
-        *,
-        sha: str,
-        stamp: str,
-        correlation_id: str,
-        capture: object = None,
-    ) -> Path:
-        _FakeApplier.calls.append("apply")
-        return Path("/state/lab-overlay/x.json")
+    state_dir = Path("/state")
+
+    def archive_overlay(self, destination: Path) -> str:
+        _FakeApplier.calls.append("build")
+        return "c" * 40
+
+    _run = staticmethod(build_passes)
 
     def build_repair_migrate_image(
         self, *, sha: str, stamp: str, correlation_id: str
@@ -573,7 +572,7 @@ class TestDev201Unchanged:
         _, fake, _, _ = _run_dev_job(tmp_path, monkeypatch, instance="dev-201")
         assert "seed_infisical lane=dev" in fake.calls
         assert "deliver_onex_api_pin" in fake.calls
-        assert _FakeApplier.calls == ["apply"]
+        assert _FakeApplier.calls == ["build"]
 
     def test_dev_201_unchanged_without_a_router(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
