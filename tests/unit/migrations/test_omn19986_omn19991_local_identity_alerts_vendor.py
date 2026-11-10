@@ -8,8 +8,8 @@ omnimarket sources the vendor was copied from: local_alerts from omnimarket#4803
 the same files. Source and vendor were compared byte for byte before pinning.
 Failure modes: a vendored file drifts from its source, loses its checksum-bound
 ledger row, is declared with a class other than the one the class checker reads
-from its statements, the FORCE step reaches a lane unfenced, or the interim grant
-declaration is missing.
+from its statements, the FORCE step reaches a lane unfenced, or an interim grant
+declaration the pinned omnimarket contract now carries reappears.
 """
 
 import hashlib
@@ -124,33 +124,7 @@ def test_only_the_force_step_is_fenced(table: str, node: str) -> None:
     assert f"node:{node}:0001_grant_tenant_projection_writer_{table}.sql" not in ids
 
 
-#: local_alerts left the interim declarations when the pinned omnimarket
-#: contract began declaring the relation; only local_identity is still bridged.
-_STILL_BRIDGED = [(table, node) for table, node in _TABLES if table != "local_alerts"]
-
-
-def test_the_retired_local_alerts_interim_declaration_is_gone() -> None:
+def test_the_retired_interim_declarations_are_gone() -> None:
     declared = {entry.table.name for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS}
     assert "local_alerts" not in declared
-    assert "local_identity" in declared
-
-
-@pytest.mark.parametrize(("table", "node"), _STILL_BRIDGED)
-def test_the_interim_grant_declaration_names_the_vendored_create(
-    table: str, node: str
-) -> None:
-    matches = [
-        entry
-        for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if entry.table.name == table
-    ]
-    assert len(matches) == 1
-    declared = matches[0].table
-    assert declared.migration == (
-        f"docker/migrations/forward/nodes/{node}/0000_create_{table}.sql"
-    )
-    assert (declared.access, declared.role, declared.schema) == (
-        "read_write",
-        table,
-        "public",
-    )
+    assert "local_identity" not in declared
