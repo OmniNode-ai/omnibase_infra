@@ -71,7 +71,6 @@ not_a_stack:
   - docker/docker-compose.model-review-canary.yml
   - docker/docker-compose.principal-issuer.yml
   - docker/docker-compose.pypi-cache.yml
-  - docker/docker-compose.pypi-canary.yml
   - docker/docker-compose.runners*.yml
 # Commands extend the same gate. Exact argv fingerprints are SHA256 of compact,
 # ASCII JSON argv arrays; the full command and entrypoint remain in compose.
