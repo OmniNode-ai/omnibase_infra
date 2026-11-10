@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Eight supplemental table bridges retired by the omnimarket pin advance (OMN-17292).
+"""Ten supplemental table bridges retired by the omnimarket pin advance (OMN-17292).
 
 The pinned omnimarket contracts now declare these relations, so the hand-authored
 ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entries that carried them are deleted.
@@ -33,6 +33,8 @@ _RETIRED_RELATIONS = (
     ("local_environment", "node_projection_local_environment"),
     ("local_alerts", "node_projection_local_alerts"),
     ("view_seam_readings", "node_view_seam_reading_reducer"),
+    ("local_identity", "node_projection_local_identity"),
+    ("work_ledger_seq_conflicts", "node_projection_work_ledger"),
 )
 
 
