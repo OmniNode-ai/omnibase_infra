@@ -283,6 +283,7 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
     # OMN-23066 (T13): the context audit consumer is retired by name the same way.
     # OMN-21933 (T12): the skill lifecycle consumer is retired by name the same way.
     # OMN-23043: the agent actions consumer is retired by name the same way.
+    # OMN-23525: the infra routing decisions consumer is retired by name the same way.
     assert process.retired_services == (
         "projection-claude-hook-events-writer",
         "context-audit-consumer",
@@ -290,6 +291,7 @@ def test_existing_definitions_gate_each_writer_from_the_policy() -> None:
         "omninode-contract-resolver",
         "skill-lifecycle-consumer",
         "agent-actions-consumer",
+        "infra-routing-decisions-consumer",
     )
     assert _overlay_gates() == {
         SERVICE: "tenant-projection",
