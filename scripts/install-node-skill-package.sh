@@ -116,6 +116,7 @@ PYPI_LEAF_DEPS=(anthropic radon "docker>=7.0.0" python-dateutil)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAN_TOOL="$SCRIPT_DIR/venv_install_plan.py"
+ATOMIC_TOOL="$SCRIPT_DIR/../src/omnibase_infra/nodes/node_venv_atomic_install/runtime_venv_atomic_install.py"
 
 EXECUTE=0
 PYTHON_BIN=""
@@ -232,7 +233,8 @@ fi
 # GNU mktemp requires the XXXXXX suffix in a template; BSD mktemp accepts it
 # too. `-t <prefix>` alone is BSD-only and fails on Linux runners.
 PYPROJECT_TMP="$(mktemp "${TMPDIR:-/tmp}/omnimarket-pyproject.XXXXXX")"
-trap 'rm -f "$PYPROJECT_TMP"' EXIT
+STAGE_DIR=""
+trap 'rm -f "$PYPROJECT_TMP"; [[ -z "$STAGE_DIR" ]] || rm -rf "$STAGE_DIR"' EXIT
 git -C "$OMNIMARKET_CLONE" show "${OMNIMARKET_REF}:pyproject.toml" >"$PYPROJECT_TMP"
 
 RESOLVED_PINS="$(env -u PYTHONPATH "$PYTHON_BIN" "$SCRIPT_DIR/resolve_omnimarket_pins.py" \
@@ -263,19 +265,29 @@ echo "  step 5          : read the venv back — it must CARRY this ref (OMN-186
 echo
 
 PLAN_ARGS=()
-if [[ "$EXECUTE" -eq 1 ]]; then
+PLAN_CMD=("$PLAN_TOOL")
+CHECK_PY="$PYTHON_BIN"
+if [[ "$EXECUTE" -eq 1 && "${ONEX_ATOMIC_INSTALL:-0}" == "1" ]]; then
+  # OMN-22712: the reconcile's additive pass. Only the packages the plan moves
+  # are installed, into a side directory; every check below reads the venv with
+  # them overlaid (CHECK_PY is a wrapper interpreter); they are exchanged into
+  # the venv afterwards, and restored if the readback after that fails.
+  STAGE_DIR="$(mktemp -d "$(cd "$(dirname "$PYTHON_BIN")/.." && pwd)/.atomic-stage.XXXXXX")"
+  PLAN_CMD=("$ATOMIC_TOOL" stage --stage-dir "$STAGE_DIR")
+  CHECK_PY="$STAGE_DIR/python"
+elif [[ "$EXECUTE" -eq 1 ]]; then
   PLAN_ARGS+=(--apply)
 fi
 
 echo "== step 1: omnimarket + omni-internal leaf deps (--no-deps) =="
-env -u PYTHONPATH "$PYTHON_BIN" "$PLAN_TOOL" \
+env -u PYTHONPATH "$PYTHON_BIN" "${PLAN_CMD[@]}" \
   --python "$PYTHON_BIN" --no-deps --label "step 1" ${PLAN_ARGS[@]+"${PLAN_ARGS[@]}"} -- \
   "omnimarket @ git+${OMNIMARKET_GIT}@${OMNIMARKET_REF}" \
   "${OMNI_INTERNAL_PINS[@]}"
 
 echo
 echo "== step 2: pure-PyPI leaf deps =="
-env -u PYTHONPATH "$PYTHON_BIN" "$PLAN_TOOL" \
+env -u PYTHONPATH "$PYTHON_BIN" "${PLAN_CMD[@]}" \
   --python "$PYTHON_BIN" --label "step 2" ${PLAN_ARGS[@]+"${PLAN_ARGS[@]}"} -- \
   "${PYPI_LEAF_DEPS[@]}"
 
@@ -285,60 +297,10 @@ if [[ "$EXECUTE" -ne 1 ]]; then
   exit 0
 fi
 
-echo
-echo "== step 3: verify node resolution =="
-env -u PYTHONPATH "$PYTHON_BIN" - <<'PYEOF'
-import sys
-from importlib.metadata import entry_points
-
-eps = {e.name for e in entry_points(group="onex.nodes")}
-# Nodes behind the operator skills this install must keep resolvable:
-#   merge_sweep -> node_pr_lifecycle_orchestrator
-#   session     -> node_session_orchestrator
-#   (aislop_sweep kept as a broad-coverage canary)
-required = {
-    "node_pr_lifecycle_orchestrator",
-    "node_session_orchestrator",
-    "node_aislop_sweep",
-}
-missing = sorted(required - eps)
-if missing:
-    print(f"FAIL: mapped nodes still unresolved: {missing}", file=sys.stderr)
-    sys.exit(1)
-print(f"OK: {len(eps)} onex.nodes entry points; required nodes resolved: {sorted(required)}")
-PYEOF
-
-# OMN-18675 AC2: a co-install that leaves the venv importable-but-broken is not
-# a success. The 2026-09-18 breakage surfaced as an `onex.cli` entry point that
-# could no longer be LOADED (its module had vanished from the downgraded
-# dependency), which takes down every `onex` subcommand, not just the one whose
-# entry point broke. Load them all and fail loudly naming the ones that raise.
-echo
-echo "== step 4: verify every advertised onex.cli entry point imports =="
-env -u PYTHONPATH "$PYTHON_BIN" - <<'PYEOF'
-import sys
-from importlib.metadata import entry_points
-
-failures: list[tuple[str, str]] = []
-eps = list(entry_points(group="onex.cli"))
-for ep in eps:
-    try:
-        ep.load()
-    except Exception as exc:  # noqa: BLE001 - any import failure breaks the CLI
-        failures.append((ep.name, f"{type(exc).__name__}: {exc}"))
-
-if failures:
-    print("FAIL: the onex CLI does not load — these entry points raise:", file=sys.stderr)
-    for name, reason in failures:
-        print(f"  {name}: {reason}", file=sys.stderr)
-    print(
-        "\nThe venv is left in this state; `onex <any subcommand>` will raise.\n"
-        "Re-install the dependency the failing entry point imports.",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-print(f"OK: all {len(eps)} onex.cli entry points import cleanly.")
-PYEOF
+verify_install() {
+  # Steps 3 and 4 (OMN-18675 AC2) are the runtime's verify command; "$1" is the interpreter.
+  echo
+  env -u PYTHONPATH "$1" "$ATOMIC_TOOL" verify || exit 1
 
 # OMN-18663: steps 3 and 4 prove the venv WORKS. This step proves it carries
 # what was just asked for. They are different questions, and only the second one
@@ -350,8 +312,8 @@ READBACK_ARGS=()
 for pin in "${OMNI_INTERNAL_PINS[@]}"; do
   READBACK_ARGS+=(--sibling "$pin")
 done
-if ! env -u PYTHONPATH "$PYTHON_BIN" "$READBACK_TOOL" \
-    --python "$PYTHON_BIN" \
+if ! env -u PYTHONPATH "$1" "$READBACK_TOOL" \
+    --python "$1" \
     --clone "$OMNIMARKET_CLONE" \
     --ref "$OMNIMARKET_REF" \
     --label "co-install readback (OMN-18663)" \
@@ -362,6 +324,26 @@ if ! env -u PYTHONPATH "$PYTHON_BIN" "$READBACK_TOOL" \
   echo "  dispatch from this interpreter and do not record this run as a" >&2
   echo "  repair. Re-run the failing uv step by hand and read its output." >&2
   exit 1
+fi
+}
+
+verify_install "$CHECK_PY"
+
+if [[ -n "$STAGE_DIR" ]]; then
+  # Everything above ran against the venv PLUS the staged packages. Put them in
+  # place, read the venv back WITHOUT the overlay, and restore on a failure.
+  echo
+  echo "== commit: exchanging the staged packages into $PYTHON_BIN =="
+  trap 'rm -f "$PYPROJECT_TMP"' EXIT # the stage now holds the previous packages
+  atomic() { env -u PYTHONPATH "$PYTHON_BIN" "$ATOMIC_TOOL" "$1" --python "$PYTHON_BIN" --stage-dir "$STAGE_DIR"; }
+  atomic commit || { echo "FAIL: the commit did not complete; the previous packages were restored ($STAGE_DIR)." >&2; exit 1; }
+  if ! ( verify_install "$PYTHON_BIN" ); then
+    echo "FAIL: the venv failed its readback after the commit; rolling back." >&2
+    if atomic rollback >&2; then rm -rf "$STAGE_DIR"; else echo "  rollback incomplete; journal and previous packages are in $STAGE_DIR" >&2; fi
+    exit 1
+  fi
+  atomic finalize
+  STAGE_DIR=""
 fi
 
 echo "== done: node-skill package installed, verified and read back =="

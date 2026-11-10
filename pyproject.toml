@@ -758,5 +758,6 @@ node_validation_ledger_projection_compute = "omnibase_infra.nodes.node_validatio
 node_validation_ledger_write_effect = "omnibase_infra.nodes.node_validation_ledger_write_effect"
 node_validation_orchestrator = "omnibase_infra.nodes.node_validation_orchestrator"
 node_vector_store_effect = "omnibase_infra.nodes.node_vector_store_effect"
+node_venv_atomic_install = "omnibase_infra.nodes.node_venv_atomic_install"
 node_waste_detection_compute = "omnibase_infra.nodes.node_waste_detection_compute"
 node_workspace_config_root_resolve_effect = "omnibase_infra.nodes.node_workspace_config_root_resolve_effect"
