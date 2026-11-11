@@ -5,7 +5,9 @@
 Operator ruling 2026-11-03: "The default broker should be in the contract overlay." ``onex
 run-node`` (omnibase_core) cannot read the lab lane declaration, so it asks the resolver this
 package registers under ``onex.node_broker_resolvers`` and reads no environment variable for the
-broker. The node's ``event_bus`` is read from
+broker. The node's ``event_bus`` is read from ``<root>/<node>/overlay.yaml`` under the first
+root in ``ONEX_SKILL_OVERLAY_ROOTS`` that holds one (the overlay home's ``overlays`` directory is
+such a root), and otherwise from
 ``<workspace config root>/config/onex/overlays/<node>/overlay.yaml``, the deployment overlay the
 node's other private facts already live in:
 
@@ -20,6 +22,7 @@ does not bind are refused with the overlay path. Nothing falls back to a default
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Final
 
@@ -52,7 +55,24 @@ from omnibase_infra.models.workspace import (
 from omnibase_infra.runtime.overlay.contract_env_ref import expand_contract_env_refs
 
 _EVENT_BUS_KEY: Final[str] = "event_bus"
+_ENV_OVERLAY_ROOTS: Final[str] = "ONEX_SKILL_OVERLAY_ROOTS"
 _KIND_NAMES: Final[tuple[str, str]] = ("kafka", "inmemory")
+
+
+def _overlay_from_roots(node_id: str) -> Path | None:
+    """``<root>/<node>/overlay.yaml`` under the first root in ``ONEX_SKILL_OVERLAY_ROOTS`` that holds one.
+
+    The roots are the overlay home's ``overlays/`` directory and the per-host store snapshot, the same
+    list ``omnimarket``'s node overlay reader walks, so a node's ``event_bus`` is read from the home
+    before the workspace config root is consulted.
+    """
+    raw = expand_contract_env_refs(f"${{env.{_ENV_OVERLAY_ROOTS}}}")
+    for root in raw.split(os.pathsep):
+        if root.strip():
+            candidate = Path(root.strip()) / node_id / "overlay.yaml"
+            if candidate.is_file():
+                return candidate
+    return None
 
 
 def _workspace_root_from_environment() -> Path | None:
@@ -98,6 +118,9 @@ class HandlerNodeBrokerResolve:
         )
 
     def _overlay_path(self, request: ModelNodeBrokerResolveRequest) -> Path:
+        from_roots = _overlay_from_roots(request.overlay_key)
+        if from_roots is not None:
+            return from_roots
         relative = Path(
             "config", "onex", "overlays", request.overlay_key, "overlay.yaml"
         )
