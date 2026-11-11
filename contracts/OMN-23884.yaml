@@ -50,11 +50,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23884-ac4-integrated
     description: >-
-      Deploy check the hosted runner can run: the Dockerfile names claude-code 2.1.251 (the check fails at the merge base, where it names 2.1.181). The read of the delivery build step and the running container version is posted as a pull request comment naming the head; it is not claimed by this check.
+      Deploy check the hosted runner can run: the Dockerfile on the dev branch names claude-code 2.1.251, read through the hosting API (the check fails at the merge base, where dev names 2.1.181). The read of the delivery build step and the running container version is posted as a pull request comment naming the head; it is not claimed by this check.
     source: manual
     binds_ac:
       - AC4
     checks:
       - check_type: command
-        check_value: grep -qF '@anthropic-ai/claude-code@2.1.251' docker/Dockerfile.runtime
+        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=dev' --jq .content | base64 -d | grep -qF '@anthropic-ai/claude-code@2.1.251'
         cwd: ${OMNI_HOME}/omnibase_infra
