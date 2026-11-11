@@ -136,7 +136,6 @@ databases:
               - topic_produce_windows
               - work_events
               - work_ledger_rows
-              - work_ledger_seq_conflicts
               - work_ledger_state
               - work_outcome_units
               - worktree_reconcile_hosts
@@ -306,7 +305,6 @@ databases:
               - llm_cost_aggregates
               - local_alerts
               - local_environment
-              - local_identity
               - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
@@ -479,5 +477,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 67c630d144c1f1e722e2283c4d42853f9c83d43e424fd1e979afd4b97d4f5a16
+  sha256: 43625a0a01ec4625d837f94eaf2cf28a69d8aea93d9d4e7c213fa8de29861d51
 topology_instance: onex-prod

@@ -144,7 +144,6 @@ databases:
               - topic_produce_windows
               - work_events
               - work_ledger_rows
-              - work_ledger_seq_conflicts
               - work_ledger_state
               - work_outcome_units
               - worktree_reconcile_hosts
@@ -283,7 +282,6 @@ databases:
               - llm_cost_aggregates
               - local_alerts
               - local_environment
-              - local_identity
               - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
