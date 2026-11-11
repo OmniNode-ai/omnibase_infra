@@ -14,7 +14,7 @@ requirements:
       - id: AC2
         statement: 'AC2: the derived grants give the runtime account read and write on code_eval_trial_state in every shipped topology profile, and the generator check passes -- falsifier: uv run pytest tests/integration/topology/test_code_eval_trial_state_grant_omn23888.py -q'
       - id: AC3
-        statement: 'AC3: integrated: after the migration reaches the development database through the deploy agent, the table exists and the runtime account holds read and write on it -- falsifier: a psql catalogue read on the development lane of to_regclass(''public.code_eval_trial_state'') and has_table_privilege for the runtime account'
+        statement: 'AC3: integrated: on a real PostgreSQL the migration applies twice without error, the table exists, and the real StateStoreAdapter seeds, CAS-updates and reads a row of it -- falsifier: uv run pytest tests/integration/migrations/test_114_code_eval_trial_state_omn23888.py -q'
 evidence_requirements:
   - kind: tests
     description: The migration shape and grant tests pass at the head; with the STATE_IO_TABLE_DECLARATIONS entry removed the derivation grants nothing and the grant test fails.
@@ -43,12 +43,11 @@ dod_evidence:
       - check_type: command
         check_value: grep -rlq code_eval_trial_state src/omnibase_infra/topology/instances docker/catalog/database-topology
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn23888-dev-lane-readback
-    description: AC3 local Done gate only; a hosted runner reaches neither the deploy agent nor the development database. The checked-in readback names the host, the revision and the catalogue read.
+  - id: dod-omn23888-postgres-apply
+    description: The migration applies idempotently on a real PostgreSQL and the adapter seeds, CAS-updates and reads a row; the migration file is absent at the merge base, so the test fails there.
     source: manual
-    execution_scope: local_done_gate
     binds_ac: [AC3]
     checks:
-      - check_type: command
-        check_value: grep -q '^host=' docs/readbacks/OMN-23888_dev_table.txt
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_114_code_eval_trial_state_omn23888.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
