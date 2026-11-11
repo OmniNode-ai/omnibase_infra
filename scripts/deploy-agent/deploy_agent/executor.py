@@ -188,6 +188,9 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_onex_api_image_import_request.py",
         "models/model_onex_api_image_import_verdict.py",
         "handlers/handler_onex_api_image_import_check.py",
+        "models/model_onex_api_image_build_request.py",
+        "models/model_onex_api_image_build_result.py",
+        "handlers/handler_onex_api_image_build.py",
         "models/model_dev_lane_pin_staleness.py",
         "handlers/handler_dev_lane_pin_compose_guard.py",
         "models/model_cost_estimator_build_config.py",
@@ -4126,13 +4129,10 @@ class DeployExecutor:
     ) -> dict[str, Any]:
         """Advance ``ONEX_API_IMAGE`` to this merge's image and recreate that one service.
 
-        OMN-18572 -- the DELIVER half of a fact the lab-overlay applier already
-        produces. ``lab_overlay._derive_pins`` builds
-        ``onex-lab/omnicloud-core:<omninode_infra sha8>-<stamp>`` on every apply,
-        so after a successful dev deploy a correct image EXISTS on this host. The
-        compose lane runs whatever ``ONEX_API_IMAGE`` names, and until this method
-        nothing on the agent path wrote that key -- which is the whole of "a fix
-        merged at 09:00:53Z was still not on the lane at 11:15Z".
+        OMN-18572 -- the DELIVER half. The settle builds the onex-api image
+        (``node_onex_api_image_build_effect``, OMN-23521) tagged
+        ``<source sha8>-<stamp>``; the compose lane runs whatever ``ONEX_API_IMAGE``
+        names, and until this method nothing on the agent path wrote that key.
 
         THE PIN IS RESTRICTED TO THIS JOB'S LINEAGE. ``--sha`` is passed, so the
         repoint considers only images built from the commit this deploy just
@@ -4974,18 +4974,9 @@ class DeployExecutor:
         job ``a1b8137b-8ff7-49c2-a95d-cf22b530ef69`` (2026-09-12T15:59:15Z):
         ``GATEWAY_DEPLOY_FAILED: ... exited 5 ... ERROR: DEPLOY_REF unset``.
 
-        The blast radius was not the gateway. ``agent.py`` then called
-        ``_apply_lab_overlay`` as the LAST statement of its deploy ``try``, so
-        this exception skipped the OMN-18200 lab-overlay caller entirely and the
-        persistent k3s ``onex-lab`` lane sat 16 hours behind ``dev`` with
-        nothing reporting it -- rule 24(a)'s k3s half, silently not running.
-        That is still true of THIS failure and OMN-18545 did not change it: a
-        gateway refusal skips the lab-overlay apply, and the lane stays where it
-        was. What OMN-18545 added is a repair build on the DEV-LANE MIGRATION
-        PREFLIGHT failure alone, which is a different error and is now its own
-        type (``DevLaneMigrationPreflightError``). So this guard is still the
-        only thing standing between an unpinned build and a silently stale lane
-        here, and it stays.
+        The blast radius was not the gateway: this exception also skips the
+        settle that delivers the onex-api pin, and this guard is still the only
+        thing between an unpinned build and a silently stale lane here.
 
         The guard STAYS. This passes the pin the accepted command already
         carries; it does not weaken, skip or opt out of the assertion. An empty

@@ -1415,6 +1415,11 @@ def test_trajectory_backend_is_isolated_to_dev(overlay: str | None) -> None:
 _SKILL_OVERLAY_ROOTS_ENV = "ONEX_SKILL_OVERLAY_ROOTS"
 _SKILL_OVERLAY_ROOTS_TARGET = "/etc/onex/skill-overlays"
 _SKILL_OVERLAY_ROOTS_HOST_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
+_OVERLAY_STORE_ROOT_TARGET = "/etc/onex/skill-overlays-store"
+_OVERLAY_STORE_ROOT_HOST_VAR = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
+_SKILL_OVERLAY_ROOTS_VALUE = (
+    f"{_SKILL_OVERLAY_ROOTS_TARGET}:{_OVERLAY_STORE_ROOT_TARGET}"
+)
 
 
 @pytest.mark.integration
@@ -1432,7 +1437,7 @@ def test_dev_lane_runtime_effects_mounts_the_operator_named_skill_overlay_roots(
 
     assert (
         effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV)
-        == _SKILL_OVERLAY_ROOTS_TARGET
+        == _SKILL_OVERLAY_ROOTS_VALUE
     )
     mounts = _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)
     assert len(mounts) == 1, f"expected one overlay-roots mount, got {mounts!r}"
@@ -1451,9 +1456,106 @@ def test_dev_lane_skill_overlay_roots_render_without_the_operator_variable() -> 
     effects = services["runtime-effects"]
     assert (
         effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV)
-        == _SKILL_OVERLAY_ROOTS_TARGET
+        == _SKILL_OVERLAY_ROOTS_VALUE
     )
     assert len(_mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)) == 1
+
+
+@pytest.mark.integration
+def test_dev_lane_overlay_store_root_is_appended_after_the_frozen_root() -> None:
+    """The second overlay root is appended after the frozen one, so a document the
+    frozen root holds still wins and one it lacks resolves in the store root."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{
+            _SKILL_OVERLAY_ROOTS_HOST_VAR: "/srv/operator/skill-overlays",
+            _OVERLAY_STORE_ROOT_HOST_VAR: "/srv/operator/overlay-store",
+        },
+    )
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
+
+    assert effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
+        _SKILL_OVERLAY_ROOTS_TARGET,
+        _OVERLAY_STORE_ROOT_TARGET,
+    ]
+
+    store_mounts = _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET)
+    assert len(store_mounts) == 1, (
+        f"expected one store-root mount, got {store_mounts!r}"
+    )
+    (store_mount,) = store_mounts
+    assert store_mount.get("type") == "bind"
+    assert store_mount.get("read_only") is True
+    assert store_mount["source"] == "/srv/operator/overlay-store"
+
+    frozen_mounts = _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)
+    assert len(frozen_mounts) == 1, (
+        f"expected one frozen-root mount, got {frozen_mounts!r}"
+    )
+    (frozen_mount,) = frozen_mounts
+    assert frozen_mount["source"] == "/srv/operator/skill-overlays"
+
+
+@pytest.mark.integration
+def test_dev_lane_overlay_store_root_default_is_the_clone_beside_this_checkout() -> (
+    None
+):
+    """With the store variable unset, the mount source is the overlays clone beside
+    this checkout: <registry root>/overlays/overlays, the clone the canonical-clone
+    sync keeps current."""
+    services = _render_dev_lane_services()
+    effects = services["runtime-effects"]
+    store_mounts = _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET)
+    assert len(store_mounts) == 1, (
+        f"expected one store-root mount, got {store_mounts!r}"
+    )
+    (store_mount,) = store_mounts
+    expected = str((REPO_ROOT / "docker" / "../../overlays/overlays").resolve())
+    assert os.path.normpath(store_mount["source"]) == os.path.normpath(expected)
+
+
+@pytest.mark.integration
+def test_tenant_fold_overlay_store_root_is_appended_after_the_frozen_root() -> None:
+    """The tenant-fold lane appends the store root after the frozen one, on the
+    omninode-runtime service that carries the folded effects role."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{
+            _SKILL_OVERLAY_ROOTS_HOST_VAR: "/srv/operator/skill-overlays",
+            _OVERLAY_STORE_ROOT_HOST_VAR: "/srv/operator/overlay-store",
+        },
+    )
+    result = _run_compose_config(
+        env,
+        profile="runtime",
+        with_dev_lane_overlay=True,
+        with_tenant_fold=True,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    runtime = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
+
+    assert runtime["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
+        _SKILL_OVERLAY_ROOTS_TARGET,
+        _OVERLAY_STORE_ROOT_TARGET,
+    ]
+
+    store_mounts = _mounts_at(runtime, _OVERLAY_STORE_ROOT_TARGET)
+    assert len(store_mounts) == 1, (
+        f"expected one store-root mount, got {store_mounts!r}"
+    )
+    (store_mount,) = store_mounts
+    assert store_mount.get("type") == "bind"
+    assert store_mount.get("read_only") is True
+    assert store_mount["source"] == "/srv/operator/overlay-store"
+
+    frozen_mounts = _mounts_at(runtime, _SKILL_OVERLAY_ROOTS_TARGET)
+    assert len(frozen_mounts) == 1, (
+        f"expected one frozen-root mount, got {frozen_mounts!r}"
+    )
+    (frozen_mount,) = frozen_mounts
+    assert frozen_mount["source"] == "/srv/operator/skill-overlays"
 
 
 @pytest.mark.integration
@@ -1465,6 +1567,7 @@ def test_only_runtime_effects_carries_the_skill_overlay_roots() -> None:
         for name, service in services.items()
         if _SKILL_OVERLAY_ROOTS_ENV in (service.get("environment") or {})
         or _mounts_at(service, _SKILL_OVERLAY_ROOTS_TARGET)
+        or _mounts_at(service, _OVERLAY_STORE_ROOT_TARGET)
     }
     assert carriers == {"runtime-effects"}
 
@@ -1511,6 +1614,7 @@ def test_lanes_layering_the_dev_overlay_carry_no_skill_overlay_roots(
 
     assert str(effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV, "")).strip() == ""
     assert _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET) == []
+    assert _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET) == []
 
 
 # OMN-20867. omnimarket's landing orchestrator and CI-red triage read six

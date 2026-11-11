@@ -34,8 +34,6 @@ _KNOWN_REPOS = {
     "omnimemory",
     "omninode_infra",
     "omniweb",
-    "onex_change_control",
-    "omnibase_compat",
 }
 
 _TICKET_PATTERN = re.compile(r"[Oo][Mm][Nn]-(\d+)")
