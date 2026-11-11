@@ -25,6 +25,13 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.helpers.declared_changed_path import (
+    LIVE_TERM_DOT,
+    NODE_LIVE,
+    dead,
+    local,
+    node_says,
+)
 from tests.helpers.prepr_pool_overlay import pool_overlay_env
 
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
@@ -152,7 +159,7 @@ def test_the_term_is_the_directory_name_alone_when_the_contract_name_is_the_same
         {"node_kept": "name: node_kept\nevent_bus:\n  subscribe_topics: [t]\n"},
     )
     (term,) = _host(root, "derive_live_grep").split()
-    assert term == pool.LIVE_TERM_DOT + "node_kept" + pool.LIVE_TERM_DOT
+    assert term == LIVE_TERM_DOT + "node_kept" + LIVE_TERM_DOT
 
 
 def test_a_node_with_no_topics_and_no_runtime_profile_is_not_a_live_term(
@@ -204,7 +211,12 @@ def test_a_changed_local_node_is_not_applicable_not_a_failure(tmp_path: Path) ->
         "live-grep derived from the diff: none (every changed node is local)\n"
         + NA_LINE
     )
-    code, text, events = base._infra_run(tmp_path, base._infra_clone(NA_NODE), live)
+    code, text, events = base._infra_run(
+        tmp_path,
+        base._infra_clone(NA_NODE),
+        live,
+        local("node_pin_bump_compute"),
+    )
     assert code == pool.EXIT_PASS, text
     assert events[0]["verifier_token"] == "ACCEPTED", text
     assert "changed_path_live" in events[0]["mandatory_checks"]
@@ -215,34 +227,38 @@ def test_a_changed_local_node_is_not_applicable_not_a_failure(tmp_path: Path) ->
         if c["name"] == "changed_path_live"
     ]
     assert check["ok"] is True
-    assert "not-applicable: node_pin_bump_compute" in check["evidence"]
+    assert (
+        "runs in no runtime (no topics, no runtime profile): node_pin_bump_compute"
+        in check["evidence"]
+    )
 
 
 def test_a_local_node_does_not_excuse_a_runtime_node_that_never_ran(
     tmp_path: Path,
 ) -> None:
-    term = pool.LIVE_TERM_DOT + "node_runtime_error_triage_effect" + pool.LIVE_TERM_DOT
+    term = LIVE_TERM_DOT + "node_runtime_error_triage_effect" + LIVE_TERM_DOT
     live = (
         f"live-grep derived from the diff: {term} \n{NA_LINE}"
         f"  omnibase-infra-local-omninode-runtime mentions {term}: 0\n"
         f"  omnibase-infra-local-runtime-effects mentions {term}: 0\n"
     )
     clone = base._infra_clone(NA_NODE, base.NODE)
-    code, text, events = base._infra_run(tmp_path, clone, live)
+    answer = dead("node_runtime_error_triage_effect")
+    code, text, events = base._infra_run(tmp_path, clone, live, answer)
     assert code == pool.EXIT_FAIL, text
     assert events[0]["failing_checks"] == ["changed_path_live"]
     assert "no runtime log mentions: node_runtime_error_triage_effect\n" in text + "\n"
 
 
 def test_a_local_node_beside_a_live_runtime_node_is_accepted(tmp_path: Path) -> None:
-    term = pool.LIVE_TERM_DOT + "node_runtime_error_triage_effect" + pool.LIVE_TERM_DOT
+    term = LIVE_TERM_DOT + "node_runtime_error_triage_effect" + LIVE_TERM_DOT
     live = (
         f"live-grep derived from the diff: {term} \n{NA_LINE}"
         f"  omnibase-infra-local-omninode-runtime mentions {term}: 5\n"
         f"  omnibase-infra-local-runtime-effects mentions {term}: 0\n"
     )
     clone = base._infra_clone(NA_NODE, base.NODE)
-    code, text, events = base._infra_run(tmp_path, clone, live)
+    code, text, events = base._infra_run(tmp_path, clone, live, NODE_LIVE)
     assert code == pool.EXIT_PASS, text
     assert events[0]["verifier_token"] == "ACCEPTED", text
 
@@ -251,14 +267,17 @@ def test_an_alternation_term_is_named_by_its_directory_in_the_failure(
     tmp_path: Path,
 ) -> None:
     term = (
-        pool.LIVE_TERM_DOT
+        LIVE_TERM_DOT
         + "(node_runtime_error_triage_effect|runtime_error_triage_effect)"
-        + pool.LIVE_TERM_DOT
+        + LIVE_TERM_DOT
     )
     live = (
         f"  omnibase-infra-local-omninode-runtime mentions {term}: 0\n"
         f"  omnibase-infra-local-runtime-effects mentions {term}: 0\n"
     )
-    code, text, _ = base._infra_run(tmp_path, base._infra_clone(base.NODE), live)
+    answer = dead("node_runtime_error_triage_effect")
+    code, text, _ = base._infra_run(
+        tmp_path, base._infra_clone(base.NODE), live, answer
+    )
     assert code == pool.EXIT_FAIL
     assert "no runtime log mentions: node_runtime_error_triage_effect\n" in text + "\n"
