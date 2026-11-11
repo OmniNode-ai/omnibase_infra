@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-23884
+title: Move the pinned coding-assistant tool in the runtime image to the version that fixes a known security flaw
+summary: >-
+  The runtime image pins the claude-code npm package and its two platform packages at 2.1.181, and the Trivy scan in the dev candidate delivery build fails on CVE-2026-88968 (HIGH, fixed in 2.1.251). The pins move to 2.1.251 in docker/Dockerfile.runtime, and the Dockerfile pin test reads the new version from the real file.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23884-claude-code-pin
+    statement: The runtime image installs the claude-code package and both platform packages at a version the scanner does not flag.
+    acceptance:
+      - id: AC1
+        statement: "AC1: docker/Dockerfile.runtime pins @anthropic-ai/claude-code, claude-code-linux-x64 and claude-code-linux-arm64 to 2.1.251 and no 2.1.181 remains in it -- falsifier: grep the file for 2.1.181 on the branch; any match fails."
+      - id: AC2
+        statement: "AC2: the Dockerfile pin test reads the pin from the real Dockerfile and fails on the old version -- falsifier: put 2.1.181 back in the Dockerfile and run tests/scripts/test_check_dockerfile_pins.py; it must go red."
+      - id: AC3
+        statement: "AC3: a Trivy scan of the runtime image built from the branch reports no finding for CVE-2026-88968 -- falsifier: the same scan on the image with the old pin reports that HIGH finding at 2.1.181."
+      - id: AC4
+        statement: "AC4: integrated: after the change merges, the Deliver dev candidate run on a dev head carrying it passes the step Run Trivy vulnerability scanner, and the running dev runtime effects container reports claude 2.1.251 -- falsifier: the step fails on that head, or the container reports any other version."
+evidence_requirements:
+  - kind: tests
+    description: The Dockerfile pin test file.
+    command: uv run --frozen pytest tests/scripts/test_check_dockerfile_pins.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23884-ac1-ac2-pin
+    description: >-
+      The Dockerfile carries 2.1.251 in all three package specs and the pin test asserts it; the same test run against the pre-change Dockerfile fails.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_check_dockerfile_pins.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23884-ac3-scan
+    description: >-
+      The scan of the built image is the Run Trivy vulnerability scanner step of the delivery build; the Dockerfile no longer names 2.1.181, which is the version the scanner flags. The scan itself is read from that step after merge and is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: "! grep -q '2\\.1\\.181' docker/Dockerfile.runtime"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23884-ac4-integrated
+    description: >-
+      Deploy check the hosted runner can run: the Dockerfile names claude-code 2.1.251 (the check fails at the merge base, where it names 2.1.181). The read of the delivery build step and the running container version is posted as a pull request comment naming the head; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: grep -qF '@anthropic-ai/claude-code@2.1.251' docker/Dockerfile.runtime
+        cwd: ${OMNI_HOME}/omnibase_infra
