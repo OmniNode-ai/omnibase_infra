@@ -128,6 +128,10 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "goal_trace_events": "omnimarket OMN-20034 (node_projection_goal_trace)",
     "goal_traces": "omnimarket OMN-20034 (node_projection_goal_trace)",
+    "merge_override_receipts": "omnimarket OMN-23836 (node_merge_override_alarm_effect)",
+    "merge_override_pending": "omnimarket OMN-23836 (node_merge_override_alarm_effect)",
+    "merge_override_verdicts": "omnimarket OMN-23836 (node_merge_override_alarm_effect)",
+    "merge_override_open_findings": "omnimarket OMN-23836 (node_merge_override_alarm_effect)",
 }
 
 _SKIP_REASON = (

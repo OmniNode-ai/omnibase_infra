@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Vendored node-migration tables bridged ahead of their omnimarket contracts.
+# Read by table_grant_derivation.LEGACY_MIGRATION_TABLE_DECLARATIONS. Each entry
+# names the vendored create migration under
+# docker/migrations/forward/nodes/<node>/<create>; a later migration in that
+# directory grants omninode_runtime SELECT, INSERT, UPDATE. A relation is
+# <prefix><table>. Each bridge expires when the omnimarket node contract
+# reaches the pin (tests/ci/test_supplemental_declaration_expiry_omn18863.py).
+- ticket: OMN-23055 # the store opens its own connection, so no db_io binding
+  node: node_gate_store_effect
+  create: 0000_create_gate_store.sql
+  prefix: gate_store_
+  tables: [state, reservations, safety, steps]
+- ticket: OMN-23341
+  node: node_projection_goal_trace
+  create: 0000_create_goal_trace_events.sql
+  prefix: ""
+  tables: [goal_trace_events, goal_traces]
+- ticket: OMN-23858 # omnimarket OMN-23836
+  node: node_merge_override_alarm_effect
+  create: 0001_create_merge_override_tables.sql
+  prefix: merge_override_
+  tables: [receipts, pending, verdicts, open_findings]

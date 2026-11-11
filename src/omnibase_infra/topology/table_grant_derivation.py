@@ -201,6 +201,9 @@ def _vendored_read_write(
     )
 
 
+_BRIDGES = Path(__file__).with_name("vendored_table_bridges.yaml")
+
+
 # Some migration-owned projection relations landed before their producing node's
 # ``db_io.db_tables`` contract is available in the omnimarket contracts root
 # consumed by this repo's CI. They still participate in the same grant
@@ -321,25 +324,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
     ),
-    # OMN-23055: node_gate_store_effect/0000 creates the four gate store relations and
-    # 0001 grants omninode_runtime on them ahead of the omnimarket node contract
-    # reaching the pin (the node's contract declares no db_io binding: the store opens
-    # its own connection); expire this bridge when that contract reaches the pin.
+    # OMN-23055, OMN-23341, OMN-23858: vendored_table_bridges.yaml.
     *(
-        _vendored_read_write(
-            f"gate_store_{s}", "node_gate_store_effect", "0000_create_gate_store.sql"
-        )
-        for s in ("state", "reservations", "safety", "steps")
-    ),
-    # OMN-23341: node_projection_goal_trace/0000 creates goal_trace_events and
-    # goal_traces and 0001 grants omninode_runtime SELECT, INSERT, UPDATE on both,
-    # ahead of the omnimarket node contract reaching the pin; expire this bridge
-    # when that contract reaches the pin.
-    *(
-        _vendored_read_write(
-            t, "node_projection_goal_trace", "0000_create_goal_trace_events.sql"
-        )
-        for t in ("goal_trace_events", "goal_traces")
+        _vendored_read_write(f"{b['prefix']}{t}", b["node"], b["create"])
+        for b in yaml.safe_load(_BRIDGES.read_text(encoding="utf-8"))
+        for t in b["tables"]
     ),
     # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
