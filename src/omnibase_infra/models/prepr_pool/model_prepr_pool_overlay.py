@@ -39,6 +39,8 @@ class ModelPreprPoolOverlay(BaseModel):
     probe_poll_s: int = Field(gt=0)
     remote_command_prefix: str
     local_command_prefix: str
+    #: the argv prefix of node_lab_proof_judge_compute's command; empty leaves changed_path_live unjudged
+    lab_proof_judge_command: str = ""
 
     @classmethod
     @cache

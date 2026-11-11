@@ -146,7 +146,6 @@ POST_BRINGUP_PARAM = "POST_BRINGUP_CMD"
 #: The literal dot prepr_pool_prove.sh puts on each side of a LIVE_GREP term it
 #: derives from a changed node (OMN-19566): a runtime logs ``.<node>.`` only once
 #: the node runs (its consumer group, its own loggers), never on discovery.
-LIVE_TERM_DOT = "[.]"
 
 # Prepended to every remote command (the overlay's remote_command_prefix): a
 # non-login ssh shell on a Docker Desktop Mac has no docker on PATH, and a bare
@@ -227,7 +226,9 @@ def default_pool_config() -> Path:
     request = ModelWorkspaceConfigRootRequest(
         workspace_root=Path(registry or "."), allow_developer_config=bool(registry)
     )
-    resolution = resolver.HandlerWorkspaceConfigRootResolve().handle(request)
+    resolution = (handler := resolver.HandlerWorkspaceConfigRootResolve()).handle(
+        request
+    )
     if resolution.config_root is None:
         raise ValueError(
             f"the pre-merge runtime pool is not configured: set "
@@ -881,6 +882,7 @@ class Readback:
     restored: bool
     residue: str
     group: GroupFacts | None = None
+    changed_path: dict[str, Any] | None = None
 
     @property
     def outcome(self) -> str:
@@ -1021,8 +1023,10 @@ def judge(
 ) -> Readback:
     """Decide the run from the phase outputs of prepr_pool_prove.sh.
 
-    Pure: every PASS/FAIL line a PR body cites is derived here from text, so a
-    test can hand it the text a broken stack prints and see the FAIL.
+    Pure but for the one command changed_path_live is asked of
+    (``declared_changed_path``): every PASS/FAIL line a PR body cites is derived
+    here from text, so a test can hand it the text a broken stack prints and see
+    the FAIL.
 
     ``base_probe`` is the probe output of the same bundle built at dev on the
     same host (a base control). With it, a contract that fails to wire at dev
@@ -1135,44 +1139,13 @@ def judge(
         notes.append(
             "wiring failures the base does not have: " + ", ".join(new_failures[:8])
         )
-    # OMN-19566: changed_path_live. The probe prints one mention count per
-    # LIVE_GREP name per runtime; a name no runtime mentions is a changed path
-    # that never ran. A caller may name LIVE_GREP; otherwise the probe derives
-    # it from the diff, one name per changed node that exists at the head and
-    # runs in a runtime. A node whose contract declares no topics and no runtime
-    # profile gets no name: the probe lists it on a not-applicable line instead
-    # (OMN-18893), and with no other name that line is the check's passing
-    # outcome, its evidence naming the node, never a pass for want of a line.
-    # With neither a name nor that line there is no check: the profile makes the
-    # check mandatory only for a PR that changes a node, and for such a PR the
-    # receipt's verifier then names it as missing rather than this judge
-    # inventing a pass.
-    mentions: dict[str, int] = {}
-    for _, name, count in re.findall(r"^\s+(\S+) mentions (\S+): (\d+)$", probe, re.M):
-        name = name.removeprefix(LIVE_TERM_DOT).removesuffix(LIVE_TERM_DOT)
-        # a term that carries the directory and the contract name is reported
-        # under the directory, the name a reader finds in the diff
-        name = re.sub(r"^\(([^|()]+)\|[^|()]+\)$", r"\1", name)
-        mentions[name] = mentions.get(name, 0) + int(count)
-    not_applicable = [
-        n
-        for line in re.findall(r"^live-grep not-applicable: ([^(\n]+?) \(", probe, re.M)
-        for n in line.split()
-    ]
-    if mentions:
-        dead = sorted(n for n, c in mentions.items() if c == 0)
-        checks["changed_path_live"] = not dead
-        if dead:
-            notes.append(
-                "changed path not live, no runtime log mentions: " + ", ".join(dead)
-            )
-    elif not_applicable:
-        checks["changed_path_live"] = True
-    if not_applicable:
-        notes.append(
-            "changed path not applicable, runs in no runtime (no topics, no runtime "
-            "profile): " + ", ".join(not_applicable)
-        )
+    # changed_path_live is judged by node_lab_proof_judge_compute (OMN-23715). It reads
+    # the probe's live-grep lines and the PR's changed paths; a check it does not answer
+    # stays absent, so the receipt's verifier names it missing, never a pass.
+    answer = declared_changed_path(outputs)
+    if answer is not None and answer["verdict"] != "NO_CHECK":
+        checks["changed_path_live"] = bool(answer["ok"])
+        notes += answer["notes"]
     rcs = re.findall(r"^(\S+) (?:focused|suite) rc=(\d+)", tests, re.M)
     failed_ids = re.findall(r"^FAILED (\S+)", tests, re.M)
     # pytest rc 1 = tests failed; a dev control at rc 1 means the test fails at
@@ -1249,9 +1222,7 @@ def judge(
         restored = False
         notes.append(f"slot teardown verdict {slot_td.group(1)}")
     residue += f", snapshot-diff={diff_m.group(1) if diff_m else 'missing'}"
-    return Readback(
-        checks=checks, notes=notes, restored=restored, residue=residue, group=group
-    )
+    return Readback(checks, notes, restored, residue, group, answer)
 
 
 #: how many trailing lines of the post-up command's output the readback carries
@@ -1518,6 +1489,29 @@ def pr_changed_paths(clone: str) -> dict[tuple[str, int], list[str]]:
     return changed
 
 
+def declared_changed_path(outputs: Mapping[str, str]) -> dict[str, Any] | None:
+    """node_lab_proof_judge_compute's answer for changed_path_live, or None (OMN-23715).
+
+    None when the overlay names no command or the command errors or answers nothing
+    readable: the check then stays absent, never a pass.
+    """
+    command = settings().lab_proof_judge_command.strip()
+    if not command:
+        return None
+    done = subprocess.run(
+        [*shlex.split(command), "pool-run"],
+        input=json.dumps({k: outputs.get(k, "") for k in ("clone", "probe")}),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=settings().fact_publish_timeout_s,
+    )
+    answer = None
+    with contextlib.suppress(ValueError):
+        answer = json.loads(done.stdout) if done.returncode == 0 else None
+    return answer if isinstance(answer, dict) else None
+
+
 def _lines(text: str, pattern: str) -> str:
     return "; ".join(m.strip() for m in re.findall(pattern, text, re.M))
 
@@ -1576,14 +1570,6 @@ def _check_map(
             "post_bringup",
             _lines(outputs.get("post-bringup", ""), r"^post-bringup .*$"),
         ),
-        "changed_path_live": (
-            "changed_path_live",
-            _lines(
-                probe,
-                r"^(?:live-grep (?:derived from the diff|not-applicable): .*"
-                r"|\s+\S+ mentions \S+: \d+)$",
-            ),
-        ),
     }
 
 
@@ -1608,6 +1594,8 @@ def receipt_checks(
     for key, ok in rb.checks.items():
         name, lines = mapping.get(key, (key, ""))
         evidence = lines or f"no line for {key} in the phase output"
+        if key == "changed_path_live" and rb.changed_path:
+            evidence = rb.changed_path["evidence"]
         evidence = f"prepr_runtime_pool.judge {key}: {evidence}"[:_EVIDENCE_LIMIT]
         if not built and key not in _STACK_INDEPENDENT:
             rows.append(
