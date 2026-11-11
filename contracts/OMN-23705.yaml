@@ -51,7 +51,10 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/topology/test_work_ledger_latest_vendored_grant.py -q -n 0 --no-cov -p no:cacheprovider
   - id: dod-omn23705-ac4
-    description: 'Proven by a read of the deploy agent job record for the roll that carries this merge and of the table grants on the development lane, recorded in the omnimarket pull request for OMN-23694; no test of this repository can read the running lane.'
+    description: 'Proven by a read of the deploy agent job record for the roll that carries this merge and of the table grants on the development lane, recorded in the omnimarket pull request for OMN-23694; the check bound here proves only the declared grant in every topology instance, since no test of this repository can read the running lane.'
     source: manual
     binds_ac:
       - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_work_ledger_latest_vendored_grant.py -q -n 0 --no-cov -p no:cacheprovider
