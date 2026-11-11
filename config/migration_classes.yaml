@@ -219,6 +219,7 @@ migrations:
   forward/nodes/node_projection_context_roi/001_create_context_roi_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CONTEXT_ROI_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CONTEXT_ROI_SCORES_RUN
   forward/nodes/node_projection_context_roi/002_add_factor_subset_hash_and_routing_source.sql: expand-only
   forward/nodes/node_projection_context_roi/003_context_roi_scores_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
+  forward/nodes/node_projection_context_roi/004_add_code_eval_trial_columns.sql: expand-only # additive ADD COLUMN IF NOT EXISTS, every column nullable or defaulted
   forward/nodes/node_projection_cost_by_repo/0001_create_cost_by_repo_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT COST_BY_REPO_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_COST_BY_REPO_RE
   forward/nodes/node_projection_cost_by_repo/0002_grant_omninode_runtime_cost_by_repo_snapshots.sql: expand-only
   forward/nodes/node_projection_cost_summary/0001_create_llm_cost_aggregates.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT LLM_COST_AGGREGATES_PKEY; ALTER TABLE ADD CONSTRAINT UNIQUE_AGGREGATION_KE
