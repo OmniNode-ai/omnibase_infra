@@ -2,9 +2,9 @@
   "corpus": {
     "contracts_by_package": {
       "omnibase_core": 21,
-      "omnibase_infra": 155
+      "omnibase_infra": 156
     },
-    "contracts_discovered": 176,
+    "contracts_discovered": 177,
     "discovery_errors": 0,
     "distinct_subscribe_topics": 103,
     "probe_count": 1137,
@@ -46,7 +46,7 @@
     "omnimemory",
     "onex-change-control"
   ],
-  "generated_at_utc": "2026-11-10T18:09:41.849127+00:00",
+  "generated_at_utc": "2026-11-11T00:49:34.774095+00:00",
   "installed_package_versions": {
     "omnibase-core": "0.47.72",
     "omnibase-infra": "0.38.77",
