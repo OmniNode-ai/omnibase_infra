@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-23705
+title: Carry the work ledger latest-state database change in the infrastructure migration tree
+summary: 'omnibase_infra half of the work ledger latest-state change (omnimarket OMN-23694): vendors node_projection_work_ledger migrations 0011 (creates omninode_internal.work_ledger_latest and backfills it from work_ledger_rows) and 0012 (grants the runtime SELECT, INSERT, UPDATE, never DELETE) ahead of the omnimarket change, registers them in the migration ledger and class list, and bridges the relation in the table-grant derivation until the contract pin advances. The behavioural proof of the read and the projection is in the omnimarket contract for OMN-23694; this change makes that code wireable and applies the table with the next deploy-agent roll.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23705-infra-vendor
+    statement: The runtime principal holds a declared grant on the latest-state table so the omnimarket projection wires, and the vendored migrations match the omnimarket source.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the infrastructure copy of both files is byte-identical to the omnimarket files at the pending change''s head -- falsifier: run scripts/sync-node-migrations.sh --check in the infrastructure repository and find a difference'
+      - id: AC2
+        statement: 'AC2: the migration ledger, class list, topology instances and catalogs name the new table and both files -- falsifier: pytest tests/unit/topology/test_work_ledger_latest_vendored_grant.py -q'
+      - id: AC3
+        statement: 'AC3: the omnimarket node-migration-vendor-parity-gate check passes on the pending change after this merges -- falsifier: read that check on the pending change''s head and find it red'
+      - id: AC4
+        statement: 'AC4: integrated: after the deploy agent rolls the development runtime from the merged tag, the table omninode_internal.work_ledger_latest exists on the development lane database and the runtime role can read and write it -- falsifier: read the deploy agent''s job record for the roll and the table''s grants on the development lane and find the table or a grant missing'
+evidence_requirements:
+  - kind: tests
+    description: The runtime grant on work_ledger_latest is present in every topology instance, and the vendored migrations are in sync with the omnimarket source.
+    command: uv run pytest tests/unit/topology/test_work_ledger_latest_vendored_grant.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23705-ac1
+    description: 'Carries the prerequisite for AC1: the vendored work-ledger migrations 0011 and 0012, their ledger and class entries, and the runtime SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_latest in every topology instance.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_work_ledger_latest_vendored_grant.py -q -n 0 --no-cov -p no:cacheprovider
+  - id: dod-omn23705-ac2
+    description: 'Carries the prerequisite for AC2: the vendored work-ledger migrations 0011 and 0012, their ledger and class entries, and the runtime SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_latest in every topology instance.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_work_ledger_latest_vendored_grant.py -q -n 0 --no-cov -p no:cacheprovider
+  - id: dod-omn23705-ac3
+    description: 'Carries the prerequisite for AC3: the vendored work-ledger migrations 0011 and 0012, their ledger and class entries, and the runtime SELECT, INSERT, UPDATE grant on omninode_internal.work_ledger_latest in every topology instance.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_work_ledger_latest_vendored_grant.py -q -n 0 --no-cov -p no:cacheprovider
+  - id: dod-omn23705-ac4
+    description: 'Proven by a read of the deploy agent job record for the roll that carries this merge and of the table grants on the development lane, recorded in the omnimarket pull request for OMN-23694; the check bound here proves only the declared grant in every topology instance, since no test of this repository can read the running lane.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_work_ledger_latest_vendored_grant.py -q -n 0 --no-cov -p no:cacheprovider
