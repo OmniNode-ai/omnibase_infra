@@ -150,7 +150,7 @@ def test_real_dockerfile_pins_codex_and_claude_exactly() -> None:
 
     by_pkg = {e.package: e.version for e in entries}
     assert by_pkg.get("@openai/codex") == "0.141.0"
-    assert by_pkg.get("@anthropic-ai/claude-code") == "2.1.181"
+    assert by_pkg.get("@anthropic-ai/claude-code") == "2.1.251"
     # And every npm global install in the real Dockerfile passes the pin gate.
     for entry in entries:
         assert _mod._check_npm_exact_pin(entry) is None
@@ -163,5 +163,5 @@ def test_real_dockerfile_pins_codex_and_claude_exactly() -> None:
     text = dockerfile.read_text()
     assert "@openai/codex-linux-x64@npm:@openai/codex@0.141.0-linux-x64" in text
     assert "@openai/codex-linux-arm64@npm:@openai/codex@0.141.0-linux-arm64" in text
-    assert "@anthropic-ai/claude-code-linux-x64@2.1.181" in text
-    assert "@anthropic-ai/claude-code-linux-arm64@2.1.181" in text
+    assert "@anthropic-ai/claude-code-linux-x64@2.1.251" in text
+    assert "@anthropic-ai/claude-code-linux-arm64@2.1.251" in text
