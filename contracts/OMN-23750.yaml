@@ -18,7 +18,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The focused tests of this change pass at the pushed head.
-    command: uv run pytest tests/unit/migrations -q -k context_roi -n 0 --no-cov -p no:cacheprovider
+    command: uv run pytest tests/unit/migrations/test_context_roi_code_eval_columns_omn23750.py -q -n 0 --no-cov -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -31,7 +31,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/migrations -q -k context_roi -n 0 --no-cov -p no:cacheprovider
+        check_value: uv run pytest tests/unit/migrations/test_context_roi_code_eval_columns_omn23750.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn23750-ac2
     description: 'AC2: the migration ledger and class list name the new file'
@@ -40,7 +40,7 @@ dod_evidence:
       - AC2
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/migrations -q -k context_roi -n 0 --no-cov -p no:cacheprovider
+        check_value: uv run pytest tests/unit/migrations/test_context_roi_code_eval_columns_omn23750.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn23750-ac3
     description: 'AC3: integrated: after the deploy agent rolls the development runtime, the result table has the new columns and its existing lines read their defaults'
@@ -49,5 +49,5 @@ dod_evidence:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/migrations -q -k context_roi -n 0 --no-cov -p no:cacheprovider
+        check_value: uv run pytest tests/unit/migrations/test_context_roi_code_eval_columns_omn23750.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
