@@ -1499,7 +1499,7 @@ def declared_changed_path(outputs: Mapping[str, str]) -> dict[str, Any] | None:
     if not command:
         return None
     done = subprocess.run(
-        [*shlex.split(command), "pool-run"],
+        [*shlex.split(os.path.expandvars(command)), "pool-run"],
         input=json.dumps({k: outputs.get(k, "") for k in ("clone", "probe")}),
         capture_output=True,
         text=True,

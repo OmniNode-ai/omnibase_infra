@@ -81,7 +81,8 @@ def test_an_unset_command_asks_nothing_and_leaves_the_check_absent() -> None:
 def test_the_command_is_handed_the_clone_and_probe_text_unread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _command(monkeypatch, "uv run --project /p python -m node_x")
+    monkeypatch.setenv("NODE_PROJECT_ROOT", "/p")
+    _command(monkeypatch, "uv run --project ${NODE_PROJECT_ROOT} python -m node_x")
     answer = json.dumps(NODE_LIVE)
     with mock.patch.object(pool.subprocess, "run", return_value=_done(answer)) as run:
         assert pool.declared_changed_path(OUTPUTS) == NODE_LIVE
