@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22177
+title: "The omnibase_infra Hostile Review accept step carries the receipt key and the verifier overlay its subprocess verifier needs"
+summary: >-
+  The CI overlay's agent_review_gate_accept names verifier_endpoint subprocess:../omniintelligence, which the omnimarket gate-accept node (omnimarket#4946) serves by running the omniintelligence receipt verifier in a subprocess with LOCAL_LLM_SHARED_SECRET. The omnibase_infra accept step gains that key in its env and the CI overlay fetch gains the verifier's overlay directory (review_agent_receipt_verify). The step still runs in ../omniintelligence with the node from omnimarket's newest dev tag, never code from the checkout under review.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22177-infra-verifier-binding
+    statement: >-
+      The accept step binds the subprocess verifier: it carries the receipt key and the verifier overlay is fetched.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: The omnibase_infra accept step carries LOCAL_LLM_SHARED_SECRET from secrets, runs in ../omniintelligence, and the CI overlay fetch includes config/onex/overlays/review_agent_receipt_verify -- falsifier: `uv run pytest tests/ci/test_hostile_review_agent_accept_step_shape_omn22275.py -q` fails when the key, the working directory or the overlay path is missing
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The step-shape test pins the key, the working directory and the overlay path; the workflow's own steps run with a node fake.
+    command: uv run --frozen pytest tests/ci -k "hostile_review_agent_accept or ci_summary_external_sweep" -q -n 0 --no-cov -p no:randomly
+  - kind: manual
+    description: >-
+      Hosted-runner deployment configuration probe: the workflow file the runner reads carries the key in the accept step and the verifier overlay path in the CI overlay fetch, and the focused workflow tests pass. Requires no gateway, key or lab host.
+    command: "deploy: uv run --frozen pytest tests/ci -k hostile_review_agent_accept -q -n 0 --no-cov -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22177-infra-ac1-verifier-binding
+    description: >-
+      The step-shape test pins LOCAL_LLM_SHARED_SECRET in the accept step's env, its working directory ../omniintelligence and the review_agent_receipt_verify sparse path. At the merge base the step has no key and the fetch has no such path, so the test fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_hostile_review_agent_accept_step_shape_omn22275.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn22177-infra-deploy
+    description: >-
+      Deploy probe -- the workflow file at the checked-out commit carries the key in the accept step and the verifier overlay path, and the workflow tests pass; fails when either is missing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci -k hostile_review_agent_accept -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "grep -qF 'config/onex/overlays/review_agent_receipt_verify' .github/workflows/hostile-reviewer.yml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

@@ -1,0 +1,46 @@
+{
+  "chain": "E15",
+  "kind": "error",
+  "title": "duplicate command owner",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_dup",
+        "registry_version": 1,
+        "content_hash": "d07c4d6230c0a1c36c478b638cce4b3c14c3947d66f638019b0f36353ebfc407",
+        "operation": "register",
+        "owner": "lab-deploy",
+        "registration_request_id": "07f00bdc-38e6-509b-8f83-a5c554fefcdb",
+        "contract_yaml": "name: node_dup\nnode_version: 1.0.0\n"
+      },
+      "key": "node_dup"
+    },
+    {
+      "step": 2,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "applied",
+      "model": "ModelContractHotloadApplied",
+      "record": {
+        "entity_id": "node_dup",
+        "registry_version": 1,
+        "content_hash": "d07c4d6230c0a1c36c478b638cce4b3c14c3947d66f638019b0f36353ebfc407",
+        "operation": "register",
+        "status": "refused",
+        "reason": "DUPLICATE_COMMAND_OWNER",
+        "runtime_instance_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f"
+      },
+      "key": "node_dup"
+    }
+  ],
+  "ends_in": "applied{refused, DUPLICATE_COMMAND_OWNER} before any mutation"
+}

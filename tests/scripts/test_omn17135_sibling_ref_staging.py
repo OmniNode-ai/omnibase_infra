@@ -41,7 +41,7 @@ STAGE_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
 
 # The repos RT-1 clean-checks-out (stage_workspace.sh SIBLING_REPOS) plus the
 # ones the lock-pin preflight resolves out of SIBLING_CLONE_MANIFEST.
-_STAGED_SIBLINGS = ("omnibase_core", "omnimarket")
+_STAGED_SIBLINGS = ("omnibase_core", "omnimarket", "omniintelligence")
 _DIST_NAME = {
     "omnibase_core": "omnibase-core",
     "omnibase_compat": "omnibase-compat",
@@ -49,6 +49,7 @@ _DIST_NAME = {
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
     "omnibase_spi": "omnibase-spi",
+    "omniintelligence": "omninode-intelligence",
 }
 _PIN_VERSION = "9.9.9"
 
@@ -92,7 +93,8 @@ def _advance_dev(path: Path) -> str:
 def _write_consumer_lock(omni_home: Path) -> None:
     blocks = [
         f'[[package]]\nname = "{dist}"\nversion = "{_PIN_VERSION}"\n'
-        for dist in _DIST_NAME.values()
+        for repo, dist in _DIST_NAME.items()
+        if repo != "omniintelligence"  # no lock pins it (OMN-22153)
     ]
     market = omni_home / "omnimarket"
     (market / "uv.lock").write_text("\n".join(blocks), encoding="utf-8")

@@ -1,0 +1,83 @@
+# Design-review verdict: fallback result store-once (OMN-22258)
+
+Verdict: **PASS with conditions.** The fallback result's store-once of plan task
+T0 (transcript intent-to-outcome graph plan) may be built as T4, under the four
+conditions below. The model is `formal/fallback_store_once/`
+(`FallbackStoreOnce.tla`); T4 cites it by that path.
+
+Reviewed against the committed TLC output in `results/`, bound to
+`model.sha256` (the sha256 of `FallbackStoreOnce.tla`, then each cfg in sorted
+order). TLC2 Version 2026.11.02.164701 (rev: dc6a944), `-workers 4`, Java
+Adoptium 17.0.20.1 in `eclipse-temurin:17-jre-alpine` on lab host h053,
+tla2tools.jar sha256 `c57d4d7bbee3ed2c89c32cb9c60cac728f751e80e2570bc4b7368ae39291fc21`
+(the tlaplus v1.8.0 release asset).
+
+| Config | Expected | TLC result | Distinct states |
+| --- | --- | --- | --- |
+| Model.cfg | pass three invariants and both properties | No error has been found, 0 states left on queue | 13 |
+| mut_write_on_arrival.cfg | counterexample | OneStoredResult violated | 9 |
+| mut_write_on_arrival_answered.cfg | counterexample | DifferentRefused violated | 9 |
+| mut_lookup_then_put.cfg | counterexample | OneStoredResult violated | 39 |
+| mut_lookup_then_put_writes.cfg | counterexample | OneWrite violated | 35 |
+| mut_no_fairness.cfg | counterexample | EveryCallAnswered and SomeResultStored violated (stuttering) | 13 |
+| wit_refused.cfg | witness violated | RefusedWitness violated | 9 |
+| wit_same.cfg | witness violated | SameWitness violated | 11 |
+
+Distinct-state counts of a violated config are where TLC stopped, and vary
+with the worker count; the Model.cfg count does not. Command, per cfg, on a
+copy of the model: `docker run --rm -v <copy>:/w -v <jar dir>:/tlc -w /w
+eclipse-temurin:17-jre-alpine java -XX:+UseParallelGC -cp
+/tlc/tla2tools.jar tlc2.TLC -noGenerateSpecTE -config <cfg> -workers 4
+-metadir /tmp/states FallbackStoreOnce.tla`. Control runs were made before the
+passing run.
+
+## Findings
+
+1. AC6. Three concurrent calls for one key (results a, b, a) leave one stored
+   result when the write is an atomic put-if-absent: the first call is answered
+   `stored`, an equal second result `same`, a different one `refused`, and the
+   stored result never changes. The control that writes on arrival stores both
+   `a` and `b` in three states and answers `stored` to a call whose result was
+   overwritten (`mut_write_on_arrival`, `mut_write_on_arrival_answered`).
+2. A lookup followed by a later write is no better
+   (`mut_lookup_then_put`: two calls see the key empty and both write, in five
+   states; `mut_lookup_then_put_writes` counts the writes, which also catches two
+   calls that write the same value).
+3. `wit_refused` and `wit_same` show a different second result refused and an
+   equal one accepted as `same` in the passing model, and `SomeResultStored`
+   rules out a store that refuses everything.
+
+## Codex review (h053, thread 01a19f67-6ccc-7820-a395-ea3473bb03bb, read-only, high effort)
+
+Codex reviewed the four models before this verdict; the models were then
+strengthened where noted and every cfg re-run, so the committed output is of
+the revised models. Its findings on this model, and the disposition of each:
+
+- W17 `OneStoredResult` counts distinct values written, so two writes of the
+  same value are invisible. Fixed: a ghost write count and the invariant
+  `OneWrite`, with `mut_lookup_then_put_writes`. `OneStoredResult` is kept
+  because it is the criterion's wording.
+- W18 `DifferentRefused` constrains only successful answers; a store that
+  refuses everything would pass it. Fixed: the property `SomeResultStored`.
+- N19 the put is atomic with an authoritative comparison, the key is stable, the
+  result lives as long as the key. Accepted as conditions 1 to 3.
+
+## Conditions on T4
+
+1. The store call is one atomic put-if-absent on the fallback key, answering
+   which of stored, same or refused applies in the same call. A lookup followed
+   by a write, or a write that overwrites, is the failing control.
+2. "Same" is a comparison of the stored result with the call's result on
+   content the store holds (not on a client-computed hash alone), and an equal
+   result is answered as success without a write.
+3. A refused call returns the stored result to its caller and leaves the stored
+   one unchanged; the caller does not retry with its own.
+4. The key is stable across calls and across restarts for as long as the result
+   is to be kept. The model has no expiry; an expiring key is a new design.
+
+## Not modelled
+
+- Key expiry or deletion; more than one key; more than three calls.
+- A call dying between computing its result and the put (the put is its first
+  effect).
+- The store's own failure.

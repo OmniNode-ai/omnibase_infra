@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_api_fixture_record_effect
+contract_name: node_api_fixture_record_effect
+node_name: node_api_fixture_record_effect
+node_type: EFFECT_GENERIC
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: "OMN-22158: capture HTTP behaviour through a private DI overlay; refuse incomplete corpora or a cleanup count delta."
+tags: [validator_support_node]
+input_model:
+  name: ModelApiFixtureRecordRequest
+  module: omnibase_infra.models.model_api_fixture_record_request
+  description: "Local private fixture, overlay and output paths; no secret values."
+output_model:
+  name: ModelApiFixtureRecordResult
+  module: omnibase_infra.models.model_api_fixture_record_result
+  description: "Counts and a fixed error code, with no private response bodies."
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.api-fixture-record.v1"]
+  publish_topics: ["onex.evt.platform.api-fixture-recorded.v1"]
+terminal_event: "onex.evt.platform.api-fixture-recorded.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: api_fixture.record
+      handler:
+        name: HandlerApiFixtureRecord
+        module: omnibase_infra.handlers.handler_api_fixture_record
+      event_model:
+        name: ModelApiFixtureRecordRequest
+        module: omnibase_infra.models.model_api_fixture_record_request
+      output_events: [ModelApiFixtureRecordResult]
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+capabilities:
+  - name: api_fixture.record
+    description: "Capture one pair per inventory identity, then clean up and compare scoped resource counts."
+config:
+  recording_policy:
+    expected_route_count: 63
+    count_resources: [tenants, accounts, keycloak_users]
+    response_headers: [content-type, content-length, date, etag, x-request-id]
+    masking_rules:
+      credential: "Credential, cookie and signature values are always replaced."
+      identity: "Names, email addresses, slugs and principals are replaced."
+      identifier: "Resource identifiers and references are replaced."
+      volatile: "Timestamps, durations and request identifiers are replaced."
+      private_text: "Every remaining string, including non-JSON bodies and embedded text, is replaced."
+    # Unknown JSON object keys are refused, including dynamic maps whose keys
+    # could themselves be private identifiers. The overlay supplies reviewed
+    # schema key names. There is no raw-body escape hatch.
+    unknown_body_key: refuse
+    credentials: private_credentials_file_only
+    output: private_directory_only
+    cleanup: finally_then_count_all_resources
+metadata:
+  ticket: OMN-22158
+  author: OmniNode Team
+  description: "Infrastructure HTTP capture; service request values live in a private overlay."
+  tags: [effect, http, fixtures]

@@ -1,0 +1,60 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-23525"
+title: "Name the retired routing decisions consumer so the dev roll removes its container"
+summary: >
+  omnibase_infra#5803 (OMN-23072) removed infra-routing-decisions-consumer from the dev compose files but did not add it to the dev main process retired_services of contracts/services/runtime_policy.contract.yaml. The deploy agent removes a previous revision's container only for the services DEV_RUNTIME_MAIN_RETIRED_SERVICES names (DeployExecutor._retire_folded_dev_services, run before main is recreated); compose only warns about the orphan. The container started by a roll ten seconds before that merge kept running on h201, holding consumer group infra-routing-decisions-postgres, and the runtime's attach of projection_infra_routing_decisions failed with ConsumerGroupFenceError. The name is added to the contract and the rendered docker/runtime-policy.env; the deploy agent's retire tests read the shipped policy.
+
+is_seam_ticket: true
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn23525-retired-by-name"
+    statement: "A dev roll retires the infra routing decisions consumer's container of a previous revision."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the dev main process of contracts/services/runtime_policy.contract.yaml lists infra-routing-decisions-consumer under retired_services and the checked-in docker/runtime-policy.env carries it in DEV_RUNTIME_MAIN_RETIRED_SERVICES"
+      - id: "AC2"
+        statement: "AC2: a unit test drives the deploy agent's retire step with the shipped policy and sees it stop and remove the infra-routing-decisions-consumer container of the dev compose project, and it fails on the unchanged policy"
+      - id: "AC3"
+        statement: "AC3: integrated: after the next dev roll from a ref carrying the change, no omninode-infra-routing-decisions-consumer container exists on h201 and the omninode-runtime log has no ConsumerGroupFenceError for projection_infra_routing_decisions"
+evidence_requirements:
+  - kind: "tests"
+    description: "The retire tests read the shipped policy and the rendered env matches the contract."
+    command: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_retire_routing_decisions_consumer_omn23525.py scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn23525-policy-names-it"
+    description: "The rendered policy env matches the contract and lists the consumer; fails at the merge base, whose list lacks it."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'grep -E \"^DEV_RUNTIME_MAIN_RETIRED_SERVICES=.*infra-routing-decisions-consumer\" docker/runtime-policy.env && uv run python scripts/render_runtime_policy_env.py --check-env-file docker/runtime-policy.env >/dev/null'"
+        cwd: "."
+  - id: "dod-omn23525-agent-retires-it"
+    description: "The deploy agent's retire step, reading the shipped policy, stops and removes the consumer's container in the dev compose project and keeps volumes."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_retire_routing_decisions_consumer_omn23525.py -q"
+        cwd: "."
+  - id: "dod-omn23525-ac3-retire-with-shipped-policy"
+    description: "The deploy agent's retire step, driven with the shipped runtime policy the way a dev roll reads it, stops and removes the omninode-infra-routing-decisions-consumer container of the dev compose project. Fails at the merge base, whose policy does not list the service."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_retire_routing_decisions_consumer_omn23525.py -k test_the_agent_retires_its_container_with_the_shipped_policy -q"
+        cwd: "."
+  - id: "dod-omn23525-live-runtime-proof"
+    description: "After the deploy agent rolls dev from a ref carrying the change, docker ps -a on h201 lists no omninode-infra-routing-decisions-consumer container. It needs the lab, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_retire_routing_decisions_consumer_omn23525.py -q"
+        cwd: "."

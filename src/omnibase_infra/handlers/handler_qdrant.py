@@ -294,11 +294,11 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
             transport_type=EnumInfraTransportType.QDRANT,
         )
 
-    async def shutdown(self, timeout_seconds: float = 30.0) -> None:
+    async def shutdown(self, timeout_seconds: float | None = None) -> None:
         """Release resources and close connections to Qdrant.
 
         Args:
-            timeout_seconds: Maximum time to wait for shutdown to complete.
+            timeout_seconds: SPI compatibility argument; cleanup delegates to the client.
         """
         if self._client is not None:
             self._client.close()

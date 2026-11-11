@@ -40,12 +40,12 @@ from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_event impor
 from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_output import (
     ModelSetupOrchestratorOutput,
 )
+from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_request import (
+    ModelSetupOrchestratorRequest,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_core.models.core.model_deployment_topology import (
-        ModelDeploymentTopology,
-    )
     from omnibase_infra.nodes.node_setup_orchestrator.protocols.protocol_infisical_effect import (
         ProtocolInfisicalEffect,
     )
@@ -200,13 +200,17 @@ class HandlerSetupOrchestrator:
             )
         topology: ModelDeploymentTopology = topology_raw
 
-        return await self.handle(topology, corr_id, compose_file_path)
+        return await self.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path=compose_file_path,
+            )
+        )
 
     async def handle(
         self,
-        topology: ModelDeploymentTopology,
-        correlation_id: UUID,
-        compose_file_path: str,
+        request: ModelSetupOrchestratorRequest,
     ) -> ModelHandlerOutput[ModelSetupOrchestratorOutput]:
         """Coordinate the full sequential setup workflow.
 
@@ -215,14 +219,16 @@ class HandlerSetupOrchestrator:
         Do NOT proceed to preflight.
 
         Args:
-            topology: Deployment topology for the setup workflow.
-            correlation_id: UUID for distributed tracing.
-            compose_file_path: Path to Docker Compose file for provision step.
+            request: Deployment topology, tracing UUID, and Docker Compose path
+                for the setup workflow.
 
         Returns:
             ModelHandlerOutput containing ModelSetupOrchestratorOutput with all
             emitted lifecycle events.
         """
+        topology = request.topology
+        correlation_id = request.correlation_id
+        compose_file_path = request.compose_file_path
         # ---------------------------------------------------------------
         # I8: Cloud gate — hard stop before preflight
         # ---------------------------------------------------------------

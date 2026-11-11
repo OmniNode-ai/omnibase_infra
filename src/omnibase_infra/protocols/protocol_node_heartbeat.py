@@ -7,7 +7,7 @@ enabling protocol-based dependency injection for HandlerNodeHeartbeat in
 the DI container.
 
 The protocol captures the minimal interface required for DI resolution:
-    - handle(): Process a heartbeat event envelope
+    - handle(): Process a heartbeat request
     - handler_id: Unique identifier for the handler
     - category: Message category (EVENT)
     - message_types: Set of handled message type names
@@ -42,7 +42,9 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
     from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_infra.models.dispatch.model_injected_request import (
+        ModelInjectedRequest,
+    )
     from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 
@@ -52,7 +54,7 @@ class ProtocolNodeHeartbeat(Protocol):
 
     This protocol defines the interface required for heartbeat handling
     in the registration orchestrator. Implementations process
-    ModelNodeHeartbeatEvent envelopes and update the registration
+    ModelNodeHeartbeatEvent requests and update the registration
     projection with heartbeat timestamps and liveness deadlines.
 
     Thread Safety:
@@ -83,7 +85,7 @@ class ProtocolNodeHeartbeat(Protocol):
         ...
         ...     async def handle(
         ...         self,
-        ...         envelope: ModelEventEnvelope[ModelNodeHeartbeatEvent],
+        ...         request: ModelInjectedRequest[ModelNodeHeartbeatEvent],
         ...     ) -> ModelHandlerOutput[object]:
         ...         ...
 
@@ -114,12 +116,13 @@ class ProtocolNodeHeartbeat(Protocol):
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[ModelNodeHeartbeatEvent],
+        request: ModelInjectedRequest[ModelNodeHeartbeatEvent],
     ) -> ModelHandlerOutput[object]:
         """Process a node heartbeat event.
 
         Args:
-            envelope: Event envelope containing the heartbeat event payload.
+            request: Injected request carrying the heartbeat event, the
+                runtime's clock reading, the input id and the correlation id.
 
         Returns:
             ModelHandlerOutput with processing results.

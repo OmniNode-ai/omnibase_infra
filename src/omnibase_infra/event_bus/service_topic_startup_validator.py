@@ -98,12 +98,11 @@ class TopicStartupValidator:
 
     def _required_topics(self) -> tuple[str, ...]:
         """Return required topics from the same contract extractor as provisioning."""
-        from omnibase_infra.tools.contract_topic_extractor import (
-            ContractTopicExtractor,
+        from omnibase_infra.models.event_bus.model_contract_topic_scan import (
+            ModelContractTopicScan,
         )
 
-        extractor = ContractTopicExtractor(include_installed_packages=True)
-        entries = extractor.extract_all(
+        entries = ModelContractTopicScan.read(
             contracts_root=self._contracts_root,
             skill_manifests_root=self._skill_manifests_root,
             skill_manifests_roots=self._skill_manifests_roots,

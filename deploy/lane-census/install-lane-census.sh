@@ -180,19 +180,24 @@ STANDALONE_TIMER_SRC="${UNIT_DIR}/${STANDALONE_TIMER_REL}"
 # that cannot resolve that root itself. The unit carries the root this install
 # was run with; there is no default (resolve_unit_dir refused an unset root).
 CENSUS_MANIFEST_REL="config/lab/lane-census/lane-manifest.yaml"
-if [[ ! -f "${ONEX_WORKSPACE_CONFIG_ROOT}/${CENSUS_MANIFEST_REL}" ]]; then
-  echo "ERROR: ${ONEX_WORKSPACE_CONFIG_ROOT}/${CENSUS_MANIFEST_REL} not found; set ONEX_WORKSPACE_CONFIG_ROOT to the private config root that holds it, or the census has no desired state" >&2
-  exit 2
-fi
+[[ -f "${ONEX_WORKSPACE_CONFIG_ROOT}/${CENSUS_MANIFEST_REL}" ]] || { echo "ERROR: ${ONEX_WORKSPACE_CONFIG_ROOT}/${CENSUS_MANIFEST_REL} not found; set ONEX_WORKSPACE_CONFIG_ROOT to the private config root that holds it, or the census has no desired state" >&2; exit 2; }
 
-# Render a shipped unit: the clone path, then the broker container and the
-# config root as the last [Service] settings (every shipped unit ends inside its
+# OMN-22152: the census reads the host registry from the lane census node's
+# overlay, and a unit runs under a bare interpreter with no overlay roots, so the
+# unit carries the registry's absolute path, the file the node's `registry path`
+# verb prints. An install that names none installs nothing: a unit that exits 3
+# every hour is not an install.
+CENSUS_REGISTRY="${LANE_CENSUS_REGISTRY:-}"
+[[ -f "$CENSUS_REGISTRY" ]] || { echo "ERROR: LANE_CENSUS_REGISTRY is '${CENSUS_REGISTRY:-unset}', not a file; set it to the absolute path of the lane census node's overlay.yaml (the node's \`registry path\` verb prints it) so the unit can read the host registry" >&2; exit 2; }
+
+# Render a shipped unit: the clone path, then the broker container, the
+# config root and the host registry as the last [Service] settings (every shipped unit ends inside its
 # [Service] section or carries [Install] after it, so the lines are inserted
 # before [Install] if any).
 render_unit() {
   local src="$1" dst="$2"
   local env_line="Environment=LANE_MEMORY_BROKER_CONTAINER=${BROKER_CONTAINER}"
-  local root_line="Environment=ONEX_WORKSPACE_CONFIG_ROOT=${ONEX_WORKSPACE_CONFIG_ROOT}"
+  local root_line="Environment=ONEX_WORKSPACE_CONFIG_ROOT=${ONEX_WORKSPACE_CONFIG_ROOT}\nEnvironment=LANE_CENSUS_REGISTRY=${CENSUS_REGISTRY}"
   sed "s#${SHIPPED_REPO_ROOT}#${REPO_ROOT}#g" "$src" | awk -v line="$env_line" -v root="$root_line" '
     /^\[Install\]/ && !done { print line; print root; print ""; done=1 }
     { print }

@@ -1,0 +1,75 @@
+{
+  "chain": "G6",
+  "kind": "golden",
+  "title": "unchanged redeploy",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "deploy",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "ba96bb87-dcff-568d-b086-04f332d6fb67",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:ba96bb87-dcff-568d-b086-04f332d6fb67",
+        "outcome": "unchanged",
+        "reason": "ALREADY_REGISTERED",
+        "registry_version": 1
+      },
+      "key": "lab-deploy:ba96bb87-dcff-568d-b086-04f332d6fb67"
+    },
+    {
+      "step": 3,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "state",
+      "model": "ModelRuntimeHotloadState",
+      "record": {
+        "entity_id": "26db428e-d3cc-5fb2-92ac-f8d8c2dce2db",
+        "incarnation_id": "655cd2fd-1b1e-5e3e-b7bb-8fb1a7d5da27",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f",
+        "bootstrap_ready": true,
+        "serving_ready": true,
+        "names": {
+          "node_x": {
+            "observed": {
+              "registry_version": 1,
+              "status": "adopted",
+              "reason": null
+            },
+            "served": {
+              "registry_version": 1,
+              "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87"
+            }
+          }
+        }
+      },
+      "key": "26db428e-d3cc-5fb2-92ac-f8d8c2dce2db",
+      "note": "the new instances serve the registered version"
+    },
+    {
+      "step": 4,
+      "actor": "cli",
+      "action": "observe",
+      "note": "confirms from the state snapshot that the new instances serve v1; exit 0"
+    }
+  ],
+  "ends_in": "no row change; the CLI confirms the registered version is served"
+}

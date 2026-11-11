@@ -49,6 +49,7 @@ ACCEPT_CONTEXTS = {
     "github.event.pull_request.head.sha",
     "github.workspace",
     "secrets.GITHUB_TOKEN",
+    "secrets.LOCAL_LLM_SHARED_SECRET",
 }
 NODE_MODULE = (
     "omnimarket.nodes.node_agent_review_gate_accept_effect.runtime_gate_accept"
@@ -131,7 +132,14 @@ def test_the_accept_step_names_only_the_contexts_it_needs() -> None:
         run_contexts | env_contexts
     )
     assert step["env"]["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
-    assert "LOCAL_LLM_SHARED_SECRET" not in str(step["env"])
+    # OMN-22177: the verifier runs as a subprocess of ../omniintelligence and needs the
+    # receipt key; the step's working directory is that trusted clone, never the
+    # checkout under review (pinned by the step-shape test above).
+    assert (
+        step["env"]["LOCAL_LLM_SHARED_SECRET"]
+        == "${{ secrets.LOCAL_LLM_SHARED_SECRET }}"
+    )
+    assert step["working-directory"] == "../omniintelligence"
 
 
 def test_the_ci_overlay_that_holds_the_nodes_deployment_facts_is_fetched_and_rooted() -> (
@@ -145,6 +153,7 @@ def test_the_ci_overlay_that_holds_the_nodes_deployment_facts_is_fetched_and_roo
     ]
     assert f"config/onex/overlays/{OVERLAY_ID}" in sparse, sparse
     assert "config/onex/overlays/node_review_voters_overlay_compute" in sparse, sparse
+    assert "config/onex/overlays/review_agent_receipt_verify" in sparse, sparse
 
 
 def test_the_accept_step_sits_between_the_summary_comment_and_the_enforcement_step() -> (

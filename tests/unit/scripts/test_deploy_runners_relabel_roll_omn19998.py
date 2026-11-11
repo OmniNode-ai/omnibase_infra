@@ -100,6 +100,12 @@ FAKE_DOCKER = textwrap.dedent(
         verb_at = next(i for i, a in enumerate(args) if a in ("config", "stop", "up"))
         verb, rest = args[verb_at], args[verb_at + 1 :]
         project = args[args.index("-p") + 1] if "-p" in args else "-"
+        if verb == "config" and "--format" in rest:
+            # Normalized mount discovery precedes secondary relabels. This
+            # world's pool uses tmpfs; disk bind behavior has its own fixture.
+            print(json.dumps({"services": {name: {"environment": {}, "volumes": []}
+                                         for name in state["containers"]}}))
+            sys.exit(0)
         name = rest[-1]
         c = state["containers"][name]
         if verb == "config":
@@ -144,6 +150,31 @@ FAKE_GH = textwrap.dedent(
 )
 
 
+def _declared_secondary_action_pool() -> tuple[str, str, int]:
+    """The (host, pool prefix, runner count) of a declared non-primary amd64
+    host whose pool carries the multiarch class, read from the fleet config so
+    the test follows the inventory instead of spelling a host.
+    """
+    config = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))
+    for row in config["hosts"]:
+        if row["host"] == config["runner_host"]:
+            continue
+        for pool in row.get("pools", []):
+            if "action-multiarch" in pool["classes"] and row["arch"] == "amd64":
+                return row["host"], pool["runner_name_prefix"], pool["expected_count"]
+    raise AssertionError("no secondary amd64 pool declares action-multiarch")
+
+
+# OMN-22898 retired the primary host's general pool, so the roll these tests drive
+# is the one `--relabel` makes on a declared secondary amd64 pool; the primary
+# host's own compose declares no runner to relabel.
+HOST, PREFIX, COUNT = _declared_secondary_action_pool()
+
+
+def runner(index: int) -> str:
+    return f"{PREFIX}-{index}"
+
+
 @dataclass
 class World:
     root: Path
@@ -165,12 +196,13 @@ class World:
                 "RELABEL_DRAIN_INTERVAL_SECONDS": "1",
                 "RELABEL_READBACK_INTERVAL_SECONDS": "0",
                 "HOME": str(self.root / "home"),
+                "ONEX_STATE_DIR": str(self.root / "node-state"),
             }
         )
         merged.pop("DEPLOY_RUNNER_TOKEN", None)
         merged.update(env or {})
         return subprocess.run(
-            ["bash", str(DEPLOY_SCRIPT), *flags],
+            ["bash", str(DEPLOY_SCRIPT), f"--host={HOST}", f"--pool={PREFIX}", *flags],
             env=merged,
             capture_output=True,
             text=True,
@@ -218,12 +250,12 @@ def _build_world(tmp_path: Path, prefix: str, count: int) -> World:
     bindir.mkdir()
     (tmp_path / "home").mkdir()
     ssh = bindir / "ssh"
-    # A remote mkdir is recorded, not run: the host path (/home/jonah/...) does
-    # not exist, and may not be created, on a hosted CI runner. docker and gh
+    # A remote mkdir is recorded, not run: the remote host's home directory
+    # does not exist on a hosted CI runner. docker and gh
     # are shell functions naming the stubs, because the secondary-host PATH
     # preamble puts /usr/local/bin and /opt/homebrew/bin ahead of the stub dir.
     ssh.write_text(
-        "#!/usr/bin/env bash\nset -euo pipefail\nshift\n"
+        "#!/usr/bin/env bash\nset -euo pipefail\nif [[ $1 == -- ]]; then shift; fi\nshift\n"
         f'docker() {{ "{bindir}/docker" "$@"; }}; gh() {{ "{bindir}/gh" "$@"; }}\n'
         "export -f docker gh\n"
         'exec bash -c \'mkdir() { echo "MKDIR $*" >> "$FAKE_CALLS"; }; \'"$1"\n'
@@ -261,7 +293,7 @@ def _build_world(tmp_path: Path, prefix: str, count: int) -> World:
 
 @pytest.fixture
 def primary(tmp_path: Path) -> World:
-    return _build_world(tmp_path, "omninode-runner", 10)
+    return _build_world(tmp_path, PREFIX, COUNT)
 
 
 def test_the_script_parses_and_documents_the_mode() -> None:
@@ -286,15 +318,15 @@ def test_relabel_refuses_to_combine_with_the_other_modes(
 def test_dry_run_changes_nothing_and_names_the_idle_and_busy_runners(
     primary: World,
 ) -> None:
-    primary.mutate("omninode-runner-2", busy=True)
+    primary.mutate(runner(2), busy=True)
     result = primary.run("--relabel", "--dry-run")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert primary.lines("STOP") == [] and primary.lines("UP") == []
     assert primary.lines("GH_POST") == [], "a dry run must not mint a token"
     assert len(primary.lines("GH_READ")) == 1, "one registry read, no per-runner polls"
-    assert "[DRY RUN] omninode-runner-1 (online) is idle" in result.stdout
-    assert "omninode-runner-2 (online) is idle" not in result.stdout
-    assert "9 runner(s) idle and relabellable now" in result.stdout
+    assert f"[DRY RUN] {runner(1)} (online) is idle" in result.stdout
+    assert f"{runner(2)} (online) is idle" not in result.stdout
+    assert f"{COUNT - 1} runner(s) idle and relabellable now" in result.stdout
     assert "1 busy" in result.stdout
     # the registry itself is untouched
     assert all(LABEL not in str(r["labels"]) for r in primary.registry().values())
@@ -303,13 +335,13 @@ def test_dry_run_changes_nothing_and_names_the_idle_and_busy_runners(
 def test_a_real_roll_relabels_the_idle_runners_one_at_a_time_and_keeps_the_count(
     primary: World,
 ) -> None:
-    primary.mutate("omninode-runner-2", busy=True)
+    primary.mutate(runner(2), busy=True)
     result = primary.run("--relabel", "--drain-timeout=1")
     assert result.returncode == 0, (result.stdout, result.stderr)
 
     ups = primary.lines("UP")
     assert [u.split()[1] for u in ups] == [
-        f"omninode-runner-{i}" for i in (1, 3, 4, 5, 6, 7, 8, 9, 10)
+        runner(i) for i in range(1, COUNT + 1) if i != 2
     ], "the busy runner must be left alone and the rest taken in order"
     for line in ups:
         assert "--force-recreate" in line and "--no-deps" in line
@@ -327,24 +359,26 @@ def test_a_real_roll_relabels_the_idle_runners_one_at_a_time_and_keeps_the_count
         assert stop.startswith("STOP ") and up.startswith("UP ")
         assert stop.split()[1] == up.split()[1]
 
-    assert len(primary.lines("GH_POST")) == 9, "one fresh token per relabelled runner"
+    assert len(primary.lines("GH_POST")) == COUNT - 1, (
+        "one fresh token per relabelled runner"
+    )
     assert len(primary.lines("GH_READ")) <= 10, "registry reads stay under the budget"
     registry = primary.registry()
-    assert LABEL not in str(registry["omninode-runner-2"]["labels"])
-    assert LABEL in str(registry["omninode-runner-1"]["labels"])
-    assert len(registry) == 12, "no runner registered or removed"
-    assert "still busy: omninode-runner-2" in result.stderr
-    assert "count_before=11 count_after=11" in result.stdout
+    assert LABEL not in str(registry[runner(2)]["labels"])
+    assert LABEL in str(registry[runner(1)]["labels"])
+    assert len(registry) == COUNT + 2, "no runner registered or removed"
+    assert f"still busy: {runner(2)}" in result.stderr
+    assert f"count_before={COUNT + 1} count_after={COUNT + 1}" in result.stdout
 
 
 def test_only_the_compose_declarations_are_synced(primary: World) -> None:
     """The containers bind-mount the entrypoint and healthcheck; a relabel must
     not replace those on a host whose image is older than the repo's copy.
     """
-    result = primary.run("--relabel", "--only=omninode-runner-3")
+    result = primary.run("--relabel", f"--only={runner(3)}")
     assert result.returncode == 0, (result.stdout, result.stderr)
     synced = " ".join(primary.lines("RSYNC"))
-    assert "docker-compose.runners.yml" in synced
+    assert f"docker-compose.runners-{PREFIX}.yml" in synced
     for artifact in (
         "entrypoint.sh",
         "healthcheck.sh",
@@ -355,8 +389,8 @@ def test_only_the_compose_declarations_are_synced(primary: World) -> None:
 
 
 def test_a_busy_runner_is_never_stopped(primary: World) -> None:
-    for i in range(1, 11):
-        primary.mutate(f"omninode-runner-{i}", busy=True)
+    for i in range(1, COUNT + 1):
+        primary.mutate(runner(i), busy=True)
     result = primary.run("--relabel", "--drain-timeout=1")
     assert primary.lines("STOP") == [] and primary.lines("UP") == []
     assert primary.lines("GH_POST") == [], "no token is minted for a runner left alone"
@@ -365,7 +399,7 @@ def test_a_busy_runner_is_never_stopped(primary: World) -> None:
 
 def test_a_token_never_reaches_output_or_argv(primary: World) -> None:
     result = primary.run(
-        "--relabel", "--only=omninode-runner-3", env={"DEPLOY_RUNNER_TOKEN": SECRET}
+        "--relabel", f"--only={runner(3)}", env={"DEPLOY_RUNNER_TOKEN": SECRET}
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert primary.lines("GH_POST") == [], "a supplied token is used instead of minting"
@@ -377,7 +411,7 @@ def test_a_token_never_reaches_output_or_argv(primary: World) -> None:
 
 
 def test_a_minted_token_never_reaches_output(primary: World) -> None:
-    result = primary.run("--relabel", "--only=omninode-runner-3")
+    result = primary.run("--relabel", f"--only={runner(3)}")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert primary.lines("GH_POST") == ["GH_POST"]
     assert primary.lines("TOKEN_SEEN") == [f"TOKEN_SEEN {MINTED}"]
@@ -390,12 +424,12 @@ def test_a_runner_whose_listener_log_shows_a_job_in_hand_is_left_alone(
     """The moment between a job being handed over and its Runner.Worker process
     appearing reads idle on the process list; the listener's own log does not.
     """
-    primary.mutate("omninode-runner-3", log_busy=True)
+    primary.mutate(runner(3), log_busy=True)
     result = primary.run("--relabel", "--drain-timeout=1")
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert "omninode-runner-3" not in " ".join(primary.lines("STOP"))
-    assert "omninode-runner-3" not in " ".join(primary.lines("UP"))
-    assert "still busy: omninode-runner-3" in result.stderr
+    assert runner(3) not in " ".join(primary.lines("STOP"))
+    assert runner(3) not in " ".join(primary.lines("UP"))
+    assert f"still busy: {runner(3)}" in result.stderr
 
 
 def test_a_missing_image_tag_refuses_the_roll_before_any_runner_is_stopped(
@@ -418,23 +452,23 @@ def test_a_job_that_lands_between_the_idle_read_and_the_stop_wins(
     """The idle check is repeated on the host immediately before the stop. A
     runner that takes a job in that window must be left running.
     """
-    primary.mutate("omninode-runner-3", busy_on_top_call=2)
+    primary.mutate(runner(3), busy_on_top_call=2)
     result = primary.run("--relabel", "--drain-timeout=1")
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert "omninode-runner-3" not in " ".join(primary.lines("STOP"))
-    assert "omninode-runner-3" not in " ".join(primary.lines("UP"))
-    assert "still busy: omninode-runner-3" in result.stderr
-    assert len(primary.lines("UP")) == 9
+    assert runner(3) not in " ".join(primary.lines("STOP"))
+    assert runner(3) not in " ".join(primary.lines("UP"))
+    assert f"still busy: {runner(3)}" in result.stderr
+    assert len(primary.lines("UP")) == COUNT - 1
 
 
 def test_a_runner_that_does_not_return_halts_the_roll(primary: World) -> None:
-    primary.mutate("omninode-runner-3", stuck=True)
+    primary.mutate(runner(3), stuck=True)
     result = primary.run("--relabel", "--drain-timeout=1")
     assert result.returncode != 0
-    assert "HALTED at omninode-runner-3" in result.stderr
+    assert f"HALTED at {runner(3)}" in result.stderr
     assert "do NOT retry blindly" in result.stderr
     touched = [u.split()[1] for u in primary.lines("UP")]
-    assert touched == ["omninode-runner-1", "omninode-runner-2", "omninode-runner-3"], (
+    assert touched == [runner(1), runner(2), runner(3)], (
         "the roll must stop at the runner that did not return"
     )
 
@@ -442,10 +476,10 @@ def test_a_runner_that_does_not_return_halts_the_roll(primary: World) -> None:
 def test_a_runner_whose_compose_lacks_the_label_is_left_untouched(
     primary: World,
 ) -> None:
-    primary.mutate("omninode-runner-1", rendered="self-hosted,omnibase-ci,linux,x64")
+    primary.mutate(runner(1), rendered="self-hosted,omnibase-ci,linux,x64")
     result = primary.run("--relabel", "--drain-timeout=1")
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert "omninode-runner-1" not in [u.split()[1] for u in primary.lines("UP")]
+    assert runner(1) not in [u.split()[1] for u in primary.lines("UP")]
     assert "lacks omnibase-ci-multiarch" in result.stderr
     assert "refused=1" in result.stdout
 
@@ -453,9 +487,9 @@ def test_a_runner_whose_compose_lacks_the_label_is_left_untouched(
 def test_a_relabel_may_not_drop_a_label_the_runner_holds_today(
     primary: World,
 ) -> None:
-    primary.mutate("omninode-runner-4", rendered=f"self-hosted,{LABEL},linux,x64")
+    primary.mutate(runner(4), rendered=f"self-hosted,{LABEL},linux,x64")
     result = primary.run("--relabel", "--drain-timeout=1")
-    assert "omninode-runner-4" not in [u.split()[1] for u in primary.lines("UP")]
+    assert runner(4) not in [u.split()[1] for u in primary.lines("UP")]
     assert "would drop" in result.stderr
 
 
@@ -464,12 +498,12 @@ def test_a_runner_already_online_with_the_label_is_not_touched(
 ) -> None:
     data = json.loads(primary.state.read_text(encoding="utf-8"))
     for r in data["registry"]:
-        if r["name"] == "omninode-runner-5":
+        if r["name"] == runner(5):
             r["labels"].append({"name": LABEL, "type": "custom"})
     primary.state.write_text(json.dumps(data), encoding="utf-8")
     result = primary.run("--relabel", "--drain-timeout=1")
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert "omninode-runner-5" not in [u.split()[1] for u in primary.lines("UP")]
+    assert runner(5) not in [u.split()[1] for u in primary.lines("UP")]
     assert "already=1" in result.stdout
 
 
@@ -477,10 +511,10 @@ def test_limit_counts_relabelled_runners_and_only_names_one(primary: World) -> N
     result = primary.run("--relabel", "--limit=2")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert [u.split()[1] for u in primary.lines("UP")] == [
-        "omninode-runner-1",
-        "omninode-runner-2",
+        runner(1),
+        runner(2),
     ]
-    bad = primary.run("--relabel", "--only=omninode-runner-99", "--dry-run")
+    bad = primary.run("--relabel", f"--only={runner(99)}", "--dry-run")
     assert bad.returncode != 0 and "is not a runner of" in bad.stderr
 
 
@@ -492,32 +526,13 @@ def test_registry_reads_are_capped_by_the_budget(primary: World) -> None:
     assert primary.lines("GH_READ") == []
 
 
-def _declared_secondary_action_pool() -> tuple[str, str, int]:
-    """The (host, pool prefix, runner count) of a declared non-primary amd64
-    host whose pool carries the multiarch class, read from the fleet config so
-    the test follows the inventory instead of spelling a host.
-    """
-    config = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))
-    for row in config["hosts"]:
-        if row["host"] == config["runner_host"]:
-            continue
-        for pool in row.get("pools", []):
-            if "action-multiarch" in pool["classes"] and row["arch"] == "amd64":
-                return row["host"], pool["runner_name_prefix"], pool["expected_count"]
-    raise AssertionError("no secondary amd64 pool declares action-multiarch")
-
-
 def test_a_secondary_pool_is_rolled_under_its_own_compose_project(
-    tmp_path: Path,
+    primary: World,
 ) -> None:
-    host, prefix, count = _declared_secondary_action_pool()
-    world = _build_world(tmp_path, prefix, count)
-    world.mutate(f"{prefix}-7", busy=True)
-    result = world.run(
-        "--relabel", f"--host={host}", f"--pool={prefix}", "--drain-timeout=1"
-    )
+    primary.mutate(runner(7), busy=True)
+    result = primary.run("--relabel", "--drain-timeout=1")
     assert result.returncode == 0, (result.stdout, result.stderr)
-    ups = world.lines("UP")
-    assert len(ups) == count - 1 and all(f"project={prefix}" in u for u in ups)
-    assert f"{prefix}-7" not in " ".join(ups)
-    assert f"count_before={count + 1} count_after={count + 1}" in result.stdout
+    ups = primary.lines("UP")
+    assert len(ups) == COUNT - 1 and all(f"project={PREFIX}" in u for u in ups)
+    assert runner(7) not in " ".join(ups)
+    assert f"count_before={COUNT + 1} count_after={COUNT + 1}" in result.stdout

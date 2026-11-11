@@ -37,6 +37,9 @@ contract_version:
 node_version: "0.1.0"
 # Node type - COMPUTE for pure validation logic
 node_type: "COMPUTE_GENERIC"
+runtime_profiles: [main]
+descriptor:
+  node_archetype: compute
 # Description
 description: >
   COMPUTE node for validating ONEX architecture patterns. Analyzes Python source code and module structures to detect architecture violations. Validates three core rules: ARCH-001 (no direct handler dispatch), ARCH-002 (no handler publishing events), and ARCH-003 (no workflow FSM in orchestrators duplicating reducer transitions). Returns a structured validation result with violations grouped by rule and severity.
@@ -44,13 +47,13 @@ description: >
 # Strongly typed I/O models
 input_model:
   name: "ModelArchitectureValidationRequest"
-  module: "omnibase_infra.nodes.node_architecture_validator.models"
+  module: "omnibase_infra.nodes.node_architecture_validator.models.model_architecture_validation_request"
   description: >
     Input containing paths to validate, optional rule filters, and validation configuration (strict mode, ignore patterns, etc.).
 
 output_model:
   name: "ModelArchitectureValidationResult"
-  module: "omnibase_infra.nodes.node_architecture_validator.models"
+  module: "omnibase_infra.nodes.node_architecture_validator.models.model_architecture_validation_result"
   description: >
     Output containing validation results: overall pass/fail status, violations grouped by rule (ARCH-001, ARCH-002, ARCH-003), severity levels, and suggested fixes for each violation.
 
@@ -173,6 +176,29 @@ capabilities:
     description: "Extensible rule-based code analysis"
   - name: "fix_suggestions"
     description: "Provide actionable fix suggestions for violations"
+# The existing architecture node carries T1's command extension; the caller supplies
+# config/validation/stack_shape.yaml as its contract/DI policy snapshot.
+event_bus:
+  version: {major: 0, minor: 1, patch: 0}
+  subscribe_topics:
+    - onex.cmd.platform.architecture-validate.v1
+  publish_topics:
+    - onex.evt.platform.architecture-validated.v1
+terminal_event: onex.evt.platform.architecture-validated.v1
+published_events:
+  - topic: onex.evt.platform.architecture-validated.v1
+    event_type: ArchitectureValidationResult
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: architecture.validate
+      topic: onex.cmd.platform.architecture-validate.v1
+      handler:
+        name: HandlerArchitectureValidation
+        module: omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation
+      event_model:
+        name: ModelArchitectureValidationRequest
+        module: omnibase_infra.nodes.node_architecture_validator.models.model_architecture_validation_request
 # Model definitions (schema reference)
 definitions:
   ModelArchitectureValidationRequest:

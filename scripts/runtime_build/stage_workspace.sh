@@ -315,8 +315,14 @@ PIN_COMPARISON_OUT="workspace/sibling-pin-comparison.json"
 # list already named omnibase-spi, but ensure_runner_clones.sh never
 # provisioned OMNI_HOME/omnibase_spi for it to find). The manifest was sourced
 # at the top of this script.
+#
+# OMN-22153: a sibling in SIBLING_LOCK_UNPINNED_REPOS has no pin in the consuming
+# lock, so the preflight has nothing to compare it with and would refuse the
+# build for its absence. It is left out of the arguments; its dev-merge tag is
+# proven by the first-party source audit instead.
 PREFLIGHT_REPO_ARGS=()
 for i in "${!SIBLING_CLONE_MANIFEST[@]}"; do
+    [[ " ${SIBLING_LOCK_UNPINNED_REPOS[*]} " == *" ${SIBLING_CLONE_MANIFEST[$i]} "* ]] && continue
     PREFLIGHT_REPO_ARGS+=(
         --repo "${SIBLING_CLONE_MANIFEST_DIST_NAMES[$i]}=$(sibling_source "${SIBLING_CLONE_MANIFEST[$i]}")"
     )
@@ -472,9 +478,7 @@ VCS_PROVENANCE_OUT="workspace/sibling-vcs-provenance.json"
 missing=()
 for repo in "${SIBLING_REPOS[@]}"; do
     src="$(sibling_source "${repo}")"
-    if [[ ! -d "${src}" ]]; then
-        missing+=("${src}")
-    fi
+    [[ -d "${src}" ]] || missing+=("${src}")
 done
 
 if [[ ${#missing[@]} -gt 0 ]]; then

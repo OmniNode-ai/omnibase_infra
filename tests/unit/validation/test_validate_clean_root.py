@@ -159,6 +159,12 @@ class TestGuardConfiguration:
                 True,
             ),
             (
+                "OmniNode-ai/omnibase_core/.github/workflows/imperative-contract-guard.yml@"
+                "dev-20261103173624-74e0b0f12767",
+                "imperative-contract-allowlist.yaml",
+                True,
+            ),
+            (
                 "OmniNode-ai/another_repo/.github/workflows/imperative-contract-guard.yml@dev",
                 "imperative-contract-allowlist.yaml",
                 False,

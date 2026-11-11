@@ -308,11 +308,6 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "projection-savings-writer",
         "projection-tenant-credentials-writer",
         "projection-live-events-writer",
-        # OMN-16025: the seventh dev-lane-only service. RT-6 resolves
-        # DEV_LANE_ONLY_RUNTIME_SERVICES and refuses to certify a deploy whose
-        # in-scope service has no running container, so a new member must appear
-        # here or the readback fixture no longer describes the real lane.
-        "infra-routing-decisions-consumer",
         # OMN-17530: the eighth. onex-api is the surface a lab proof is taken
         # THROUGH, so a stale one makes the proof itself stale -- it is in the
         # recreate scope for that reason and therefore in the readback's scope
@@ -329,12 +324,7 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         # rather than in RUNTIME_SERVICES: a prod `up -d --no-deps` naming it
         # would start it on a lane that never opted in.
         "tenant-projection-writer",
-        # OMN-19513: the tenth. The claude hook-events writer is the only owner
-        # of node_projection_claude_hook_events on the dev lane, whose main
-        # runtime excludes the node, so a deploy that left it behind would
-        # certify a lane on which that projection runs a stale image.
-        "projection-claude-hook-events-writer",
-        # OMN-21481: the eleventh. The cost estimator page is recreated by every
+        # OMN-21481: the tenth. The cost estimator page is recreated by every
         # dev-lane deploy so it comes back after one, which puts it in the
         # readback's scope too.
         "cost-estimator-web",
@@ -353,12 +343,8 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "projection-savings-writer": "projection-savings-writer",
         "projection-tenant-credentials-writer": "projection-tenant-credentials-writer",
         "projection-live-events-writer": "projection-live-events-writer",
-        "infra-routing-decisions-consumer": "omninode-infra-routing-decisions-consumer",
         "onex-api": "onex-api",
         "tenant-projection-writer": "omnimarket-tenant-projection-writer",
-        "projection-claude-hook-events-writer": (
-            "omnimarket-projection-claude-hook-events-writer"
-        ),
         "cost-estimator-web": "omninode-cost-estimator-web",
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)

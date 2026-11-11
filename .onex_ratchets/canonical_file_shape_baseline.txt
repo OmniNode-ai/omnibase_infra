@@ -565,7 +565,6 @@ src/omnibase_infra/cli/cli_identity.py
 src/omnibase_infra/cli/cli_kafka.py
 src/omnibase_infra/cli/cli_ledger.py
 src/omnibase_infra/cli/cli_node.py
-src/omnibase_infra/cli/cli_occ.py
 src/omnibase_infra/cli/cli_profile.py
 src/omnibase_infra/cli/cli_skill.py
 src/omnibase_infra/cli/commands.py

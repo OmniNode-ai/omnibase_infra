@@ -1,0 +1,58 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22162
+title: T18f Serve the cost estimator page from the report host and remove it from the dev lane (one-runtime plan)
+summary: The part of T18f that stands alone. T18f needs the estimator route group ported into the runtime (T18c or T18d, as the T18a inventory assigns it) and the onex-api callers rerouted (T18e), and none of those is done, so the estimator API still answers from onex-api on the dev lane. This change declares the serving topology for the page on the .51 report host (docker/docker-compose.cost-estimator-web.yml, one tailnet-bound container that passes the OMN-22190 gate values through from the host env file) and fixes the cause of the stack-shape refusal in config/validation/stack_shape.yaml, which names that file under not_a_stack because it is the report host's page and not a lane's runtime stack. It does not remove cost-estimator-web from docker/docker-compose.dev-lane.yml and it does not serve the page, so the ticket's own AC1, AC2 and AC3 stay open; the plan removes the dev container only after the page works from the report host.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22162-report-host-compose
+    statement: The report host's compose file declares the cost estimator page as one container published on one tailnet address, with every deployment value required from the host env file and the gate flag and password passed through from it with no default that names a password.
+    acceptance:
+      - id: AC22162001
+        statement: "AC22162001: docker/docker-compose.cost-estimator-web.yml renders only with the image, bind address, port, API origin and auth origin set; the gate flag reads true and the gate password reads empty when the host env sets neither, and both pass through when it does -- falsifier: uv run --frozen pytest tests/unit/docker/test_cost_estimator_web_report_host_compose.py -q --no-cov"
+  - id: req-omn22162-stack-shape
+    statement: The stack-shape data declares the report host's page file not a runtime stack, so the check no longer counts a second declaration of cost-estimator-web, while the dev lane's own declaration stays judged and baselined.
+    acceptance:
+      - id: AC22162002
+        statement: "AC22162002: config/validation/stack_shape.yaml lists docker/docker-compose.cost-estimator-web.yml under not_a_stack with the baseline unchanged, and the same tree with that entry removed is refused for a second declaration of cost-estimator-web -- falsifier: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k report_host"
+evidence_requirements:
+  - kind: tests
+    description: The report host's compose file rendered with and without each required value, and the stack-shape data judged over the real tree with and without the not_a_stack entry.
+    command: uv run --frozen pytest tests/unit/docker/test_cost_estimator_web_report_host_compose.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22162-ac1-report-host-compose
+    description: The compose file refuses to render without each of its five required values, publishes on the one address it is given, passes the gate flag and password through from the host env with the flag defaulting to true and the password to empty, and holds no state. At the merge base the file does not exist, so these tests fail there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_cost_estimator_web_report_host_compose.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22162001
+  - id: dod-omn22162-ac2-stack-shape
+    description: The real compose tree judges clean with the report host file declared not a stack and the baseline entry for cost-estimator-web still at one file, and refuses a second declaration once that declaration is removed. At the merge base the entry is absent, so the not_a_stack test fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k report_host
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22162002
+  - id: dod-omn22162-report-host-compose-deploy-probe
+    description: Hosted-runner probe reads the report host's compose file from GitHub at the checked-out commit and requires the one service, the tailnet bind address as a required value, and the gate flag and password passed through from the host env. The compose tests execute the required-value refusals, address binding and gate defaults and overrides alongside that readback, including when the verifier scopes this contract to this changed evidence item. The probe runs inside the repository clone under OMNI_HOME; the merge base's relative cwd is refused by containment. Serving the page on the report host still needs the page image built there and its host env file.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_cost_estimator_web_report_host_compose.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.cost-estimator-web.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys, yaml; d = yaml.safe_load(sys.stdin); assert list(d["services"]) == ["cost-estimator-web"]; s = d["services"]["cost-estimator-web"]; assert s["ports"][0].startswith("${COST_ESTIMATOR_BIND_ADDR:?"); e = s["environment"]; assert e["ESTIMATOR_GATE_PASSWORD"] == "${ESTIMATOR_GATE_PASSWORD:-}"; assert e["FEATURE_ESTIMATOR_GATE_ENABLED"] == "${FEATURE_ESTIMATOR_GATE_ENABLED:-true}"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22162001

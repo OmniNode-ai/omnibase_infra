@@ -85,6 +85,11 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - gate_store_reservations
+            privileges: [DELETE, SELECT]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
               - alert_channel_liveness_verdicts
               - automation_alarm_episodes
               - automation_liveness_state
@@ -104,6 +109,10 @@ databases:
               - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
+              - gate_store_reservations
+              - gate_store_safety
+              - gate_store_state
+              - gate_store_steps
               - gateway_link_health
               - lab_container_memory_window
               - lab_job_state
@@ -111,10 +120,12 @@ databases:
               - lab_lane_health
               - lab_proof_receipts
               - lane_drift_and_stalls
+              - ledger_line_citation
               - live_events
               - log_entries
               - open_obligations
               - orchestration_style_outcomes
+              - overlay_store
               - pr_landing_state
               - pr_landing_transitions
               - pr_state
@@ -131,6 +142,7 @@ databases:
               - topic_produce_windows
               - work_events
               - work_ledger_rows
+              - work_ledger_seq_conflicts
               - work_ledger_state
               - work_outcome_units
               - worktree_reconcile_hosts
@@ -242,8 +254,14 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - agent_actions
+              - agent_detection_failures
+              - agent_execution_logs
               - agent_routing_decisions
+              - agent_status_events
+              - agent_transformation_events
               - capability_scores
+              - context_audit_events
               - context_roi_scores
               - delegation_budget_applied_events
               - delegation_budget_state
@@ -268,6 +286,7 @@ databases:
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - provider_quota_state
+              - router_performance_metrics
               - run_trace
               - savings_estimates
               - skill_execution_snapshots
@@ -275,11 +294,13 @@ databases:
               - tenant_inference_credentials
               - usage_by_model_day
               - usage_by_model_day_calls
+              - view_seam_readings
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
           - object_type: TABLE
             objects:
               - projection_cost_savings_overview
+              - projection_delegation_daily
               - projection_delegation_model_routing
               - projection_delegation_quality_gate
               - projection_delegation_savings

@@ -99,10 +99,15 @@ def evaluate_consumer_stall(
     """
     required = policy.required_consecutive_stalls
 
-    def _clear(reason: EnumConsumerStallReason) -> ModelConsumerStallVerdict:
+    # ``stalls`` defaults to zero, which is what every non-stalled verdict
+    # carries: the caller can take the returned count forward with no reset
+    # logic of its own.
+    def _verdict(
+        reason: EnumConsumerStallReason, stalls: int = 0
+    ) -> ModelConsumerStallVerdict:
         return ModelConsumerStallVerdict(
             reason=reason,
-            consecutive_stalls=0,
+            consecutive_stalls=stalls,
             required_consecutive_stalls=required,
         )
 
@@ -110,22 +115,33 @@ def evaluate_consumer_stall(
     # checked first and unconditionally: no other signal can override direct
     # evidence of progress.
     if observation.seconds_since_last_record < policy.stall_seconds:
-        return _clear(EnumConsumerStallReason.NOT_STALLED_PROGRESSING)
+        return _verdict(EnumConsumerStallReason.NOT_STALLED_PROGRESSING)
 
     # The end-offset probe failed, so the leaders are unreachable. Whatever is
     # wrong is not a client that can see the brokers and not its coordinator,
     # and recreating into an unreachable broker only churns connections.
     if not observation.broker_reachable:
-        return _clear(EnumConsumerStallReason.NOT_STALLED_BROKER_UNREACHABLE)
+        return _verdict(EnumConsumerStallReason.NOT_STALLED_BROKER_UNREACHABLE)
 
-    if observation.assigned_partitions == 0:
-        reason = EnumConsumerStallReason.STALLED_NO_ASSIGNMENT
-    elif observation.backlog_records > 0:
-        reason = EnumConsumerStallReason.STALLED_BACKLOG_NOT_DRAINING
-    else:
-        # Assigned, caught up, quiet. This is the positive control: an idle
-        # consumer must never be recreated, however long it stays quiet.
-        return _clear(EnumConsumerStallReason.NOT_STALLED_IDLE)
+    # Nothing is waiting, and that was MEASURED. Either assigned and caught up,
+    # or holding no assignment while the whole topic is drained. The first is
+    # the positive control an idle consumer must never be recreated for. The
+    # second is OMN-22291: holding no assignment is not a fault by itself,
+    # because a group can have more members than the topic has partitions -- on
+    # a laptop, where the partition cap leaves one partition, that is every
+    # topic -- and the members that get nothing are standbys, assigned exactly
+    # as Kafka intends. What separates a standby from the outage this class
+    # exists for (OMN-18640's ``Empty`` group) is whether records are waiting
+    # with nobody taking them, which is the GROUP's backlog over the topic. A
+    # backlog nobody could measure stays unknown and falls through to the
+    # remedy, so no unmeasured zero can read as health.
+    if observation.backlog_measured and observation.backlog_records == 0:
+        return _verdict(EnumConsumerStallReason.NOT_STALLED_IDLE)
+    reason = (
+        EnumConsumerStallReason.STALLED_NO_ASSIGNMENT
+        if observation.assigned_partitions == 0
+        else EnumConsumerStallReason.STALLED_BACKLOG_NOT_DRAINING
+    )
 
     # The signature holds. Bound the recreate rate before confirming it: a
     # fault that survives a rejoin must not turn into a recreate loop. The
@@ -133,17 +149,10 @@ def evaluate_consumer_stall(
     # rejoin rather than resetting the evidence for it.
     since_rejoin = observation.seconds_since_last_rejoin
     if since_rejoin is not None and since_rejoin < policy.rejoin_cooldown_seconds:
-        return ModelConsumerStallVerdict(
-            reason=EnumConsumerStallReason.NOT_STALLED_WITHIN_COOLDOWN,
-            consecutive_stalls=prior_consecutive_stalls,
-            required_consecutive_stalls=required,
-        )
+        cooling = EnumConsumerStallReason.NOT_STALLED_WITHIN_COOLDOWN
+        return _verdict(cooling, prior_consecutive_stalls)
 
-    return ModelConsumerStallVerdict(
-        reason=reason,
-        consecutive_stalls=prior_consecutive_stalls + 1,
-        required_consecutive_stalls=required,
-    )
+    return _verdict(reason, prior_consecutive_stalls + 1)
 
 
 __all__ = ["ModelConsumerRejoinPolicy", "evaluate_consumer_stall"]

@@ -22,9 +22,6 @@
 # Burn-down tracked under OMN-14135. End state is an empty list, at which point
 # `_missing_handle` becomes a wiring-time hard failure instead of a per-message one.
 known_entrypointless:
-  - contract: handler_architecture_validation
-    handler: HandlerArchitectureValidation
-    module: omnibase_infra.nodes.node_architecture_validator.handlers.handler_architecture_validation
   # OMN-18013: HandlerContractFileWatcher was removed from node_artifact_change_detector_effect's
   # handler_routing entirely — it is a filesystem watchdog driven from node.py, not a bus
   # consumer, and it owned BOTH subscribe topics only because an operation_match entry

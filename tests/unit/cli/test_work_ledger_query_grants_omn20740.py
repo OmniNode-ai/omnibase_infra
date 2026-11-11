@@ -8,11 +8,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from omnibase_infra.handlers.handler_broker_grant_derive import HandlerBrokerGrantDerive
+from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
+    HandlerBrokerGrantDerive,
+)
 from omnibase_infra.handlers.handler_work_ledger_query import (
     load_work_ledger_query_client_config,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+from omnibase_infra.models.security.model_broker_grant_bindings import (
     ModelBrokerGrantBindings,
 )
 
@@ -31,7 +33,8 @@ def test_client_operations_are_exactly_the_derived_dev_grant() -> None:
     expected = (
         {
             ("dev", "TOPIC", config.command_topic, "LITERAL", op)
-            for op in ("WRITE", "DESCRIBE")
+            # OMN-23418: READ too, so the seam deadline probe can read the request topic.
+            for op in ("READ", "WRITE", "DESCRIBE")
         }
         | {
             ("dev", "TOPIC", config.completed_topic, "LITERAL", op)

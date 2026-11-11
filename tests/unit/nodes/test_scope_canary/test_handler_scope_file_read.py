@@ -12,6 +12,9 @@ from pydantic import ValidationError
 from omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_file_read import (
     HandlerScopeFileRead,
 )
+from omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_request import (
+    ModelScopeFileReadRequest,
+)
 
 
 @pytest.mark.unit
@@ -30,9 +33,11 @@ class TestHandlerScopeFileRead:
         cid = uuid4()
 
         result = await handler.handle(
-            file_path=str(plan_file),
-            correlation_id=cid,
-            output_path=str(tmp_path / "scope-manifest.json"),
+            ModelScopeFileReadRequest(
+                file_path=str(plan_file),
+                correlation_id=cid,
+                output_path=str(tmp_path / "scope-manifest.json"),
+            )
         )
 
         assert result.success is True
@@ -46,9 +51,11 @@ class TestHandlerScopeFileRead:
         cid = uuid4()
 
         result = await handler.handle(
-            file_path=str(tmp_path / "missing.md"),
-            correlation_id=cid,
-            output_path=str(tmp_path / "scope-manifest.json"),
+            ModelScopeFileReadRequest(
+                file_path=str(tmp_path / "missing.md"),
+                correlation_id=cid,
+                output_path=str(tmp_path / "scope-manifest.json"),
+            )
         )
 
         assert result.success is False
@@ -65,9 +72,11 @@ class TestHandlerScopeFileRead:
         cid = uuid4()
 
         result = await handler.handle(
-            file_path=str(plan_file),
-            correlation_id=cid,
-            output_path=str(tmp_path / "scope-manifest.json"),
+            ModelScopeFileReadRequest(
+                file_path=str(plan_file),
+                correlation_id=cid,
+                output_path=str(tmp_path / "scope-manifest.json"),
+            )
         )
 
         assert result.correlation_id == cid
@@ -83,14 +92,18 @@ class TestHandlerScopeFileRead:
 
         with pytest.raises(ValidationError, match="output_path"):
             await handler.handle(
-                file_path=str(plan_file),
-                correlation_id=uuid4(),
-                output_path=output_path,
+                ModelScopeFileReadRequest(
+                    file_path=str(plan_file),
+                    correlation_id=uuid4(),
+                    output_path=output_path,
+                )
             )
 
         with pytest.raises(ValidationError, match="output_path"):
             await handler.handle(
-                file_path=str(tmp_path / "missing.md"),
-                correlation_id=uuid4(),
-                output_path=output_path,
+                ModelScopeFileReadRequest(
+                    file_path=str(tmp_path / "missing.md"),
+                    correlation_id=uuid4(),
+                    output_path=output_path,
+                )
             )

@@ -1,0 +1,121 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23039
+title: "The dev deploy agent installs from a branch"
+summary: "A declared code-ref pin in the agent's state directory names the branch whose code the dev deploy agent loads, with an expiry of at most seven days. self_update follows the pinned branch while the record is live and returns to the declared tracking ref when it is released or expires. The lane's tracking ref is untouched, so the sibling fallback of a build and the ref fence still read dev."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23039-agent-installs-from-a-branch
+    statement: A fix to the deploy agent's own code can be shown working on the dev lane before it merges, because a declared pin keeps the agent's code clone on its branch across idle heartbeats.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a unit test over the deploy agent's self-update shows that a branch ref declared through the installer route is loaded and not reset to dev at the next idle heartbeat -- falsifier: uv run pytest of the deploy agent self-update tests over a fixture clone, run red first on the current code"
+      - id: AC2
+        statement: "AC2: the declared installer route restarts the h201 dev deploy agent onto omnibase_infra#5772 head 58b95d2b and its journal names that revision as the clone's code -- falsifier: journalctl -u deploy-agent-dev on h201 after the installer run"
+      - id: AC3
+        statement: "AC3: one dev deploy through that agent leaves dev as one container, with no runtime-effects container and ports 8085 and 8086 answering HTTP 200 -- falsifier: docker ps on the dev lane plus curl of ports 8085 and 8086 after the deploy"
+      - id: AC4
+        statement: "AC4: a ledger row records installed=<host>:<revision> for omnibase_infra#5772 so that the pr-handoff readiness read accepts it -- falsifier: pr-handoff readiness read of #5772 at head 58b95d2b"
+  - id: req-omn23039-onex-api-pin-import-check
+    statement: A candidate onex-api image that cannot import its omnimarket modules does not keep the advanced pin, so onex-api is not recreated into a crash loop.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the deploy agent imports-checks the candidate onex-api image and writes the previous pin back when a module is missing -- falsifier: uv run pytest of the import-check unit and integration tests, which fail with the gate call removed"
+  - id: req-omn23039-onex-api-roll-pin-heal
+    statement: A dev roll whose ONEX_API_IMAGE pin is already an image that cannot import its omnimarket modules moves the pin to the newest local onex-api image that can, before onex-api is recreated, so one bad delivery no longer stops every later roll at onex-api.
+    acceptance:
+      - id: AC6
+        statement: "AC6: the dev roll import-checks the pinned onex-api image before recreating onex-api and writes the newest importable local image of the same repository as the pin when it is broken, and leaves a good pin and a check that could not run alone -- falsifier: uv run pytest of the roll pin-heal unit tests, whose wiring test fails with the heal call removed from run_compose_up_steps"
+evidence_requirements:
+  - kind: tests
+    description: The pin tests drive self_update over real git clones; the pinned branch is loaded and held across a second heartbeat, and the same clone without a pin returns to dev.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_code_ref_pin_omn23039.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23039-pin-tests
+    description: The pin model, the register, show and release command, and self_update over fixture clones pass at the head. With the pin read removed from self_update the held-branch test fails and the control test still passes.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_code_ref_pin_omn23039.py scripts/deploy-agent/tests/unit/test_executor_self_update.py scripts/deploy-agent/tests/unit/test_tracking_ref.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-agent-journal-names-branch-revision
+    description: The h201 dev deploy agent journal names the omnibase_infra#5772 head as the clone's code after the pin was registered. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" "journalctl --user -u deploy-agent-dev --since '-3 hours' --no-pager | grep -c \"running the clone's code (58b95d2b3314\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-dev-is-one-container
+    description: After one dev deploy through the pinned agent the dev lane has no runtime-effects container and ports 8085 and 8086 answer HTTP 200. The probe prints no secret.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" "test \"$(docker ps --format '{{.Names}}' | grep -c runtime-effects)\" = 0 && curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8085/health | grep -x 200 && curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8086/health | grep -x 200"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-installed-row-recorded
+    description: The work ledger holds a row for omnibase_infra#5772 that records installed=h201 and the revision, which the pr-handoff readiness read accepts.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: grep -c "pr=omnibase_infra#5772 .*installed=h201:" "$ONEX_LEDGER_PATH"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-registered-pin-is-followed
+    description: The register command writes the record the agent reads, and self_update follows the registered branch and holds it at the next heartbeat, which is what puts the branch head in the agent journal as the clone's code (AC2). The live read is the journal probe above.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_code_ref_pin_omn23039.py -q -k "register or pinned_branch_is_loaded"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-boot-guard-passes-a-folded-dev-lane
+    description: The dev boot guard accepts a folded one-container dev lane after a deploy, which is what the pinned agent runs for omnibase_infra#5772 (AC3). The live read is the container and port probe above.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py tests/integration/handlers/test_handler_dev_lane_code_ref_pin_omn23039.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-installed-row-names-a-head
+    description: A pin records the head it was registered at, the pull request and the ticket, which is what the installed=<host>:<revision> row of AC4 cites. The live read is the ledger probe above.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_code_ref_pin_omn23039.py -q -k "TestPinRecord or show"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-onex-api-import-check-rolls-back
+    description: The import check refuses an image whose omnimarket module is gone and restores the previous pin, keeps the pin for an importable image, and the integration test runs the check script in a real interpreter over a fixture tree.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_handler_onex_api_image_import_check_omn23039.py scripts/deploy-agent/tests/unit/test_onex_api_import_check_omn23039.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23039-import-check-integration-proof
+    description: Run this pull request's own import-check tests on a lab host at the pushed head. Hosted CI cannot reach the lab, so only the local Done gate runs this unbound check.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-23039 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/handlers/test_handler_onex_api_image_import_check_omn23039.py -q --no-cov
+        cwd: .
+  - id: dod-omn23039-roll-pin-heal
+    description: The roll heals an already-broken onex-api pin onto the newest importable local image before recreating onex-api, leaves an importable pin and an unrunnable check alone, and names the refusal when no local image imports.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_import_check_omn23039.py -q -k "roll"
+        cwd: ${OMNI_HOME}/omnibase_infra

@@ -367,7 +367,7 @@ def test_floor_document_is_shell_parseable_and_records_what_was_proven(
     )
 
     doc = json.loads(out.read_text(encoding="utf-8"))
-    assert doc["schema"] == "onex.workspace.floor.v1"
+    assert doc["schema"] == vm.FLOOR_SCHEMA
     assert doc["distributions"]["omnibase_infra"] == "0.38.16"
     assert doc["omnimarket_commit"].startswith("66b7131a")
     assert doc["generated_at"].endswith("Z")
@@ -480,7 +480,7 @@ def test_governed_dists_match_the_sibling_clone_manifest(vm: ModuleType) -> None
         [
             "bash",
             "-c",
-            'source "$1"; printf "%s\\n" "${SIBLING_CLONE_MANIFEST_DIST_NAMES[@]}"',
+            'source "$1"; for i in "${!SIBLING_CLONE_MANIFEST[@]}"; do [[ " ${SIBLING_LOCK_UNPINNED_REPOS[*]} " == *" ${SIBLING_CLONE_MANIFEST[$i]} "* ]] || printf "%s\\n" "${SIBLING_CLONE_MANIFEST_DIST_NAMES[$i]}"; done',
             "bash",
             str(manifest),
         ],
@@ -496,7 +496,7 @@ def test_governed_dists_match_the_sibling_clone_manifest(vm: ModuleType) -> None
 
 @pytest.mark.parametrize("missing", [None, "commit", "omnibase-spi"])
 def test_floor_from_venv_stamps_observed_build_or_preserves_existing_floor(
-    tmp_path: Path, missing: str | None
+    vm: ModuleType, tmp_path: Path, missing: str | None
 ) -> None:
     site = tmp_path / "site-packages"
     commit = "a" * 40
@@ -553,4 +553,4 @@ def test_floor_from_venv_stamps_observed_build_or_preserves_existing_floor(
         }
         assert document["omnimarket_commit"] == commit
         assert document["omni_home"] == str(tmp_path)
-        assert document["schema"] == "onex.workspace.floor.v1"
+        assert document["schema"] == vm.FLOOR_SCHEMA

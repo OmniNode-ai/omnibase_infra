@@ -31,6 +31,18 @@ def _parse_redacted_fields(value: object) -> tuple[str, ...]:
     return tuple(str(item) for item in value if str(item))
 
 
+def _parse_consumer_group(value: object) -> str | None:
+    """Read the OMN-22822 failing consumer group off a raw DLQ envelope.
+
+    Envelopes written before the publisher recorded it carry no such key, and a
+    blank or non-string value names no group: both read as ``None``, which
+    replays to every subscriber exactly as before.
+    """
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
 class ModelDlqMessage(BaseModel):
     """A DLQ message parsed from a Kafka payload, with replay metadata."""
 
@@ -78,6 +90,16 @@ class ModelDlqMessage(BaseModel):
             "record is deliberately incomplete, and ``should_replay`` "
             "refuses it: republishing a command whose credential has been "
             "replaced by a marker sends a request that cannot authenticate."
+        ),
+    )
+    consumer_group: str | None = Field(
+        default=None,
+        description=(
+            "Consumer group whose subscriber failed the original message "
+            "(OMN-22822). When set, the replay is addressed to this group "
+            "alone via the ``x-replay-target-group`` header; ``None`` (a dead "
+            "letter written before the publisher recorded it) replays to "
+            "every subscriber of the original topic."
         ),
     )
     dlq_offset: int = Field(
@@ -170,6 +192,7 @@ class ModelDlqMessage(BaseModel):
             retry_count=retry_count,
             error_type=str(payload.get("error_type", "Unknown")),
             redacted_fields=_parse_redacted_fields(payload.get("redacted_fields")),
+            consumer_group=_parse_consumer_group(payload.get("consumer_group")),
             dlq_offset=dlq_offset,
             dlq_partition=dlq_partition,
             raw_payload=payload,

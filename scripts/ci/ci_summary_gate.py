@@ -73,9 +73,8 @@ always reaches a terminal state.
    caller's deadline converts to FAILURE. This is the presence assertion
    OMN-14456 AC4 asked for.
 
-   *Why this was load-bearing:* PR #2555 merged with ``CI Summary`` = **success**
-   (all 53 in-run jobs green) while ``deploy-gate / deploy-gate`` = **failure**
-   on the same head SHA: the failing check was in another run.
+   *Why this was load-bearing:* PR #2555 merged with ``CI Summary`` green while
+   ``deploy-gate / deploy-gate`` was red on the same head, in another run.
 
 5. **Default-deny EXTERNAL sweep (OMN-18960).** Check 4 is a whitelist
    LOOKUP: it walks the expected tuple and asks the head for each name. It
@@ -112,6 +111,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 # The poller's own job — excluded to avoid self-deadlock.
 SELF_JOB_NAME = "CI Summary"
@@ -356,6 +356,15 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # SUCCESS. The job is unconditional in ci.yml (no needs/if), so a skip or an
     # absence is anomalous and fails closed here instead of reading green.
     "Stack Shape (OMN-21891)",  # stack-shape
+    # OMN-22360: the core dependency-pin validator (layer order, no cycle, release
+    # bound, pin style, core hook revs), called from ci.yml's `dependency-pins` job as
+    # a reusable, so it surfaces as "<caller job id> / <inner job name>". THIS LINE IS
+    # HALF THE MECHANISM: the default-deny sweep fails CI Summary when the job FAILS,
+    # but an unregistered job that is `skipped` or absent yields SUCCESS. The job is
+    # unconditional in ci.yml (no needs/if), so a skip or an absence is anomalous and
+    # fails closed here instead of reading green. Renaming either half makes the gate
+    # permanently PENDING.
+    "dependency-pins / Dependency Pins",  # dependency-pins
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
@@ -415,6 +424,26 @@ SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
 # ``docs/**`` and ``*.md`` moved.
 DOCS_ONLY_MARKER_JOB = "Docs-Only Marker (OMN-16661)"
 
+# Notes that sat inside the tables now read from ci_summary_gate_tables.json:
+# OMN-18970 adversarial review: a queue run's rows are a verdict about
+# a queue commit, not about this pull request. The sweep only runs on
+# `pull_request` today so this cannot currently fire, and it is listed
+# anyway because the deny list is the place a reader looks to learn
+# which events are not pull-request verdicts.
+# In ci-summary ``needs`` but deliberately EXCLUDED from the pass/fail
+# condition (advisory / informational):
+# Not in ci-summary ``needs`` and not a required context:
+# Advisory off merge_group only (OMN-9120); on merge_group its compose
+# inner job is STRICT via MERGE_GROUP_STRICT_GATE_JOBS (OMN-20147).
+# OMN-14909: report-only telemetry needs ci-summary, so it is never
+# completed while the poller runs; allowlisted so a re-run of CI Summary
+# can never read a prior attempt's red telemetry as a failure.
+# Structural path filter — reusable caller, excluded from the condition:
+# Tables the gate reads as data (the baselined gate file only shrinks).
+_TABLES = json.loads(
+    Path(__file__).with_name("ci_summary_gate_tables.json").read_text(encoding="utf-8")
+)
+
 #
 # NOTE ON MEMBERSHIP vs ci.yml GATING — these are two different sets, on
 # purpose. This tuple only ever RELAXES a ``STRICT_GATE_JOBS`` member, so it
@@ -425,12 +454,7 @@ DOCS_ONLY_MARKER_JOB = "Docs-Only Marker (OMN-16661)"
 # tolerated by the L3 default-deny sweep (``skipped`` ∈ GOOD_CONCLUSIONS).
 # Adding it would be a no-op that misleads the reader into thinking the poller
 # enforces it.
-DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
-    "Application Database Domain Enforcement (OMN-15361)",  # ~7 min
-    "Kafka Schema Handshake (OMN-3411)",  # ~4 min
-    "Effect-Assertion Gate (RT-5)",  # ~2 min
-    "Demo Loop Gate",  # ~2 min
-)
+DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = tuple(_TABLES["docs_only_skippable"])
 
 # Every job the completeness anchor must observe present+good for SUCCESS.
 GATE_JOBS: tuple[str, ...] = STRICT_GATE_JOBS + SKIPPABLE_GATE_JOBS
@@ -484,27 +508,7 @@ def strict_gates_for_event(event_name: str) -> tuple[str, ...]:
 # callers — whose inner jobs surface as ``"<caller name> / <inner job>"`` — are
 # covered by their caller entry (``zone-filter``, ``Runtime Boot Smoke
 # (compose)``).
-SOFT_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        # In ci-summary ``needs`` but deliberately EXCLUDED from the pass/fail
-        # condition (advisory / informational):
-        "Test-Failure Ratchet Gate",  # advisory (OMN-13867)
-        "Version Pin Compliance",  # in needs, never checked in the condition
-        # Not in ci-summary ``needs`` and not a required context:
-        # Advisory off merge_group only (OMN-9120); on merge_group its compose
-        # inner job is STRICT via MERGE_GROUP_STRICT_GATE_JOBS (OMN-20147).
-        "Runtime Boot Smoke (compose)",
-        "Cross-Repo Migration Conflicts",  # migration-conflict-check; not required
-        "Kafka Boundary Compat (OMN-3256)",  # advisory; carries xfail known-drift
-        "AI-Slop Pattern Check (strict, PR diff)",  # aislop-sweep gates the tree
-        # OMN-14909: report-only telemetry needs ci-summary, so it is never
-        # completed while the poller runs; allowlisted so a re-run of CI Summary
-        # can never read a prior attempt's red telemetry as a failure.
-        "CI cascade reason-graph (report-only)",
-        # Structural path filter — reusable caller, excluded from the condition:
-        "zone-filter",  # zone-filter (reusable) inner jobs surface prefixed
-    }
-)
+SOFT_ALLOWLIST: frozenset[str] = frozenset(_TABLES["soft_allowlist"])
 
 # ---------------------------------------------------------------------------
 # OMN-15496 — cross-workflow ("external") required contexts.
@@ -836,32 +840,14 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # all reported this context successful before merge. Recorded rows and
     # failure/skip/absence controls live in test_hook_push_rehearsal_caller_omn17427.py.
     "hook-push-rehearsal / rehearse",
-    # OMN-17427 (operator RULING 2026-10-21T13:00:04Z: "put it on Dev and then
-    # we can do a override if necessary but that requires a human"). The
-    # hostile-reviewer finding gate (hostile-reviewer.yml, re-run on every
-    # thread reply by hostile-review-thread-gate.yml): on a PR into dev every
-    # hostile-reviewer thread needs a reply `fixed-in <sha>` whose commit
-    # touched the cited lines, or `rejected: <reason>`. With no thread at all
-    # it passes, so a reviewer that was skipped, degraded or down never holds
-    # a merge. Asserted on PRs into dev ONLY: scoped_to_base() drops
-    # DEV_BASE_ONLY_CONTEXTS on any other base, so a PR into main is not held.
-    #
-    # Admission, measured 2026-10-21 through onex scm on the bus: the 20 most
-    # recent merged dev PRs (#5145..#5219) all carried this context at their
-    # head, 20/20 present and 20/20 `success`, including the 5 bot PRs the
-    # reviewer skips (#5184, #5198, #5203, #5209, #5219). Before this entry a
-    # red thread gate was caught only by the default-deny sweep, and only when
-    # CI Summary polled after the gate had posted; an absent or still-running
-    # gate was read by nothing. Placed at the tail and admitted under
-    # POST_FIXTURE_WINDOW_CONTEXTS for the reason the `Governed helper
-    # primitive gate` entry states.
-    "Hostile Review Thread Gate",
 )
 
 # OMN-17427: members of EXPECTED_EXTERNAL_CONTEXTS asserted only on a pull
-# request into `dev` (see the entry above). A subset, never an addition: every
-# name here must also be in EXPECTED_EXTERNAL_CONTEXTS.
-DEV_BASE_ONLY_CONTEXTS: frozenset[str] = frozenset({"Hostile Review Thread Gate"})
+# request into `dev`. A subset, never an addition: every name here must also be
+# in EXPECTED_EXTERNAL_CONTEXTS. Empty since OMN-22478 (operator RULING
+# 2026-11-05T20:27:56Z): its one member, the Hostile Review Thread Gate, no
+# longer holds a merge. The mechanism stays for the gate's return.
+DEV_BASE_ONLY_CONTEXTS: frozenset[str] = frozenset()
 
 
 def scoped_to_base(contexts: tuple[str, ...], base_ref: str) -> tuple[str, ...]:
@@ -895,10 +881,6 @@ def scoped_to_base(contexts: tuple[str, ...], base_ref: str) -> tuple[str, ...]:
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
-        # OMN-17427: admitted 2026-10-21 on a 20/20 present-and-green record
-        # over merged dev heads #5145..#5219, read through onex scm; no
-        # fixture window covering it is captured yet.
-        "Hostile Review Thread Gate",
         # OMN-20413: October rehearsal rows postdate the July/August fixtures.
         # Its separate sixteen-PR admission replay retains the recorded rows.
         "hook-push-rehearsal / rehearse",
@@ -1274,30 +1256,7 @@ EXTERNAL_FAILURE_SUPERSESSION_GRACE_S: int = 1200
 # such as code scanning or the change-control writer, a run absent from the
 # supplied index, an unparseable URL, or no index supplied at all — is SWEPT.
 # An allow list would silently exempt every one of those.
-SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(
-    {
-        "push",
-        # OMN-18970 adversarial review: a queue run's rows are a verdict about
-        # a queue commit, not about this pull request. The sweep only runs on
-        # `pull_request` today so this cannot currently fire, and it is listed
-        # anyway because the deny list is the place a reader looks to learn
-        # which events are not pull-request verdicts.
-        "merge_group",
-        "schedule",
-        "workflow_dispatch",
-        "release",
-        "deployment",
-        "deployment_status",
-        "repository_dispatch",
-        "create",
-        "delete",
-        "fork",
-        "page_build",
-        "public",
-        "registry_package",
-        "watch",
-    }
-)
+SWEEP_NON_PR_EVENTS: frozenset[str] = frozenset(_TABLES["sweep_non_pr_events"])
 
 # The STRICT bar, and it is the same one layer 4 holds its own tuple to: the
 # ONLY conclusion that passes is `success`.
@@ -1375,92 +1334,55 @@ SWEEP_EXCLUSION_MAX_DAYS: int = 90
 # will change. It is what forces a premise that has held for a quarter to be
 # re-read by a person, which is the whole difference between this list and an
 # allowlist.
-EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
-    "verify": SweepExclusion(
-        reason=(
-            "The check run verify was skipped on all sixteen measured heads and never "
-            "concluded success. The job configuration includes a condition that "
-            "requires the pull request head repository to be a fork. Because the "
-            "internal pull requests do not satisfy this fork condition, the job skips "
-            "execution without producing a result. Excluding this name prevents the "
-            "gate from failing on a check that is logically inapplicable to internal "
-            "merges."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Docker Integration Tests": SweepExclusion(
-        reason=(
-            "The check run Docker Integration Tests was skipped on the seven heads "
-            "where it appeared and never concluded success. The job carries a "
-            "condition requiring the event to not be a pull request. Since the gate "
-            "judges pull request heads specifically the condition is false and the "
-            "job skips. Excluding this entry prevents the gate from treating the "
-            "inapplicable integration test suite as a blocking failure."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Security Scan (Trivy)": SweepExclusion(
-        reason=(
-            "The check run Security Scan (Trivy) was skipped on the seven heads where "
-            "it appeared and never concluded success. The job configuration requires "
-            "the git reference to be the main branch for execution. On a pull request "
-            "head this reference condition is not met so the job skips. This "
-            "exclusion ensures the gate does not block merges due to a security scan "
-            "that is restricted to the main branch."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Image Size Analysis": SweepExclusion(
-        reason=(
-            "The check run Image Size Analysis was skipped on the seven heads where "
-            "it appeared and never concluded success. The job shares the same "
-            "mechanism as the security scan and requires the git reference to be the "
-            "main branch. It therefore skips on pull request heads where the "
-            "reference does not match the main branch. The gate excludes this name to "
-            "avoid failing on an analysis job that only runs on the main branch."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "Hostile Reviewer (adversarial gate)": SweepExclusion(
-        reason=(
-            "The check run Hostile Reviewer (adversarial gate) succeeded on thirteen "
-            "heads and skipped on three. This entry differs from the others because "
-            "the check does reach success when it runs. It skips on some pull request "
-            "shapes due to a condition involving the draft state and base branch. The "
-            "exclusion covers only the skip case to prevent the gate from failing "
-            "when the check is conditionally inactive."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    # OMN-19218 — the eleventh name, missed by the 16-PR window because none of
-    # those heads touched prod-promotion-lineage.yml's path filter.
-    "Enforce clean + promoted build source": SweepExclusion(
-        reason=(
-            "The check run Enforce clean + promoted build source is the lineage-check "
-            "job of prod-promotion-lineage.yml, which carries the condition "
-            "github.event_name == 'workflow_call' && inputs.enforce_lineage. The "
-            "workflow runs on pull_request for a path filter that includes the "
-            "deploy-agent executor and onex-runtime-deploy, so on every such pull "
-            "request the job skips without producing a verdict. Measured on "
-            "omnibase_infra#3980 at head ba61dc95: every producer green, CI Summary "
-            "red on this skipped row alone. The job does its real work only when the "
-            "prod image build calls the workflow, which this exclusion does not touch."
-        ),
-        ticket="OMN-19218",
-        added="2026-09-22",
-        expires="2026-12-20",
-    ),
-}
+# The registry is data, in ci_summary_sweep_exclusions.json beside this file
+# (stdlib json: the poller runs with no third-party packages). Each entry names
+# its reason, ticket, added date and expiry. The Tessl Reviewer entry is
+# RULING 2026-11-05T20:27:56Z (OMN-22478): the automated reviewer app posts a
+# neutral row on every pull request and holds no merge. Moved out of code
+# because the canonical-file-shape ratchet refuses growth of this file.
+SWEEP_EXCLUSIONS_FILE = Path(__file__).with_name("ci_summary_sweep_exclusions.json")
+
+
+def load_sweep_exclusions(path: Path) -> dict[str, SweepExclusion]:
+    """Read the exclusion registry; a malformed file raises and fails the gate."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {name: SweepExclusion(**fields) for name, fields in raw.items()}
+
+
+EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = load_sweep_exclusions(
+    SWEEP_EXCLUSIONS_FILE
+)
+
+# Per-check advisory or blocking mode is data (ruling 2026-11-08): the contract names
+# each mode and the conclusions it adds to success, the overlay declares each check's
+# mode. A neutral passes only for a declared-advisory check; undeclared stays denied.
+# A missing, unparsable or malformed file refuses the gate and admits nothing.
+CHECK_MODES_FILES = [
+    Path(__file__).with_name(f"ci_summary_external_check_modes{part}.json")
+    for part in (".contract", "")
+]
+
+
+def load_check_modes(contract: Path, overlay: Path) -> tuple[dict, list[str]]:
+    # Returns (conclusions each declared check adds to success, refusals).
+    try:
+        spec = json.loads(contract.read_text(encoding="utf-8"))
+        decls = json.loads(overlay.read_text(encoding="utf-8"))
+        modes = {m: frozenset(c) for m, c in spec["modes"].items()}
+        need = sorted({"mode", *spec["entry_fields"]})
+        bad = {
+            n
+            for n, e in decls.items()
+            if not isinstance(e, dict)
+            or not all(isinstance(e.get(f), str) and e[f].strip() for f in need)
+            or e["mode"] not in modes
+        }
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return {}, [f"unreadable or malformed: {exc!r}"]
+    return {n: modes[e["mode"]] for n, e in decls.items() if n not in bad}, [
+        f"{n}: needs non-empty text {', '.join(need)} and a declared mode"
+        for n in sorted(bad)
+    ]
 
 
 _SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")
@@ -2507,7 +2429,10 @@ def evaluate_external_sweep(
         return [], [], [], [], []
     accounted = frozenset(expected) | in_run_names | {self_name}
     active, _expired = active_sweep_exclusions(exclusions, now=now)
-    failures: list[str] = []
+    check_modes, mode_refusals = load_check_modes(*CHECK_MODES_FILES)
+    # A row a declared-advisory check's mode admits lands in ``excluded`` as
+    # "name (conclusion, declared advisory)"; an unreadable registry is a failure.
+    failures = [f"check-mode registry {r}" for r in mode_refusals]
     in_flight: list[str] = []
     swept: list[str] = []
     excluded: list[str] = []
@@ -2534,6 +2459,9 @@ def evaluate_external_sweep(
             in_flight.append(name)
             continue
         if state.status == "completed" and state.conclusion in SWEEP_GOOD_CONCLUSIONS:
+            continue
+        if state.conclusion in check_modes.get(name, ()):
+            excluded.append(f"{name} ({state.conclusion}, declared advisory)")
             continue
         if verdict_is_provisional(state, now) or replacement_run_in_flight(
             raw, workflow_runs
@@ -3092,7 +3020,7 @@ def main(argv: list[str] | None = None) -> int:
     external_contexts = (
         EXPECTED_EXTERNAL_CONTEXTS if args.event_name == "pull_request" else ()
     )
-    # OMN-17427: the Hostile Review Thread Gate holds PRs into dev only.
+    # OMN-17427: DEV_BASE_ONLY_CONTEXTS hold PRs into dev only.
     external_contexts = scoped_to_base(external_contexts, args.base_ref)
     code, report = evaluate(
         jobs,

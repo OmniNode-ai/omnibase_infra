@@ -1,0 +1,128 @@
+{
+  "chain": "E1",
+  "kind": "error",
+  "title": "rejected",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "cli",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_q",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "afbe2b8b-a320-5350-a6b8-7abf6e4b7196",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_q"
+    },
+    {
+      "step": 2,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:afbe2b8b-a320-5350-a6b8-7abf6e4b7196",
+        "outcome": "rejected",
+        "reason": "NOT_INSTALLED",
+        "registry_version": 0
+      },
+      "key": "lab-deploy:afbe2b8b-a320-5350-a6b8-7abf6e4b7196"
+    },
+    {
+      "step": 3,
+      "actor": "cli",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_x",
+        "content_hash": "187e176c530cfadad1d09ce7389d72cd4cbee74f82c84e74b3ab7586ee8dc46b",
+        "registration_request_id": "5f5933a1-0c06-5ad0-af5d-b1a3ce528241",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 4,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:5f5933a1-0c06-5ad0-af5d-b1a3ce528241",
+        "outcome": "rejected",
+        "reason": "HASH_NOT_INSTALLED",
+        "registry_version": 0
+      },
+      "key": "lab-deploy:5f5933a1-0c06-5ad0-af5d-b1a3ce528241"
+    },
+    {
+      "step": 5,
+      "actor": "cli",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_h",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "45aefdbd-5de1-5b06-9091-e9fdd7aab973",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_h"
+    },
+    {
+      "step": 6,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:45aefdbd-5de1-5b06-9091-e9fdd7aab973",
+        "outcome": "rejected",
+        "reason": "HANDLER_OUTSIDE_PREFIX",
+        "registry_version": 0
+      },
+      "key": "lab-deploy:45aefdbd-5de1-5b06-9091-e9fdd7aab973"
+    },
+    {
+      "step": 7,
+      "actor": "cli",
+      "action": "publish",
+      "topic_role": "sender_request",
+      "model": "ModelContractLoadRequest",
+      "record": {
+        "operation": "register",
+        "contract_name": "node_p",
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "registration_request_id": "c9b6ef8f-5d04-5618-bf07-ba2a0eedd75a",
+        "expected_version": 0,
+        "owner": "lab-deploy"
+      },
+      "key": "node_p"
+    },
+    {
+      "step": 8,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "replies",
+      "model": "ModelContractLoadReply",
+      "record": {
+        "entity_id": "lab-deploy:c9b6ef8f-5d04-5618-bf07-ba2a0eedd75a",
+        "outcome": "rejected",
+        "reason": "PROFILE_NOT_LOADED",
+        "registry_version": 0
+      },
+      "key": "lab-deploy:c9b6ef8f-5d04-5618-bf07-ba2a0eedd75a"
+    }
+  ],
+  "ends_in": "a rejected reply on the replies topic for each cause; no row change; exit 1"
+}

@@ -119,6 +119,12 @@ ALLOWED_EMPTY_DEFAULTS = {
     # report shows `llm.openrouter.api_key` as unresolved and the inference
     # effect's resolver raises on it; nothing substitutes a default.
     "OPENROUTER_API_KEY",
+    # OMN-22650: the TypeSafe Jev typed-decision rung's key, seeded in the secret
+    # store at /shared/env/LLM_TYPESAFE_API_KEY for the dev lane only. Lanes that
+    # do not route to the rung must still render. Empty is NOT a silent disable:
+    # the provider-rung canary reads the ref as UNRESOLVED and the typed-decision
+    # effect refuses with CREDENTIAL_NOT_REGISTERED; nothing substitutes a default.
+    "LLM_TYPESAFE_API_KEY",
     # OMN-19492 / OMN-14375: the onexbot-pr-reader App webhook's HMAC secret,
     # on the identical contract as the OnexBot App identity above -- minted
     # onto a specific runtime host by the operator, so every other lane must

@@ -104,7 +104,7 @@ dod_evidence:
         check_value: |
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/placement/handler_placement_session.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'return self._lease_id != 0 and self._clock() < self._deadline' > /dev/null &&
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/placement/handler_placement_epoch_guard.py?ref=$(git rev-parse HEAD)" --jq .content |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/placement/handler_placement_epoch_guard/handler.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'if command.placement_epoch < self.highest(command.node_key):' > /dev/null &&
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/placement/handler_placement_runtime.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'logger.warning("placement: etcd unreachable, primary nodes held: %s", exc)' > /dev/null

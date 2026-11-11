@@ -22,6 +22,67 @@ SCRIPT = REPO_ROOT / "scripts" / "audit-runner-routing.py"
 POLICY = REPO_ROOT / "config" / "runner_routing_policy.yaml"
 
 
+def _nuc_policy_override(policy):
+    """Find the declared NUC exclusion without repeating private inventory."""
+    exclusions = [
+        (repo, entry)
+        for repo, entry in policy["trusted_runner_variable"][
+            "repository_overrides"
+        ].items()
+        if "NUC" in entry["revert_when"]
+    ]
+    assert len(exclusions) == 1
+    return exclusions[0]
+
+
+def test_nuc_policy_requires_amd64_and_fresh_activation_evidence() -> None:
+    policy = _load_script()._load_policy(POLICY)
+    _, override = _nuc_policy_override(policy)
+    assert json.loads(override["expected_json"]) == [
+        "self-hosted",
+        "omnibase-ci",
+        "arch-amd64",
+    ]
+    gate = override["activation_gate"]
+    assert gate["sustained_min_span_seconds"] == 5400
+    for criterion in (
+        "sustained_samples",
+        "capacity_budget",
+        "positive_control_acceptance",
+    ):
+        assert "arch-amd64" in gate[criterion]
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        ["self-hosted", "omnibase-ci", "arch-amd64"],
+        ["self-hosted", "omnibase-ci"],
+        ["self-hosted", "omnibase-ci", "arch-arm64"],
+        [["self-hosted", "omnibase-ci"], ["self-hosted", "omnibase-ci", "arch-amd64"]],
+        None,
+    ],
+    ids=["eligible", "broad", "arm64", "both-values", "missing-shadow"],
+)
+def test_nuc_policy_audit_accepts_only_amd64_shadow(monkeypatch, labels) -> None:
+    module = _load_script()
+    policy = module._load_policy(POLICY)
+    name = policy["trusted_runner_variable"]["name"]
+    repo, _ = _nuc_policy_override(policy)
+
+    def variables(args):
+        if args == ["--org", "OmniNode-ai"]:
+            return [{"name": name, "value": '["ubuntu-latest"]'}]
+        assert args == ["--repo", f"OmniNode-ai/{repo}"]
+        return [] if labels is None else [{"name": name, "value": json.dumps(labels)}]
+
+    monkeypatch.setattr(module, "_variables", variables)
+    findings = module._audit_trusted_style_variable(
+        policy["trusted_runner_variable"], [repo]
+    )
+    assert (findings == []) == (labels == ["self-hosted", "omnibase-ci", "arch-amd64"])
+
+
 def _load_script():
     spec = importlib.util.spec_from_file_location("audit_runner_routing", SCRIPT)
     assert spec and spec.loader
@@ -597,7 +658,6 @@ def test_policy_tracks_repos_that_drifted_to_hosted_minutes() -> None:
         "omnibase_infra",
         "omniclaude",
         "omnimarket",
-        "onex_change_control",
     }.issubset(set(policy["repositories"]))
 
 
@@ -1398,11 +1458,14 @@ def test_the_cloud_canary_variable_points_at_the_cloud_fleet_label() -> None:
     assert declaration["revert_when"].strip()
 
 
-def test_the_canary_variable_is_read_ahead_of_the_docker_seam() -> None:
-    """Precedence is the whole design, and it is only true if it is written.
+def test_the_acl_proof_job_never_reads_the_cloud_canary_variable() -> None:
+    """OMN-22665: the one job class the canary governed is routed hosted again.
 
-    Read from the PARSED runs-on of the one job it governs, so a mention of the
-    variable in a comment elsewhere in the file cannot satisfy it.
+    The canary pointed ``rebuilt-postgres16-proof`` at the scale-to-zero cloud
+    fleet. From 2026-11-05T03:51Z no runner carrying the fleet label
+    registered, and every run's job sat queued; the policy's own revert
+    condition names exactly that observation. Read from the PARSED runs-on, so
+    a mention of the variable in a comment cannot satisfy it.
     """
     import yaml
 
@@ -1413,47 +1476,51 @@ def test_the_canary_variable_is_read_ahead_of_the_docker_seam() -> None:
     )
     runs_on = workflow["jobs"]["rebuilt-postgres16-proof"]["runs-on"]
 
-    canary = runs_on.index("OMNI_CLOUD_CANARY_RUNS_ON_JSON")
+    assert "OMNI_CLOUD_CANARY_RUNS_ON_JSON" not in runs_on
+    assert "omni-cloud-ci" not in runs_on
+
+    # The hosted fallbacks stay in their order, and the fork branch still comes
+    # first: this repository is public and a fork pull request must never reach
+    # a self-hosted runner of any kind.
+    fork = runs_on.index("OMNI_PUBLIC_PR_RUNS_ON_JSON")
     docker = runs_on.index("OMNI_DOCKER_CI_RUNS_ON_JSON")
     trusted = runs_on.index("OMNI_TRUSTED_CI_RUNS_ON_JSON")
-    assert canary < docker < trusted
-
-    # NEGATIVE CONTROL for the ordering above: the fork branch must still come
-    # first of all, because this repository is public and a fork pull request
-    # must never reach a self-hosted runner of any kind.
-    assert runs_on.index("OMNI_PUBLIC_PR_RUNS_ON_JSON") < canary
+    assert fork < docker < trusted
 
 
-def test_the_capacity_requester_cannot_resolve_onto_the_fleet_it_requests() -> None:
-    """The requester is hosted by literal, and that is load-bearing.
+def test_the_acl_proof_workflow_asks_no_cloud_fleet_for_capacity() -> None:
+    """A capacity request for a fleet nothing routes to is a job that cannot help.
 
-    A requester that resolved through any routing variable could be relocated
-    onto the scale-to-zero fleet it exists to start, which deadlocks: the job
-    that would ask for capacity is itself waiting for capacity.
+    The request job reported success on every run while nothing registered, so
+    it hid the cause from anyone reading the run's first job. No job in the
+    workflow may name the cloud fleet's scaler or its role variable, and the
+    proof job carries no ``needs`` on a requester.
     """
     import yaml
 
-    workflow = yaml.safe_load(
-        (
-            REPO_ROOT / ".github" / "workflows" / "application-acl-postgres16-proof.yml"
-        ).read_text(encoding="utf-8")
-    )
-    requester = workflow["jobs"]["request-cloud-capacity"]
+    text = (
+        REPO_ROOT / ".github" / "workflows" / "application-acl-postgres16-proof.yml"
+    ).read_text(encoding="utf-8")
+    for token in (
+        "omninode-ci-runner-scaler",
+        "AWS_CI_RUNNER_SCALER_ROLE_NAME",
+        "request-cloud-capacity",
+        "id-token",
+    ):
+        assert token not in text, f"{token} is back in the ACL proof workflow"
 
-    assert requester["runs-on"] == "ubuntu-latest"
-    assert "${{" not in str(requester["runs-on"])
-    assert workflow["jobs"]["rebuilt-postgres16-proof"]["needs"] == (
-        "request-cloud-capacity"
-    )
+    workflow = yaml.safe_load(text)
+    assert set(workflow["jobs"]) == {"rebuilt-postgres16-proof"}
+    assert "needs" not in workflow["jobs"]["rebuilt-postgres16-proof"]
 
 
-def test_the_requester_file_is_allowlisted_for_its_bare_hosted_pin() -> None:
-    """Otherwise the local-workflow audit reports it as a routing violation."""
+def test_the_acl_proof_file_holds_no_bare_hosted_pin_allowlist_entry() -> None:
+    """The workflow has no literal hosted pin left, so its allowlist row is stale."""
     import yaml
 
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
     paths = {entry["path"] for entry in policy["hosted_runner_allowlist"]}
-    assert ".github/workflows/application-acl-postgres16-proof.yml" in paths
+    assert ".github/workflows/application-acl-postgres16-proof.yml" not in paths
 
 
 def test_public_pr_runner_variable_drift_is_reported_at_org_scope(
@@ -2467,3 +2534,172 @@ def test_recorded_rate_limit_job_is_unreadable_not_drift(
     # so the annotation may not promise one.
     assert "reset time when GitHub reports one" in result.stdout
     assert "reported findings" not in result.stdout
+
+
+# OMN-22478: the private-repository refusal has one exception, for the outside
+# canary, and it covers that one job and nothing else.
+_HOSTED_JOB = "jobs:\n  {job}:\n    runs-on: ubuntu-latest\n"
+_CANARY = ".github/workflows/canary.yml"
+_CANARY_EXCEPTION = {
+    "repository": "floor-canary",
+    "path": _CANARY,
+    "job": "canary",
+    "ruling": "RULING 2026-11-05T22:32:36Z lane=orchestrator-31d9",
+    "reason": "test",
+}
+
+
+def _private_pass(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    workflows: dict[str, dict[str, str]],
+) -> None:
+    """Run the real private-placement pass over fixture private repositories."""
+    original = module.audit_private_repo_hosted_placement
+    monkeypatch.setattr(
+        module,
+        "audit_private_repo_hosted_placement",
+        lambda: original(
+            visibility_fn=lambda org: [(name, True) for name in workflows],
+            workflow_fetch_fn=lambda name: workflows[name],
+        ),
+    )
+
+
+def _scopes(findings: list[Any]) -> list[str]:
+    return sorted(f.scope for f in findings)
+
+
+def test_the_canary_job_alone_is_admitted_on_a_hosted_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    _private_pass(
+        module,
+        monkeypatch,
+        {
+            "floor-canary": {
+                _CANARY: "jobs:\n  canary:\n    runs-on: ubuntu-latest\n"
+                "  other:\n    runs-on: ubuntu-latest\n",
+                ".github/workflows/other.yml": _HOSTED_JOB.format(job="canary"),
+            },
+            "another-private": {
+                _CANARY: _HOSTED_JOB.format(job="canary"),
+                ".github/workflows/ci.yml": _HOSTED_JOB.format(job="ci"),
+            },
+        },
+    )
+    assert len(module.audit_private_repo_hosted_placement()) == 5
+
+    left = module.audit_private_repo_hosted_exception(
+        {"private_repo_hosted_exception": _CANARY_EXCEPTION}
+    )
+
+    assert _scopes(left) == sorted(
+        [
+            f"another-private:{_CANARY}:canary",
+            "another-private:.github/workflows/ci.yml:ci",
+            f"floor-canary:{_CANARY}:other",
+            "floor-canary:.github/workflows/other.yml:canary",
+        ]
+    )
+
+
+def test_without_the_policy_entry_the_canary_job_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failing control: with no entry the same job is a finding again."""
+    module = _load_script()
+    _private_pass(
+        module,
+        monkeypatch,
+        {"floor-canary": {_CANARY: _HOSTED_JOB.format(job="canary")}},
+    )
+    assert _scopes(module.audit_private_repo_hosted_exception({})) == [
+        f"floor-canary:{_CANARY}:canary"
+    ]
+
+
+@pytest.mark.parametrize(
+    "exception",
+    [
+        pytest.param({**_CANARY_EXCEPTION, "repository": "floor-*"}, id="repo-glob"),
+        pytest.param({**_CANARY_EXCEPTION, "repository": "other"}, id="other-repo"),
+        pytest.param(
+            {**_CANARY_EXCEPTION, "path": ".github/workflows/*.yml"}, id="path-glob"
+        ),
+        pytest.param({**_CANARY_EXCEPTION, "path": "canary.yml"}, id="bare-path"),
+        pytest.param({**_CANARY_EXCEPTION, "job": "can*"}, id="job-glob"),
+        pytest.param({**_CANARY_EXCEPTION, "job": ["canary"]}, id="job-list"),
+        pytest.param({**_CANARY_EXCEPTION, "ruling": ""}, id="no-ruling"),
+        pytest.param({**_CANARY_EXCEPTION, "reason": " "}, id="no-reason"),
+        pytest.param([_CANARY_EXCEPTION], id="list-of-exceptions"),
+    ],
+)
+def test_an_invalid_or_wider_private_exception_admits_nothing(
+    monkeypatch: pytest.MonkeyPatch, exception: object
+) -> None:
+    module = _load_script()
+    _private_pass(
+        module,
+        monkeypatch,
+        {"floor-canary": {_CANARY: _HOSTED_JOB.format(job="canary")}},
+    )
+
+    left = module.audit_private_repo_hosted_exception(
+        {"private_repo_hosted_exception": exception}
+    )
+
+    assert _scopes(left) == [f"floor-canary:{_CANARY}:canary"]
+
+
+def test_the_policy_names_exactly_the_canary_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text())
+    entry = policy["private_repo_hosted_exception"]
+    assert (entry["repository"], entry["path"], entry["job"]) == (
+        "floor-canary",
+        _CANARY,
+        "canary",
+    )
+    module = _load_script()
+    _private_pass(
+        module,
+        monkeypatch,
+        {
+            "floor-canary": {
+                _CANARY: "jobs:\n  canary:\n    runs-on: ubuntu-latest\n"
+                "  other:\n    runs-on: ubuntu-latest\n"
+            }
+        },
+    )
+    assert _scopes(module.audit_private_repo_hosted_exception(policy)) == [
+        f"floor-canary:{_CANARY}:other"
+    ]
+
+
+def test_main_passes_the_canary_and_still_fails_any_other_hosted_private_job(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module, "audit_github_variables", lambda policy: [])
+    monkeypatch.setattr(module, "audit_scoped_variables", lambda policy: [])
+    _private_pass(
+        module,
+        monkeypatch,
+        {
+            "floor-canary": {_CANARY: _HOSTED_JOB.format(job="canary")},
+            "other-private": {_CANARY: _HOSTED_JOB.format(job="canary")},
+        },
+    )
+
+    code, out, _ = _run_main(module, monkeypatch, tmp_path, capsys)
+
+    assert code == 1
+    assert f"other-private:{_CANARY}:canary" in out
+    assert f"floor-canary:{_CANARY}:canary" not in out

@@ -24,9 +24,9 @@
 #               prepr_teardown_slot.sh, both from the test-merge tree. Neither
 #               takes a lane argument; the project is derived from the slot.
 #
-# Params (sourced): TAG W [INFRA_PR INFRA_HEAD [INFRA_TAG] | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE] | INFRA_REF_SHA] [MARKET_PR MARKET_HEAD [MARKET_TAG] | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE] | MARKET_REF_SHA]
+# Params (sourced): TAG W [CLONE_BASE_URL, set by the driver from the repository layer map; the clone, build and tests phases read it] [INFRA_PR INFRA_HEAD [INFRA_TAG] | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE] | INFRA_REF_SHA] [MARKET_PR MARKET_HEAD [MARKET_TAG] | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE] | MARKET_REF_SHA]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS SUITE_REPO SUITE_WORKERS DEV_CONTROL_MAX CORE_REF SPI_REF INFRA_DEV_TAG STAGE_DEV_TAGS
-#   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
+#   PROBE_POLL_S DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
 #   POSITIVE_CONTROL REASON OVERLAY_FILE POST_UP_COMMAND POST_BRINGUP_CMD]
 #
 # The id and file lists below ($C $V $N $IMGS $FILES and the like) are word-split
@@ -93,8 +93,7 @@ neighbour_diff() {
 # --- slot-ports-readback begin ---
 slot_ports_readback() {
   local pub out p
-  pub=$(docker ps --filter "label=com.docker.compose.project=$P" --format '{{.Ports}}' \
-    | tr ',' '\n' | sed -n 's/.*:\([0-9][0-9-]*\)->.*/\1/p' | sort -u | tr '\n' ' ')
+  pub=$(docker ps --filter "label=com.docker.compose.project=$P" --format '{{.Ports}}' | tr ',' '\n' | sed -n 's/.*:\([0-9][0-9-]*\)->.*/\1/p' | sort -u | tr '\n' ' ')
   out=""
   for p in $pub; do
     case "|$PORTS|" in *"|$p|"*) ;; *) out="$out $p" ;; esac
@@ -280,7 +279,7 @@ fetch_pr() { # dir repo pr expected [tag] -> merges PR head into dev (no-ff), fa
   # pull ref; the head it resolves to is still compared with the expected one below.
   local d=$1 repo=$2 pr=$3 exp=$4 tag=${5:-} ref
   ref=pull/$pr/head; [ -z "$tag" ] || ref=refs/tags/$tag
-  git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
+  git clone -q --branch dev "$CLONE_BASE_URL/$repo.git" "$d"
   git -C "$d" fetch -q origin "$ref"
   local h; h=$(git -C "$d" rev-parse FETCH_HEAD)
   echo "$repo#$pr fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
@@ -289,7 +288,7 @@ fetch_pr() { # dir repo pr expected [tag] -> merges PR head into dev (no-ff), fa
 }
 fetch_ref() { # dir repo sha -> merges a branch head, named by its full sha, into dev; no PR (OMN-20085)
   local d=$1 repo=$2 sha=$3
-  git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
+  git clone -q --branch dev "$CLONE_BASE_URL/$repo.git" "$d"
   git -C "$d" fetch -q origin "$sha"
   local h; h=$(git -C "$d" rev-parse FETCH_HEAD)
   echo "$repo@${sha:0:12} fetched head $h expected $sha match=$([ "$h" = "$sha" ] && echo yes || echo NO)"
@@ -310,7 +309,7 @@ fetch_ref() { # dir repo sha -> merges a branch head, named by its full sha, int
 GROUP_GIT_ENV="GIT_AUTHOR_NAME=lab-pool-group GIT_AUTHOR_EMAIL=lab-pool-group@lab.invalid GIT_COMMITTER_NAME=lab-pool-group GIT_COMMITTER_EMAIL=lab-pool-group@lab.invalid GIT_AUTHOR_DATE=2026-01-01T00:00:00+0000 GIT_COMMITTER_DATE=2026-01-01T00:00:00+0000"
 fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
   local d=$1 repo=$2 members=$3 base=${4:-} want=${5:-} m n exp h
-  git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
+  git clone -q --branch dev "$CLONE_BASE_URL/$repo.git" "$d"
   if [ -n "$base" ]; then
     git -C "$d" switch -q --detach "$base" || { echo "group-base-missing $repo $base"; return 1; }
   fi
@@ -367,10 +366,7 @@ proof_containers() { # one line; rc 1 and no output when the composed list is ab
 }
 composed_build() { # build the composed omnimarket image and read its containers from the render
   local img="$P-omnimarket-runtime:latest" brc need
-  docker build -f "$R/omnimarket/Dockerfile.runtime" \
-    --build-arg INFRA_RUNTIME_IMAGE="$P-runtime:latest" \
-    --build-arg OMNIMARKET_VCS_REF="$(git -C "$R/omnimarket" rev-parse HEAD)" \
-    -t "$img" "$R/omnimarket" > "$W/composed-build.log" 2>&1
+  docker build -f "$R/omnimarket/Dockerfile.runtime" --build-arg INFRA_RUNTIME_IMAGE="$P-runtime:latest" --build-arg OMNIMARKET_VCS_REF="$(git -C "$R/omnimarket" rev-parse HEAD)" -t "$img" "$R/omnimarket" > "$W/composed-build.log" 2>&1
   brc=$?; echo "composed build rc=$brc $(date -u +%FT%TZ)"; tail -4 "$W/composed-build.log"
   [ "$brc" = 0 ] || return 1
   rm -f "$W/composed-containers"
@@ -381,6 +377,13 @@ composed_build() { # build the composed omnimarket image and read its containers
   done
   mv "$W/composed-containers.out" "$W/composed-containers"
   echo "composed-containers: $(tr '\n' ' ' < "$W/composed-containers")"
+}
+slot_composed_containers() { # a prepr slot's containers on the composed image its route layered (OMN-22863)
+  local id c need; id=$(docker image inspect -f '{{.Id}}' "$P-omnimarket-runtime:latest") || { echo "composed-containers: the slot route left no composed image"; return 1; }
+  rm -f "$W/composed-containers"
+  for c in $(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}'); do [ "$(docker inspect -f '{{.Image}}' "$c")" = "$id" ] && echo "$c"; done | sort -u > "$W/composed-containers.out"
+  for need in $M $E; do grep -qx "$need" "$W/composed-containers.out" || { echo "composed-containers lacks the kernel $need: $(tr '\n' ' ' < "$W/composed-containers.out")"; return 1; }; done
+  mv "$W/composed-containers.out" "$W/composed-containers"; echo "composed-containers: $(tr '\n' ' ' < "$W/composed-containers")"
 }
 starting_count() { # containers still in their health start period: the runtimes and the composed services
   local rows
@@ -445,28 +448,28 @@ snap-pre|snap-post)
   ;;
 clone)
   drop_source_trees
-  echo "clone start $(ts)"; mkdir -p "$R" "$T"
+  echo "clone start $(ts)"; mkdir -p "$R" "$T"; : "${CLONE_BASE_URL:?CLONE_BASE_URL is set by the driver from the repository layer map}"
   if [ -n "${INFRA_GROUP:-}" ]; then
     fetch_group "$R/omnibase_infra" omnibase_infra "$INFRA_GROUP" "${INFRA_GROUP_BASE:-}" "${INFRA_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
     # the focused tests run against the group commit itself
-    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q "$R/omnibase_infra" HEAD; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+    git clone -q "$CLONE_BASE_URL/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q "$R/omnibase_infra" HEAD; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   elif [ -n "${INFRA_REF_SHA:-}" ]; then fetch_ref "$R/omnibase_infra" omnibase_infra "$INFRA_REF_SHA"
-    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "$INFRA_REF_SHA"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+    git clone -q "$CLONE_BASE_URL/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "$INFRA_REF_SHA"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   elif [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD" "${INFRA_TAG:-}"
-    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "${INFRA_TAG:+refs/tags/}${INFRA_TAG:-pull/$INFRA_PR/head}"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
-  elif [ -n "${INFRA_DEV_TAG:-}" ]; then git clone -q --branch "$INFRA_DEV_TAG" https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra" || exit 1  # OMN-17427: the image audit takes a clean dev-merge-tag tree, never a test merge
-  else git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra"; fi
+    git clone -q "$CLONE_BASE_URL/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "${INFRA_TAG:+refs/tags/}${INFRA_TAG:-pull/$INFRA_PR/head}"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+  elif [ -n "${INFRA_DEV_TAG:-}" ]; then git clone -q --branch "$INFRA_DEV_TAG" "$CLONE_BASE_URL/omnibase_infra.git" "$R/omnibase_infra" || exit 1  # OMN-17427: the image audit takes a clean dev-merge-tag tree, never a test merge
+  else git clone -q --branch dev "$CLONE_BASE_URL/omnibase_infra.git" "$R/omnibase_infra"; fi
   if [ -n "${MARKET_GROUP:-}" ]; then
     fetch_group "$R/omnimarket" omnimarket "$MARKET_GROUP" "${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
     # the focused tests run against the group commit itself
-    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q "$R/omnimarket" HEAD; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
+    git clone -q "$CLONE_BASE_URL/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q "$R/omnimarket" HEAD; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
   elif [ -n "${MARKET_REF_SHA:-}" ]; then fetch_ref "$R/omnimarket" omnimarket "$MARKET_REF_SHA"
-    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "$MARKET_REF_SHA"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
+    git clone -q "$CLONE_BASE_URL/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "$MARKET_REF_SHA"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
   elif [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD" "${MARKET_TAG:-}"
-    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "${MARKET_TAG:+refs/tags/}${MARKET_TAG:-pull/$MARKET_PR/head}"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
-  else git clone -q --branch dev https://github.com/OmniNode-ai/omnimarket.git "$R/omnimarket"; fi
-  git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_core.git "$R/omnibase_core"
-  git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_spi.git "$R/omnibase_spi"
+    git clone -q "$CLONE_BASE_URL/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "${MARKET_TAG:+refs/tags/}${MARKET_TAG:-pull/$MARKET_PR/head}"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
+  else git clone -q --branch dev "$CLONE_BASE_URL/omnimarket.git" "$R/omnimarket"; fi
+  source "$R/omnibase_infra/scripts/runtime_build/sibling_clone_manifest.sh" || exit 1  # OMN-22153: the tree under test names the vendored set
+  for repo in "${SIBLING_VENDORED_REPOS[@]}"; do [ -d "$R/$repo" ] || git clone -q --branch dev "$CLONE_BASE_URL/$repo.git" "$R/$repo" || exit 1; done
   # The workspace build vendors each sibling from these clones, not from the PR's
   # pin, so a PR that moves a sibling pin names the ref here (CORE_REF=v0.47.24).
   for pair in "omnibase_core:${CORE_REF:-}" "omnibase_spi:${SPI_REF:-}"; do
@@ -491,16 +494,16 @@ build)
       export ONEX_LANE_OVERLAY_DIR="$W/lane-overlay"
       echo "overlay mounted as $P.bifrost.yaml sha256=$(shasum -a 256 "$OVERLAY_FILE" | cut -c1-12)"
     fi
+    # OMN-22863: a proof with omnimarket in it has the slot route layer that tree over the slot's runtime image
+    COMPOSED_ARGS=(); market_under_test && COMPOSED_ARGS=(--composed-omnimarket "$R/omnimarket")
     echo "slot $PREPR_SLOT bring-up start $(ts) GIT_SHA=$(git rev-parse HEAD)"
-    OMNI_HOME="$R" bash scripts/runtime_build/prepr_verify_lane.sh --slot "$PREPR_SLOT" \
-      --worktree "$R/omnibase_infra" --reason "${REASON:?REASON is required on a prepr slot}" \
-      --descriptor-out "$W/descriptor.json" > "$W/build.log" 2>&1
+    OMNI_HOME="$R" bash scripts/runtime_build/prepr_verify_lane.sh --slot "$PREPR_SLOT" --worktree "$R/omnibase_infra" --reason "${REASON:?REASON is required on a prepr slot}" --descriptor-out "$W/descriptor.json" ${COMPOSED_ARGS[@]+"${COMPOSED_ARGS[@]}"} > "$W/build.log" 2>&1
     src=$?; echo "prepr_verify_lane rc=$src $(ts)"; grep '^\[prepr-verify-lane\]' "$W/build.log" | tail -6
     # The rendered-slot verifier lists its mismatches on lines the grep above does not
     # match, so an exit 12 reached the receipt with its reason dropped (OMN-21433).
     [ "$src" = 12 ] && grep -E '^\[prepr-verify-rendered\]|^  - ' "$W/build.log" | head -12 | cut -c1-300
     case $src in
-      0) echo "build rc=0"; echo "up rc=0"; : > "$W/migrated" ;;
+      0) if market_under_test && ! slot_composed_containers; then echo "build rc=1 the slot's composed omnimarket containers were not read"; exit 1; fi; echo "build rc=0"; echo "up rc=0"; : > "$W/migrated" ;;
       8) # another holder owns the slot: never tear down what this run did not start
          : > "$W/foreign-slot"; echo "build rc=8 slot lock held by another process" ;;
       9) if grep -q 'migration failed' "$W/build.log"; then
@@ -516,8 +519,9 @@ build)
   cd "$R/omnibase_infra" || exit 1
   echo "stage start $(ts)"
   # STAGE_DEV_TAGS: every sibling at its newest dev-merge tag (omnibase_infra#5472); a sha pin records no tag and the audit refuses it
-  REFS=(--repo-ref omnibase_core="$(git -C "$R/omnibase_core" rev-parse HEAD)" --repo-ref omnibase_spi="$(git -C "$R/omnibase_spi" rev-parse HEAD)" --repo-ref omnimarket="$(git -C "$R/omnimarket" rev-parse HEAD)"); DR=
-  [ -z "${STAGE_DEV_TAGS:-}" ] || { REFS=(); DR=origin/dev; }
+  source scripts/runtime_build/sibling_clone_manifest.sh || exit 1; REFS=(); for repo in "${SIBLING_VENDORED_REPOS[@]}"; do REFS+=(--repo-ref "$repo=$(git -C "$R/$repo" rev-parse HEAD)"); done; DR=
+  # OMN-21968: the image audit refuses a sha-pinned sibling in the dev-lane context, so an omnimarket-only proof (no infra pull request, group or ref) stages dev-merge tags unless the params name STAGE_DEV_TAGS, even empty
+  [ -z "${STAGE_DEV_TAGS-$([ -n "${INFRA_PR:-}${INFRA_GROUP:-}${INFRA_REF_SHA:-}" ] || echo 1)}" ] || { REFS=(); DR=origin/dev; }
   OMNI_HOME="$R" CONSUMER_LOCK="$R/omnimarket/uv.lock" DEPLOY_REF=$DR bash scripts/runtime_build/stage_workspace.sh ${REFS[@]+"${REFS[@]}"} 2>&1 | tail -5
   echo "stage rc=${PIPESTATUS[0]} $(ts)"
   make local-env LOCAL_ENV_FILE="$W/local.env" LOCAL_OVERLAY_FILE="$W/local.bifrost.yaml" 2>&1 | tail -2
@@ -559,11 +563,7 @@ json.dump(cfg, open(sys.argv[1],"w"))' "$DC/config.json"
     export DOCKER_CONFIG="$DC"; echo "docker config isolated at $DC (no credential store)"
   fi
   echo "build start $(ts) RUNTIME_VERSION=$RV GIT_SHA=$(git rev-parse HEAD)"
-  docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build \
-    --build-arg BUILD_SOURCE=workspace --build-arg EXPECTED_BUILD_SOURCE=workspace \
-    --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true \
-    --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" \
-    --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1
+  docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build --build-arg BUILD_SOURCE=workspace --build-arg EXPECTED_BUILD_SOURCE=workspace --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1
   brc=$?; echo "build rc=$brc $(ts)"; tail -4 "$W/build.log"
   if [ "$brc" != 0 ]; then
     grep -qi keychain "$W/build.log" && echo "build failed on the docker credential keychain: set docker_config: isolated for this host"
@@ -588,7 +588,7 @@ probe)
     c2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "localhost:$EFF/health")
     if [ "$starting" = 0 ] && [ "$c1" != 000 ] && [ "$c2" != 000 ]; then break; fi
     if [ "$(date +%s)" -ge "$end" ]; then echo "health wait timed out"; break; fi
-    sleep 15
+    sleep "${PROBE_POLL_S:?PROBE_POLL_S is set by the driver from the pool overlay}"
   done
   echo "health wait $(( $(date +%s) - start ))s ended $(ts) starting=$starting $MAIN=$c1 $EFF=$c2"
   if [ "$KIND" = prepr-slot ]; then slot_ports_readback; fi
@@ -721,7 +721,7 @@ teardown)
     else
       TD="$R/omnibase_infra/scripts/runtime_build/prepr_teardown_slot.sh"
       if [ ! -f "$TD" ]; then
-        git clone -q --depth 1 --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$W/td"
+        git clone -q --depth 1 --branch dev "$CLONE_BASE_URL/omnibase_infra.git" "$W/td"
         TD="$W/td/scripts/runtime_build/prepr_teardown_slot.sh"
       fi
       bash "$TD" --slot "$PREPR_SLOT" --reason "${REASON:-lab pool teardown $TAG}" --report-out "/tmp/$TAG-slot-teardown.json" > "/tmp/$TAG-slot-teardown.log" 2>&1

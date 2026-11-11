@@ -1,0 +1,125 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21924
+title: Runtime-image commands are declared in stack-shape data
+summary: >-
+  Extend T1's existing stack-shape gate and compose parser through the existing architecture-validation node and handler. The same data file declares allowed executables, scoped exact dependency commands, shrinking legacy command budgets, and each package's console-script disposition. No second validator is added.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+  - topics
+requirements:
+  - id: req-allowed-commands
+    statement: The stack-shape gate refuses unlisted compose commands by service and command.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a compose service whose command is outside the declared allowed list is refused by the stack-shape check naming the service and the command, and the list lives in data and not in code -- falsifier: `uv run pytest tests/unit/docker -q -k allowed_commands` in omnibase_infra with one planted `python -m` service'
+  - id: req-console-scripts
+    statement: Every declared console script has an explicit disposition and appears in the PR inventory.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: every console script the packages declare is either run by a lane, removed or marked developer-only, with the list of each in the pull request body -- falsifier: a console script that appears in none of the three lists'
+  - id: req-existing-validator
+    statement: T1's stack-shape gate, parser, CI job and hook carry the extension.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the check extends T1's validator and adds no second validator -- falsifier: `git diff --name-only origin/dev` on the pull request lists a new validator file beside T1's"
+evidence_requirements:
+  - kind: tests
+    description: Planted commands, baseline growth, console-script coverage and both DI profiles.
+    command: uv run pytest tests/unit/docker -q -k allowed_commands
+  - kind: tests
+    description: Existing service, baseline, replica and gate-wiring checks.
+    command: uv run pytest tests/unit/validation/test_checker_stack_shape.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-command-runtime-round-trip
+    description: >-
+      The installed generic node CLI discovers the real architecture-validator contract and dispatches over its in-memory event bus. Runtime commands pass; string and argv command/entrypoint plants and a shell wrapper are refused with the service, command, source location and correlation preserved in the terminal readback.
+    source: manual
+    binds_ac: [AC1, AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/node_architecture_validator/test_allowed_commands_runtime_omn21924.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-allowed-commands
+    description: >-
+      A planted python -m command on a known runtime or legacy service is refused by name; runtime and forwarder positive controls pass. Changes to a baseline command, a raised count or a first-install plant fail against base snapshots.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker -q -k allowed_commands --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-console-script-inventory
+    description: >-
+      The real package declarations agree with their inventory, a planted console script without a disposition fails, and explicit developer-only marking passes. The PR body lists the run-by-lane and developer-only scripts and states that no scripts were removed.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_allowed_commands.py -q -k console_scripts --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-t1-extension
+    description: >-
+      Existing T1 tests and the command-rule gate-wiring test run through the same gate. The extension uses the existing architecture node and handler, with a new typed snapshot model rather than a second validator.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-core-floor-ships-imported-modules
+    description: >-
+      The omnibase-core floor in pyproject.toml is not below the release that first ships every omnibase_core module node_architecture_validator imports (checker_stack_shape and validator_stack_shape first ship in 0.47.62). The test reads the floor from pyproject.toml and the per-module first release from a data file, and fails at a floor of 0.47.58. The fallback matrix and the pin tests agree with the floor.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_architecture_validator/test_core_floor_omn21924.py tests/ci/test_core_dev_tag_pin_omn17427.py tests/unit/runtime/test_fallback_matrix_sync.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-deploy-command-handler
+    description: >-
+      Hosted-runner falsifier for the runtime-affecting contract: build the existing node under in-memory and Redpanda DI overlays and dispatch a JSON-materialized request using the runtime's real contract discovery and handler wiring. Both profiles must return the planted service and command in the refusal. This is a construction/dispatch proof, not a claim of a live broker or dev deployment. Post-merge installation and live dev evidence remain the deploy agent's work.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_allowed_commands.py -q -k both_profiles --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-live-deployed-command-node
+    description: >-
+      Deploy-agent evidence. With the deployed runtime container present the probe runs inside it, as the deploy agent does after merge and deployment; with no container (the hosted runner) the same probe runs through the checked-out tree's installed generic node client. Either way the node dispatches through the event bus and real contract/handler wiring: onex-runtime must pass, and a planted python -m command must be refused naming both the service and command. A stale image without the extension, failed dispatch or wrong result exits nonzero. Construction-only tests do not satisfy the in-container reading.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          PROBE='
+          import json
+          import subprocess
+          import tempfile
+          from pathlib import Path
+          policy = {"allowed_commands": [{"argv": ["onex-runtime"], "match": "executable", "field": "command", "services": ["omninode-runtime"], "reason": "Runtime command positive control"}], "command_baseline": [], "baseline": [], "console_scripts": {}}
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              for name, argv in (("allowed", ["onex-runtime"]), ("planted", ["python", "-m", "planted.sidecar"])):
+                  request = root / (name + ".json")
+                  state = root / name
+                  compose = {"services": {"omninode-runtime": {"command": argv}}}
+                  request.write_text(json.dumps({"stack_shape": {"policy_yaml": json.dumps(policy), "compose_files": {"probe.yml": json.dumps(compose)}}}))
+                  subprocess.run(["onex", "node", "node_architecture_validator", "--input", str(request), "--backend", "event_bus=inmemory", "--state-root", str(state)], check=True, timeout=60)
+                  result = json.loads((state / "workflow_result.json").read_text())["terminal_payload"]
+                  if name == "allowed":
+                      assert not result["violations"], result
+                  else:
+                      assert any(v["rule_id"] == "command_not_allowed" and "omninode-runtime" in v["message"] and "python -m planted.sidecar" in v["message"] for v in result["violations"]), result
+          print("Deployed node admitted onex-runtime and refused omninode-runtime: python -m planted.sidecar")
+          '
+          if docker inspect "${RUNTIME_CONTAINER:-omninode-runtime}" >/dev/null 2>&1; then
+            docker exec "${RUNTIME_CONTAINER:-omninode-runtime}" python -c "$PROBE"
+          else
+            uv run --frozen python -c "$PROBE"
+          fi
+        cwd: ${OMNI_HOME}/omnibase_infra

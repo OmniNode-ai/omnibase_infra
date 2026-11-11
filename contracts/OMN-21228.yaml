@@ -1,0 +1,47 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21228
+title: "Contract hot loading H3a: Transactional publication on the bus"
+summary: >-
+  The Kafka bus and the in-memory bus each open a transactional producer under a caller-fixed transactional id. One publish through it is one transaction, and a newer producer opened under the same id fences the older one, whose next publish fails and leaves nothing a read_committed reader can see.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21228-transactional-publish
+    statement: The bus publishes a batch transactionally under a caller-fixed transactional id, and a newer producer under the same id fences an older one.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: after a second producer with the same id initializes, a publish from the first fails, and nothing it sent is visible to an independent `read_committed` consumer built in the test -- falsifier: that consumer returns a fenced or aborted record.'
+evidence_requirements:
+  - kind: tests
+    description: On a real Redpanda broker, a producer fenced between publishes and a producer fenced in the middle of its transaction both fail, and an independent read_committed consumer sees only the surviving producer's records; a read_uncommitted consumer sees the aborted in-flight record, so the silence is the broker filtering a written record. The in-memory bus carries the same call and the same fence.
+    command: uv run pytest tests/integration/event_bus/test_transactional_publish.py tests/unit/event_bus/test_inmemory_transactional_publish_omn21228.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21228-ac1-broker
+    description: >-
+      On a Redpanda broker started by the test, the first producer is fenced by a second producer with the same transactional id: its publish raises InfraProducerFencedError, and an independent AIOKafkaConsumer with isolation_level read_committed returns only the records of the producer that survived, both when the fence lands between publishes and when it lands after the first record of a transaction is already in the log (a read_uncommitted consumer is the positive control that the aborted record was written).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/event_bus/test_transactional_publish.py -q --no-cov
+    binds_ac: ["AC1"]
+  - id: dod-omn21228-ac1-inmemory
+    description: >-
+      The in-memory bus carries the same call: a second producer with the same transactional id fences the first, the first producer's publish raises InfraProducerFencedError and appends and delivers nothing, distinct ids do not fence each other, and a batch is appended whole.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_inmemory_transactional_publish_omn21228.py -q --no-cov
+    binds_ac: ["AC1"]
+  - id: dod-omn21228-ac1-deploy
+    description: >-
+      Deploy compatibility probe: the checked-out Kafka bus runs against a disposable Redpanda broker on the verifier's Docker engine. The two fencing tests require InfraProducerFencedError and use independent read_committed consumers to reject fenced or aborted records, with a read_uncommitted positive control for the aborted in-flight record. The probe exercises the source under verification rather than reading a moving branch.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "docker info --format '{{.ServerVersion}}' && env PYTHONDONTWRITEBYTECODE=1 COMPOSE_PROJECT_NAME=omn21228-transactional-proof uv run --frozen pytest tests/integration/event_bus/test_transactional_publish.py -q --no-cov"
+    binds_ac: ["AC1"]

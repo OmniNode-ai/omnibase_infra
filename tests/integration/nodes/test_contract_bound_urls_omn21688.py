@@ -34,7 +34,12 @@ def test_board_probe_request_default_equals_the_shipped_contract_value() -> None
     declared = block["projection_api_base_url"]
     assert declared
     assert contract_topics.consumer_flow_projection_api_base_url() == declared
-    assert ModelConsumerFlowRequest(subject_lane="dev").base_url == declared
+    assert (
+        ModelConsumerFlowRequest(
+            subject_lane="dev", compose_project="omnibase-infra"
+        ).base_url
+        == declared
+    )
 
 
 def test_merge_group_reader_binds_the_shipped_contract_value() -> None:

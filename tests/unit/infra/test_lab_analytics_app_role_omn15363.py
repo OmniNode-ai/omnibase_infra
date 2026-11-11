@@ -48,6 +48,7 @@ ROLLBACK = (
 )
 BASE_COMPOSE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 DEV_LANE_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
+FOLD_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-tenant-fold.yml"
 NON_DEV_OVERLAYS = (
     REPO_ROOT / "docker" / "docker-compose.stability-test.yml",
     REPO_ROOT / "docker" / "docker-compose.prod.yml",
@@ -134,6 +135,23 @@ def _services_with_analytics_dsn(path: Path) -> set[str]:
         name
         for name, cfg in services.items()
         if isinstance(cfg, dict) and ANALYTICS_DSN_KEY in (cfg.get("environment") or {})
+    }
+
+
+def _folded_services() -> set[str]:
+    """Services the primary-dev fold overlay gates under a ``folded-*`` profile.
+
+    OMN-21288: their role runs inside main, so no bring-up starts them and the
+    lab-lane overlay has nothing to repoint.
+    """
+    services = _load_compose(FOLD_OVERLAY).get("services") or {}
+    return {
+        name
+        for name, cfg in services.items()
+        if isinstance(cfg, dict)
+        and isinstance(cfg.get("profiles"), list)
+        and bool(cfg["profiles"])
+        and all(str(p).startswith("folded-") for p in cfg["profiles"])
     }
 
 
@@ -309,7 +327,7 @@ def test_every_base_analytics_consumer_is_repointed_on_the_lab_lane() -> None:
     assert base_consumers, "base compose declares no analytics consumers — parse bug"
 
     overridden = _services_with_analytics_dsn(DEV_LANE_OVERLAY)
-    missing = base_consumers - overridden
+    missing = base_consumers - overridden - _folded_services()
     assert not missing, (
         f"services still resolve the base (superuser) analytics DSN on the lab "
         f"lane: {sorted(missing)}. Add them to docker-compose.dev-lane.yml."

@@ -72,6 +72,18 @@ class ModelConsumerPollObservation(BaseModel):
         ),
         ge=0.0,
     )
+    backlog_measured: bool = Field(
+        default=True,
+        description=(
+            "Whether ``backlog_records`` is a MEASUREMENT (OMN-22291). Zero is "
+            "also what an unmeasurable backlog reports -- a probe that failed, "
+            "or a consumer holding no assignment, which is the case this field "
+            "was added for -- and a verdict that read those zeros as 'caught "
+            "up' would clear a stall nobody measured. False means unknown, and "
+            "the verdict then falls toward the remedy rather than toward "
+            "health."
+        ),
+    )
 
 
 __all__ = ["ModelConsumerPollObservation"]

@@ -1,0 +1,91 @@
+# Design-review verdict: mirror conditional upload (OMN-22258)
+
+Verdict: **PASS with conditions.** The mirror's conditional upload of plan task
+T0 (transcript intent-to-outcome graph plan) may be built as T0a, under the
+three conditions below. The model is `formal/mirror_conditional_upload/`
+(`MirrorConditionalUpload.tla`); T0a cites it by that path.
+
+Reviewed against the committed TLC output in `results/`, bound to
+`model.sha256` (the sha256 of `MirrorConditionalUpload.tla`, then each cfg in
+sorted order). TLC2 Version 2026.11.02.164701 (rev: dc6a944), `-workers 4`,
+Java Adoptium 17.0.20.1 in `eclipse-temurin:17-jre-alpine` on lab host h053,
+tla2tools.jar sha256 `c57d4d7bbee3ed2c89c32cb9c60cac728f751e80e2570bc4b7368ae39291fc21`
+(the tlaplus v1.8.0 release asset).
+
+| Config | Expected | TLC result | Distinct states |
+| --- | --- | --- | --- |
+| Model.cfg | pass both invariants and the property | No error has been found, 0 states left on queue | 533 |
+| mut_put_unconditional.cfg | counterexample | RecordedNeverDecreases violated | 146 |
+| mut_put_unconditional_longest.cfg | counterexample | RecordedIsLongestPut violated | 140 |
+| mut_check_then_put.cfg | counterexample | RecordedNeverDecreases violated | 339 |
+| mut_no_fairness.cfg | counterexample | EverySnapshotCovered violated (stuttering) | 533 |
+| wit_refused.cfg | witness violated | RefusedWitness violated | 147 |
+| wit_full.cfg | witness violated | FullWitness violated | 48 |
+
+Distinct-state counts of a violated config are where TLC stopped, and vary
+with the worker count; the Model.cfg count does not. Command, per cfg, on a
+copy of the model: `docker run --rm -v <copy>:/w -v <jar dir>:/tlc -w /w
+eclipse-temurin:17-jre-alpine java -XX:+UseParallelGC -cp
+/tlc/tla2tools.jar tlc2.TLC -noGenerateSpecTE -config <cfg> -workers 4
+-metadir /tmp/states MirrorConditionalUpload.tla`. Control runs were made
+before the passing run.
+
+## Findings
+
+1. AC5. Two mirror runs A and B, each taking up to two snapshots of a growing
+   file (1 to 3 records) and putting them with the store's atomic condition
+   "recorded revision below the copy's", never lower the recorded revision, and
+   the copy held is the longest one put. The control that puts without the
+   condition reproduces the criterion's race in seven states: A reads 2
+   records, B reads 3 and puts, A puts 2 afterwards (`mut_put_unconditional`,
+   `mut_put_unconditional_longest`). The lengths 2 and 3 stand for the
+   criterion's 10 and 11; only the order matters.
+2. The condition must be on the store. A run that reads the recorded revision
+   and then puts without the condition (`mut_check_then_put`) breaks the
+   invariant the same way, in eight states: the read is stale by the time of the
+   put.
+3. `wit_refused` shows a shorter copy refused by the condition (a put of a copy
+   shorter than the recorded one), and `wit_full` that the three-record copy is
+   reachable as the stored one, so the passing zeros are not vacuous. Under
+   fair scheduling every snapshot is put or superseded
+   (`EverySnapshotCovered`); without fairness TLC finds a stuttering
+   counterexample.
+
+## Codex review (h053, thread 01a19f67-6ccc-7820-a395-ea3473bb03bb, read-only, high effort)
+
+Codex reviewed the four models before this verdict; the models were then
+strengthened where noted and every cfg re-run, so the committed output is of
+the revised models. Its findings on this model, and the disposition of each:
+
+- N9 `MaxLen` 3 is enough for the ordering race. Accepted.
+- W10 `RefusedWitness` fired on an equal copy, not a shorter one. Fixed: a ghost
+  `refusedShort` records a refusal of a copy shorter than the recorded one, and
+  the witness uses it.
+- W11 `EverySnapshotCovered` covers revisions of snapshots taken, not that the
+  final local file is eventually mirrored (a run's two snapshots can be spent
+  before the file reaches 3). Accepted: it is a bound of the model, and
+  condition 3.
+- N12 the model assumes one atomic compare and replace on the store, and that a
+  revision stands for content. Accepted as conditions 1 and 2.
+
+## Conditions on T0a
+
+1. The upload is one conditional put on the object store, decided on the store:
+   the object is replaced only if its recorded revision is below the copy's
+   (an `If-Match` on the recorded revision, or the store's equivalent). A client
+   side check before an unconditional put is the failing control. A refused put
+   is a normal outcome, not an error, and is not retried with the same copy.
+2. The recorded revision and the object's content change together, in the same
+   conditional operation, and a larger revision is always an extension of a
+   smaller one. The model's revision is a record count and its content is
+   absent; if the file can be rewritten (not only appended), the revision must
+   not be the count.
+3. A run that uploads a snapshot does not by that mean the latest local file is
+   mirrored: a later run must take a new snapshot. The model bounds a run to two
+   snapshots and says nothing about when the next run starts.
+
+## Not modelled
+
+- A crash of a run mid-upload (the store's put is atomic by assumption).
+- The object's content; a delete of the object; a third run.
+- Clock skew and retries of a refused put.

@@ -1,0 +1,52 @@
+{
+  "incident": "OMN-22291",
+  "source": "the runtime's own `make status-local` health payload, copied off the walked macOS account on the operator's Mac into the machine's Shared folder as s.txt, the path OMN-22291 names",
+  "measured_at": "2026-11-03T04:52:00Z",
+  "runtime_version": "0.38.76",
+  "scrubbed": "No credential, token, host address or account name is carried. The group ids, the dimension detail and the healthcheck line are verbatim; the per-group `observed` block below is read from the same payload's runtime log lines.",
+  "container_healthcheck": "FAIL [runtime_unhealthy] health payload reports status=unhealthy",
+  "failing_streak": 217,
+  "runtime_health_status": "CRITICAL",
+  "consumer_sync": {
+    "status": "CRITICAL",
+    "groups_total": 488,
+    "groups_out_of_sync": 3,
+    "detail": "3 of 488 consumer group(s) out of sync: local.runtime_config.node_savings_estimation_compute.consume.v1 lag=0 stalled=8021s last_advance=239s reason=not_stalled_within_cooldown; local.runtime_config.runtime_config-dynamic-contract-listener.consume.v1 lag=0 stalled=7682s last_advance=214s reason=not_stalled_within_cooldown; local.runtime_config.runtime-error-triage.consume.v1 lag=0 stalled=7651s last_advance=184s reason=not_stalled_within_cooldown",
+    "sibling_effects_runtime_detail": "353 consumer group(s) in sync; max lag 0"
+  },
+  "groups": [
+    {
+      "consumer_group": "local.runtime_config.node_savings_estimation_compute.consume.v1",
+      "lag": 0,
+      "stalled_seconds": 8021,
+      "last_advance_seconds": 239,
+      "reason": "not_stalled_within_cooldown"
+    },
+    {
+      "consumer_group": "local.runtime_config.runtime_config-dynamic-contract-listener.consume.v1",
+      "lag": 0,
+      "stalled_seconds": 7682,
+      "last_advance_seconds": 214,
+      "reason": "not_stalled_within_cooldown"
+    },
+    {
+      "consumer_group": "local.runtime_config.runtime-error-triage.consume.v1",
+      "lag": 0,
+      "stalled_seconds": 7651,
+      "last_advance_seconds": 184,
+      "reason": "not_stalled_within_cooldown"
+    }
+  ],
+  "observed": {
+    "note": "The conditions the three groups were actually in, from the same payload's runtime log lines. The dimension detail carries no assignment count, which is why the three read as zero-lag rather than as unassigned.",
+    "assigned_partitions": 0,
+    "aiokafka_assignment_line": "Setting newly assigned partitions set() for group",
+    "join_generation": 11,
+    "join_was_clean": true,
+    "topic_partitions": 1,
+    "topic_partitions_source": "the local stack's redpanda-partition-cap leaves one partition per topic, so a group with more members than partitions has standbys by construction",
+    "group_backlog_records": 0,
+    "group_backlog_measurable": true,
+    "topic_not_recorded": "The payload names the groups, not the topics they subscribe to, so the replay declares one topic constant of its own. No verdict in this dimension reads the topic."
+  }
+}

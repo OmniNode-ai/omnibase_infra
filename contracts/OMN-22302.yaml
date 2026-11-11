@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-22302
+title: The pinned DoD verifier install retries its transient network failures before Tests (Split 2/15) runs pytest
+summary: The step that installs the pinned DoD verifier before pytest ran three network commands once each (the omnimarket tag fetch, uv venv, uv sync). On 2026-11-08 at 10:23:38Z a 504 Gateway Timeout from uv's download of cpython 3.13.3 failed that step on Tests (Split 2/15) of omnibase_infra#5702 (job 128702118554) and no pytest ran. The install script now runs those three commands through a retry of up to 3 attempts (10 s, then 20 s). A moved tag is still refused at once. No check, threshold or step ceiling was changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22302-verifier-install-retry
+    statement: The pinned verifier install script retries each of its three network commands up to 3 times with 10 s then 20 s waits, refuses a moved tag on the first read, and leaves an already finished install untouched.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: tests/ci/test_verifier_install_retry.py runs the real install script with recording git, uv and sleep stand-ins on PATH; 3 of its 5 tests fail on the dev script and all 5 pass on the branch -- falsifier: uv run pytest tests/ci/test_verifier_install_retry.py in omnibase_infra at the branch head fails any of the 5'
+evidence_requirements:
+  - kind: tests
+    description: The install script replayed with the 504 text printed by CI job 128702118554 and a git 503, the persistent-504 attempt count, the moved-tag refusal and the finished-install early exit
+    command: uv run --frozen pytest tests/ci/test_verifier_install_retry.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22302-retry-tests
+    description: The install script retries a 504 from uv and a 503 from git, fails after three attempts with the error text when the 504 persists, refuses a moved tag without a retry, and exits at once on a finished install. With scripts/ci/check_deploy_scope_dod.py taken from dev, 3 of the 5 tests fail.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_verifier_install_retry.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

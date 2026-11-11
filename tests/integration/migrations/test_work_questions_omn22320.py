@@ -165,6 +165,44 @@ def test_second_pass_changes_nothing(database: EphemeralPostgres) -> None:
         conn.close()
 
 
+def test_runtime_grant_is_exact_and_idempotent_without_defaults(
+    database: EphemeralPostgres,
+) -> None:
+    _apply(database, MIGRATION)
+    conn = _connect(database)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE ROLE omninode_runtime")
+            cur.execute("SELECT count(*) FROM pg_default_acl")
+            assert cur.fetchone() == (0,)
+        conn.commit()
+        grant = MIGRATION.with_name("0001_grant_omninode_runtime_work_questions.sql")
+        expected = {
+            (table, privilege)
+            for table in FIVE_TABLES
+            for privilege in ("SELECT", "INSERT", "UPDATE")
+        }
+        for _ in range(2):
+            _apply(database, grant)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT c.relname, a.privilege_type FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace, "
+                    "aclexplode(c.relacl) a "
+                    "WHERE n.nspname = 'omninode_internal' "
+                    "AND a.grantee = 'omninode_runtime'::regrole"
+                )
+                assert set(cur.fetchall()) == expected
+                cur.execute(
+                    "SELECT has_schema_privilege("
+                    "'omninode_runtime', 'omninode_internal', 'USAGE')"
+                )
+                assert cur.fetchone() == (True,)
+            conn.rollback()
+    finally:
+        conn.close()
+
+
 def test_schema_diff_is_exactly_the_five_tables(database: EphemeralPostgres) -> None:
     conn = _connect(database)
     try:

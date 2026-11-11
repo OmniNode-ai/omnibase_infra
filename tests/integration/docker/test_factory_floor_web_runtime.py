@@ -31,7 +31,7 @@ COMPOSE = (
 SERVICE = "factory-floor-web"
 DEFAULT_POLICY = (
     "default-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; "
-    "frame-ancestors 'none'; object-src 'none'; style-src 'self' 'unsafe-inline'; "
+    "frame-ancestors 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'; "
     "script-src 'self' 'unsafe-inline'; img-src 'self' data:"
 )
 SCOPED_POLICY = DEFAULT_POLICY.replace(

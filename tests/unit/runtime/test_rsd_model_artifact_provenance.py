@@ -468,13 +468,24 @@ def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
     reader = _TrackingReader(payload)
 
     original_stat = Path.stat
+    original_open = Path.open
 
     def fail_stat(path: Path, *, follow_symlinks: bool = True) -> object:
         if path == example_path:
             raise AssertionError("loader must not stat before opening the descriptor")
         return original_stat(path, follow_symlinks=follow_symlinks)
 
-    def open_once(_path: Path, mode: str) -> _TrackingReader:
+    # Both stubs are installed on Path itself, so they see every read the
+    # process makes while this test runs, not only the document under test.
+    # ModelRsdPinnedModelIdentity.from_contract() reads the packaged pin
+    # contract through Path.read_text the first time a field validator resolves
+    # a pin, and that read is functools.cache'd -- so whether it lands inside
+    # this test depends on which tests ran before it in this worker, which
+    # pytest-xdist decides at run time. Delegating every other path keeps the
+    # assertion about the document under test and nothing else (OMN-17427).
+    def open_once(path: Path, mode: str = "r", **kwargs: object) -> object:
+        if path != example_path:
+            return original_open(path, mode, **kwargs)
         assert mode == "rb"
         return reader
 

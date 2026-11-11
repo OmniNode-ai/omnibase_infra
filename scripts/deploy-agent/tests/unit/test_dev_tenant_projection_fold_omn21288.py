@@ -46,7 +46,24 @@ RUNTIME_WRITERS = {
     "projection-writer-savings": "projection-savings-writer",
     "projection-writer-tenant-credentials": "projection-tenant-credentials-writer",
     "projection-writer-tenant-registry": "projection-tenant-registry-writer",
+    "projection-writer-delegation": "projection-delegation-writer",
 }
+# The hook-events writer has no runtime profile of its own: main runs its node by
+# default, so the policy retires it by service name (``retired_services``).
+HOOK_EVENTS_WRITER = "projection-claude-hook-events-writer"
+# OMN-23066 (plan T13): the context audit projection runs in main as a node, so the
+# policy retires its consumer container by name as well.
+CONTEXT_AUDIT_CONSUMER = "context-audit-consumer"
+# OMN-22391 (plan T15): the intelligence API is the mount main serves; its container is
+# retired by name as well.
+INTELLIGENCE_API = "intelligence-api"
+SKILL_LIFECYCLE_CONSUMER = "skill-lifecycle-consumer"  # OMN-21933 (T12)
+# OMN-23043: the agent actions projection runs in main as a node, so the policy
+# retires its consumer container by name as well.
+AGENT_ACTIONS_CONSUMER = "agent-actions-consumer"
+# OMN-23525: the infra routing decisions projection runs in main as a node
+# (OMN-23072 dropped the consumer from compose), so its container is retired by name.
+ROUTING_DECISIONS_CONSUMER = "infra-routing-decisions-consumer"
 
 
 def test_primary_dev_disables_the_tenant_carrier_only(
@@ -77,7 +94,7 @@ def test_primary_dev_disables_the_tenant_carrier_only(
 
 
 def test_committed_policy_disables_every_folded_writer() -> None:
-    """The committed policy folds the five in-process writers; each container is disabled."""
+    """The committed policy folds the six in-process writers; each container is disabled."""
     policy = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
     with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy):
         folded = lane_folded_profiles(EnumRuntimeLane.DEV)
@@ -88,12 +105,25 @@ def test_committed_policy_disables_every_folded_writer() -> None:
         {
             "tenant-projection-writer",
             *RUNTIME_WRITERS.values(),
+            HOOK_EVENTS_WRITER,
+            # OMN-22930: the effects role runs in main; its service is disabled too.
+            "runtime-effects",
+            # OMN-21288 (T9): the workers role runs in main; its service is disabled too.
+            "runtime-worker",
+            CONTEXT_AUDIT_CONSUMER,
+            INTELLIGENCE_API,
+            # OMN-23324: the contract resolver is mounted in main.
+            "omninode-contract-resolver",
+            SKILL_LIFECYCLE_CONSUMER,
+            AGENT_ACTIONS_CONSUMER,
+            ROUTING_DECISIONS_CONSUMER,
+            # OMN-21288 (T17): the projection API is served by main as a mounted node.
+            "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
         }
     )
-    # The two writers that still run their own consume loop keep their containers.
-    assert "projection-delegation-writer" not in config.disabled_services
-    assert "projection-claude-hook-events-writer" not in config.disabled_services
+    # The delegation writer is folded too (plan task T10, OMN-22664).
+    assert "projection-delegation-writer" in config.disabled_services
 
 
 def test_folded_profile_without_a_gated_service_is_refused(
@@ -152,23 +182,65 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         return
     censused = [c[-1] for c in calls if c[1] == "ps"]
     assert censused == [
+        f"label=com.docker.compose.service={AGENT_ACTIONS_CONSUMER}",
+        f"label=com.docker.compose.service={CONTEXT_AUDIT_CONSUMER}",
+        f"label=com.docker.compose.service={ROUTING_DECISIONS_CONSUMER}",
+        f"label=com.docker.compose.service={INTELLIGENCE_API}",
+        "label=com.docker.compose.service=omninode-contract-resolver",
+        f"label=com.docker.compose.service={HOOK_EVENTS_WRITER}",
         "label=com.docker.compose.service=projection-savings-writer",
+        f"label=com.docker.compose.service={SKILL_LIFECYCLE_CONSUMER}",
         "label=com.docker.compose.service=tenant-projection-writer",
     ]
     if failure is None:
         ids = [
+            f"{AGENT_ACTIONS_CONSUMER}-a",
+            f"{AGENT_ACTIONS_CONSUMER}-b",
+            f"{CONTEXT_AUDIT_CONSUMER}-a",
+            f"{CONTEXT_AUDIT_CONSUMER}-b",
+            f"{ROUTING_DECISIONS_CONSUMER}-a",
+            f"{ROUTING_DECISIONS_CONSUMER}-b",
+            f"{INTELLIGENCE_API}-a",
+            f"{INTELLIGENCE_API}-b",
+            "omninode-contract-resolver-a",
+            "omninode-contract-resolver-b",
+            f"{HOOK_EVENTS_WRITER}-a",
+            f"{HOOK_EVENTS_WRITER}-b",
             "projection-savings-writer-a",
             "projection-savings-writer-b",
+            f"{SKILL_LIFECYCLE_CONSUMER}-a",
+            f"{SKILL_LIFECYCLE_CONSUMER}-b",
             "tenant-projection-writer-a",
             "tenant-projection-writer-b",
         ]
-        assert calls[2] == ["docker", "stop", "--time", "30", *ids]
-        assert calls[3] == ["docker", "rm", *ids]
+        # One ps call per retired service comes first, then the single stop and rm.
+        assert calls[len(censused)] == ["docker", "stop", "--time", "30", *ids]
+        assert calls[len(censused) + 1] == ["docker", "rm", *ids]
 
 
 def test_retirement_is_inert_on_other_lanes() -> None:
     with patch("deploy_agent.executor._run") as run:
         DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
+    run.assert_not_called()
+    assert HOOK_EVENTS_WRITER not in (
+        lane_config_for(EnumRuntimeLane.STABILITY_TEST).disabled_services
+    )
+
+
+def test_other_dev_instance_does_not_retire_the_hook_events_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control: the primary instance retires it; any other instance folds nothing."""
+    assert HOOK_EVENTS_WRITER in lane_config_for(EnumRuntimeLane.DEV).disabled_services
+    monkeypatch.setattr(
+        "deploy_agent.executor.active_dev_instance",
+        lambda: f"{DEFAULT_DEV_INSTANCE}-other",
+    )
+    assert HOOK_EVENTS_WRITER not in (
+        lane_config_for(EnumRuntimeLane.DEV).disabled_services
+    )
+    with patch("deploy_agent.executor._run") as run:
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.DEV)
     run.assert_not_called()
 
 
@@ -236,7 +308,20 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
             lambda *args: None,
             lane=EnumRuntimeLane.DEV,
         )
-    retired = {"tenant-projection-writer", *RUNTIME_WRITERS.values()}
+    retired = {
+        "tenant-projection-writer",
+        *RUNTIME_WRITERS.values(),
+        HOOK_EVENTS_WRITER,
+        "runtime-effects",  # OMN-22930: the effects role runs in main
+        "runtime-worker",  # OMN-21288 (T9): the workers role runs in main
+        CONTEXT_AUDIT_CONSUMER,
+        INTELLIGENCE_API,
+        SKILL_LIFECYCLE_CONSUMER,
+        AGENT_ACTIONS_CONSUMER,
+        ROUTING_DECISIONS_CONSUMER,  # OMN-23525
+        "projection-api",  # OMN-21288 (T17)
+        "omninode-contract-resolver",  # OMN-23324
+    }
     census = len(retired)
     compose_calls = calls[census + 2 :]
     assert [c[1] for c in calls[: census + 2]] == [*["ps"] * census, "stop", "rm"]

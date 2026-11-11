@@ -72,6 +72,21 @@ evidence_artifacts:
       - c16-receipt-identity.json
     rationale: >-
       One row per probe (R-DELEG-11, R-DELEG-12, R-DELEG-26) with its outcome, its reasons and the compared keys: the route, provider and model the receipt names beside the provider and model the orchestrator's own bus terminal records, the completed run's rule count, and the dead run's typed failure class and code. SKIP rows are recorded as SKIP and fail the verdict, so an empty record is exactly the state that must not read green.
+  # --- chain-canary-c16-receipt-identity.yml: the pinned-backend row (OMN-23176) --
+  #
+  # Dispatch only. The step's exit code is the verdict; the record shows the
+  # per-role comparison of the receipt's accepted backend, host and cost with
+  # the delegation_events row. An absent record beside a green run would claim
+  # three pinned delegations were compared with nothing behind the claim.
+  - id: c16-pinned-backends
+    workflow: .github/workflows/chain-canary-c16-receipt-identity.yml
+    job: c16-receipt-identity
+    producer_step: "Pin one delegation to each named backend and compare with the delegation_events row"
+    artifact_name: c16-pinned-backends
+    required_paths:
+      - c16-pinned-backends.json
+    rationale: >-
+      One row, R7-PINNED, with its outcome and reasons, and per role the backend and host the receipt names beside the backend and host the delegation_events row stores. A missing backend or an unreadable table is recorded as FAIL or SKIP and fails the step, so an empty record is exactly the state that must not read green.
   # --- chain-canary-c11-negative-paths.yml: the C11 verdict (OMN-19175) ----
   #
   # The probe's EXIT CODE is the criterion's verdict, so this record is not how
@@ -112,7 +127,7 @@ evidence_artifacts:
   - id: c28-consumer-flow
     workflow: .github/workflows/chain-canary-c28-consumer-flow.yml
     job: c28-consumer-flow
-    producer_step: "Re-measure C28 on the dev lane and grade it"
+    producer_step: "Re-measure C28 on the stability lane and grade it"
     artifact_name: c28-consumer-flow
     required_paths:
       - c28-consumer-flow.json
@@ -258,15 +273,6 @@ evidence_artifacts:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for an OMNINODE_INFRA commit that changed the lane's onex-api image (rule 24(a), OMN-18572). Keyed by the omninode_infra sha, because that is the revision the lane's onex-api container was proven to carry; it collides with neither the omnibase_infra receipt nor a sibling's, which are claims about different repositories' commits. It lands on the omninode_infra run, since a called reusable workflow's artifacts belong to the caller.
-  - id: lab-pass-receipt-onex-lab-k3s
-    workflow: .github/workflows/runtime-rebuild-trigger.yml
-    job: verify-lab-overlay-converged
-    producer_step: "Emit the onex-lab-k3s lab-pass receipt"
-    artifact_name: lab-pass-receipt-onex-lab-k3s-${{ needs.trigger-rebuild.outputs.source_sha }}
-    required_paths:
-      - ${LAB_PASS_DIR}/receipt.json
-    rationale: >-
-      The k3s onex-lab overlay's half of rule 24(a), on its own lane name so it cannot supersede the boot gate's onex-lab receipt for the same sha.
   # --- the non-required check failure-rate report (OMN-18254) --------------
   #
   # Declared because its ABSENCE is the failure it exists to prevent. This

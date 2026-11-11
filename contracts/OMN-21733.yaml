@@ -19,6 +19,11 @@ requirements:
     acceptance:
       - id: AC7
         statement: "AC7: the server's default content security policy loads nothing from another host, and only /reports/decision-map/ allows exactly the two pinned CDN script files, keeping the method, cache and dot-file rules -- falsifier: uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q -k decision_map_directory"
+  - id: req-omn21733-frame-ancestors
+    statement: "The floor site's tab shell draws the floor, process and map tabs as same-origin frames, so its content security policy lets the site's own origin frame its pages and no other origin."
+    acceptance:
+      - id: AC8
+        statement: "AC8: the floor site may frame its own pages and no other origin -- falsifier: uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q -k nginx_serves_only_get"
 evidence_requirements:
   - kind: tests
     description: "The compose file's port, volume and lock-down properties, and docker compose config refusing each missing deployment value."
@@ -67,3 +72,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_factory_floor_web_runtime.py -q --no-cov --log-cli-level=INFO'
+  - id: dod-006-frame-ancestors-self
+    description: "The site's default content security policy sends frame-ancestors 'self', so the site may frame its own pages and no other origin may."
+    source: generated
+    binds_ac: [AC8]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov -k nginx_serves_only_get"
+        cwd: ${OMNI_HOME}/omnibase_infra

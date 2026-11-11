@@ -49,8 +49,21 @@ runner_name_prefix: omninode-runner
 # surplus runners are removed by `deploy-runners.sh --retire-surplus`
 # (idle-checked, one at a time, creds volumes kept), never by a recreate that
 # could kill a job.
-expected_count: 10
-burst_count: 10
+#
+# OMN-22898 (operator, 2026-11-09 about 15:10Z, "h201 swaps all the time, take
+# its CI runners off first"): the primary host's general pool is cut 10 -> 0.
+# The action fleet is the 16-runner CI pool on the second amd64 host (declared
+# below) and the five `hp053-ci-runner` runners on h053, which carry the same labels
+# (`omnibase-ci`, `omnibase-ci-multiarch`, `arch-amd64`). The host keeps its
+# verify, deploy, prod-deploy and customer-plane runners: they are pinned by
+# label to this host's docker daemon and lanes. The primary host's repair timer
+# (docker/runners/runner-monitor.sh) recreates a missing runner only up to
+# these counts, so the removal is made here and in the compose file, not by
+# hand; `deploy-runners.sh --retire-surplus` then retires the ten that are
+# still running, idle-checked, one at a time. `declared_total("action")` was 31
+# before this cut (10 + 16 + 5) and is 21 after it (16 on the second amd64 host, 5 on h053).
+expected_count: 0
+burst_count: 0
 # OMN-17477 — DECLARED HOST INVENTORY.
 #
 # The five scalar fields above describe ONE host, which is what the fleet was
@@ -103,7 +116,11 @@ hosts:
   - host: omninode-pc.tail75df5e.ts.net
     arch: amd64
     runner_name_prefix: omninode-runner
-    expected_count: 10
+    # OMN-22898: no general runner on this host any more. The row stays because
+    # the scalar fields above describe it and the pools below hang from it; the
+    # classes stay so a general runner added back here counts toward the right
+    # fleets, and at zero they add nothing to `declared_total`.
+    expected_count: 0
     # OMN-19998: `omnibase-ci-multiarch` is in this pool's RUNNER_LABELS too.
     classes: [action, action-multiarch]
     # OMN-19895 -- the primary host's other runner families, declared so the
@@ -117,15 +134,6 @@ hosts:
       - runner_name_prefix: omninode-customer-plane-runner
         expected_count: 2
         classes: [customer-plane]
-  # .101 — Mac mini, M2 Pro, 12 cores. Docker Desktop, data root on an external
-  # volume. Deploy/verify class first: those jobs are cloud-touching
-  # (kubectl/aws/gh) and architecture-neutral, so they are the class that can
-  # move to arm64 without any workflow carrying an architecture assumption.
-  - host: stickybeatz-2.tail75df5e.ts.net
-    arch: arm64
-    runner_name_prefix: omninode-mini-runner
-    expected_count: 1
-    classes: [verify]
   # .105 was removed from the lab mix by the operator on 2026-10-01.
   # OMN-17427 readback on 2026-10-06 found no omninode-air-runner registered;
   # retired capacity is not part of the declared verify fleet.
@@ -142,6 +150,15 @@ hosts:
     runner_name_prefix: omnipc2-verify-runner
     expected_count: 1
     classes: [verify]
+    # OMN-22898 -- the action pool below is now the largest share of the action
+    # fleet (16 of 21). A three-runner merge-queue project also ran on this
+    # host from a compose file kept in a lane directory; it is declared nowhere
+    # in this inventory on purpose. The merge-queue class is declared on h051
+    # and h053 only, and this host's verify and customer-plane runners stay
+    # declared here: the verify runner is pinned by its host label to the
+    # docker daemon of this host's own dev lane, and the customer-plane runner
+    # is the second host `runner-pool-spread.yml` needs for that label.
+    #
     # OMN-19895 -- .202 takes a share of the action fleet and a second
     # customer-plane runner, so neither label relies on the primary host alone.
     # The earlier "verify class only" rule above protected the model server and
@@ -181,6 +198,15 @@ hosts:
     runner_name_prefix: hp051-ci-runner
     expected_count: 4
     classes: [action-multiarch]
+    # OMN-22123 -- the reserved merge-queue pool. A merge_group job of a private repository asks for the label
+    # `omnibase-ci-mq`; the runners that carried it lived on another lab host that is in repair and the fleet declared none, so each job
+    # waited 14 to 60 minutes. Four runners on h051, labelled `omnibase-ci-mq` alone (no `omnibase-ci`, no
+    # `omnibase-ci-multiarch`), so only a merge_group job can take them. Class `merge-queue` counts toward no other
+    # class: it is not part of the `action` floor. Deployed with `deploy-runners.sh --host=h051 --pool=hp051-ci-mq-runner`.
+    pools:
+      - runner_name_prefix: hp051-ci-mq-runner
+        expected_count: 4
+        classes: [merge-queue]
   # h053 -- HP ProLiant Gen9 (hp-gen9), Xeon E5-2680 v4 Broadwell, 56 threads,
   # 125 GiB, amd64 WITH AVX2 (OMN-22111; RULING 2026-11-02T13:33:32Z under
   # OMN-17232). The general `omnibase-ci` runners leave the primary host here:
@@ -190,10 +216,11 @@ hosts:
   # (cp312), the wheel that dies with SIGILL on h051, imports and runs, and the
   # 119 unit tests of the private repository that imports it pass. So the pool
   # carries `omnibase-ci` beside the opt-in `omnibase-ci-multiarch`, no
-  # workflow changes, and the router's `action` floor counts it. Eight runners
-  # at 6 GiB are 48 GiB of the 66 GiB available there with the lab-work units
-  # running, inside the pool's own slice and git mirror
-  # (docker/runners/systemd/pools/hp053-ci-runner/). The primary host's share
+  # workflow changes, and the router's `action` floor counts it. OMN-19998
+  # (2026-11-04) resized the pool from eight to FIVE runners at 9 GiB with five
+  # CPUs each and the job directories in memory: 49 to 55 GiB were available
+  # there that morning with the lab-work units running, and the pool's slice
+  # (docker/runners/systemd/pools/hp053-ci-runner/) caps all five at 46 GiB. The primary host's share
   # is lowered AFTER one passing job per repository is read from this pool
   # (`deploy-runners.sh --retire-surplus`), not by this declaration. The host
   # is an ssh alias, h053, that each operator's ssh config resolves. Deployed
@@ -201,8 +228,17 @@ hosts:
   - host: h053
     arch: amd64
     runner_name_prefix: hp053-ci-runner
-    expected_count: 8
+    expected_count: 5
     classes: [action, action-multiarch]
+    # OMN-22123 -- the reserved merge-queue pool. A merge_group job of a private repository asks for the label
+    # `omnibase-ci-mq`; the runners that carried it lived on another lab host that is in repair and the fleet declared none, so each job
+    # waited 14 to 60 minutes. Four runners on h053, labelled `omnibase-ci-mq` alone (no `omnibase-ci`, no
+    # `omnibase-ci-multiarch`), so only a merge_group job can take them. Class `merge-queue` counts toward no other
+    # class: it is not part of the `action` floor. Deployed with `deploy-runners.sh --host=h053 --pool=hp053-ci-mq-runner`.
+    pools:
+      - runner_name_prefix: hp053-ci-mq-runner
+        expected_count: 4
+        classes: [merge-queue]
   # .200 -- Mac Studio M2 Ultra, arm64, always-on (OMN-19657, operator approval
   # ledger 2026-09-25T18:27:30Z, answering the open question at ledger
   # 2026-09-25T10:29:02Z). One verify runner, labelled host-200, for the
@@ -242,9 +278,12 @@ network_pool_warn_ratio: 0.8
 # STATUS 2026-08-14: cache SERVICE LIVE, canary WIRED, fleet NOT yet activated.
 #   - devpi service is up and healthy on the runner host (container
 #     omninode-pypi-cache, 22G warmed corpus, index HTTP 200).
-#   - A 3-runner canary (omninode-runner-2/4/5) is wired via
+#   - A 3-runner canary (omninode-runner-2/4/5) was wired via
 #     docker/docker-compose.pypi-canary.yml and verified by container-env
-#     readback. Runbook step 3 is DONE.
+#     readback (runbook step 3). OMN-22898 retired those runners with the rest
+#     of the primary host's general pool, which ended the canary: the override
+#     file and its compose-overrides.list entry are removed and canary_runners
+#     is empty. The soak this gate needs restarts on a runner that still exists.
 #   - `active` stays false because it means FLEET-ACTIVE. Runbook step 5 gates
 #     the fleet on measured canary acceptance (hit rate >= target_hit_rate, p95
 #     `uv sync` wall time, zero UV_HTTP_TIMEOUT failures under high-concurrency
@@ -259,12 +298,9 @@ network_pool_warn_ratio: 0.8
 # Runbook: knowledge-base:runbooks/pypi-cache-egress-rollout.md.
 pypi_cache:
   active: false
-  # Runners currently wired at the cache via docker/docker-compose.pypi-canary.yml.
-  # Empty once the canary graduates to the fleet or is rolled back.
-  canary_runners:
-    - omninode-runner-2
-    - omninode-runner-4
-    - omninode-runner-5
+  # Runners wired at the cache by a canary compose override. Empty: the canary
+  # ended when its runners were retired (OMN-22898).
+  canary_runners: []
   # Tailscale MagicDNS host + published port, matching runner_host above so the
   # endpoint does not depend on the runner host's current LAN/Tailscale IP.
   host: omninode-pc.tail75df5e.ts.net
@@ -324,7 +360,6 @@ git_mirror:
     - omniclaude
     - omniweb
     - omnimemory
-    - omnibase_compat
     - knowledge_base
     - knowledge-base-internal
   # Space-separated RUNNER_NAME allowlist consumed by the pre-seed, or ALL.

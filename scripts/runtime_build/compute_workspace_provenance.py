@@ -97,9 +97,14 @@ VCS_PROVENANCE_PATH = Path("/workspace/sibling-vcs-provenance.json")
 # Dockerfile reinstalls it with --no-deps over the lock-pinned wheel). Verifying
 # its install is local makes a regression (core silently reverting to the
 # enum-less released wheel) fail the build instead of crash-looping at runtime.
+#
+# OMN-22153: omniintelligence is provisioned the same way on the dev lane. Its
+# distribution name is not its directory name with underscores swapped, so it is
+# named. The directory is also the import name, which the content parity check
+# below resolves the installed package by.
 WORKSPACE_PACKAGES: dict[str, str] = {
     repo: repo.replace("_", "-") for repo in ("omnibase_core", "omnibase_spi")
-}
+} | {"omniintelligence": "omninode-intelligence"}
 
 
 _TREE_EXCLUDE_PARTS = (".git", "__pycache__", ".venv")

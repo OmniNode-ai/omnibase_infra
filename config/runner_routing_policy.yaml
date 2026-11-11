@@ -476,22 +476,26 @@ trusted_runner_variable:
           This repository publishes no OCC companion and calls neither publisher reusable -- its only cross-repository delegation is the kb-doc-gate reusable itself -- so there is no companion whose fate this shadow could share. Stated rather than left absent, on the omni_home entry's terms.
         positive_control_acceptance: >-
           Acceptance is a named fleet runner, not an absence of red: the next `kb-doc-gate / kb-doc-gate` run on a pull request here reporting conclusion success with a populated `runner_name` matching `omninode-runner-*` and labels self-hosted,omnibase-ci. The positive control that the fleet itself is healthy is a fleet-literal job in the SAME run -- `Lint & Format` -- staying green, which is the discriminator that already distinguishes this repository's failing job from its passing ones today.
+    # OMN-19998: the permanently unparked repository must exclude NUC
+    # runners. Publish this declaration before the separate repository-variable
+    # write. The audit accepts one value, so the old shadow (or a missing one)
+    # remains a finding until that write; there is no dual-value transition.
     omniweb:
-      expected_json: '["self-hosted","omnibase-ci"]'
+      expected_json: '["self-hosted","omnibase-ci","arch-amd64"]'
       revert_when: >-
-        Revert to '["ubuntu-latest"]' only once omniweb is no longer a private repository, or if a job routed by this shadow fails on a named fleet runner for a fleet-caused reason. This entry DECLARES a value that has been live since 2026-09-01T12:39:22Z; it does not create one, so there is nothing to revert to a prior state.
+        Retain arch-amd64 while repairing a fleet-caused failure, capacity breach or maintenance-roll failure. Revert to '["ubuntu-latest"]' only when hosted placement is permitted and actually executes. Never restore the broad self-hosted,omnibase-ci route: it admits the excluded NUC runners.
       activation_gate:
         sustained_samples: >-
-          Not applicable prospectively: the value has been live for thirteen days. The sustained sample is the historical record -- omniweb's workflow runs over that window, 833 in the last seven days alone, with no fleet-attributed failure and no saturation event traced to this repository.
-        sustained_min_span_seconds: 1123200
+          Take four job-level samples immediately before the repository-variable write and at thirty, sixty and ninety minutes afterward. Record eligible online/busy/idle runners and org-wide queue depth each time, filtering eligibility by all three labels self-hosted,omnibase-ci,arch-amd64. Historical samples of the broader fleet do not accept this narrower route.
+        sustained_min_span_seconds: 5400
         capacity_budget: >-
-          Twelve seam-driven job definitions plus two fleet literals. Same 88-runner group and the same `min_idle_runners` floor as the omninode_infra entry above; this repository has never been a named contributor to a saturation reading.
+          Before the write, count affected job definitions from parsed runs-on on the repository's default branch and record eligible online/busy/idle runners matching self-hosted,omnibase-ci,arch-amd64. The eligible pool must keep at least the min_idle_runners floor of route below free at every sample. Two consecutive breaches require repair of the eligible fleet or a permitted, executing hosted placement; do not restore the broad route.
         maintenance_roll_convergence: >-
-          Unchanged by this entry. No roll has failed to converge for a reason attributed to omniweb in the thirteen days the value has been live.
+          Record one completed maintenance roll, or the eligible pool returning inside the capacity budget, within the ninety-minute sampling window. Historical convergence of the broader fleet does not accept this narrower route.
         evidence_companion_fate_isolation: >-
-          This repository's OCC autobind and companion-effect publishers read OMNI_OCC_AUTOBIND_RUNS_ON_JSON, which stays UNSET, so they are isolated from this seam by the same construction as omninode_infra above. Observed live: omniweb run 34780241951 companion path SUCCESS.
+          The OCC autobind and companion-effect publishers read OMNI_OCC_AUTOBIND_RUNS_ON_JSON, which this change leaves untouched. Verify that the companion path still executes independently of the trusted seam during activation; historical companion success is not current activation evidence.
         positive_control_acceptance: >-
-          Already satisfied and cited rather than promised: omniweb run 34780281040, `pr-title / check-title`, conclusion success on `omninode-runner-20` with labels self-hosted,omnibase-ci, against the control of run 34780242070 in the same repository landing hosted on `GitHub Actions 1000000036` because its definition routes dev-targeting pull requests to the public class.
+          Record two conclusive successful PR runs and two conclusive successful merge-queue runs where that event is configured, with populated runner_name and labels self-hosted,omnibase-ci,arch-amd64. Verify a NUC runner is ineligible for this selector and record a fleet control job in the same window. An absence of red is not acceptance.
 # OMN-18205, 2026-09-12: THE EXCLUSION ABOVE RESTS ON PRE-FIX EVIDENCE, and
 # this entry is the correction. The 5-of-5 self-hosted failures of "Customer
 # Path Boundary (OMN-18012)" recorded above all predate commit
@@ -651,6 +655,16 @@ cloud_canary_runner_variable:
   #
   # Three capability gaps, none visible offline, all found by one real job of
   # one real class. That is the argument for a canary of exactly this shape.
+  # SUPERSEDED, 2026-11-06 (OMN-22665). No workflow reads this variable any more:
+  # `rebuilt-postgres16-proof` resolves through the public-PR, docker and trusted
+  # seams to a hosted runner, and the capacity request job is deleted. The
+  # revert condition below fired: no runner carrying omni-cloud-ci has
+  # registered since 2026-11-05T03:51Z (the last completed run of the job was
+  # 41928549324, success at 2026-11-04T22:51:49Z, and six runs sat queued while
+  # their request job reported success). The declaration stays, with the value
+  # the live variable still holds, so the hourly audit holds the repository to
+  # it until the variable is deleted; deleting the variable and this entry
+  # together is the follow-up, and the repository variable is not written here.
   expected_json: '["self-hosted","omni-cloud-ci"]'
   repositories:
     - omnibase_infra
@@ -727,7 +741,6 @@ repositories:
   - omnibase_infra
   - omniclaude
   - omnimarket
-  - onex_change_control
   # OMN-18205 phase 2, 2026-09-12: added so this repository is audited at all.
   # The audit loop iterates this list; a repository absent from it is never
   # queried, whatever the policy declares about it. This repository pins 44 of
@@ -784,9 +797,19 @@ pull_request_target_exception:
   path: .github/workflows/call-repo-evidence-gate.yml
   ruling: "RULING 2026-10-08T22:41:24Z lane=orchestrator-9f8a (OMN-20074), operator words \"1 yes\""
   reason: "GitHub reads the Repo Evidence Gate caller from dev, so a pull request cannot edit the workflow that judges it, which is what lets repo-evidence / dod-verify later be required on dev, as omnimarket and omnibase_core already do. Same-repository heads run on the trusted runners as they do under pull_request, and the pinned reusable refuses fork heads before any checkout."
+# OMN-22478: the single named exception to the refusal of hosted runners in
+# private repositories (operator ruling 2026-09-14, audit_private_repo_hosted_placement).
+# Exactly one repository, one workflow path and one job, each exact (a pattern or
+# a list is refused by scripts/audit-runner-routing.py, and an invalid entry
+# grants nothing). Every other job in that repository, and every job of any other
+# private repository, stays refused.
+private_repo_hosted_exception:
+  repository: floor-canary
+  path: .github/workflows/canary.yml
+  job: canary
+  ruling: "Operator ruling of 2026-11-05 (OMN-22478): the outside canary is a hosted job that emails the alerts address, every 15 minutes, with a one-job audit exception; operator words \"Sure, I'm fine with the canary. Can we do it in GitHub? Don't they have like VMs that you can use?\""
+  reason: "The outside canary reads the one status file the lab publishes and fails when the lab goes silent, so it must not share fate with the lab: on a lab runner it would go quiet at the moment it exists to report. It reads no secret, touches no lab host and reaches no tailnet address; a failed scheduled run is GitHub's own notice to the owner of the schedule. The job is pinned to a literal GitHub-hosted label so that no seam flip can relocate it onto the fleet."
 hosted_runner_allowlist:
-  - path: .github/workflows/application-acl-postgres16-proof.yml
-    reason: "OMN-18291: the `request-cloud-capacity` job is bare hosted BY NECESSITY -- it is the job that asks the scale-to-zero cloud fleet for the runner the routed job below it needs, so it cannot itself resolve through the routing variable it is serving. Pinning it by literal also means no future flip of any seam can relocate the requester onto the capacity it is trying to request. The workflow's other job, `rebuilt-postgres16-proof`, is NOT hosted -- it is the canary routed to the cloud fleet through cloud_canary_runner_variable."
   - path: .github/workflows/ci.yml
     reason: "OMN-14127: CI Summary is a lightweight hosted fail-closed aggregator so required status always posts during self-hosted saturation."
   - path: .github/workflows/build-and-push-runtime.yml
@@ -799,6 +822,8 @@ hosted_runner_allowlist:
     reason: "OMN-13915: scheduled fleet canary must not share fate with the self-hosted runner fleet it monitors."
   - path: .github/workflows/model-review-capability-canary.yml
     reason: "OMN-17876: capability contract evidence must stay on hosted compute until separately authorized live runner selection."
+  - path: .github/workflows/security-scan.yml
+    reason: "OMN-22896: the secret-scan job runs the pinned TruffleHog image with docker run in a public repository. The repository is public, so the job is pinned to a literal ubuntu-latest and never follows a variable onto an internal runner; the scanner also cannot run on the self-hosted fleet, where its docker bind mount resolves on the host daemon (OMN-16045)."
   - path: .github/workflows/runner-broker-dispatch-wedge-rerun.yml
     reason: "OMN-15776: scheduled broker-dispatch-wedge rerun must not share fate with the self-hosted runner fleet it remediates -- same isolation rationale as runner-fleet-canary.yml above."
   - path: .github/workflows/pr-ci-zombie-detector.yml
@@ -815,6 +840,60 @@ hosted_runner_allowlist:
     reason: "OMN-18031: the saturation-record job is a bare ubuntu-latest by design -- the monitor must survive the saturation it reports on, the same fate-isolation rationale as runner-fleet-canary.yml above. Its sibling lab-load-probe job is deliberately self-hosted on a literal [self-hosted, omnibase-ci] and the pre-existing dev-lane-liveness job on [self-hosted, omnibase-verify] (it was [self-hosted, omnibase-deploy] until OMN-18408 moved it off the single deploy runner); neither is a bare hosted runner, so this entry covers the ONE hosted job. These probes live here rather than in runner-fleet-canary.yml because tests/ci/test_dev_lane_liveness.py asserts the canary stays single-job and GitHub-hosted, and names this workflow as the home for lane/host-scoped probes."
   - path: .github/workflows/build-and-push-migrate-image.yml
     reason: "OMN-18205: the migration image build pushes to ECR, which is the workload OMN-13747 recorded as failing from the self-hosted fleet's egress path -- the same reason build-and-push-runtime.yml and build-workspace-candidate-runtime.yml above are pinned. It had been reading the trusted seam, so a routing flip would have moved a registry push onto the fleet as an unenumerated side effect. The workflow has no pull_request trigger, so its fork branch was decoration and was removed with the pin."
+  - path: .github/workflows/alerter-injected-red-canary.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/attest-source-hash.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/branch-protection-audit.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dep-provenance-lineage-live-canary.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/in-progress-probe-hygiene.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/linear-demotion-guard-armed.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/linear-done-guard-armed.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/lockfile-cve-autobump.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/merge-queue-bypass-audit.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/node-migration-sync.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/omnimarket-contract-pin-refresh.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/plugin-pin-cascade.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/release-python-dry-run.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/release-python-reusable.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/sync-revert-watchdog.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/validate-validator-requirements.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/validator-runtime-profiles.yml
+    reason: "OMN-22867: a scheduled, dispatched or reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dependabot-runner-image-lock-refresh.yml
+    reason: "OMN-22867: a scheduled, dispatched and reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/compose-config-lint.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/delegation-consumer-kwarg-parity.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dispatch-parity-gate.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dispatcher-route-coverage.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/duplication-sweep.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/governed-helper-primitive-gate.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/no-bare-compose-teardown.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/s6-runtime-seam-gate.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/shellcheck-gate.yml
+    reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
   - path: .github/workflows/shared-env-runner-parity.yml
     reason: "OMN-16555: the hosted half of the shared-env two-runner-class parity gate must be pinned to a literal ubuntu-latest -- routing it through OMNI_RUNNER_SELECTOR_V1 would let a var change move it back onto the fleet and void the ephemeral-runner proof. Its self-hosted half does use the standard selector."
   - path: .github/workflows/runner-pool-spread.yml
@@ -829,6 +908,70 @@ hosted_runner_allowlist:
     reason: "OMN-17427: re-runs the Hostile Review Thread Gate when a finding thread is answered; it reads GitHub thread state and the PR's git history and touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z); omnibase_core's check-public-runner-placement refuses a variable-driven runs-on that is not in its shrink-only baseline, so the pin is a literal hosted label."
   - path: .github/workflows/hostile-review-judge.yml
     reason: "OMN-17427: the workflow_run judge executes base-branch code and calls the judge model over the CI overlay's public endpoint. It touches no lab service. This is a public repository, so it uses a literal hosted label per RULING 2026-10-16T07:07:09Z."
+  - path: .github/workflows/canonical-inference-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/check-env-reads-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/check-handshake.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/check-sibling-compat.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/ci-live-contact.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/contract-topic-graph.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/contract-validation.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/contractor-integration-note.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dep-provenance-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/direct-model-call.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/exposure-reader-coverage.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/git-env-scrub.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/integration-test-check.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/main-target-guard.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/non-dev-base-guard.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/pin-resolvability-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/pr-title-check.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/precommit-parity-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/receipt-honesty.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/seed-provenance-check.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/skill-node-mapping-sync.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/stale-todo-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/todo-audit-on-merge.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/url-authority-gate.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/wheel-content-parity.yml
+    reason: "OMN-22867: a gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/artifact-reconciliation-webhook.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/dependency-cascade.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/fresh-deploy-fitness.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/pr-merged-event.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/prod-promotion-lineage.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/release-drift-monitor.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/runner-routing-audit.yml
+    reason: "OMN-23241: a workflow that reads no lab service on a read of its steps. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
 #
 # The route job (scripts/ci/runner_route_decision.py) decides, once per run,
@@ -983,7 +1126,6 @@ route:
     # required-context probe's own repo set.
     fleet_repos:
       - omnibase_core
-      - omnibase_compat
       - omnibase_infra
       - omnibase_spi
       - omniclaude
@@ -994,7 +1136,6 @@ route:
       - omni_home
       - omninode_infra
       - omniweb
-      - onex_change_control
       - omnibase_internal
       - omniclaude-internal
       - omnicursor
@@ -1125,6 +1266,9 @@ route:
         - Demo Loop Gate
         - Dep Provenance Gate
         - Dep Provenance Lineage Gate (OMN-15604)
+        # OMN-22360: the core dependency-pin validator, registered STRICT in
+        # STRICT_GATE_JOBS and enforced by the CI Summary poller.
+        - dependency-pins / Dependency Pins
         - Deploy Agent Tests (OMN-15378) / deploy-agent-tests
         - deploy-gate / deploy-gate
         - dispatcher-route-coverage
@@ -1140,9 +1284,6 @@ route:
         # OMN-20413: the hook push rehearsal, enforced by the CI Summary poller
         # via EXPECTED_EXTERNAL_CONTEXTS and absent from branch protection.
         - hook-push-rehearsal / rehearse
-        # OMN-17427: the hostile-reviewer finding gate, enforced by the CI
-        # Summary poller on PRs into dev via EXPECTED_EXTERNAL_CONTEXTS.
-        - Hostile Review Thread Gate
         - imperative-contract-guard / Imperative Contract Guard
         - Infra Node Handler Ownership
         - Integration Silent-Skip Guard (OMN-14172)

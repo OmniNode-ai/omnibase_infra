@@ -47,12 +47,6 @@ entries:
   - path: .github/workflows/build-workspace-candidate-runtime.yml
     family: O
     content_sha1: d513212182edffef6563d2b5dfc6a6c3b85bccf6
-  - path: .github/workflows/canonical-inference-gate.yml
-    family: G
-    content_sha1: b12ea5e3379a841f73a663bff43bf2aa65187e47
-  - path: .github/workflows/canonical-inference-gate.yml
-    family: G
-    content_sha1: e8101b3c97f3abdee56607d9351a46b6941f2860
   - path: .github/workflows/ci.yml
     family: E-LAN
     content_sha1: 88afc870896a457882ee53cb90caa59739dfdc2d
@@ -64,16 +58,7 @@ entries:
     content_sha1: 02c6504809a91bd45dcc6706f756a41ab5961fa0
   - path: .github/workflows/ci.yml
     family: G
-    content_sha1: 0c73ce6e76ac863e4f93207f14c2c0cebc07ab38
-  - path: .github/workflows/ci.yml
-    family: G
-    content_sha1: 1f78c18c4c8ed2e6f62cb3ae547dc8fd967ce1e9
-  - path: .github/workflows/ci.yml
-    family: G
     content_sha1: 391ef6e84a36bcc4e1e00e62f358e8bc9bea99c2
-  - path: .github/workflows/ci.yml
-    family: G
-    content_sha1: 415a8d723cee643b19b43610c69ef13f9e35fb96
   - path: .github/workflows/ci.yml
     family: O
     content_sha1: 04216c912e3554324d8b25f255175391f7d61833
@@ -140,9 +125,6 @@ entries:
   - path: .github/workflows/dev-baseline-publisher.yml
     family: E-LAN
     content_sha1: 88afc870896a457882ee53cb90caa59739dfdc2d
-  - path: .github/workflows/direct-model-call.yml
-    family: G
-    content_sha1: bee0543d5689d95476d6261f39453f5b065b146f
   - path: .github/workflows/dispatch-parity-gate.yml
     family: E-LAN
     content_sha1: 88afc870896a457882ee53cb90caa59739dfdc2d
@@ -668,9 +650,6 @@ entries:
   - path: docker/docker-compose.dev-lane.yml
     family: O
     content_sha1: 15c00d181e75250214e883dbb7f958bfdfc993c6
-  - path: docker/docker-compose.dev-lane.yml
-    family: O
-    content_sha1: 2103d2e9023f70c2f7ee95468410278b2f8a0519
   - path: docker/docker-compose.dogfood.yml
     family: M
     content_sha1: 6a59aee6659ad9b2a233940f506c5dc5d25f5ccd
@@ -1045,28 +1024,10 @@ entries:
     content_sha1: 26b51e223c955ffe31c6d7664a349ff4ce92bcc0
   - path: scripts/ci/c28_consumer_flow_probe.py
     family: O
-    content_sha1: 1e942263faa5c7f5c89ffe3db84ec63b36188ca6
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
     content_sha1: 21fd9338cd40a474e6a1c2dc8ce2ee29312e6fe5
   - path: scripts/ci/c28_consumer_flow_probe.py
     family: O
-    content_sha1: 5f9c9f77322d3d68b727ec7e83a4abb6f02c5d1a
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
-    content_sha1: 9084e85f901b60188594a231c6c4f6e4ea12d9de
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
-    content_sha1: ac2f1f14dc5012eb55ff82569a0979b96e88ef8c
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
-    content_sha1: b04fe7de26e3c31eacb267e9612e60fce11c23bc
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
     content_sha1: bc2d74b348b9a1c61ede79a10fe0746a3d911379
-  - path: scripts/ci/c28_consumer_flow_probe.py
-    family: O
-    content_sha1: bf2ccf2deca619d9851d2fd0174950792546b376
   - path: scripts/ci/c28_consumer_flow_probe.py
     family: O
     content_sha1: e346125ae99e4f703974fd474c4ee2e82efa9d14
@@ -1420,9 +1381,6 @@ entries:
     content_sha1: 33af7195b1ab55231e8925ede4c200326ea74e0c
   - path: scripts/deploy-agent/deploy_agent/executor.py
     family: O
-    content_sha1: 38d2b7c964b563bd5574a5d6d454f51eeb25c594
-  - path: scripts/deploy-agent/deploy_agent/executor.py
-    family: O
     content_sha1: 3cee5fd0bc7d99662a83600a92a5c5766a1642a6
   - path: scripts/deploy-agent/deploy_agent/executor.py
     family: O
@@ -1541,9 +1499,6 @@ entries:
   - path: scripts/deploy-agent/deploy_agent/lab_overlay.py
     family: O
     content_sha1: 3905f7df64208d7dd68a89f5a7ac9873871787a0
-  - path: scripts/deploy-agent/deploy_agent/lab_overlay.py
-    family: O
-    content_sha1: 745efc1abc5a3df2533d98014591159278bc1275
   - path: scripts/deploy-agent/deploy_agent/lane_lock_client.py
     family: O
     content_sha1: c9ab5f4389ee14205fef958db0b9e528e69d5992
@@ -1586,12 +1541,6 @@ entries:
   - path: scripts/deploy-agent/tests/unit/test_deploy_agent_service_source.py
     family: E-LAN
     content_sha1: 6f60fd4395db87927e6de93962135b7465141f6a
-  - path: scripts/deploy-agent/tests/unit/test_lab_overlay_omn18200.py
-    family: E-LAN
-    content_sha1: 43acc706402a3e8b7cd88f7bfd40635e97e81147
-  - path: scripts/deploy-agent/tests/unit/test_lab_overlay_omn18200.py
-    family: E-LAN
-    content_sha1: 59b2a00605b57633a32c9c94637511640bc9c4bb
   - path: scripts/deploy-agent/tests/unit/test_llm_endpoint_env_contract_guard.py
     family: E-LAN
     content_sha1: 38228ea7db2f79a941cf00ef2f171ce9e393270c
@@ -2776,9 +2725,6 @@ entries:
     content_sha1: f0fa5f1317da482f8727dfdb991b1d0622e19e02
   - path: src/omnibase_infra/handlers/handler_graph.py
     family: O
-    content_sha1: 1b43c8222f9154db1f5114356231e8b2dbba9a77
-  - path: src/omnibase_infra/handlers/handler_graph.py
-    family: O
     content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33
   - path: src/omnibase_infra/handlers/handler_hotpatch_ledger_reconcile.py
     family: O
@@ -2801,9 +2747,6 @@ entries:
   - path: src/omnibase_infra/handlers/handler_mcp.py
     family: O
     content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33
-  - path: src/omnibase_infra/handlers/handler_qdrant.py
-    family: O
-    content_sha1: 1b43c8222f9154db1f5114356231e8b2dbba9a77
   - path: src/omnibase_infra/handlers/handler_qdrant.py
     family: O
     content_sha1: 6dd95a35783cd1123312b9da0ef1c5102aef7d33
@@ -2846,9 +2789,6 @@ entries:
   - path: src/omnibase_infra/handlers/mcp/adapter_onex_to_mcp.py
     family: O
     content_sha1: bed1987e9d958a1d4cc2034c4c6d2c7c971326f0
-  - path: src/omnibase_infra/handlers/models/model_operation_context.py
-    family: O
-    content_sha1: 3212107661a199b76ba8bef18452451fd1d61349
   - path: src/omnibase_infra/handlers/placement/handler_placement_etcd.py
     family: O
     content_sha1: 673c51e55aa87fb220ce9b81469e8eead254681f
@@ -2948,6 +2888,9 @@ entries:
   - path: src/omnibase_infra/models/projection/model_snapshot_topic_config.py
     family: O
     content_sha1: 98384abd0a729f79da6cf18947a91851319e2315
+  - path: src/omnibase_infra/models/resilience/model_operation_context.py
+    family: O
+    content_sha1: 3212107661a199b76ba8bef18452451fd1d61349
   - path: src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_imperative_orchestrator_ratchet.py
     family: F
     content_sha1: c05e8880fb661f1c518614c1ccd91e488767893c

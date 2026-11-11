@@ -1,0 +1,146 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 13 and seed 429432934707210208 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/TranscriptIngestReducer.tla
+Parsing file /tmp/tlc-11508476042230981770/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-11508476042230981770/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-11508476042230981770/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-11508476042230981770/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TranscriptIngestReducer
+Linting of module TranscriptIngestReducer
+Starting... (2026-11-03 03:21:25)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:21:25.
+Error: Invariant DerivedNeverOlder is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 0, dig |-> 0], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 0, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 0, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 2: <DEmit(1) line 314, col 3 to line 319, col 35 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 0, dig |-> 0], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {1}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 0, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {1}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 0, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 3: <DEmit(2) line 314, col 3 to line 319, col 35 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 0, dig |-> 0], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {1, 2}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 0, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {1, 2}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 0, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 4: <DApplyCrash(2) line 335, col 3 to line 340, col 85 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 2
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 0, dig |-> 0], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {1, 2}
+/\ dhi = 2
+/\ hiRow = [k1 |-> 0, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {1, 2}
+/\ crashes = 1
+/\ dedupIds = {}
+/\ dres = 2
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 0, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 5: <DApply(1) line 328, col 3 to line 332, col 87 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 2
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 0, dig |-> 0], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {2}
+/\ dhi = 2
+/\ hiRow = [k1 |-> 0, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {1, 2}
+/\ crashes = 1
+/\ dedupIds = {}
+/\ dres = 1
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 0, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+2755 states generated, 1169 distinct states found, 792 states left on queue.
+The depth of the complete state graph search is 7.
+Finished in 00s at (2026-11-03 03:21:26)

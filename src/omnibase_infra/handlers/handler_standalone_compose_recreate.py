@@ -4,8 +4,10 @@
 
 The deploy agent runs this on the host that serves the compose file. The node contract declares the
 lanes, compose files and services the route may touch; a request outside them is refused before
-docker is called. The recreate runs with no dependencies. The host's containers are read before
-and after, and the result is a scope violation unless exactly the one declared container id changed.
+docker is called. Before the recreate, each file the target declares as carried is written into the
+host's tree from the requested git ref, so a bind-mounted config no merge refreshes cannot go stale.
+The recreate runs with no dependencies. The host's containers are read before and after, and the
+result is a scope violation unless exactly the one declared container id changed.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import json
 import subprocess
 from typing import TYPE_CHECKING
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -126,6 +129,19 @@ def recreate_standalone_compose(
             message=reason or "request refused",
         )
 
+    carried: list[str] = []
+    try:
+        for path in target.carried_files:
+            if docker.carry_file(request.git_ref, path):
+                carried.append(path)
+    except InfraConnectionError as exc:
+        return ModelStandaloneComposeRecreateResult(
+            correlation_id=request.correlation_id,
+            outcome=EnumStandaloneComposeRecreateOutcome.FAILED,
+            message=f"carrying {path!r} failed: {sanitize_error_message(exc)}",
+            carried_files=tuple(carried),
+        )
+
     before = docker.list_containers()
     try:
         docker.recreate_service(request.compose_file, env_file, request.service)
@@ -138,6 +154,7 @@ def recreate_standalone_compose(
             containers_before=before,
             containers_after=after_failed,
             changed=_changed(before, after_failed),
+            carried_files=tuple(carried),
         )
     after = docker.list_containers()
     changed = _changed(before, after)
@@ -155,6 +172,7 @@ def recreate_standalone_compose(
             containers_before=before,
             containers_after=after,
             changed=changed,
+            carried_files=tuple(carried),
         )
     return ModelStandaloneComposeRecreateResult(
         correlation_id=request.correlation_id,
@@ -165,6 +183,7 @@ def recreate_standalone_compose(
         containers_before=before,
         containers_after=after,
         changed=changed,
+        carried_files=tuple(carried),
     )
 
 
@@ -259,6 +278,49 @@ class HandlerStandaloneComposeDocker:
         except (ValueError, KeyError, TypeError) as exc:
             raise self._error("unreadable Docker container census", "ps") from exc
         return containers
+
+    def carry_file(self, git_ref: str, relative_path: str) -> bool:
+        """Write ``relative_path`` as the source clone holds it at ``git_ref`` into the host's tree.
+
+        The write is a temporary file renamed into place, so a reader never sees a partial file,
+        and a file already holding those bytes is left alone. Returns whether the bytes changed.
+        """
+        if git_ref.startswith("-"):
+            raise self._error("git ref may not start with '-'", "show")
+        try:
+            completed = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self._config.source_root),
+                    "show",
+                    f"{git_ref}:{relative_path}",
+                ],
+                env=scrub_git_location_env(self._config.environment),
+                capture_output=True,
+                timeout=self._config.timeout_seconds,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise self._error(sanitize_error_message(exc), "show") from exc
+        if completed.returncode:
+            raise self._error(
+                f"git show exited {completed.returncode}: "
+                f"{sanitize_error_string(completed.stderr.decode(errors='replace'))}",
+                "show",
+            )
+        destination = self._config.repo_root / relative_path
+        if destination.is_file() and destination.read_bytes() == completed.stdout:
+            return False
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f"{destination.name}.carry")
+        try:
+            temporary.write_bytes(completed.stdout)
+            temporary.chmod(0o644)
+            temporary.replace(destination)
+        except OSError as exc:
+            raise self._error(sanitize_error_message(exc), "write") from exc
+        return True
 
     def recreate_service(self, compose_file: str, env_file: str, service: str) -> None:
         """Force-recreate one admitted service without starting its dependencies."""

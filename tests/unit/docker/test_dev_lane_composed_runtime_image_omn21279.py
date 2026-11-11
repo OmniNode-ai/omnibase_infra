@@ -13,6 +13,9 @@ import pytest
 import yaml
 
 from tests.integration.infra.test_lakshman_compose_render import COMPOSE_FILE
+from tests.unit.docker.test_dev_tenant_projection_fold_omn21288 import (
+    dev_stack_services as folded_dev_stack_services,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -158,9 +161,11 @@ def test_fixture_explicit_base_contract_allows_infra_kernel(
 
 
 def test_real_dev_stack_has_no_market_workloads_on_the_infra_only_image() -> None:
+    # OMN-21288: a role folded into main starts under no profile a bring-up
+    # requests, so the stack that runs is base + dev-lane + the fold overlay.
     assert (
         find_services_without_market_image(
-            dev_stack_services(),
+            folded_dev_stack_services(),
             (_DOCKER / "Dockerfile.runtime").read_text(encoding="utf-8"),
         )
         == {}

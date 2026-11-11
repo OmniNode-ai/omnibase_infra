@@ -24,10 +24,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
+)
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
 )
 from omnibase_infra.models.registration.model_topic_catalog_request import (
     ModelTopicCatalogRequest,
@@ -38,6 +40,15 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_catalo
 )
 from omnibase_infra.nodes.node_registration_orchestrator.services.service_introspection_topic_store import (
     ServiceIntrospectionTopicStore,
+)
+from omnibase_infra.topics.platform_topic_suffixes import (
+    SUFFIX_CONTRACT_DEREGISTERED,
+    SUFFIX_FEATURE_FLAG_CHANGED,
+    SUFFIX_FSM_STATE_TRANSITIONS,
+    SUFFIX_NODE_HEARTBEAT,
+    SUFFIX_REGISTRATION_COMPLETED,
+    SUFFIX_REQUEST_INTROSPECTION,
+    SUFFIX_RESOLUTION_DECIDED,
 )
 
 TEST_NOW = datetime(2026, 2, 27, 12, 0, 0, tzinfo=UTC)
@@ -53,7 +64,7 @@ def _make_request_envelope(
     requester: str | None = "test-client",
     store: ServiceIntrospectionTopicStore | None = None,
 ) -> tuple[
-    ModelEventEnvelope[ModelTopicCatalogRequest], ServiceIntrospectionTopicStore
+    ModelInjectedRequest[ModelTopicCatalogRequest], ServiceIntrospectionTopicStore
 ]:
     """Create a test request envelope and store."""
     if correlation_id is None:
@@ -65,12 +76,8 @@ def _make_request_envelope(
         requested_at=TEST_NOW,
         requester=requester,
     )
-    envelope: ModelEventEnvelope[ModelTopicCatalogRequest] = ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=payload,
-        envelope_timestamp=TEST_NOW,
-        correlation_id=correlation_id,
-        source_tool="test",
+    envelope: ModelInjectedRequest[ModelTopicCatalogRequest] = ModelInjectedRequest(
+        event=payload, now=TEST_NOW, input_id=uuid4(), correlation_id=correlation_id
     )
     return envelope, store
 
@@ -174,7 +181,7 @@ class TestHandlerCatalogRequestTopicFiltering:
     @pytest.mark.asyncio
     async def test_no_cold_warning_when_nodes_registered(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [SUFFIX_NODE_HEARTBEAT])
         handler = HandlerCatalogRequest(topic_store=store)
         envelope, _ = _make_request_envelope(store=store)
 
@@ -192,15 +199,15 @@ class TestHandlerCatalogRequestMultiNode:
     @pytest.mark.asyncio
     async def test_unions_topics_from_multiple_nodes(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [SUFFIX_NODE_HEARTBEAT])
         await store.update_node(
             "node-002",
             [
-                "onex.evt.platform.bar.v1",
+                SUFFIX_FSM_STATE_TRANSITIONS,
                 "onex.evt.omniintelligence.pattern-stored.v1",
             ],
         )
-        await store.update_node("node-003", ["onex.evt.platform.foo.v1"])  # duplicate
+        await store.update_node("node-003", [SUFFIX_NODE_HEARTBEAT])  # duplicate
 
         handler = HandlerCatalogRequest(topic_store=store)
         envelope, _ = _make_request_envelope(store=store)
@@ -210,9 +217,9 @@ class TestHandlerCatalogRequestMultiNode:
         response = output.events[0]
         assert isinstance(response, ModelTopicCatalogResponse)
         topic_names = {e.topic_name for e in response.topics}
-        # Deduplicated: foo.v1 appears in node-001 and node-003 but listed once
-        assert "onex.evt.platform.foo.v1" in topic_names
-        assert "onex.evt.platform.bar.v1" in topic_names
+        # Deduplicated: the first topic appears in node-001 and node-003 but listed once
+        assert SUFFIX_NODE_HEARTBEAT in topic_names
+        assert SUFFIX_FSM_STATE_TRANSITIONS in topic_names
         assert "onex.evt.omniintelligence.pattern-stored.v1" in topic_names
         # Exactly 3 unique evt topics
         assert len(topic_names) == 3
@@ -220,8 +227,8 @@ class TestHandlerCatalogRequestMultiNode:
     @pytest.mark.asyncio
     async def test_node_count_in_response(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
-        await store.update_node("node-002", ["onex.evt.platform.bar.v1"])
+        await store.update_node("node-001", [SUFFIX_NODE_HEARTBEAT])
+        await store.update_node("node-002", [SUFFIX_FSM_STATE_TRANSITIONS])
 
         handler = HandlerCatalogRequest(topic_store=store)
         envelope, _ = _make_request_envelope(store=store)
@@ -238,8 +245,8 @@ class TestHandlerCatalogRequestMultiNode:
         await store.update_node(
             "node-001",
             [
-                "onex.evt.platform.zzz.v1",
-                "onex.evt.platform.aaa.v1",
+                SUFFIX_RESOLUTION_DECIDED,
+                SUFFIX_CONTRACT_DEREGISTERED,
                 "onex.evt.omnimemory.doc-changed.v1",
             ],
         )
@@ -306,33 +313,33 @@ class TestServiceIntrospectionTopicStore:
         store = _make_store()
         await store.update_node(
             "node-001",
-            ["onex.evt.platform.foo.v1", "onex.cmd.platform.bar.v1"],
+            [SUFFIX_NODE_HEARTBEAT, SUFFIX_REQUEST_INTROSPECTION],
         )
         topics = await store.get_evt_topics()
-        assert "onex.evt.platform.foo.v1" in topics
-        assert "onex.cmd.platform.bar.v1" not in topics
+        assert SUFFIX_NODE_HEARTBEAT in topics
+        assert SUFFIX_REQUEST_INTROSPECTION not in topics
 
     @pytest.mark.asyncio
     async def test_update_replaces_previous_entry(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.old.v1"])
-        await store.update_node("node-001", ["onex.evt.platform.new.v1"])
+        await store.update_node("node-001", [SUFFIX_FEATURE_FLAG_CHANGED])
+        await store.update_node("node-001", [SUFFIX_REGISTRATION_COMPLETED])
         topics = await store.get_evt_topics()
-        assert "onex.evt.platform.new.v1" in topics
-        assert "onex.evt.platform.old.v1" not in topics
+        assert SUFFIX_REGISTRATION_COMPLETED in topics
+        assert SUFFIX_FEATURE_FLAG_CHANGED not in topics
 
     @pytest.mark.asyncio
     async def test_node_count(self) -> None:
         store = _make_store()
         assert await store.get_node_count() == 0
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [SUFFIX_NODE_HEARTBEAT])
         await store.update_node("node-002", [])
         assert await store.get_node_count() == 2
 
     @pytest.mark.asyncio
     async def test_nodes_missing_event_bus(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [SUFFIX_NODE_HEARTBEAT])
         await store.update_node("node-002", [])  # missing event_bus
         count = await store.count_nodes_missing_event_bus()
         assert count == 1
@@ -340,12 +347,12 @@ class TestServiceIntrospectionTopicStore:
     @pytest.mark.asyncio
     async def test_snapshot_atomic(self) -> None:
         store = _make_store()
-        await store.update_node("node-001", ["onex.evt.platform.foo.v1"])
+        await store.update_node("node-001", [SUFFIX_NODE_HEARTBEAT])
         await store.update_node("node-002", [])
 
         topics, node_count, missing = await store.snapshot()
 
-        assert topics == ["onex.evt.platform.foo.v1"]
+        assert topics == [SUFFIX_NODE_HEARTBEAT]
         assert node_count == 2
         assert missing == 1
 
@@ -354,7 +361,7 @@ class TestServiceIntrospectionTopicStore:
         store = _make_store()
         await store.update_node(
             "node-001",
-            ["onex.evt.platform.zzz.v1", "onex.evt.platform.aaa.v1"],
+            [SUFFIX_RESOLUTION_DECIDED, SUFFIX_CONTRACT_DEREGISTERED],
         )
         topics = await store.get_evt_topics()
         assert topics == sorted(topics)

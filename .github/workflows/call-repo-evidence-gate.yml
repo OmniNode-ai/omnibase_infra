@@ -87,7 +87,7 @@ permissions:
 
 jobs:
   repo-evidence:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@ac2f26e3e5bfd02c92496f7d3a9a14071f2c4432 # dev-20261101005012-ac2f26e3e5bf; an omnibase_core dev-merge tag; carries #2203 (verifier-tag), the fix-parent control fallback (control_uses_fix_parent), #2085 (check-timeout-seconds) and #2079 (verifies only the evidence a pull request adds or changes) (OMN-20134, OMN-21853)
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@fe0d8082717eec6717f138825c0aad71efc27ee0 # dev-20261108023315-fe0d8082717e; an omnibase_core dev-merge tag; carries #2284 (a pin-train hook rev swap in .pre-commit-config.yaml is pin-only), #2203 (verifier-tag), the fix-parent control fallback (control_uses_fix_parent), #2085 (check-timeout-seconds) and #2079 (verifies only the evidence a pull request adds or changes) (OMN-20134, OMN-21853)
     with:
       evidence-source: caller
       verifier-tag: dev-20261101000200-949993edf3b7

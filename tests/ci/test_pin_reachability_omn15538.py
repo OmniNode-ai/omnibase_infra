@@ -500,17 +500,16 @@ def test_real_tree_extracts_precommit_revs_and_workflow_git_pins() -> None:
 def test_real_tree_core_ratchet_pins_stay_equal() -> None:
     """Each core ratchet shares one ref between its hook and its CI job.
 
-    canonical-file-shape pins a dev-merge tag of omnibase_core (OMN-21523); its
-    CI job reads that tag from the hook block at run time (OMN-21538), so ci.yml
-    carries no second literal for it. node-boundary-imports still pins a full
-    commit SHA in both places.
+    The CI jobs of canonical-file-shape (OMN-21538) and node-boundary-imports
+    (OMN-22360) read the hook block's ref at run time, so ci.yml carries no second
+    literal for either, and both refs are dev-merge tags of omnibase_core.
     """
     precommit = REPO_ROOT / ".pre-commit-config.yaml"
     pins = extract_pins([WORKFLOWS_DIR, precommit])
     config = yaml.safe_load(precommit.read_text(encoding="utf-8"))
     ci_loci = {
         "canonical-file-shape": (".env.CANONICAL_FILE_SHAPE_CORE", 0),
-        "check-node-boundary-imports": (".env.NODE_BOUNDARY_CORE", 1),
+        "check-node-boundary-imports": (".env.NODE_BOUNDARY_CORE", 0),
     }
     refs: dict[str, set[str]] = {}
     for hook_id, (ci_suffix, workflow_pin_count) in ci_loci.items():
@@ -544,7 +543,7 @@ def test_real_tree_core_ratchet_pins_stay_equal() -> None:
     (shape_ref,) = refs["canonical-file-shape"]
     (boundary_ref,) = refs["check-node-boundary-imports"]
     assert re.fullmatch(r"dev-\d{14}-[0-9a-f]{12}", shape_ref)
-    assert len(boundary_ref) == 40 and set(boundary_ref) <= set("0123456789abcdef")
+    assert re.fullmatch(r"dev-\d{14}-[0-9a-f]{12}", boundary_ref)
 
 
 @pytest.mark.unit

@@ -1,0 +1,51 @@
+{
+  "chain": "E6",
+  "kind": "error",
+  "title": "not owned",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "relay",
+      "action": "publish",
+      "topic_role": "accepted",
+      "model": "ModelContractHotloadAccepted",
+      "record": {
+        "entity_id": "node_x",
+        "registry_version": 1,
+        "content_hash": "699156ae8c67601d365c8e49219343e318d2f2eb77b9583dee6e72d802d19f87",
+        "operation": "register",
+        "owner": "lab-deploy",
+        "registration_request_id": "0699257c-4489-50ba-b232-397c84daf9ca",
+        "contract_yaml": "name: node_x\nnode_version: 1.0.0\n"
+      },
+      "key": "node_x"
+    },
+    {
+      "step": 2,
+      "actor": "runtime",
+      "action": "observe",
+      "note": "profile or lane does not own the contract"
+    },
+    {
+      "step": 3,
+      "actor": "runtime",
+      "action": "publish",
+      "topic_role": "state",
+      "model": "ModelRuntimeHotloadState",
+      "record": {
+        "entity_id": "8c242722-5f7b-5b52-86f1-0961206fa958",
+        "incarnation_id": "1a6a8f03-c3b2-5871-8d65-d9965acec8b8",
+        "profile": "effects",
+        "lane": "dev",
+        "image_digest": "sha256:0cf457e24a479f02fd4d34540389f720f0807dcff92a7562108165b2637ea82f",
+        "bootstrap_ready": true,
+        "serving_ready": true,
+        "names": {}
+      },
+      "key": "8c242722-5f7b-5b52-86f1-0961206fa958",
+      "note": "no entry for node_x"
+    }
+  ],
+  "ends_in": "that runtime does nothing: no applied record, no entry for the name",
+  "note": "expects_no_records_on: applied"
+}

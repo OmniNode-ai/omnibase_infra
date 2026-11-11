@@ -161,7 +161,6 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
         "skill-lifecycle-consumer",
         "context-audit-consumer",
         "intelligence-migration",
-        "intelligence-api",
         "omninode-contract-resolver",
         "autoheal",
     ],
@@ -258,7 +257,6 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     "projection-savings-writer",
     "projection-tenant-credentials-writer",
     "projection-live-events-writer",
-    "infra-routing-decisions-consumer",
     "onex-api",
     # OMN-18114: the TENANT-domain projection carrier, for a reason that is the
     # OPPOSITE of the writers' reason above and is stated separately so the two
@@ -275,14 +273,6 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     # moved past -- the exact defect measured above, on the one service where
     # nothing else would ever notice.
     "tenant-projection-writer",
-    # OMN-19513: the claude hook-events projection writer. Declared in the base
-    # compose file behind the same inert profile as the carrier above, so the
-    # same reasoning applies: a lane-agnostic `up -d --no-deps` of this name
-    # would start it on a lane that never opted in. It is also the only owner of
-    # node_projection_claude_hook_events on the dev lane, whose main runtime
-    # excludes the node, so an agent scope that could not reach it would leave
-    # that projection running an image the rest of the lane had moved past.
-    "projection-claude-hook-events-writer",
     # OMN-21481: the public cost estimator page. Tag-referenced (see the set
     # below); a member so every dev deploy recreates it, which is what brings
     # it back after a redeploy with no manual step.
@@ -329,7 +319,6 @@ DEV_LANE_COMPOSED_RUNTIME_SERVICES: tuple[str, ...] = (
     "agent-actions-consumer",
     "skill-lifecycle-consumer",
     "context-audit-consumer",
-    "intelligence-api",
     "omninode-contract-resolver",
 )
 

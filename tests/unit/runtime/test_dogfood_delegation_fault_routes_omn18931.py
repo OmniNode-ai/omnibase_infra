@@ -98,7 +98,7 @@ def test_unbounded_identity_or_unknown_pin_refuses(
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("requested_timeout_seconds", 241), ("max_attempts", 2), ("no_escalation", False)],
+    [("requested_timeout_seconds", 0), ("max_attempts", 2), ("no_escalation", False)],
 )
 def test_declared_route_cannot_weaken_single_hop_policy(
     tmp_path: Path, field: str, value: object

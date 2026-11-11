@@ -1,0 +1,386 @@
+{
+  "_provenance": {
+    "source": "HandlerLaneEntryPointCensus live Docker SSH adapter: docker ps -a -q --no-trunc, followed by docker inspect of those IDs on the dev daemon. Only the fields used by the census are retained.",
+    "captured_utc": "2026-11-02T16:08:15.615268+00:00",
+    "source_sha256": "78ce01337c27a9420070812266d42464b6ba8ba7417679bf28074b7b6bc26fde"
+  },
+  "recorded": "2026-11-02T16:08:15.615268+00:00",
+  "source": "Read-only docker ps -a -q --no-trunc and docker inspect on the dev lane host; only Name, State.Status, Config.Image, Entrypoint, Cmd and compose project retained.",
+  "inspection": [
+    {
+      "Name": "/omnibase-infra-runtime-worker-1",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-runtime-worker",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "onex-runtime"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnibase-intelligence-api",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-intelligence-api",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "uvicorn",
+          "omniintelligence.api.app:create_app",
+          "--factory",
+          "--host",
+          "0.0.0.0",
+          "--port",
+          "8053",
+          "--workers",
+          "1"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnimarket-projection-api",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-projection-api",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "omnimarket-projection-api"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnimarket-projection-claude-hook-events-writer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-projection-claude-hook-events-writer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "onex-runtime"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnimarket-projection-delegation-writer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-projection-delegation-writer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnimarket.nodes.node_projection_delegation.handlers.handler_delegation"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnimarket-projection-live-events-writer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-projection-live-events-writer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnimarket.nodes.node_projection_live_events.handlers.handler_live_events"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnimarket-projection-registration-writer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-projection-registration-writer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnimarket.nodes.node_projection_registration.handlers.handler_registration"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnimarket-projection-savings-writer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-projection-savings-writer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnimarket.nodes.node_projection_savings.handlers.handler_savings"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnimarket-projection-tenant-credentials-writer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-projection-tenant-credentials-writer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnimarket.nodes.node_projection_tenant_credentials.handlers.handler_tenant_credentials_projection"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omnimarket-projection-tenant-registry-writer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-projection-tenant-registry-writer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnimarket.nodes.node_projection_tenant_registry.handlers.handler_tenant_registry_projection"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omninode-agent-actions-consumer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-agent-actions-consumer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnibase_infra.services.observability.agent_actions.consumer"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omninode-context-audit-consumer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-context-audit-consumer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnibase_infra.services.observability.context_audit.consumer"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omninode-contract-resolver",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-omninode-contract-resolver",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "uvicorn",
+          "omnibase_infra.services.contract_resolver.launcher:app",
+          "--host",
+          "0.0.0.0",
+          "--port",
+          "8091",
+          "--workers",
+          "1"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omninode-infra-routing-decisions-consumer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-infra-routing-decisions-consumer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnibase_infra.services.observability.infra_routing_decisions.consumer"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omninode-runtime",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-omninode-runtime",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "onex-runtime"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omninode-runtime-effects",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-runtime-effects",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "onex-runtime"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    },
+    {
+      "Name": "/omninode-skill-lifecycle-consumer",
+      "State": {
+        "Status": "running"
+      },
+      "Config": {
+        "Image": "omnibase-infra-skill-lifecycle-consumer",
+        "Entrypoint": [
+          "/usr/bin/tini",
+          "--",
+          "/app/entrypoint-runtime.sh"
+        ],
+        "Cmd": [
+          "python",
+          "-m",
+          "omnibase_infra.services.observability.skill_lifecycle.consumer"
+        ],
+        "Labels": {
+          "com.docker.compose.project": "omnibase-infra"
+        }
+      }
+    }
+  ]
+}

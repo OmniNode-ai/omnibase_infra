@@ -1,0 +1,69 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 15 and seed 8789806633086124795 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/FindingPublication.tla
+Parsing file /tmp/tlc-10575303074350850481/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-10575303074350850481/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-10575303074350850481/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-10575303074350850481/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module FindingPublication
+Linting of module FindingPublication
+Starting... (2026-11-03 03:26:56)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:26:56.
+Error: Invariant BranchGetsPr is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {}
+/\ prs = 0
+/\ pc = [r1 |-> "new", r2 |-> "new"]
+/\ branch = FALSE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 2: <StepB("r2") line 98, col 3 to line 103, col 77 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {}
+/\ prs = 0
+/\ pc = [r1 |-> "new", r2 |-> "b_done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 3: <StepB("r1") line 98, col 3 to line 103, col 77 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {}
+/\ prs = 0
+/\ pc = [r1 |-> "done", r2 |-> "b_done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 4: <Crash("r2") line 145, col 3 to line 150, col 65 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 1
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {}
+/\ prs = 0
+/\ pc = [r1 |-> "done", r2 |-> "dead"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "b_done"
+
+29 states generated, 26 distinct states found, 11 states left on queue.
+The depth of the complete state graph search is 5.
+Finished in 00s at (2026-11-03 03:26:56)

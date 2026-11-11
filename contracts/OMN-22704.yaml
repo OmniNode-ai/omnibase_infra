@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22704
+title: "The retired Mac lane leaves the declarations of this repository, so the census parity check reads the census as it is"
+summary: The operator removed Docker from the two Macs and the census half removed the lane there. This is the other half, the compose overlay, the routing instance, the receipt lane value, the generator entries and the tests that pinned them. The studio runner compose file and runner fleet rows are left to a follow-up.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22704-infra-lane-removed
+    statement: No declaration in this repository names the retired Mac lane, and the census parity tests read the census without it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the compose overlay, routing instance, settle budget, receipt lane value and generator entries of the retired lane are gone -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_manifest_parity.py tests/ci/test_incident_replay_omn18949.py -q against the census without the lane"
+      - id: AC2
+        statement: "AC2: the same tests fail on the declarations before this change with a KeyError on the lane name (the failing control) -- falsifier: the same command with the generator and the parity test list restored from the base"
+evidence_requirements:
+  - kind: tests
+    description: The census parity tests read the census as it is.
+    command: uv run --frozen pytest tests/unit/scripts/test_lane_census_manifest_parity.py tests/ci/test_incident_replay_omn18949.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22704-ac1-parity-reads-census
+    description: The census parity tests pass with the lane declarations removed, read over the CI overlay census.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_manifest_parity.py tests/ci/test_incident_replay_omn18949.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22704-ac2-failing-control
+    description: The failing control was run on a lab host with the base declarations restored, 5 failed and 30 passed with the KeyError; it is recorded in the pull request body. The check shown is the passing read over the shipped tree.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_manifest_parity.py tests/ci/test_incident_replay_omn18949.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn22704-ac1-no-retired-container
+    description: Post-deploy probe on a lab host. No container of the retired lane's compose project is running, read from the docker daemon with the project name supplied in RETIRED_LANE_PROJECT; the probe fails if one is. With the variable unset it matches nothing. Run after the merge.
+    source: manual
+    checks:
+      - check_type: command_succeeds
+        check_value: docker ps -q --filter label=com.docker.compose.project=${RETIRED_LANE_PROJECT:-none} | xargs -r false
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

@@ -42,20 +42,22 @@
 # directory name; SIBLING_CLONE_MANIFEST_DIST_NAMES[i] is the corresponding
 # uv.lock distribution (package) name for that same repo.
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
-SIBLING_CLONE_MANIFEST=(
-    "omnibase_infra"
-    "omnibase_core"
-    "omnibase_spi"
-    "omnimarket"
-)
+SIBLING_CLONE_MANIFEST=("omnibase_infra" "omnibase_core" "omnibase_spi" "omnimarket" "omniintelligence")
 
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
-SIBLING_CLONE_MANIFEST_DIST_NAMES=(
-    "omnibase-infra"
-    "omnibase-core"
-    "omnibase-spi"
-    "omnimarket"
-)
+SIBLING_CLONE_MANIFEST_DIST_NAMES=("omnibase-infra" "omnibase-core" "omnibase-spi" "omnimarket" "omninode-intelligence")
+
+# Siblings whose pin the consuming lock (omnimarket/uv.lock) does NOT carry
+# (OMN-22153). The sibling-pin preflight treats a requested package absent from
+# the lock as a hard error, which is right for a foundation package and wrong for
+# omniintelligence: omnimarket does not depend on it, so no lock can pin it. The
+# Dockerfile has always installed it by a registry range with no resolver, and
+# the dev lane now stages it at its newest dev-merge tag instead; that tag, not a
+# lock pin, is its version authority, and the first-party source audit proves it.
+# stage_workspace.sh leaves these out of the preflight's --repo arguments. Every
+# member must also be in SIBLING_VENDORED_REPOS, so this array cannot excuse a
+# package the build does not stage.
+SIBLING_LOCK_UNPINNED_REPOS=("omniintelligence")
 
 # ---------------------------------------------------------------------------
 # OMN-19072: every OTHER named sibling set lives here too.
@@ -82,10 +84,16 @@ SIBLING_CLONE_MANIFEST_DIST_NAMES=(
 # key set of compute_workspace_provenance.py's WORKSPACE_PACKAGES (less
 # omnimarket, which the infra image does not install), which runs inside the
 # image and cannot source this file; the parity test holds the two equal.
+# omniintelligence joined the set under OMN-22153: it used to install from the
+# package index by a range, so work merged to its dev branch (the http_mount of
+# OMN-21288) waited for a release train cut. The dev lane now builds it from its
+# newest dev-merge tag; non-dev lanes keep the registry install in
+# docker/Dockerfile.runtime. Like omnimarket it comes after the foundation
+# packages, and unlike omnimarket the image installs it.
 # omnibase_compat left every set in this file under OMN-21284: it is being
 # retired, and the image installs it from the lock until no consumer remains.
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
-SIBLING_VENDORED_REPOS=("omnibase_core" "omnibase_spi" "omnimarket")
+SIBLING_VENDORED_REPOS=("omnibase_core" "omnibase_spi" "omnimarket" "omniintelligence")
 
 # The lab scripts track no extra repository now that onex_change_control is
 # retired. This array stays as the place to add an extra tracked repository.

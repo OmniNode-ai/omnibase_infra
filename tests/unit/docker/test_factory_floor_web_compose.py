@@ -220,7 +220,7 @@ def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
     assert directives["connect-src"] == ["'self'"]
     assert directives["form-action"] == ["'none'"]
     assert directives["base-uri"] == ["'none'"]
-    assert directives["frame-ancestors"] == ["'none'"]
+    assert directives["frame-ancestors"] == ["'self'"]
     assert directives["object-src"] == ["'none'"]
     top = _parse_nginx(NGINX.read_text(encoding="utf-8"))
     (http,) = _children(top, "http")
@@ -281,6 +281,8 @@ def test_only_the_decision_map_directory_may_load_two_pinned_cdn_scripts() -> No
     assert len(policies) == 2
     default, scoped = policies
     assert "http" not in default
+    # The decision map's location repeats the whole policy, so it must also let only this origin frame its pages.
+    assert "frame-ancestors 'self';" in scoped
     assert f"script-src 'self' 'unsafe-inline' {cdn} {elk};" in scoped
     # Exactly the two pinned URLs appear as origins, however the policy is spaced or ordered.
     assert re.findall(r"https?://\S+?(?=[;\s]|$)", scoped) == [cdn, elk]
@@ -598,7 +600,7 @@ def test_running_nginx_sends_the_security_headers_on_every_response(
     assert headers["cache-control"] == "no-store"
     assert headers["x-content-type-options"] == "nosniff"
     assert "default-src 'self'" in headers["content-security-policy"]
-    assert "frame-ancestors 'none'" in headers["content-security-policy"]
+    assert "frame-ancestors 'self'" in headers["content-security-policy"]
 
 
 def test_running_nginx_serves_the_record_and_answers_health_without_a_page(

@@ -1,0 +1,118 @@
+schema_version: 1.0.0
+ticket_id: OMN-22258
+title: 'T0: Model before build (transcript intent-to-outcome graph plan)'
+summary: Adds four TLA+ models under formal/ (transcript_ingest_reducer, mirror_conditional_upload, fallback_store_once, finding_publication), each with a Model.cfg, one control configuration per property, witness configurations, committed TLC output bound to model.sha256, and a design-review verdict that T0a, T2, T3, T4, T6 and T9 cite by path.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22258-transcribed-acceptance-criteria
+    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: Failing test first, written before the change: the model, with a reducer that accepts any arriving revision (the control), violates the invariants "a session row''s revision never decreases" and "a session row equals the highest revision applied so far"; under fair delivery every published revision is eventually applied or superseded -- falsifier: the TLC model checker run over the control model prints a counterexample trace for both invariants, and the same run over the compare-and-upsert model prints none'
+      - id: AC2
+        statement: 'AC2: the model checks both invariants over two concurrent runs, reversed delivery and one crash -- falsifier: the control produces a counterexample trace and the compare-and-upsert model produces none.'
+      - id: AC3
+        statement: 'AC3: The terminal has exactly-once effect per manifest id (it may be published more than once, consumers deduplicate on the id), also across a crash between the close transaction and the publish, and across a crash after the publish and before the outbox row is marked, and it is emitted only when every required (session, stream, revision) tuple is stored at a revision above the required one, or at the required revision with equal content -- falsifier: a model that terminates on publish, or that records completion and the outbox row in two steps, produces a counterexample.'
+      - id: AC4
+        statement: 'AC4: A downstream result computed from older source versions never replaces one computed from newer -- falsifier: the control that applies by arrival order produces a counterexample.'
+      - id: AC5
+        statement: 'AC5: Under any interleaving of two mirror runs an object''s recorded revision never decreases -- falsifier: the control that puts without the condition produces a counterexample (run A reads 10 records, run B puts 11, run A puts 10 afterwards).'
+      - id: AC6
+        statement: 'AC6: Concurrent calls for one fallback key leave one stored result and refuse a different second one -- falsifier: the control that writes on arrival stores two.'
+      - id: AC7
+        statement: 'AC7: In every interleaving of two runs, one crash and reordered stage events at most one pull request exists per finding id, a branch that exists with no pull request is completed by the next run, and a recorded finding is never moved back to an earlier state -- falsifier: the control that looks up and then creates without adopting produces a counterexample with two pull requests, the control that treats an existing branch as finished produces a counterexample in which no pull request is ever opened, and the model with the two create-or-adopt steps produces neither.'
+evidence_requirements:
+  - kind: tests
+    description: The TLC output of every model and every control and witness configuration matches the current spec and cfg digest, each Model.cfg holds every property, each control reports the violation it is named for, and each model has a design-review verdict.
+    command: uv run --frozen pytest tests/formal/test_transcript_graph_models.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22258-ac1-ac2-accept-any-control
+    description: formal/transcript_ingest_reducer/results holds the TLC output of the reducer that accepts any arriving revision (RowNeverDecreases and RowIsHighestApplied each violated, a counterexample trace each), of the compare-and-upsert Model.cfg and NoConflict.cfg (no error, 0 states left on queue, two runs, reversed delivery, two crashes) and of the fairness-less run (EventuallyApplied violated), bound to model.sha256.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/formal/test_transcript_graph_models.py -q --no-cov -p no:cacheprovider -k "transcript_ingest_reducer and (mut_accept_any or mut_no_fairness or passing or digest or breaks_it)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-omn22258-ac3-terminal-outbox
+    description: The control that closes when its events are published (TerminalOnlyWhenSatisfied and EmittedOnlyWhenSatisfied violated), the control that counts an equal revision whatever its digest, the two-step completion and outbox (CloseCarriesOutbox, ClosedEventuallyEffected violated), the mark-before-publish control (SentWasPublished violated) and the consumer without dedup (EffectAtMostOnce violated) each report their named property; the duplicate-terminal witness shows two published copies take effect once.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/formal/test_transcript_graph_models.py -q --no-cov -p no:cacheprovider -k "transcript_ingest_reducer and (term_on_publish or mut_two_step or mark_before or no_dedup or no_digest or wit_duplicate or wit_both or wit_conflict)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn22258-ac4-apply-by-arrival
+    description: The downstream result that applies by arrival order reports DerivedNeverOlder and DerivedIsNewest violated; Model.cfg reports neither.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/formal/test_transcript_graph_models.py -q --no-cov -p no:cacheprovider -k "transcript_ingest_reducer and mut_apply_by_arrival"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn22258-ac5-mirror-conditional-upload
+    description: formal/mirror_conditional_upload/results holds Model.cfg with no error (0 states left on queue), the put-without-condition control with RecordedNeverDecreases and RecordedIsLongestPut violated, the check-then-put control, and the witnesses, bound to model.sha256.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/formal/test_transcript_graph_models.py -q --no-cov -p no:cacheprovider -k "mirror_conditional_upload"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn22258-ac6-fallback-store-once
+    description: formal/fallback_store_once/results holds Model.cfg with no error (0 states left on queue), the write-on-arrival control with OneStoredResult and DifferentRefused violated, the lookup-then-put control, and the witnesses, bound to model.sha256.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/formal/test_transcript_graph_models.py -q --no-cov -p no:cacheprovider -k "fallback_store_once"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn22258-ac7-finding-publication
+    description: formal/finding_publication/results holds Model.cfg with no error (0 states left on queue), the lookup-then-create control with AtMostOnePr violated, the existing-branch-as-finished control with BranchGetsPr violated, the stage-by-arrival control with RecordedNeverBack violated, and the witnesses, bound to model.sha256.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/formal/test_transcript_graph_models.py -q --no-cov -p no:cacheprovider -k "finding_publication"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-omn22258-verdicts
+    description: Each model directory holds results/design_review_verdict.txt headed with OMN-22258, a verdict line (PASS, PASS with conditions or FAIL), the model path, the findings, the Codex review and the conditions the build tasks must honour.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/formal/test_transcript_graph_models.py -q --no-cov -p no:cacheprovider -k "verdict_recorded"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+      - AC4
+      - AC5
+      - AC6
+      - AC7
+  - id: dod-omn22258-work-questions-runtime-admission
+    description: The deployed topology admits the five vendored work-question projections through the runtime binding validator in every shipped profile, with exactly SELECT, INSERT and UPDATE for omninode_runtime and no other table principal. The explicit grant migration is scoped to those tables, classified expand-only and checksum-bound. This hosted-runner check needs no live service and fails on the fix parent where the grants are undeclared.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/topology/test_work_questions_runtime_grants.py tests/unit/migrations/test_omn22320_work_questions_vendor.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn22258-work-questions-unique-declarations
+    description: The shipped work-question declarations resolve together through the runtime projection validator in every supported topology profile. The hosted-runner probe requires no live service and rejects duplicate or missing declarations for the five tables.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/topology/test_work_questions_runtime_grants.py -q --no-cov -p no:cacheprovider -k shipped_work_question
+        cwd: .

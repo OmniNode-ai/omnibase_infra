@@ -45,6 +45,7 @@ from scripts.preflight_lane_deploy_attribution import (
 )
 from tests.helpers.lane_census_fixtures import (
     LAB_MANIFEST,
+    lab_registry,
     lanes_declared_on_host,
 )
 from tests.helpers.lane_overlay_fixtures import (
@@ -76,7 +77,6 @@ EXPECTED_PUBLISHED_PORTS = {
     "61091",  # contract resolver
     "61092",  # skill lifecycle consumer
     "61093",  # context audit consumer
-    "61053",  # intelligence API
     "61006",  # phoenix
     "61090",  # onex-api (disabled here, reserved)
     "61436",  # Postgres
@@ -130,7 +130,6 @@ DEV_TO_DEV_202 = {
     "omnibase-infra-cloud-migration": "omnibase-infra-dev-202-cloud-migration",
     "omnibase-infra-cloud-migration-files": "omnibase-infra-dev-202-cloud-migration-files",
     "onex-api": "onex-api-dev-202",
-    "omninode-infra-routing-decisions-consumer": "omninode-dev-202-infra-routing-decisions-consumer",
 }
 
 #: Declared but disabled on .202: the cloud image only the .201 lab-overlay pin
@@ -174,7 +173,7 @@ def test_dev_202_lane_boundary_is_not_in_the_prod_grant_interlock() -> None:
 @pytest.mark.lab_overlay
 def test_dev_202_lane_boundary_manifest_declares_lab_202_only() -> None:
     lane = _manifest()["lanes"][LANE]
-    assert lane["hosts"] == [HOST_ID]
+    assert lab_registry().hosts_of(LANE) == [HOST_ID]
     assert lane["compose_project"] == COMPOSE_PROJECT
     assert lane["network"] == NETWORK
     assert lane["compose_file"] == "docker/docker-compose.dev-202.yml"
@@ -379,15 +378,15 @@ def _plan_on_202(rows: list[dict[str, Any]], networks: list[str]) -> dict[str, A
         "networks": networks,
         "runtime_tag": None,
     }
-    return build_plan(envelope, _manifest())
+    return build_plan(envelope, _manifest(), lab_registry())
 
 
 @pytest.mark.lab_overlay
 def test_dev_202_lane_boundary_host_resolves_and_carries_dev_202() -> None:
     manifest = _manifest()
-    validate_hosts(manifest)
-    assert resolve_host(HOSTNAME_ON_HOST, manifest) == HOST_ID
-    lanes_on_host = lanes_declared_on_host(manifest, HOST_ID)
+    validate_hosts(manifest, lab_registry())
+    assert resolve_host(HOSTNAME_ON_HOST, manifest, lab_registry()) == HOST_ID
+    lanes_on_host = lanes_declared_on_host(lab_registry(), HOST_ID)
     assert LANE in lanes_on_host
 
 
@@ -396,7 +395,7 @@ def test_dev_202_lane_boundary_census_on_202_reads_clean() -> None:
     plan = _plan_on_202(_healthy_dev_202_rows(), [NETWORK])
     manifest = _manifest()
     assert plan["host"] == HOST_ID
-    on_host = set(lanes_declared_on_host(manifest, HOST_ID))
+    on_host = set(lanes_declared_on_host(lab_registry(), HOST_ID))
     assert LANE in on_host
     assert set(plan["lanes_checked"]) == on_host
     assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - on_host

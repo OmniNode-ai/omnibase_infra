@@ -5,8 +5,8 @@
 The reviewed source digests pin the vendored bytes. The create migration also
 restores its four CHECK constraints on a drifted table, so it differs from the
 source by those guarded blocks. The ledger must bind each
-artifact exactly once and match its live digest, and the interim declaration
-must derive the tenant_projection_writer grant shipped in all three instances.
+artifact exactly once and match its live digest, and the shipped instances
+must carry the tenant_projection_writer grant the pinned contract derives.
 """
 
 from __future__ import annotations
@@ -118,47 +118,13 @@ def test_only_the_force_rls_step_is_fenced() -> None:
 
 
 @pytest.mark.parametrize("profile", _PROFILES)
-def test_bridge_derives_the_shipped_table_grant(profile: str) -> None:
-    from omnibase_core.enums.enum_database_grant_object_type import (
-        EnumDatabaseGrantObjectType,
-    )
-    from omnibase_infra.topology import load_topology_profile
-    from omnibase_infra.topology.table_grant_derivation import (
-        LEGACY_MIGRATION_TABLE_DECLARATIONS,
-        derive_table_grants,
-    )
-
-    bridges = tuple(
-        entry
-        for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if entry.table.name == _TABLE
-    )
-    assert len(bridges) == 1
-    bridge = bridges[0]
-    assert bridge.table.access == "read_write"
-    assert bridge.table.role == _TABLE
-    assert bridge.table.schema == "public"
-    assert bridge.table.database_ref == "application"
-    migration = (_VENDOR / _CREATE).relative_to(_ROOT)
-    assert bridge.contract_path == migration
-    assert bridge.table.migration == str(migration)
-    derived = derive_table_grants(load_topology_profile(profile), bridges)
-    matching = [
-        (principal, grant)
-        for principal, grants in derived.grants.items()
-        for grant in grants
-        if grant.object_type is EnumDatabaseGrantObjectType.TABLE
-        and grant.schema == "public"
-        and _TABLE in grant.objects
-    ]
-    assert len(matching) == 1
-    principal, grant = matching[0]
-    assert principal == "tenant_projection_writer"
-    assert {privilege.value for privilege in grant.privileges} == {
-        "SELECT",
-        "INSERT",
-        "UPDATE",
-    }
+def test_the_shipped_instance_carries_the_contract_derived_table_grant(
+    profile: str,
+) -> None:
+    # The supplemental bridge was retired by the pin advance to 3aa4e8b26af6;
+    # the pinned omnimarket contract derives this grant now, so the shipped
+    # instance is what is left to pin.
+    principal = "tenant_projection_writer"
     instance = yaml.safe_load(
         (
             _ROOT / "src/omnibase_infra/topology/instances" / f"{profile}.yaml"

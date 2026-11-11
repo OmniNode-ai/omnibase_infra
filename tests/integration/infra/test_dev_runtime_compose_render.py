@@ -26,6 +26,7 @@ This module only ever invokes `docker compose config` (a non-mutating render)
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -210,7 +211,7 @@ def _docker_compose_available() -> bool:
     return result.returncode == 0
 
 
-# OMN-21288 folds five of the six standalone writers into the dev runtime: the
+# OMN-21288 folds the six standalone writers into the dev runtime: the
 # committed policy env points their compose profiles at retired `folded-*`
 # names, so a default render omits them. The writer-definition assertions in
 # this file are about the unfolded definitions, so they render with the
@@ -218,12 +219,25 @@ def _docker_compose_available() -> bool:
 _UNFOLDED_WRITER_PROFILES: dict[str, str] = {
     f"DEV_RUNTIME_MAIN_PROJECTION_{name}_WRITER_{kind}_PROFILE": kind.lower()
     for name in (
+        "DELEGATION",
         "LIVE_EVENTS",
         "REGISTRATION",
         "SAVINGS",
         "TENANT_CREDENTIALS",
         "TENANT_REGISTRY",
     )
+    for kind in ("RUNTIME", "FULL")
+}
+# OMN-22930 folds the effects role the same way: the committed policy env gates
+# `runtime-effects` under `folded-effects-*`, and the assertions that read the
+# service's definition render it with the profiles it declares unfolded.
+_UNFOLDED_WRITER_PROFILES |= {
+    f"DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_{kind}_PROFILE": kind.lower()
+    for kind in ("RUNTIME", "FULL")
+}
+# OMN-21288 (T9) folds the workers role the same way, under `folded-workers-*`.
+_UNFOLDED_WRITER_PROFILES |= {
+    f"DEV_RUNTIME_MAIN_RUNTIME_WORKER_{kind}_PROFILE": kind.lower()
     for kind in ("RUNTIME", "FULL")
 }
 
@@ -320,6 +334,66 @@ def test_primary_dev_tenant_fold_removes_the_carrier_in_real_compose() -> None:
         "/app/tenant-projection-data",
         "/app/tenant-projection-logs",
     } <= targets
+
+
+@pytest.mark.integration
+def test_primary_dev_main_receives_the_fold_handovers_in_real_compose() -> None:
+    """OMN-23009: the policy's handovers for effects and workers reach main's env.
+
+    The runtime reads ``ONEX_RUNTIME_FOLD_HANDOVERS``; the render shows the
+    folded main holds it, carrying the retired instance ids the policy declares.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert result.returncode == 0, result.stderr
+    main = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
+    handovers = json.loads(main["environment"]["ONEX_RUNTIME_FOLD_HANDOVERS"])
+    assert handovers["workers"]["from_instance_id"] == "runtime-worker"
+    assert handovers["workers"]["handover_rule"] == "last_ran"
+    assert handovers["effects"]["from_instance_id"] == "runtime-effects"
+    assert set(handovers) <= set(
+        main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")
+    )
+
+
+@pytest.mark.integration
+def test_dev_hook_events_fold_keeps_the_consumer_group_id_in_real_compose() -> None:
+    """OMN-22027: the claude hook-events projection runs in main, group id unchanged.
+
+    The consumer group name embeds ``KAFKA_INSTANCE_ID``. The retired writer set
+    ``runtime-main``, the value main sets, so after the fold main resumes the
+    group from its committed offsets and no handover is needed. The real render
+    shows the writer is not started by a dev bring-up, main no longer excludes
+    the node, and the retired writer's declaration still names main's id.
+    """
+    writer = "projection-claude-hook-events-writer"
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    started = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert started.returncode == 0, started.stderr
+    services = yaml.safe_load(started.stdout)["services"]
+    main = services["omninode-runtime"]  # positive control: the render really parsed
+    assert writer not in services
+    for name, service in services.items():
+        assert "ONEX_RUNTIME_NODE_EXCLUSION" not in service.get("environment", {}), name
+    assert main["environment"]["KAFKA_INSTANCE_ID"] == "runtime-main"
+
+    # The retired declaration, rendered only under the profile no bring-up asks for.
+    retired = _run_compose_config(
+        {**env, "COMPOSE_PROFILES": "runtime,folded-hook-events"},
+        with_dev_lane_overlay=True,
+        with_tenant_fold=True,
+    )
+    assert retired.returncode == 0, retired.stderr
+    declared = yaml.safe_load(retired.stdout)["services"][writer]
+    assert (
+        declared["environment"]["KAFKA_INSTANCE_ID"]
+        == main["environment"]["KAFKA_INSTANCE_ID"]
+    ), "the fold must not change the consumer group id the projection resumes from"
 
 
 @pytest.mark.integration
@@ -1017,7 +1091,6 @@ _READ_BINDING_GROUP = "local.omnimarket-projections.runtime-read.consume.v1"
 # claims the dev-lane layering and is missing here.
 _BORROWER_OVERLAYS: dict[str, str] = {
     "docker-compose.dev-105.yml": "runtime",
-    "docker-compose.dev-200.yml": "runtime",
     "docker-compose.dev-202.yml": "runtime",
     "docker-compose.prepr.yml": "prepr",
 }
@@ -1052,6 +1125,85 @@ def _binding_mount_source(service: dict[str, Any]) -> Path | None:
     for mount in _mounts_at(service, _RUNTIME_BINDING_TARGET):
         return Path(mount["source"])
     return None
+
+
+def _primary_dev_services(
+    *, effects_folded: bool, workers_folded: bool = True
+) -> dict[str, Any]:
+    """Primary dev's layered render; ``*_folded=False`` is that role's pre-fold shape."""
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    if effects_folded:
+        # The committed policy env, as the deploy agent renders primary dev.
+        for kind in ("RUNTIME", "FULL"):
+            env.pop(f"DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_{kind}_PROFILE")
+    if workers_folded:
+        for kind in ("RUNTIME", "FULL"):
+            env.pop(f"DEV_RUNTIME_MAIN_RUNTIME_WORKER_{kind}_PROFILE")
+    result = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert result.returncode == 0, result.stderr
+    return yaml.safe_load(result.stdout)["services"]
+
+
+@pytest.mark.integration
+def test_primary_dev_effects_fold_removes_the_service_in_real_compose() -> None:
+    """OMN-22930: no runtime-effects service; main carries its secrets, port and state."""
+    services = _primary_dev_services(effects_folded=True)
+    assert "runtime-effects" not in services
+    main = services["omninode-runtime"]
+    assert "effects" in main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")
+    policy = {
+        key: value.strip("'")
+        for key, value in (
+            line.split("=", 1)
+            for line in POLICY_ENV_PATH.read_text(encoding="utf-8").splitlines()
+            if "=" in line and not line.startswith("#")
+        )
+    }
+    # `docker compose config` doubles every literal dollar sign.
+    assert (
+        main["environment"]["ONEX_SECRET_RESOLVER_CONFIG_JSON"].replace("$$", "$")
+        == policy["DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON"]
+    )
+    assert main["environment"]["INFISICAL_ENVIRONMENT_SLUG"] == "dev"
+    published = {
+        (port["target"], int(port["published"])) for port in main.get("ports", [])
+    }
+    assert (8085, int(policy["DEV_RUNTIME_EFFECTS_PORT"])) in published
+    targets = {volume["target"] for volume in main["volumes"]}
+    assert {"/app/effects-data", "/app/effects-logs"} <= targets
+
+
+@pytest.mark.integration
+def test_failing_control_pre_fold_render_still_has_the_effects_service() -> None:
+    """The pre-fold profiles restore the service, with the resolver config it always had."""
+    services = _primary_dev_services(effects_folded=False)
+    resolver = services["runtime-effects"]["environment"][
+        "ONEX_SECRET_RESOLVER_CONFIG_JSON"
+    ].replace("$$", "$")
+    assert resolver.startswith('{"enable_convention_fallback":false')
+    assert '"namespace":"tenant_inference_credentials"' in resolver
+
+
+@pytest.mark.integration
+def test_primary_dev_worker_fold_removes_the_service_in_real_compose() -> None:
+    """OMN-21288 (T9): no runtime-worker service; main carries the role and its logs."""
+    services = _primary_dev_services(effects_folded=True, workers_folded=True)
+    assert "runtime-worker" not in services
+    main = services["omninode-runtime"]
+    folded = main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")
+    assert {"effects", "workers"} <= set(folded)
+    assert "/app/worker-logs" in {volume["target"] for volume in main["volumes"]}
+
+
+@pytest.mark.integration
+def test_failing_control_pre_fold_render_still_has_the_worker_service() -> None:
+    """The pre-fold profiles restore the service, with its one replica and its profile."""
+    services = _primary_dev_services(effects_folded=True, workers_folded=False)
+    worker = services["runtime-worker"]
+    assert worker["environment"]["RUNTIME_PROFILE"] == "workers"
+    assert worker["deploy"]["replicas"] == 1
 
 
 def _render_dev_lane_services() -> dict[str, Any]:
@@ -1120,7 +1272,10 @@ def test_dev_lane_read_binding_reads_as_the_projection_api_does() -> None:
     effects_dsn = services["runtime-effects"]["environment"][
         "OMNIDASH_ANALYTICS_DB_URL"
     ]
-    api_dsn = services["projection-api"]["environment"]["OMNIDASH_ANALYTICS_DB_URL"]
+    # OMN-21288 (T17): main serves the projection API as a mounted node, so the DSN the
+    # API reads through is main's; the retired projection-api service renders nowhere.
+    assert "projection-api" not in services
+    api_dsn = services["omninode-runtime"]["environment"]["OMNIDASH_ANALYTICS_DB_URL"]
     assert effects_dsn == api_dsn
     assert urlsplit(effects_dsn).username == "role_omnidash"
 
@@ -1223,7 +1378,10 @@ def test_every_lane_layering_the_dev_overlay_is_listed() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("overlay", [None, "dev-200", "dev-202", "dev-105"])
+@pytest.mark.parametrize(
+    "overlay",
+    [None, *(k.split(".")[1] for k in _BORROWER_OVERLAYS if "prepr" not in k)],
+)
 def test_trajectory_backend_is_isolated_to_dev(overlay: str | None) -> None:
     env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
     result = _run_compose_config(
@@ -1257,6 +1415,11 @@ def test_trajectory_backend_is_isolated_to_dev(overlay: str | None) -> None:
 _SKILL_OVERLAY_ROOTS_ENV = "ONEX_SKILL_OVERLAY_ROOTS"
 _SKILL_OVERLAY_ROOTS_TARGET = "/etc/onex/skill-overlays"
 _SKILL_OVERLAY_ROOTS_HOST_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
+_OVERLAY_STORE_ROOT_TARGET = "/etc/onex/skill-overlays-store"
+_OVERLAY_STORE_ROOT_HOST_VAR = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
+_SKILL_OVERLAY_ROOTS_VALUE = (
+    f"{_SKILL_OVERLAY_ROOTS_TARGET}:{_OVERLAY_STORE_ROOT_TARGET}"
+)
 
 
 @pytest.mark.integration
@@ -1274,7 +1437,7 @@ def test_dev_lane_runtime_effects_mounts_the_operator_named_skill_overlay_roots(
 
     assert (
         effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV)
-        == _SKILL_OVERLAY_ROOTS_TARGET
+        == _SKILL_OVERLAY_ROOTS_VALUE
     )
     mounts = _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)
     assert len(mounts) == 1, f"expected one overlay-roots mount, got {mounts!r}"
@@ -1293,9 +1456,106 @@ def test_dev_lane_skill_overlay_roots_render_without_the_operator_variable() -> 
     effects = services["runtime-effects"]
     assert (
         effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV)
-        == _SKILL_OVERLAY_ROOTS_TARGET
+        == _SKILL_OVERLAY_ROOTS_VALUE
     )
     assert len(_mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)) == 1
+
+
+@pytest.mark.integration
+def test_dev_lane_overlay_store_root_is_appended_after_the_frozen_root() -> None:
+    """The second overlay root is appended after the frozen one, so a document the
+    frozen root holds still wins and one it lacks resolves in the store root."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{
+            _SKILL_OVERLAY_ROOTS_HOST_VAR: "/srv/operator/skill-overlays",
+            _OVERLAY_STORE_ROOT_HOST_VAR: "/srv/operator/overlay-store",
+        },
+    )
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
+
+    assert effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
+        _SKILL_OVERLAY_ROOTS_TARGET,
+        _OVERLAY_STORE_ROOT_TARGET,
+    ]
+
+    store_mounts = _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET)
+    assert len(store_mounts) == 1, (
+        f"expected one store-root mount, got {store_mounts!r}"
+    )
+    (store_mount,) = store_mounts
+    assert store_mount.get("type") == "bind"
+    assert store_mount.get("read_only") is True
+    assert store_mount["source"] == "/srv/operator/overlay-store"
+
+    frozen_mounts = _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)
+    assert len(frozen_mounts) == 1, (
+        f"expected one frozen-root mount, got {frozen_mounts!r}"
+    )
+    (frozen_mount,) = frozen_mounts
+    assert frozen_mount["source"] == "/srv/operator/skill-overlays"
+
+
+@pytest.mark.integration
+def test_dev_lane_overlay_store_root_default_is_the_clone_beside_this_checkout() -> (
+    None
+):
+    """With the store variable unset, the mount source is the overlays clone beside
+    this checkout: <registry root>/overlays/overlays, the clone the canonical-clone
+    sync keeps current."""
+    services = _render_dev_lane_services()
+    effects = services["runtime-effects"]
+    store_mounts = _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET)
+    assert len(store_mounts) == 1, (
+        f"expected one store-root mount, got {store_mounts!r}"
+    )
+    (store_mount,) = store_mounts
+    expected = str((REPO_ROOT / "docker" / "../../overlays/overlays").resolve())
+    assert os.path.normpath(store_mount["source"]) == os.path.normpath(expected)
+
+
+@pytest.mark.integration
+def test_tenant_fold_overlay_store_root_is_appended_after_the_frozen_root() -> None:
+    """The tenant-fold lane appends the store root after the frozen one, on the
+    omninode-runtime service that carries the folded effects role."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{
+            _SKILL_OVERLAY_ROOTS_HOST_VAR: "/srv/operator/skill-overlays",
+            _OVERLAY_STORE_ROOT_HOST_VAR: "/srv/operator/overlay-store",
+        },
+    )
+    result = _run_compose_config(
+        env,
+        profile="runtime",
+        with_dev_lane_overlay=True,
+        with_tenant_fold=True,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    runtime = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
+
+    assert runtime["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
+        _SKILL_OVERLAY_ROOTS_TARGET,
+        _OVERLAY_STORE_ROOT_TARGET,
+    ]
+
+    store_mounts = _mounts_at(runtime, _OVERLAY_STORE_ROOT_TARGET)
+    assert len(store_mounts) == 1, (
+        f"expected one store-root mount, got {store_mounts!r}"
+    )
+    (store_mount,) = store_mounts
+    assert store_mount.get("type") == "bind"
+    assert store_mount.get("read_only") is True
+    assert store_mount["source"] == "/srv/operator/overlay-store"
+
+    frozen_mounts = _mounts_at(runtime, _SKILL_OVERLAY_ROOTS_TARGET)
+    assert len(frozen_mounts) == 1, (
+        f"expected one frozen-root mount, got {frozen_mounts!r}"
+    )
+    (frozen_mount,) = frozen_mounts
+    assert frozen_mount["source"] == "/srv/operator/skill-overlays"
 
 
 @pytest.mark.integration
@@ -1307,6 +1567,7 @@ def test_only_runtime_effects_carries_the_skill_overlay_roots() -> None:
         for name, service in services.items()
         if _SKILL_OVERLAY_ROOTS_ENV in (service.get("environment") or {})
         or _mounts_at(service, _SKILL_OVERLAY_ROOTS_TARGET)
+        or _mounts_at(service, _OVERLAY_STORE_ROOT_TARGET)
     }
     assert carriers == {"runtime-effects"}
 
@@ -1353,6 +1614,7 @@ def test_lanes_layering_the_dev_overlay_carry_no_skill_overlay_roots(
 
     assert str(effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV, "")).strip() == ""
     assert _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET) == []
+    assert _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET) == []
 
 
 # OMN-20867. omnimarket's landing orchestrator and CI-red triage read six

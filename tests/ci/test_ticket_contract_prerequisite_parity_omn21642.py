@@ -77,6 +77,7 @@ def released_judge(tmp_path_factory: pytest.TempPathFactory):
     )
 
 
+@pytest.mark.timeout(300)
 def test_the_incident_contract_with_no_dod_evidence_is_refused(released_judge) -> None:
     decision = classify_ticket_contracts(
         [_TICKET], lambda _t: _text("planted_no_dod_evidence.yaml"), released_judge
@@ -86,6 +87,7 @@ def test_the_incident_contract_with_no_dod_evidence_is_refused(released_judge) -
     assert decision.findings == (_REFUSALS["planted_no_dod_evidence.yaml"],)
 
 
+@pytest.mark.timeout(300)
 def test_the_incident_contract_with_unbound_criteria_is_refused_unbound(
     released_judge,
 ) -> None:
@@ -97,6 +99,7 @@ def test_the_incident_contract_with_unbound_criteria_is_refused_unbound(
     assert decision.findings == (_REFUSALS["planted_unbound_ac.yaml"],)
 
 
+@pytest.mark.timeout(300)
 def test_the_recorded_contract_that_pr_create_accepts_passes(released_judge) -> None:
     decision = classify_ticket_contracts(
         [_TICKET], lambda _t: _text("accepted_recorded_omn21629.yaml"), released_judge
@@ -115,6 +118,7 @@ def test_a_missing_contract_is_still_named_before_the_prerequisite_runs() -> Non
     assert decision.outcome == FAIL_NO_CONTRACT
 
 
+@pytest.mark.timeout(300)
 def test_hook_and_pr_create_give_one_verdict_per_fixture_parity(
     released_judge, tmp_path: Path
 ) -> None:

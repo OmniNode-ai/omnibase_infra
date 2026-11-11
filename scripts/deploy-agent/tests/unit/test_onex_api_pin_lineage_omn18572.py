@@ -55,6 +55,7 @@ paired with a case in the same file where the same double IS called.
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -70,6 +71,8 @@ from deploy_agent.events import (
     Scope,
 )
 from deploy_agent.job_state import JobStore
+
+from .test_lab_overlay_omn18200 import build_passes, captured
 
 pytestmark = pytest.mark.unit
 
@@ -161,32 +164,36 @@ class _FakeApplier:
     #: Set per test. Models an apply that raised partway through.
     raise_on_apply: Exception | None = None
     calls: list[dict[str, Any]] = []
+    captured_sha: str = ""
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
         self.manifest_sha: str | None = None
 
-    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> Any:
+        # A fresh applier per call: the class carries the sha to the build.
+        _FakeApplier.captured_sha = sha
         # OMN-19501: the compose-lane half, taken under the lane lock. Opaque
-        # to the agent, which only hands it back to ``apply``.
-        return {"sha": sha, "stamp": stamp}
+        # to the agent, which only hands it back to the onex-api build.
+        return captured(sha, stamp)
 
-    def apply(
-        self,
-        *,
-        sha: str,
-        stamp: str,
-        correlation_id: str,
-        capture: object = None,
-    ) -> Path:
-        _FakeApplier.calls.append({"entry": "apply", "sha": sha})
-        # The real applier sets this the moment it archives the overlay, before
-        # anything that can fail later, which is why a raising apply can still
-        # leave a resolvable lineage behind.
-        self.manifest_sha = _FakeApplier.manifest_sha_value
+    state_dir = Path("/state")
+
+    def archive_overlay(self, destination: Path) -> str:
+        _FakeApplier.calls.append({"entry": "build", "sha": _FakeApplier.captured_sha})
+        if _FakeApplier.manifest_sha_value is None:
+            # Models a build that never reached its source.
+            raise RuntimeError("git rev-parse origin/dev failed")
+        return _FakeApplier.manifest_sha_value
+
+    def _run(self, argv: Any, **kwargs: Any) -> Any:
+        # Models a build that ran and failed AFTER its source resolved, which
+        # is why a failed build still leaves a resolvable lineage behind.
         if _FakeApplier.raise_on_apply is not None:
-            raise _FakeApplier.raise_on_apply
-        return Path(f"/state/lab-overlay/{sha}.json")
+            return subprocess.CompletedProcess(
+                list(argv), 1, "", str(_FakeApplier.raise_on_apply)
+            )
+        return build_passes(argv, **kwargs)
 
     def build_repair_migrate_image(
         self, *, sha: str, stamp: str, correlation_id: str
@@ -279,7 +286,7 @@ async def test_delivery_asks_for_the_overlay_commit_not_the_merged_infra_sha(
     assert OVERLAY_SHA != INFRA_SHA
 
 
-async def test_the_apply_still_receives_the_merged_infra_sha(
+async def test_the_build_still_receives_the_merged_infra_sha(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The record stays keyed by the merge; only the PIN lineage changed.
@@ -439,18 +446,17 @@ async def test_no_resolvable_lineage_is_a_named_non_attempt(
     assert delivery["requested_sha"] is None
 
 
-async def test_an_apply_that_raises_after_resolving_its_source_still_delivers(
+async def test_a_build_that_fails_after_resolving_its_source_still_delivers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The lineage survives a partial apply, and so does the delivery.
+    """The lineage survives a failed build, and so does the delivery.
 
-    The applier resolves its source before anything that can fail later, and
-    the image built from that lineage is on the host either way -- so a raising
-    apply must still produce a delivery that NAMES the lineage rather than a
-    silent nothing. Positive control for the zero above: the same double, the
+    The source resolves before the build can fail, so a failed build must still
+    produce a delivery that NAMES the lineage (the repoint then refuses for it)
+    rather than a silent nothing. Positive control for the zero above: the same double, the
     same code path, and here the delivery IS called.
     """
-    _FakeApplier.raise_on_apply = RuntimeError("apply died at the migrate barrier")
+    _FakeApplier.raise_on_apply = RuntimeError("docker build died at step 4")
     cmd = _dev_cmd()
     executor = _FakeExecutor()
     agent = _make_agent(tmp_path, monkeypatch, cmd, executor)

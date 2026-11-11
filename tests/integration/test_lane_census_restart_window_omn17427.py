@@ -16,7 +16,11 @@ from threading import Thread
 import pytest
 
 from scripts import lane_census_inventory as inventory
-from tests.helpers.lane_census_fixtures import NEUTRAL_HOSTNAME, NEUTRAL_MANIFEST
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_HOSTNAME,
+    NEUTRAL_MANIFEST,
+    NEUTRAL_REGISTRY,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -126,6 +130,7 @@ def test_inspect_start_time_reaches_planner_cli(
         env={
             **os.environ,
             "LANE_MANIFEST": str(NEUTRAL_MANIFEST),
+            "LANE_CENSUS_REGISTRY": str(NEUTRAL_REGISTRY),
             "PYTHONDONTWRITEBYTECODE": "1",
         },
         cwd=_ROOT,

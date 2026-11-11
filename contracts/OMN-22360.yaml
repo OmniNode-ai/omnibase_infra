@@ -1,0 +1,46 @@
+# OMN-22360 contract file for omnibase_infra: the core dependency-pin validator becomes a CI Summary member here.
+schema_version: "1.0.0"
+ticket_id: "OMN-22360"
+title: "Core validator: cross-repository dependency pins follow the declared layer order, form no cycle, and stay at the newest release"
+summary: "omnibase_infra calls omnibase_core's dependency-pins reusable workflow at dev-20261103173624-74e0b0f12767 from ci.yml (job dependency-pins) and registers its context dependency-pins / Dependency Pins in STRICT_GATE_JOBS so CI Summary fails closed on it. Ten of the eleven omnibase_core hook blocks in .pre-commit-config.yaml move to that tag. The public-runner-placement block retains 1c9566e2c249fe54257a4b3ef3ff2e71de027b89 under the core policy's enforced 14-release hook-revision bound, and each CI twin reads its revision from its hook block. omnibase-spi moves to a range that admits the newest release (>=0.23.12,<0.24.0) in the project table and the uv override, with uv.lock and the version-matrix fallback regenerated. The omnibase-compat dependency is already deleted on dev by omnibase_infra#5648, so with dev merged in the validator reports no finding on this tree."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22360-infra-dependency-pins-wired
+    statement: "omnibase_infra runs the core dependency-pin check as a CI Summary member and its pins and core hook revisions satisfy it."
+    acceptance:
+      - id: AC7
+        statement: "AC7: every registry repository with a dependency manifest runs the check as a required context on its landing branch, and the check refuses a canary branch that adds an upward pin -- falsifier: gh api repos/OmniNode-ai/omnibase_core/contents/.github/workflows/dependency-pins.yml plus a canary run of uv run python -m omnibase_core.nodes.node_dependency_pins_check_effect.runtime_dependency_pins_check on the canary tree exiting 1"
+      - id: AC8
+        statement: "AC8: every violation the validator reports on the registry repositories at origin of 2026-11-03 is fixed by a pull request named in a comment here, and none is recorded in a baseline or allowlist -- falsifier: uv run python -m omnibase_core.nodes.node_dependency_pins_check_effect.runtime_dependency_pins_check run in each consumer clone at its landing-branch head exits 0"
+evidence_requirements:
+  - kind: tests
+    description: "The wired test shows the dependency-pins job calls the core workflow at the core hook tag and CI Summary registers its context."
+    command: "uv run --frozen pytest tests/ci/test_dependency_pins_wired_omn22360.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Deploy check: the landing branch's ci.yml calls the dependency-pins reusable at the core dev-merge tag."
+    command: "deploy: gh api 'repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/ci.yml?ref=dev' --jq .content | base64 -d | grep -q 'dependency-pins.yml@dev-20261103173624-74e0b0f12767'"
+dod_evidence:
+  - id: dod-001
+    description: "The dependency-pins job calls the core reusable workflow at dev-20261103173624-74e0b0f12767, ten of the eleven omnibase_core hook blocks use that tag, the public-runner-placement block retains its separately bounded revision, and CI Summary registers dependency-pins / Dependency Pins as a strict gate."
+    source: generated
+    binds_ac: [AC7]
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen pytest tests/ci/test_dependency_pins_wired_omn22360.py tests/ci/test_ci_summary_gate.py -q -p no:cacheprovider'
+  - id: dod-002
+    description: "Pin findings fixed at their source: omnibase-spi is a range that admits the newest release in the project table and the uv override, uv.lock resolves it, the version-matrix fallback agrees, and the core validator run over this tree exits 0. The omnibase-compat dependency is deleted on dev by omnibase_infra#5648, so the validator reports nothing on this head."
+    source: generated
+    binds_ac: [AC8]
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen check-dependency-pins .'
+  - id: dod-003
+    description: "Deploy-scope readback, bound to no criterion: the landing branch's ci.yml calls the dependency-pins reusable at the core dev-merge tag; read through the GitHub contents API on dev, it exits non-zero until this change has merged. Only the local Done gate runs it; a pull request runner cannot pass it before the merge."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api 'repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/ci.yml?ref=dev' --jq .content | base64 -d | grep -q 'dependency-pins.yml@dev-20261103173624-74e0b0f12767'

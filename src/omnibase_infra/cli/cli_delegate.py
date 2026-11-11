@@ -252,12 +252,24 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
     HandlerWorkspaceRuntimeConfigMaterializer,
 )
+from omnibase_infra.models.delegation.delegate_flag_checks import (
+    validate_backend_pin as _validate_backend_pin,
+)
+from omnibase_infra.models.delegation.delegate_flag_checks import (
+    validate_model_choice as _validate_model_choice,
+)
+from omnibase_infra.models.delegation.delegate_refusal_state_root import (
+    funnel_state_root,
+    state_root_from_arguments,
+)
 from omnibase_infra.models.delegation.delegate_request_payload import (
     DELEGATE_TICKET_METADATA_KEY,
+    load_probe_ladder,
 )
 from omnibase_infra.models.delegation.delegate_request_payload import (
     build_delegate_request_payload as _request_payload,
 )
+from omnibase_infra.models.delegation.delegate_traffic_options import traffic_options
 from omnibase_infra.models.delegation.model_delegate_incomplete_terminal import (
     ModelDelegateIncompleteTerminal,
 )
@@ -2002,48 +2014,6 @@ def load_acceptance_capable_criteria() -> frozenset[str] | None:
     return frozenset(capable)
 
 
-def _validate_backend_pin(backend_id: str | None) -> str | None:
-    """Normalise ``--backend-id`` and refuse an empty one (OMN-19124).
-
-    Whitespace-only is refused rather than normalised to ``None``: a pin the
-    caller believes they set, silently dropped, walks the cheapest-first
-    ladder and answers — the exact silence this flag exists to remove.
-
-    The id itself is deliberately NOT validated against a list of known
-    backends. The routing contract is the source of truth for what backends
-    exist and the routing authority already raises loudly on an unresolvable
-    pin (``_resolve_initial_backend``: "a resolution failure on a caller's
-    EXPLICIT pin means the caller asked for a backend that doesn't exist, and
-    hiding that behind a silent fallback would defeat the whole point of
-    pinning"). A second, CLI-side copy of that vocabulary is a table that
-    goes stale and starts refusing backends the contract declares.
-    """
-    if backend_id is None:
-        return None
-    pinned = backend_id.strip()
-    if not pinned:
-        raise ValueError(
-            "--backend-id was given an empty value. Pass a backend id declared "
-            "by the routing contract, or omit the flag to use the "
-            "cheapest-first tier_order walk."
-        )
-    return pinned
-
-
-def _validate_model_choice(model: str | None) -> str | None:
-    """Normalise ``--model`` and refuse an empty choice (OMN-20844)."""
-    if model is None:
-        return None
-    chosen = model.strip()
-    if not chosen:
-        raise ValueError(
-            "--model was given an empty value. Pass a model id for the "
-            "customer's own provider key, or omit the flag to use the model "
-            "stored with the key."
-        )
-    return chosen
-
-
 #: A Linear issue identifier: a team key, a hyphen, a positive number.
 _TICKET_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9]+-[1-9][0-9]*$")
 
@@ -2198,8 +2168,8 @@ def _wire_criteria_mode(criteria_mode: str | None) -> str | None:
 # Where a tenant overlay is declared it arrives as ``ONEX_TENANT_ID``, the same
 # variable the delegate handler already reads, and it wins, so the stamp is the
 # tenant the handler would have resolved had the lane held it. Lab usage goes
-# through the host tenant declared in lab_run_hosts.yaml even without the
-# overlay (OMN-18829); there is no fallback tenant.
+# through the host tenant declared in the lab_hosts overlay's projection even
+# without the overlay (OMN-18829); there is no fallback tenant.
 #
 # NOTHING HERE IS A DEFAULT. Every branch returns a stamp that was declared or
 # minted, or refuses naming ``onex local init``. The one request that carries no
@@ -2299,8 +2269,8 @@ def read_lab_host_tenant(
         table = Path(configured)
     elif registry:
         table = (
-            Path(registry).resolve().parent
-            / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+            Path(environ.get("HOME") or "/")
+            / ".local/state/onex/overlay-store/lab_hosts/overlay.yaml"
         )
         if not table.exists() and not host:
             return None
@@ -2448,6 +2418,9 @@ def _write_payload(
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
     session_model: str | None = None,
+    traffic_class: str | None = None,
+    source_surface: str | None = None,
+    probe_ladder: Mapping[str, object] | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -2503,6 +2476,9 @@ def _write_payload(
             lineage=lineage,
             named_tests=named_tests,
             session_model=session_model,
+            traffic_class=traffic_class,
+            source_surface=source_surface,
+            probe_ladder=probe_ladder,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2772,7 +2748,6 @@ def resolve_prompt_source(prompt: str | None, prompt_file: str | None) -> str:
 _RUN_ID_META_KEY = "omnibase_infra.delegate.run_id"
 _CORRELATION_ID_META_KEY = "omnibase_infra.delegate.correlation_id"
 
-_STATE_ROOT_FLAG = "--state-root"
 _RESULT_ONLY_FLAG = "--result-only"
 _DIAGNOSTICS_LOG_NAME = "diagnostics.log"
 #: Receipt classes the CLI writes when no terminal arrived. They name no cause.
@@ -2927,44 +2902,6 @@ def _write_refusal_run_files(
     else:
         click.echo(artifacts_line, err=True)
     return run_dir
-
-
-def _funnel_state_root(explicit: Path | None, *, quiet: bool = False) -> Path | None:
-    """The root a refusal receipt is filed under: the command's own rule.
-
-    The flag is the operator's own choice and is used as given; without it the
-    root resolves exactly as the command body resolves it (OMN-19232), never
-    against the working directory. ``None`` when no root can be resolved (a
-    relative ``ONEX_STATE_DIR``, a root under ``~/.claude``): there is then no
-    place the receipt belongs, and the cause goes to stderr instead. ``quiet``
-    (``--result-only``) leaves stderr alone: the command body refuses on the same
-    unresolvable root and that refusal is the one line the caller reads.
-    """
-    if explicit is not None:
-        return explicit
-    try:
-        return resolve_state_root(None)
-    except ProtocolConfigurationError as exc:
-        if not quiet:
-            click.echo(
-                f"onex delegate: no refusal receipt was written: {exc.message}",
-                err=True,
-            )
-        return None
-
-
-def _state_root_from_arguments(arguments: Sequence[str]) -> Path | None:
-    """Read ``--state-root`` out of raw arguments that did not parse.
-
-    Argument parsing may have failed before the option was read, and the
-    receipt belongs where the caller said state lives.
-    """
-    for index, argument in enumerate(arguments):
-        if argument == _STATE_ROOT_FLAG and index + 1 < len(arguments):
-            return Path(arguments[index + 1])
-        if argument.startswith(f"{_STATE_ROOT_FLAG}="):
-            return Path(argument.partition("=")[2])
-    return None
 
 
 def _result_only_requested(arguments: Sequence[str]) -> bool:
@@ -3196,8 +3133,8 @@ class DelegateCommand(click.Command):
             return super().parse_args(ctx, args)
         except click.ClickException as exc:
             quiet = _result_only_requested(given)
-            state_root = _funnel_state_root(
-                _state_root_from_arguments(given), quiet=quiet
+            state_root = funnel_state_root(
+                state_root_from_arguments(given), quiet=quiet
             )
             self._file_refusal(
                 ctx,
@@ -3243,7 +3180,7 @@ class DelegateCommand(click.Command):
         the answer on success, one ``Error:`` line on any failure (OMN-21088).
         """
         explicit = ctx.params.get("state_root")
-        state_root = _funnel_state_root(
+        state_root = funnel_state_root(
             Path(explicit) if explicit is not None else None, quiet=True
         )
         run_dir = self._run_dir(ctx, state_root)
@@ -3294,7 +3231,7 @@ class DelegateCommand(click.Command):
 
     def _invoke_filed(self, ctx: click.Context, *, quiet: bool) -> object:
         explicit = ctx.params.get("state_root")
-        state_root = _funnel_state_root(
+        state_root = funnel_state_root(
             Path(explicit) if explicit is not None else None, quiet=quiet
         )
         try:
@@ -3775,6 +3712,7 @@ class DelegateCommand(click.Command):
         "come from an UNVERIFIED build and are not evidence."
     ),
 )
+@traffic_options
 def delegate_command(
     prompt: str | None,
     prompt_file: str | None,
@@ -3810,6 +3748,9 @@ def delegate_command(
     test_files: tuple[str, ...] = (),
     answer_path: str | None = None,
     session_model: str | None = None,
+    traffic_class: str | None = None,
+    source_surface: str | None = None,
+    probe_ladder: Path | None = None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print the result.
 
@@ -3896,6 +3837,9 @@ def delegate_command(
         named_test_metadata = (
             resolved_named_tests.as_metadata() if resolved_named_tests else None
         )
+        probe_ladder_rungs = load_probe_ladder(
+            probe_ladder, traffic_class=traffic_class
+        )
         acceptance_criteria = tuple(criteria)
         declared_contract = _load_response_contract(response_contract)
         _validate_replace_mode_authority(
@@ -3932,6 +3876,9 @@ def delegate_command(
             lineage=lineage,
             named_tests=named_test_metadata,
             session_model=session_model,
+            traffic_class=traffic_class,
+            source_surface=source_surface,
+            probe_ladder=probe_ladder_rungs,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -3970,6 +3917,9 @@ def run_delegate(
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
     session_model: str | None = None,
+    traffic_class: str | None = None,
+    source_surface: str | None = None,
+    probe_ladder: Mapping[str, object] | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -4084,6 +4034,9 @@ def run_delegate(
                 model=model,
                 max_tokens=max_tokens,
                 correlation_id=uuid.uuid4(),
+                traffic_class=traffic_class,
+                source_surface=source_surface,
+                probe_ladder=probe_ladder,
             )
         )
     except RegistryUnresolvedError as exc:
@@ -4302,6 +4255,9 @@ def run_delegate(
             lineage=lineage,
             named_tests=named_tests,
             session_model=session_model,
+            traffic_class=traffic_class,
+            source_surface=source_surface,
+            probe_ladder=probe_ladder,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.

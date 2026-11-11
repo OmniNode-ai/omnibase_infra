@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-22386
+title: omnibase_infra Tests (Split 3/15) verifier-install tests are budgeted for a cold runner install
+summary: The tests that call install_verifier ran a cold fetch and uv sync of the omnimarket verifier tag (about 61 s measured) under CI's --timeout=60, so Tests (Split 3/15) failed on branches with a Timeout from pytest-timeout while dev's own run passed. Those tests now carry a 300 s timeout mark, and a regression test built from the recorded timings refuses an installing test without it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The installing tests carry the install budget and pass under --timeout=60.
+    command: uv run --frozen pytest tests/ci/test_verifier_install_budget_omn17427.py tests/ci/test_ticket_contract_prepush_omn20870.py tests/ci/test_ticket_contract_prerequisite_parity_omn21642.py -q --no-cov --timeout=60
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-install-tests-budgeted
+    description: Every test that installs the verifier carries the install timeout mark and the two ticket-contract files pass under the suite timeout.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_ticket_contract_prepush_omn20870.py tests/ci/test_ticket_contract_prerequisite_parity_omn21642.py -q --no-cov --timeout=60
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-install-budget-regression
+    description: The regression test built from the recorded cold-install timings fails when an installing test lacks the mark and passes with it.
+    source: manual
+    binds_ac:
+      - AC2
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_verifier_install_budget_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-verifier-install-budget
+    statement: A test that installs the released verifier is budgeted for a cold install, above CI's suite timeout and inside the install lock's hold.
+    acceptance:
+      - id: AC1
+        statement: Every test in the two ticket-contract test files that calls install_verifier or takes released_judge carries the install timeout mark, and the files pass under --timeout=60.
+      - id: AC2
+        statement: A regression test built from the recorded cold-install timings and CI's suite timeout fails when an installing test lacks the mark and passes with it.
+      - id: AC3
+        statement: The fix is merged to omnibase_infra dev and Tests (Split 3/15) is green on a pull request that failed it.

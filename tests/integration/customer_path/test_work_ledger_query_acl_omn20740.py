@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Work-ledger queries as a granted developer and an unrelated SCRAM principal.
 
-Only the six dev query grants derived from the shipped bindings are installed.
+Only the seven dev query grants derived from the shipped bindings are installed.
 The responder uses the read node's wire shape; its domain replay is owned and
 tested by omnimarket. This exercises real Kafka authorization and the actual
 infra client, without a database, private checkout, or hosted-runner secret.
@@ -23,12 +23,14 @@ from aiokafka.errors import GroupAuthorizationFailedError, TopicAuthorizationFai
 
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.handlers.handler_broker_grant_derive import HandlerBrokerGrantDerive
+from omnibase_infra.handlers.handler_broker_grant_derive.handler import (
+    HandlerBrokerGrantDerive,
+)
 from omnibase_infra.handlers.handler_work_ledger_query import (
     HandlerWorkLedgerQuery,
     load_work_ledger_query_client_config,
 )
-from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
+from omnibase_infra.models.security.model_broker_grant_bindings import (
     ModelBrokerGrantBindings,
 )
 
@@ -77,7 +79,7 @@ def _query_grants():
 
 def _grant_query(broker: RedpandaSasl, principal: RuntimePrincipal) -> None:
     grants = _query_grants()
-    assert len(grants) == 6
+    assert len(grants) == 7
     assert {g.broker for g in grants} == {"dev"}
     for grant in grants:
         broker.rpk(

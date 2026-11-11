@@ -64,7 +64,10 @@ name: Hostile Reviewer
 
 on:
   pull_request:
-    branches: [main, dev]
+    # OMN-22478, operator RULING 2026-11-05T20:27:56Z: the automated review holds
+    # no merge and runs on no pull request until the review route is fixed. No
+    # branch has this name, so GitHub starts no run. To restore: branches: [main, dev]
+    branches: [review-stopped-omn-22478]
     # OMN-16216: labeled/unlabeled/ready_for_review so applying/removing
     # ci:ready or a draft->ready flip retriggers this workflow's evaluation
     # of the hostile-review job's if:. `edited` is absent: no job here reads
@@ -197,6 +200,7 @@ jobs:
           sparse-checkout: |
             config/onex/overlays/node_review_voters_overlay_compute
             config/onex/overlays/agent_review_gate_accept
+            config/onex/overlays/review_agent_receipt_verify
           sparse-checkout-cone-mode: false
 
       - name: Place the CI overlay outside the workspace
@@ -727,6 +731,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACCEPT_SRC: ${{ github.workspace }}/../omnimarket/src
           ONEX_SKILL_OVERLAY_ROOTS: ${{ github.workspace }}/../ci-overlay/config/onex/overlays
+          # OMN-22177: the receipt key the review step already carries, for the
+          # omniintelligence verifier node the accept node runs in a subprocess of
+          # ../omniintelligence when the agent_review_gate_accept overlay names
+          # verifier_endpoint subprocess:<path> (it does since omnimarket#4946). The
+          # step runs in ../omniintelligence with the node from the omnimarket dev
+          # tag, never code from the checkout under review.
+          LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
         run: |
           if [ ! -d "$ACCEPT_SRC/omnimarket/nodes/node_agent_review_gate_accept_effect" ]; then
             echo "::notice::the omnimarket clone carries no node_agent_review_gate_accept_effect (or was not cloned); the voters' verdict stands"

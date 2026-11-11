@@ -93,6 +93,15 @@ PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
     }
 )
 
+# Relations whose vendored migration also grants DELETE, which no ``access`` mode
+# derives. The reservations table is released or expired by deleting its rows
+# (OMN-23055, node_gate_store_effect/0001). Each is declared as a separate
+# PRUNE_PRIVILEGES grant beside the derived one, so no grant carries a
+# non-canonical privilege set; expire with the gate store bridge.
+PRUNED_RELATIONS: frozenset[tuple[str, str]] = frozenset(
+    {("omninode_internal", "gate_store_reservations")}
+)
+
 # Mirrors ``_projection_operation_bindings``. PLATFORM_CATALOG is absent by
 # design: that domain requires a caller-supplied read/write binding, so a
 # contract declaration alone cannot name the principal. Such declarations are
@@ -112,6 +121,35 @@ class ContractTableDeclaration:
     table: ModelDbTableDeclaration
 
 
+def _declared_table(
+    node: str,
+    table: str,
+    migration: str,
+    *,
+    role: str,
+    database_ref: str = "application",
+    access: str = "read_write",
+) -> ContractTableDeclaration:
+    """A public-schema relation whose migration already lives in the repo.
+
+    ``contract_path`` is the migration path itself (a bridge has no contract),
+    ``database_ref`` defaults to ``application`` and ``access`` defaults to
+    ``read_write``; a caller that needs a narrower mode passes it explicitly.
+    """
+    return ContractTableDeclaration(
+        node=node,
+        contract_path=Path(migration),
+        table=ModelDbTableDeclaration(
+            name=table,
+            database_ref=database_ref,
+            schema="public",
+            migration=migration,
+            access=access,
+            role=role,
+        ),
+    )
+
+
 # ``state_io`` (OMN-14208, ``handler_wiring._read_state_io``) is a legacy
 # contract subcontract that pre-dates ``ModelDbTableDeclaration`` and has no
 # core model of its own -- ``load_contract_declarations`` only scans
@@ -121,90 +159,24 @@ class ContractTableDeclaration:
 # reported green, the exact "declared but never granted" shape OMN-15656
 # exists to prevent. This is the sanctioned, checked-in way a state_io table
 # still participates in derivation (OMN-15337 / operator ruling R-q).
-STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    ContractTableDeclaration(
-        node="state_io:delegation_workflow_state",
-        contract_path=Path(
-            "docker/migrations/forward/090_create_delegation_workflow_state.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_workflow_state",
-            database_ref="omnibase_infra",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/090_create_delegation_workflow_state.sql"
-            ),
-            access="read_write",
-            role="state",
-        ),
-    ),
-    # OMN-16924. Same seam, same classification: durable REDUCER state for
-    # node_session_phase_reducer, keyed on ``session_id`` rather than
-    # ``correlation_id``. Its ``tenant_id`` column is likewise denormalized
-    # provenance extracted from the opaque payload, never an authorization key,
-    # so operator ruling R-q's OMNINODE_INTERNAL classification carries over
-    # unchanged.
-    ContractTableDeclaration(
-        node="state_io:session_phase_state",
-        contract_path=Path(
-            "docker/migrations/forward/102_create_session_phase_state.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="session_phase_state",
-            database_ref="omnibase_infra",
-            schema="public",
-            migration="docker/migrations/forward/102_create_session_phase_state.sql",
-            access="read_write",
-            role="state",
-        ),
-    ),
-    # OMN-19829. Same seam, same classification: durable per-PR landing
-    # workflow state for omnimarket's node_pr_landing_orchestrator, keyed on
-    # ``landing_key`` (``owner/repo#<number>``). Its ``tenant_id`` column is
-    # denormalized provenance from the opaque payload, never an authorization
-    # key, so operator ruling R-q's OMNINODE_INTERNAL classification holds.
-    ContractTableDeclaration(
-        node="state_io:pr_landing_workflow_state",
-        contract_path=Path(
-            "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="pr_landing_workflow_state",
-            database_ref="omnibase_infra",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
-            ),
-            access="read_write",
-            role="state",
-        ),
-    ),
-    # OMN-21935. The omnibase_infra database's grants are derived from this
-    # manifest alone, and omnimarket's node_projection_infra_routing_decisions
-    # declares a db_io write on public.infra_routing_decisions there: the
-    # relation migration 080 already creates. The runtime refuses to wire a
-    # projection whose binding principal (role_omnibase_infra) lacks SELECT,
-    # INSERT and UPDATE on it. No new migration; the grant is provisioned from
-    # the topology. Once the pinned omnimarket contracts carry the node the
-    # same relation derives from the contract too, and the derivation is
-    # idempotent per relation, so this entry may then be deleted.
-    ContractTableDeclaration(
-        node="state_io:infra_routing_decisions",
-        contract_path=Path(
-            "docker/migrations/forward/080_create_infra_routing_decisions.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="infra_routing_decisions",
-            database_ref="omnibase_infra",
-            schema="public",
-            migration="docker/migrations/forward/080_create_infra_routing_decisions.sql",
-            access="read_write",
-            role="state",
-        ),
-    ),
+STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
+    _declared_table(
+        f"state_io:{table}",
+        table,
+        f"docker/migrations/forward/{migration}",
+        database_ref="omnibase_infra",
+        role="state",
+    )
+    for table, migration in (
+        ("delegation_workflow_state", "090_create_delegation_workflow_state.sql"),
+        ("session_phase_state", "102_create_session_phase_state.sql"),
+        ("pr_landing_workflow_state", "108_create_pr_landing_workflow_state.sql"),
+        ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
+    )
 )
 
 
+# A vendored relation whose role, node dir and create file follow the table.
 def _vendored_read_write(
     table: str,
     node_dir: str | None = None,
@@ -213,8 +185,8 @@ def _vendored_read_write(
     node: str | None = None,
     schema: str = "omninode_internal",
     access: Literal["read", "write", "read_write"] = "read_write",
+    role: str | None = None,
 ) -> ContractTableDeclaration:
-    """A vendored relation whose role, node dir and create file follow the table."""
     migration = f"docker/migrations/forward/nodes/{node_dir or f'node_projection_{table}'}/{create_file or f'0000_create_{table}.sql'}"
     return ContractTableDeclaration(
         node=node or f"legacy_migration:{table}",
@@ -225,7 +197,7 @@ def _vendored_read_write(
             schema=schema,
             migration=migration,
             access=access,
-            role=table,
+            role=role or table,
         ),
     )
 
@@ -239,102 +211,17 @@ def _vendored_read_write(
 # generated YAML: ``--check`` continues to prove every shipped instance and
 # rendered catalog against one auditable derivation source.
 LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    ContractTableDeclaration(
-        node="legacy_migration:tenant_inference_credentials",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-            "0000_create_tenant_inference_credentials.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="tenant_inference_credentials",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-                "0000_create_tenant_inference_credentials.sql"
-            ),
-            access="write",
-            role="credentials",
-        ),
-    ),
-    # OMN-18159: the four delegation aggregate READ VIEWS, in this manifest for
-    # exactly the reason the docstring above gives -- the migration that
-    # creates them is vendored here, but the producing node's db_io
-    # declaration is not yet in the PINNED omnimarket contracts root this
-    # repo's CI derives from, and the pin advances only after the omnimarket
-    # source PR merges. The source PR in turn cannot merge until this grant
-    # exists, because the runtime validates the binding principal's declared
-    # read privilege before it will wire the handler. Declaring them here
-    # breaks that cycle without pointing the pin at an unmerged commit.
-    #
-    # These entries become redundant once the pin advances past the source
-    # PR and the contract declares the same four relations; removing them
-    # then is the follow-up, and leaving them is inert rather than wrong --
-    # the derivation is idempotent per relation.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_model_routing",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_model_routing",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_model_routing",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_quality_gate",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_quality_gate",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_quality_gate",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_summary",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_summary",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_summary",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_token_usage",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_token_usage",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_token_usage",
-        ),
-    ),
+    # OMN-21947: the tenant_inference_credentials bridge that sat here was
+    # deleted; the omnimarket contract pin 63aaa30a2 declares the relation in
+    # node_projection_tenant_credentials' db_io, and --check --prove reports
+    # the same grants for all nine profiles without it. This frees the code
+    # lines the ledger_line_citation bridge below adds.
+    # OMN-18159: the four delegation aggregate read views (model_routing,
+    # quality_gate, summary, token_usage) that sat here were deleted once the
+    # omnimarket contract pin c7cd6a481 declared all four in
+    # node_projection_delegation's db_io, the follow-up their own comment
+    # named; the regeneration wrote nothing, which is the proof the contract
+    # derives what the entries used to.
     # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
     # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
     # request its own comment named. The expiry module went red on the bot pull
@@ -415,20 +302,12 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # same proof: the expiry module went red on the bot's pin-advance pull
     # request naming all six, and the deletion rode that pull request.
     #
-    # OMN-17427: durable delegation execution ownership and its outbox,
-    # vendored infra-first ahead of omnimarket#4277. Both carry the source
-    # contract's read_write access and table-name role. Removable once the
-    # pin advances past that pull request; the expiry module names both.
-    _vendored_read_write(
-        "delegation_lab_jobs",
-        "node_llm_delegation_call_effect",
-        "0000_delegation_lab_job_execution.sql",
-    ),
-    _vendored_read_write(
-        "delegation_lab_job_outbox",
-        "node_llm_delegation_call_effect",
-        "0000_delegation_lab_job_execution.sql",
-    ),
+    # OMN-21970: the pin advance to 3aa4e8b26af6 retired six more the same way
+    # (delegation_lab_jobs and delegation_lab_job_outbox, omnimarket#4277;
+    # delegation_budget_readings, OMN-17427; compaction_receipts, OMN-21336;
+    # delegation_capability_cells, omnimarket#4380; local_environment,
+    # OMN-19988): the expiry module named all six on omnibase_infra#5679 and
+    # the regenerated instances came back byte-identical.
     #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
@@ -437,25 +316,23 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # INSERT, UPDATE. Retired by the omnimarket OMN-19861
     # node_projection_demo_readiness pull request merging and the pin advancing
     # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:demo_readiness_latest",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-            "0000_create_demo_readiness_latest.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="demo_readiness_latest",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-                "0000_create_demo_readiness_latest.sql"
-            ),
-            access="read_write",
-            role="demo_readiness",
-        ),
+    _vendored_read_write(
+        "demo_readiness_latest",
+        "node_projection_demo_readiness",
+        "0000_create_demo_readiness_latest.sql",
+        role="demo_readiness",
     ),
-    # The four bridges below share one shape: 0000_create_<table>.sql under the
+    # OMN-23055: node_gate_store_effect/0000 creates the four gate store relations and
+    # 0001 grants omninode_runtime on them ahead of the omnimarket node contract
+    # reaching the pin (the node's contract declares no db_io binding: the store opens
+    # its own connection); expire this bridge when that contract reaches the pin.
+    *(
+        _vendored_read_write(
+            f"gate_store_{s}", "node_gate_store_effect", "0000_create_gate_store.sql"
+        )
+        for s in ("state", "reservations", "safety", "steps")
+    ),
+    # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
     *(
         _vendored_read_write(t, d)
@@ -464,12 +341,8 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
             # when node_context_install_confirm_trigger_effect reaches the pin.
             ("compaction_activations", "node_context_install_confirm_trigger_effect"),
-            # OMN-17427: the delegation budget readings precede the omnimarket contract
-            # pin. The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
-            # when node_projection_delegation_budget_readings reaches the pin.
-            ("delegation_budget_readings", None),
             # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
-            # omnimarket node contract, as compaction_receipts below. 0001 grants
+            # omnimarket node contract. 0001 grants
             # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
             # USAGE. The ownership declaration names access read_write, role
             # compaction_current_context. Retired when the
@@ -477,48 +350,20 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             # omnimarket pin advances past it; the OMN-18863 expiry module names this
             # bridge.
             ("compaction_current_context", None),
-            # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
-            # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
-            # UPDATE plus schema and cursor sequence USAGE. The ownership declaration
-            # names access read_write, role compaction_receipts. Retired when the
-            # node_projection_compaction_receipts contract merges and the omnimarket
-            # pin advances past it; the OMN-18863 expiry module names this bridge.
-            ("compaction_receipts", None),
         )
     ),
-    # OMN-20169: infra vendors delegation_capability_cells before omnimarket#4380
-    # lands its node contract (head 677d2941ff7e). This bridge expires once the
-    # pin includes that contract. Retired by: omnimarket#4380 merging and the pin
-    # advancing past it; the OMN-18863 expiry module names this bridge.
-    _vendored_read_write(
-        "delegation_capability_cells",
-        "node_projection_delegation_capability_map",
-        "0000_create_delegation_capability_cells.sql",
-        schema="public",
-    ),
-    # OMN-19988: the same infra-first window; this repo vendors
-    # node_projection_local_environment/0000-0002 ahead of the omnimarket node
-    # contract that declares the relation, which lands after this release (the
-    # node's wiring check refuses a contract whose table no release grants). The
-    # source declares access read_write, role local_environment in omnimarket's
-    # scripts/application-relation-ownership.yaml; 0001 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
-    # node_projection_local_environment contract merges and the pin advances
-    # past it; the expiry module names it.
-    # OMN-19991: the same infra-first window as local_environment; this repo
-    # vendors node_projection_local_alerts/0000-0002 ahead of the omnimarket node
-    # contract that declares the relation. 0001 grants tenant_projection_writer
-    # SELECT, INSERT, UPDATE. Retired when omnimarket's node_projection_local_alerts
-    # contract merges and the pin advances past it; the expiry module names it.
     # OMN-19986: the same window for node_projection_local_identity/0000-0002,
     # the API Keys page's local identity. 0001 grants tenant_projection_writer
     # SELECT, INSERT, UPDATE. Retired when omnimarket's
     # node_projection_local_identity contract merges and the pin advances past
     # it; the expiry module names it.
-    *(
-        _vendored_read_write(t, schema="public")
-        for t in ("local_environment", "local_alerts", "local_identity")
-    ),
+    _vendored_read_write("local_identity", schema="public"),
+    # OMN-21920 and OMN-21970: the six agent_* bridges
+    # (node_projection_agent_actions) and projection_delegation_daily were
+    # DELETED by the pin advance to e7258b346065, which declares all seven in
+    # the node contracts. Same mechanism and same proof as the entries above:
+    # the expiry module went red naming them and the regeneration must write
+    # nothing.
     # OMN-22320: node_projection_work_questions/0000 creates five
     # omninode_internal tables ahead of the omnimarket writer's contract and
     # 0001 grants omninode_runtime SELECT, INSERT, UPDATE on each. Retired
@@ -554,22 +399,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # What guards them instead is the pairing: both views are granted by the
     # same statement block in one migration, so declaring one and not the other
     # is the defect, and a test asserts they are declared together.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_savings",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_savings",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_savings/"
-                "089_savings_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_delegation_savings",
-        ),
+    _vendored_read_write(
+        "projection_delegation_savings",
+        "node_projection_savings",
+        "089_savings_aggregate_views_per_tenant.sql",
+        schema="public",
+        access="read",
+        role="aggregate_delegation_savings",
     ),
     # OMN-17426: the savings overview READ VIEW follows the same temporary
     # supplemental-declaration path as OMN-18159 above. Infra vendors migration
@@ -577,22 +413,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # merge until this infra PR gives the tenant projection reader an explicit
     # grant. The source contract declaration makes this redundant once the pin
     # advances; until then, the vendored migration is the local authority.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_cost_savings_overview",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_cost_savings_overview",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_savings/"
-                "089_savings_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_savings_overview",
-        ),
+    _vendored_read_write(
+        "projection_cost_savings_overview",
+        "node_projection_savings",
+        "089_savings_aggregate_views_per_tenant.sql",
+        schema="public",
+        access="read",
+        role="aggregate_savings_overview",
     ),
     # OMN-17886 AC2 step 1: three omninode_internal relations whose owner is an
     # omnibase_infra node that writes with direct SQL rather than through the
@@ -620,17 +447,14 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # The gateway_link_health_status VIEW is not declared at all: no runtime
     # node reads or writes it, so its privileges are revoked rather than
     # declared.
-    _vendored_read_write(
-        "savings_injection_signals",
-        "node_savings_estimation_compute",
-        "0001_create_savings_signal_tables.sql",
-        node="infra_direct_sql:node_savings_estimation_compute",
-    ),
-    _vendored_read_write(
-        "savings_validator_catch_signals",
-        "node_savings_estimation_compute",
-        "0001_create_savings_signal_tables.sql",
-        node="infra_direct_sql:node_savings_estimation_compute",
+    *(
+        _vendored_read_write(
+            table,
+            "node_savings_estimation_compute",
+            "0001_create_savings_signal_tables.sql",
+            node="infra_direct_sql:node_savings_estimation_compute",
+        )
+        for table in ("savings_injection_signals", "savings_validator_catch_signals")
     ),
     _vendored_read_write(
         "savings_correlation_finalizations",
@@ -658,6 +482,31 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0001_create_skill_executions.sql",
         schema="public",
         access="write",
+    ),
+    # OMN-21947: infra vendors the work-ledger history-import migrations (0007
+    # creates ledger_line_citation, 0008 grants the runtime SELECT, INSERT,
+    # UPDATE and never DELETE) ahead of the omnimarket change whose
+    # node_projection_work_ledger contract declares the relation with write
+    # access and the ledger_line_citation role. Its auto-wiring refuses a
+    # principal with no declared privilege, so this grant must exist before
+    # that change can merge. The table's own trigger refuses every UPDATE and
+    # DELETE. Retired when the contract merges and the omnimarket pin advances
+    # past it; the OMN-18863 expiry module names this bridge.
+    # OMN-23152: infra vendors the work-ledger sequence migrations (0007 creates
+    # work_ledger_seq_conflicts and the unique ledger_seq index, 0008 grants the
+    # runtime SELECT, INSERT, UPDATE and never DELETE) ahead of the omnimarket
+    # change whose node_projection_work_ledger contract declares the relation
+    # with write access. Its auto-wiring refuses a principal with no declared
+    # privilege, so this grant must exist before that change can merge. The
+    # writer only inserts a conflict row. Retired when the contract merges and
+    # the omnimarket pin advances past it; the OMN-18863 expiry module names
+    # this bridge.
+    *(
+        _vendored_read_write(t, "node_projection_work_ledger", f, access="write")
+        for t, f in (
+            ("ledger_line_citation", "0007_work_ledger_history_import.sql"),
+            ("work_ledger_seq_conflicts", "0009_work_ledger_seq_unique.sql"),
+        )
     ),
 )
 
@@ -766,73 +615,57 @@ def derive_table_grants(
     # contract that declares the same relation.
     required: dict[tuple[str, str, str], set[EnumDatabasePrivilege]] = {}
     unmappable: dict[tuple[str, str, str], UnmappableDeclaration] = {}
+    pruned: set[tuple[str, str, str]] = set()
+
+    def refuse(declaration: ContractTableDeclaration, reason: str) -> None:
+        table = declaration.table
+        unmappable.setdefault(
+            (table.database_ref, table.schema, table.name),
+            UnmappableDeclaration(
+                node=declaration.node,
+                database_ref=table.database_ref,
+                schema=table.schema,
+                name=table.name,
+                reason=reason,
+            ),
+        )
 
     for declaration in declarations:
         table = declaration.table
-        key = (table.database_ref, table.schema, table.name)
         if table.database_ref != database_ref:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=(
-                        f"database_ref {table.database_ref!r} is not declared in "
-                        "the application topology"
-                    ),
-                ),
+            refuse(
+                declaration,
+                f"database_ref {table.database_ref!r} is not declared in "
+                "the application topology",
             )
             continue
         schema = database.schemas.get(table.schema)
         if schema is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=f"schema {table.schema!r} is not declared in the topology",
-                ),
+            refuse(
+                declaration,
+                f"schema {table.schema!r} is not declared in the topology",
             )
             continue
         binding_ref = DOMAIN_PROJECTION_BINDINGS.get(schema.domain)
         if binding_ref is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=(
-                        f"domain {schema.domain.value} requires an explicit "
-                        "caller-supplied binding and cannot be derived from a "
-                        "contract declaration alone"
-                    ),
-                ),
+            refuse(
+                declaration,
+                f"domain {schema.domain.value} requires an explicit "
+                "caller-supplied binding and cannot be derived from a "
+                "contract declaration alone",
             )
             continue
         binding = database.bindings.get(binding_ref)
         if binding is None:
-            unmappable.setdefault(
-                key,
-                UnmappableDeclaration(
-                    node=declaration.node,
-                    database_ref=table.database_ref,
-                    schema=table.schema,
-                    name=table.name,
-                    reason=f"topology declares no binding {binding_ref!r}",
-                ),
-            )
+            refuse(declaration, f"topology declares no binding {binding_ref!r}")
             continue
         grant_schema = physical_grant_schema_for_table(table.schema, table.name)
         entry = required.setdefault(
             (binding.principal, grant_schema, table.name), set()
         )
         entry.update(_privileges_for_access(table.access))
+        if (table.schema, table.name) in PRUNED_RELATIONS:
+            pruned.add((binding.principal, grant_schema, table.name))
 
     grants: dict[str, tuple[ModelDeploymentTopologyDatabaseGrant, ...]] = {}
     # Group by (principal, schema, privilege set) so each principal carries at
@@ -842,6 +675,12 @@ def derive_table_grants(
         privilege_key = tuple(sorted(privilege.value for privilege in privileges))
         grouped.setdefault(principal, {}).setdefault(
             (schema_name, privilege_key), []
+        ).append(table_name)
+
+    prune_key = tuple(sorted(privilege.value for privilege in PRUNE_PRIVILEGES))
+    for principal, schema_name, table_name in pruned:
+        grouped.setdefault(principal, {}).setdefault(
+            (schema_name, prune_key), []
         ).append(table_name)
 
     for principal in sorted(grouped):

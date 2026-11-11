@@ -1,0 +1,38 @@
+schema_version: '1.0.0'
+ticket_id: OMN-22858
+title: 'The h101 mini-runner row leaves the declared runner fleet, so the fleet declares no runner on the Docker-free Mac'
+summary: 'config/runner_fleet.yaml no longer declares the h101 mini host row (arm64, one verify runner), and the three tests that pinned it read the one remaining arm64 host from the inventory and expect five declared verify runners instead of six.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-22858-1
+    statement: The declared runner fleet names no runner on the h101 mini host, which no longer runs Docker.
+    acceptance:
+      - id: AC22858001
+        statement: The runner fleet inventory, host targeting and pool spread tests pass with the h101 mini row removed.
+      - id: AC22858002
+        statement: With the fleet file of the base branch put back, the host targeting and inventory tests fail.
+evidence_requirements:
+  - kind: tests
+    description: The three focused test files pass on the branch and four tests fail with the base branch's fleet file.
+    command: uv run --frozen pytest tests/ci/test_runner_pool_spread_omn19895.py tests/scripts/test_deploy_runners_host_targeting.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: The runner fleet inventory, host targeting and pool spread tests pass with the h101 mini row removed (28 passed on h106)
+    source: generated
+    binds_ac: [AC22858001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_pool_spread_omn19895.py tests/scripts/test_deploy_runners_host_targeting.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q --no-cov
+  - id: dod-002
+    description: The base branch's fleet file fails four of the same tests (4 failed, 24 passed on h106 with config/runner_fleet.yaml taken from origin/dev)
+    source: generated
+    binds_ac: [AC22858002]
+    checks:
+      - check_type: command
+        check_value: 'test -z "$(grep -n omninode-mini-runner config/runner_fleet.yaml)"'

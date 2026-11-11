@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -13,6 +15,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.enums.enum_standalone_compose_recreate_outcome import (
     EnumStandaloneComposeRecreateOutcome,
 )
@@ -32,6 +35,9 @@ from omnibase_infra.models.model_standalone_compose_recreate_policy import (
 )
 from omnibase_infra.models.model_standalone_compose_recreate_request import (
     ModelStandaloneComposeRecreateRequest,
+)
+from omnibase_infra.models.model_standalone_compose_recreate_target import (
+    ModelStandaloneComposeRecreateTarget,
 )
 from omnibase_infra.nodes import node_standalone_compose_recreate_effect
 
@@ -65,6 +71,8 @@ class FakeDocker:
         recreates: bool = True,
         removes: tuple[str, ...] = (),
         census_fails_on_call: int | None = None,
+        carry_fails: bool = False,
+        carry_changes: bool = True,
     ) -> None:
         self.containers = {**OTHERS, TARGET.container_key: "id-floor-0"}
         self._env_file = env_file
@@ -75,6 +83,10 @@ class FakeDocker:
         self._census_fails_on_call = census_fails_on_call
         self.census_calls = 0
         self.calls: list[tuple[str, str, str]] = []
+        self._carry_fails = carry_fails
+        self._carry_changes = carry_changes
+        self.events: list[str] = []
+        self.carried: list[tuple[str, str]] = []
 
     def list_containers(self) -> dict[str, str]:
         self.census_calls += 1
@@ -82,7 +94,15 @@ class FakeDocker:
             raise InfraConnectionError("unreadable Docker container census")
         return dict(self.containers)
 
+    def carry_file(self, git_ref: str, relative_path: str) -> bool:
+        self.events.append("carry")
+        self.carried.append((git_ref, relative_path))
+        if self._carry_fails:
+            raise InfraConnectionError("git show exited 128")
+        return self._carry_changes
+
     def recreate_service(self, compose_file: str, env_file: str, service: str) -> None:
+        self.events.append("recreate")
         self.calls.append((compose_file, env_file, service))
         if self._fail:
             raise InfraConnectionError("compose exited 1")
@@ -398,15 +418,67 @@ class FakeConfigContainer:
         return self._config
 
 
+CARRIED = "docker/factory-floor-web/nginx.conf"
+
+
+def _git(root: Path, *arguments: str) -> None:
+    """Run git in ``root`` with an environment that cannot reach out of it (OMN-14891)."""
+    env = scrub_git_location_env(os.environ)
+    for key in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        env.pop(key, None)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    subprocess.run(
+        ["git", "-C", str(root), *arguments], check=True, env=env, capture_output=True
+    )
+
+
+def _source_clone(root: Path, content: bytes) -> Path:
+    """A git clone whose tag ``deploy-ref`` holds ``CARRIED``; the working tree then moves on."""
+    root.mkdir()
+    _git(root, "init", "--quiet", "-b", "main")
+    (root / CARRIED).parent.mkdir(parents=True)
+    (root / CARRIED).write_bytes(content)
+    _git(root, "add", CARRIED)
+    _git(
+        root,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--quiet",
+        "-m",
+        "carried file",
+    )
+    _git(root, "tag", "deploy-ref")
+    (root / CARRIED).write_bytes(b"working tree edit that is not at the ref\n")
+    return root
+
+
 def _real_docker(
     tmp_path: Path, script: str, *, timeout_seconds: float
 ) -> HandlerStandaloneComposeDocker:
     process = tmp_path / "docker_process.py"
     process.write_text(script)
+    (tmp_path / "host").mkdir()
     config = ModelStandaloneComposeDockerConfig(
-        repo_root=tmp_path,
+        repo_root=tmp_path / "host",
+        source_root=_source_clone(tmp_path / "source", b"server { }\n"),
         command=(sys.executable, str(process)),
-        environment={TARGET.env_file_variable: "/host/floor.env"},
+        environment={
+            **scrub_git_location_env(os.environ),
+            TARGET.env_file_variable: "/host/floor.env",
+        },
         timeout_seconds=timeout_seconds,
     )
     return HandlerStandaloneComposeDocker(
@@ -427,7 +499,7 @@ def test_a_timeout_during_compose_up_is_a_typed_failure_with_nothing_changed(
 ) -> None:
     docker = _real_docker(tmp_path, _SLOW_COMPOSE, timeout_seconds=1.0)
 
-    result = recreate_standalone_compose(docker, POLICY, _request())
+    result = recreate_standalone_compose(docker, POLICY, _request(git_ref="deploy-ref"))
 
     assert result.outcome is EnumStandaloneComposeRecreateOutcome.FAILED
     assert result.changed == ()
@@ -441,3 +513,144 @@ def test_an_empty_census_stdout_reads_as_a_host_with_no_containers(
     docker = _real_docker(tmp_path, "", timeout_seconds=5)
 
     assert docker.list_containers() == {}
+
+
+_QUICK_COMPOSE = f"""\
+import json, os, sys
+print(json.dumps({{"Names": "{TARGET.container_key}", "ID": "{"a" * 64}"}}))
+"""
+
+
+def test_the_contract_carries_the_nginx_conf_the_compose_file_mounts() -> None:
+    repo = Path(__file__).resolve().parents[3]
+    compose_path = repo / TARGET.compose_file
+    compose = yaml.safe_load(compose_path.read_text())
+    mounted = [
+        (compose_path.parent / volume["source"]).resolve().relative_to(repo).as_posix()
+        for volume in compose["services"][TARGET.service]["volumes"]
+        if isinstance(volume, dict) and volume.get("target") == "/etc/nginx/nginx.conf"
+    ]
+
+    assert mounted == [CARRIED]
+    assert TARGET.carried_files == (CARRIED,)
+    assert (repo / CARRIED).is_file()
+
+
+def test_the_carried_file_reaches_the_host_before_compose_recreates_the_service() -> (
+    None
+):
+    docker = FakeDocker()
+    result = recreate_standalone_compose(docker, POLICY, _request(git_ref="deploy-ref"))
+
+    assert result.outcome is EnumStandaloneComposeRecreateOutcome.RECREATED
+    assert docker.carried == [("deploy-ref", CARRIED)]
+    assert docker.events == ["carry", "recreate"]
+    assert result.carried_files == (CARRIED,)
+
+
+def test_a_carried_file_already_on_the_host_is_not_reported_as_carried() -> None:
+    docker = FakeDocker(carry_changes=False)
+    result = recreate_standalone_compose(docker, POLICY, _request())
+
+    assert result.outcome is EnumStandaloneComposeRecreateOutcome.RECREATED
+    assert docker.events == ["carry", "recreate"]
+    assert result.carried_files == ()
+
+
+def test_a_carry_failure_is_a_typed_failure_and_nothing_is_recreated() -> None:
+    docker = FakeDocker(carry_fails=True)
+    result = recreate_standalone_compose(docker, POLICY, _request())
+
+    assert result.outcome is EnumStandaloneComposeRecreateOutcome.FAILED
+    assert CARRIED in result.message
+    assert docker.events == ["carry"]
+    assert docker.census_calls == 0
+    assert docker.calls == []
+
+
+def test_a_refused_request_carries_nothing() -> None:
+    docker = FakeDocker(env_file=None)
+    result = recreate_standalone_compose(docker, POLICY, _request())
+
+    assert result.outcome is EnumStandaloneComposeRecreateOutcome.REFUSED
+    assert docker.carried == []
+
+
+def test_the_carried_file_is_written_from_the_ref_not_from_the_working_tree(
+    tmp_path: Path,
+) -> None:
+    docker = _real_docker(tmp_path, _QUICK_COMPOSE, timeout_seconds=10)
+    stale = tmp_path / "host" / CARRIED
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"stale host copy\n")
+
+    assert docker.carry_file("deploy-ref", CARRIED) is True
+
+    assert stale.read_bytes() == b"server { }\n"
+    assert stale.stat().st_mode & 0o777 == 0o644
+    assert [p.name for p in stale.parent.iterdir()] == ["nginx.conf"]
+    assert docker.carry_file("deploy-ref", CARRIED) is False
+
+
+def test_carrying_creates_a_file_the_host_does_not_have_yet(tmp_path: Path) -> None:
+    docker = _real_docker(tmp_path, _QUICK_COMPOSE, timeout_seconds=10)
+
+    assert docker.carry_file("deploy-ref", CARRIED) is True
+
+    assert (tmp_path / "host" / CARRIED).read_bytes() == b"server { }\n"
+
+
+def test_a_full_recreate_leaves_the_host_with_the_refs_nginx_conf(
+    tmp_path: Path,
+) -> None:
+    docker = _real_docker(tmp_path, _QUICK_COMPOSE, timeout_seconds=10)
+    host_file = tmp_path / "host" / CARRIED
+    host_file.parent.mkdir(parents=True)
+    host_file.write_bytes(b"stale host copy\n")
+
+    result = recreate_standalone_compose(docker, POLICY, _request(git_ref="deploy-ref"))
+
+    assert host_file.read_bytes() == b"server { }\n"
+    assert result.carried_files == (CARRIED,)
+
+
+def test_an_unknown_ref_fails_and_leaves_the_host_copy_untouched(
+    tmp_path: Path,
+) -> None:
+    docker = _real_docker(tmp_path, _QUICK_COMPOSE, timeout_seconds=10)
+    host_file = tmp_path / "host" / CARRIED
+    host_file.parent.mkdir(parents=True)
+    host_file.write_bytes(b"stale host copy\n")
+
+    result = recreate_standalone_compose(
+        docker, POLICY, _request(git_ref="no-such-ref")
+    )
+
+    assert result.outcome is EnumStandaloneComposeRecreateOutcome.FAILED
+    assert host_file.read_bytes() == b"stale host copy\n"
+    assert result.containers_before == {}
+
+
+@pytest.mark.parametrize("git_ref", ["--output=/tmp/x", "-n"])
+def test_a_ref_that_looks_like_an_option_is_refused_before_git_runs(
+    tmp_path: Path, git_ref: str
+) -> None:
+    docker = _real_docker(tmp_path, _QUICK_COMPOSE, timeout_seconds=10)
+
+    with pytest.raises(InfraConnectionError):
+        docker.carry_file(git_ref, CARRIED)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["", "/etc/nginx/nginx.conf", "../outside", "docker/../../outside", "-flag", "a:b"],
+)
+def test_a_target_may_only_carry_plain_repo_relative_paths(path: str) -> None:
+    with pytest.raises(ValidationError):
+        ModelStandaloneComposeRecreateTarget(
+            compose_file=TARGET.compose_file,
+            service=TARGET.service,
+            container_key=TARGET.container_key,
+            env_file_variable=TARGET.env_file_variable,
+            carried_files=(path,),
+        )

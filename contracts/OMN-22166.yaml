@@ -1,0 +1,34 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22166
+title: Hold the boot topic provisioning list at a recorded baseline (one-runtime plan T29, AC2)
+summary: >-
+  Delivers AC2 only. Records the pre-T28 dev topic figures (2,559 broker topics, 2,296 specs per boot, read 2026-11-01T13:13Z) in data, and holds the specs this repository's own boot provisioning path builds at a recorded ceiling with a unit test over the boot list, including a planted extra spec that fails it. AC1 (before and after counts re-read from the broker admin endpoint) is not delivered: the after figure needs T28 merged and redeployed on dev, and no broker was readable from the lane host.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22166-boot-baseline
+    statement: >-
+      The boot provisioning list is held at a recorded figure kept in data, so a boot that builds more topic specs fails a unit test.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: a planted extra topic spec at boot fails the check -- falsifier: a new unit test over the boot provisioning list, run with uv run pytest
+evidence_requirements:
+  - kind: tests
+    description: The boot spec list built through TopicProvisioner stays within the recorded ceiling, and a planted extra spec fails the check.
+    command: uv run pytest tests/unit/event_bus/test_boot_topic_baseline_omn22166.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22166-ac2-planted-spec
+    description: The unit test builds the boot spec list through TopicProvisioner, passes at the recorded ceiling, and fails when one extra spec is planted. It fails at the merge base, where the test and the baseline data do not exist.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_boot_topic_baseline_omn22166.py -q --no-cov
+        cwd: .

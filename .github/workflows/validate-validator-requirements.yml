@@ -34,13 +34,7 @@ jobs:
   validate-validator-requirements:
     name: Enforce validator-requirements.yaml (OMN-13291)
     # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     # OMN-14017: sibling checkout plus uv sync can consume the default budget
     # while retrying transient GitHub/PyPI fetch failures.
     timeout-minutes: 20
@@ -55,7 +49,7 @@ jobs:
           repository: OmniNode-ai/omnibase_core
           # Pinned to the commit that exports the validate-validator-requirements hook (OMN-13291).
           # Update by running: gh api repos/OmniNode-ai/omnibase_core/commits/dev --jq '.sha'
-          ref: d163312724489f10f58ffdf8115ba1fa9d5783e8
+          ref: 74e0b0f127670fd0d675b83ee9f4d3e1268cc630
           path: omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 

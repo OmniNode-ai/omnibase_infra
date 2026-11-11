@@ -13,10 +13,14 @@ from omnibase_infra.models.event_bus.model_idempotency_config import (
 from omnibase_infra.models.event_bus.model_offset_policy_config import (
     ModelOffsetPolicyConfig,
 )
+from omnibase_infra.models.event_bus.model_read_committed_topics import (
+    ModelReadCommittedTopics,
+)
 
 __all__ = [
     "ModelConsumerRetryConfig",
     "ModelDlqConfig",
     "ModelIdempotencyConfig",
     "ModelOffsetPolicyConfig",
+    "ModelReadCommittedTopics",
 ]

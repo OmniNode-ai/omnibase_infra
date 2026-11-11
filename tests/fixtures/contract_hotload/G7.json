@@ -1,0 +1,27 @@
+{
+  "chain": "G7",
+  "kind": "golden",
+  "title": "generated tool",
+  "steps": [
+    {
+      "step": 1,
+      "actor": "generation-consumer",
+      "action": "publish",
+      "note": "publishes a generated contract on node-registration.v1; not a hot-loading record"
+    },
+    {
+      "step": 2,
+      "actor": "node_projection_mcp_tools",
+      "action": "observe",
+      "note": "records the tool"
+    },
+    {
+      "step": 3,
+      "actor": "runtime",
+      "action": "observe",
+      "note": "materializes nothing"
+    }
+  ],
+  "ends_in": "no record appears on the accepted, applied or state topics",
+  "note": "expects_no_records_on: accepted, applied, state, replies"
+}

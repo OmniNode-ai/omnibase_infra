@@ -1,0 +1,5 @@
+{
+  "operation": "lane_entry_point_census.run",
+  "policy_path": "deploy/lane-census/runtime-entry-points.yaml",
+  "inspect_json_path": "tests/unit/nodes/node_lane_entry_point_census_effect/fixtures/inspect_planted.json"
+}

@@ -132,6 +132,7 @@ jobs:
           sparse-checkout: |
             config/onex/overlays/node_review_voters_overlay_compute
             config/onex/overlays/agent_review_gate_accept
+            config/onex/overlays/review_agent_receipt_verify
           sparse-checkout-cone-mode: false
 
       - name: Place the CI overlay outside the workspace

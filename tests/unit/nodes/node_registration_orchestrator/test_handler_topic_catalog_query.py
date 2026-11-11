@@ -24,7 +24,6 @@ from uuid import uuid4
 import pytest
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.catalog.catalog_warning_codes import (
     INTERNAL_ERROR,
@@ -35,6 +34,9 @@ from omnibase_infra.models.catalog.model_topic_catalog_query import (
 )
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
+)
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_catalog_query import (
     HandlerTopicCatalogQuery,
@@ -80,7 +82,7 @@ def _make_query_envelope(
     include_inactive: bool = False,
     topic_pattern: str | None = None,
     correlation_id: object = None,
-) -> ModelEventEnvelope[ModelTopicCatalogQuery]:
+) -> ModelInjectedRequest[ModelTopicCatalogQuery]:
     """Create a valid query envelope for testing."""
     corr_id = correlation_id or uuid4()
     payload = ModelTopicCatalogQuery(
@@ -89,12 +91,8 @@ def _make_query_envelope(
         include_inactive=include_inactive,
         topic_pattern=topic_pattern,
     )
-    return ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=payload,
-        envelope_timestamp=TEST_NOW,
-        correlation_id=corr_id,
-        source_tool="test",
+    return ModelInjectedRequest(
+        event=payload, now=TEST_NOW, input_id=uuid4(), correlation_id=corr_id
     )
 
 
@@ -197,17 +195,13 @@ async def test_handler_malformed_payload_returns_warning() -> None:
 
     # Create envelope with wrong payload type (not ModelTopicCatalogQuery)
     wrong_payload = MagicMock(spec=[])  # not a ModelTopicCatalogQuery
-    envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=wrong_payload,
-        envelope_timestamp=TEST_NOW,
-        correlation_id=uuid4(),
-        source_tool="test",
+    envelope: ModelInjectedRequest[object] = ModelInjectedRequest.model_construct(
+        event=wrong_payload, now=TEST_NOW, input_id=uuid4(), correlation_id=uuid4()
     )
 
     # Cast to expected type to satisfy mypy; the wrong payload type is intentional
     # to test the handler's isinstance guard.
-    typed_envelope = cast("ModelEventEnvelope[ModelTopicCatalogQuery]", envelope)
+    typed_envelope = cast("ModelInjectedRequest[ModelTopicCatalogQuery]", envelope)
     output = await handler.handle(typed_envelope)
 
     assert len(output.events) == 1
@@ -291,12 +285,8 @@ async def test_handler_generates_correlation_id_when_absent() -> None:
         correlation_id=uuid4(),
         client_id="test-client",
     )
-    envelope: ModelEventEnvelope[ModelTopicCatalogQuery] = ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=payload,
-        envelope_timestamp=TEST_NOW,
-        correlation_id=None,
-        source_tool="test",
+    envelope: ModelInjectedRequest[ModelTopicCatalogQuery] = ModelInjectedRequest(
+        event=payload, now=TEST_NOW, input_id=uuid4(), correlation_id=None
     )
 
     output = await handler.handle(envelope)

@@ -142,6 +142,8 @@ migrations:
   forward/nodes/node_deployment_evidence_reducer/0002_grant_omninode_runtime_deployment_evidence_tables.sql: expand-only
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
   forward/nodes/node_evidence_dashboard_reducer/0002_grant_omninode_runtime_evidence_dashboard_tables.sql: expand-only
+  forward/nodes/node_gate_store_effect/0000_create_gate_store.sql: forward-only # CREATE TABLE IF NOT EXISTS, CREATE INDEX IF NOT EXISTS and one seeded singleton row for the four gate store relations
+  forward/nodes/node_gate_store_effect/0001_grant_omninode_runtime_gate_store.sql: expand-only # GRANT to omninode_runtime on the four gate store relations
   forward/nodes/node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql: forward-only # ALTER TABLE ALTER COLUMN; CREATE OR REPLACE
   forward/nodes/node_gateway_link_health_write_effect/0002_revoke_omninode_runtime_gateway_link_health_status.sql: forward-only # REVOKE
   forward/nodes/node_gateway_link_health_write_effect/0003_grant_omninode_runtime_gateway_link_health.sql: expand-only
@@ -167,6 +169,8 @@ migrations:
   forward/nodes/node_pr_merged_projection/0002_grant_omninode_runtime_pr_merged_events.sql: forward-only # EXECUTE
   forward/nodes/node_pr_merged_projection/0003_pr_merged_events_unique_repo_pr_number.sql: forward-only # DELETE (data rewrite); ALTER TABLE ADD CONSTRAINT PR_MERGED_EVENTS_REPO_PR_NUMBER_KEY (ADD CONSTRAINT class)
   forward/nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql: expand-only
+  forward/nodes/node_projection_agent_actions/0000_create_agent_observability_tables.sql: forward-only # ALTER TABLE ADD CONSTRAINT <table>_PKEY PRIMARY KEY on agent_actions, agent_transformation_events, router_performance_metrics, agent_detection_failures, agent_execution_logs, agent_status_events (ADD CONSTRAINT class); ALTER TABLE ALTER COLUMN SET NOT NULL on router_performance_metrics, agent_detection_failures, agent_status_events
+  forward/nodes/node_projection_agent_actions/0001_grant_tenant_projection_writer_agent_observability_tables.sql: expand-only
   forward/nodes/node_projection_alert_channel_liveness/0000_create_alert_channel_liveness_verdicts.sql: forward-only # CREATE UNIQUE INDEX idx_alert_channel_liveness_cursor on omninode_internal.alert_channel_liveness_verdicts (UNIQUE INDEX class)
   forward/nodes/node_projection_alert_channel_liveness/0001_grant_omninode_runtime_alert_channel_liveness_verdicts.sql: expand-only # additive
   forward/nodes/node_projection_automation_liveness/0000_create_automation_liveness.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.automation_liveness_state); UNIQUE INDEX on an existing table (omninode_internal.automation_run_history)
@@ -209,6 +213,8 @@ migrations:
   forward/nodes/node_projection_consumer_flow/0005_add_node_id_ingest_index.sql: expand-only
   forward/nodes/node_projection_consumer_flow/0006_grant_role_omnidash_consumer_flow_windows_retention.sql: expand-only
   forward/nodes/node_projection_consumer_flow/0007_autovacuum_consumer_flow_windows.sql: forward-only # ALTER TABLE SET storage parameters (autovacuum thresholds)
+  forward/nodes/node_projection_context_audit/0000_add_context_audit_event_key.sql: forward-only # CREATE UNIQUE INDEX ux_context_audit_events_event_key on an existing table (UNIQUE INDEX class)
+  forward/nodes/node_projection_context_audit/0001_grant_tenant_projection_writer_context_audit_events.sql: expand-only
   forward/nodes/node_projection_context_roi/001_create_context_roi_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CONTEXT_ROI_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CONTEXT_ROI_SCORES_RUN
   forward/nodes/node_projection_context_roi/002_add_factor_subset_hash_and_routing_source.sql: expand-only
   forward/nodes/node_projection_context_roi/003_context_roi_scores_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
@@ -278,6 +284,11 @@ migrations:
   forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql: forward-only # DROP VIEW; CREATE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_delegation/0063_generation_events_cost_inference_usd_nullable.sql: forward-only # ALTER COLUMN DROP NOT NULL, DROP DEFAULT
   forward/nodes/node_projection_delegation/0064_delegation_events_data_source_experiment.sql: forward-only # DROP; ALTER TABLE public.delegation_events DROP CONSTRAINT IF; ALTER TABLE public.delegation_events ADD CONSTRAINT DELEGATION_EVENTS_DATA_SOURCE_CHECK (ADD CONSTRAINT class)
+  forward/nodes/node_projection_delegation/0065_quality_gate_failure_categories_bounded.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
+  forward/nodes/node_projection_delegation/0066_delegation_events_projection_cursor.sql: forward-only # ALTER TABLE ADD COLUMN (BIGSERIAL numbers existing rows); SET NOT NULL; CREATE UNIQUE INDEX; GRANT USAGE ON SEQUENCE
+  forward/nodes/node_projection_delegation/0067_delegation_daily_view.sql: forward-only # CREATE OR REPLACE VIEW (new); ALTER VIEW SET (security_invoker); GRANT SELECT
+  forward/nodes/node_projection_delegation/0068_delegation_summary_excludes_experiment.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
+  forward/nodes/node_projection_delegation/0069_delegation_events_turn_count.sql: expand-only
   forward/nodes/node_projection_delegation_capability_map/0000_create_delegation_capability_cells.sql: forward-only
   forward/nodes/node_projection_delegation_capability_map/0001_grant_tenant_projection_writer_delegation_capability_cells.sql: expand-only
   forward/nodes/node_projection_delegation_capability_map/0002_force_rls_delegation_capability_cells.sql: forward-only
@@ -374,6 +385,7 @@ migrations:
   forward/nodes/node_projection_local_environment/0000_create_local_environment.sql: forward-only # ALTER TABLE public.local_environment ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
   forward/nodes/node_projection_local_environment/0001_grant_tenant_projection_writer_local_environment.sql: expand-only
   forward/nodes/node_projection_local_environment/0002_force_rls_local_environment.sql: forward-only # ALTER TABLE public.local_environment FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_local_environment/0003_grant_delete_local_environment.sql: expand-only
   forward/nodes/node_projection_local_alerts/0000_create_local_alerts.sql: forward-only # ALTER TABLE public.local_alerts ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
   forward/nodes/node_projection_local_alerts/0001_grant_tenant_projection_writer_local_alerts.sql: expand-only
   forward/nodes/node_projection_local_alerts/0002_force_rls_local_alerts.sql: forward-only # ALTER TABLE public.local_alerts FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
@@ -428,6 +440,7 @@ migrations:
   forward/nodes/node_projection_savings/097_savings_overview_all_runs.sql: forward-only # Replace aggregate population and append run count
   forward/nodes/node_projection_savings/098_delegation_savings_measured_population.sql: forward-only # Replace monetary population and append provenance counts
   forward/nodes/node_projection_savings/100_savings_overview_token_directions.sql: forward-only # Replace the overview view and append its token directions
+  forward/nodes/node_projection_savings/101_delegation_savings_unpriced_single_pass.sql: forward-only # Read the savings unpriced count in one pass
   forward/nodes/node_projection_savings/099_savings_series_tenant_bucket.sql: forward-only # Replace tenant/day series view and append tenant key
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_content/0002_add_session_barrier_stamps.sql: expand-only
@@ -439,6 +452,8 @@ migrations:
   forward/nodes/node_projection_skill_executions/0002_skill_execution_snapshots_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_skill_lifecycle/0001_create_skill_executions.sql: forward-only # NOT NULL and constraint reconciliation
   forward/nodes/node_projection_skill_lifecycle/0002_grant_tenant_projection_writer_skill_executions.sql: forward-only # enforced tenant RLS
+  forward/nodes/node_projection_skill_lifecycle/0003_grant_app_dashboard_select_skill_executions.sql: forward-only # reader SELECT grant for the RLS-scoped dashboard role
+  forward/nodes/node_projection_skill_lifecycle/0004_set_received_at_default_skill_executions.sql: forward-only # column default only, no data change
   forward/nodes/node_projection_swarm/0001_create_swarm_runs.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SWARM_RUNS_PKEY
   forward/nodes/node_projection_swarm/0002_grant_omninode_runtime_swarm_runs.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/0000_create_tenant_inference_credentials.sql: expand-only
@@ -471,6 +486,14 @@ migrations:
   forward/nodes/node_projection_work_ledger/0004_grant_work_ledger_ro_work_ledger_state.sql: expand-only # additive guarded GRANT SELECT to a read-only role
   forward/nodes/node_projection_work_ledger/0005_grant_role_omnidash_work_ledger_rows_select.sql: expand-only
   forward/nodes/node_projection_work_ledger/0006_work_ledger_ingested_at.sql: forward-only # ALTER TABLE ADD COLUMN IF NOT EXISTS nullable ingested_at (additive); ALTER COLUMN SET DEFAULT on the existing table (omninode_internal.work_ledger_rows), declared forward-only per the checker's rule
+  forward/nodes/node_projection_work_ledger/0007_work_ledger_history_import.sql: forward-only # ADD COLUMN IF NOT EXISTS nullable legacy_ordinal and CREATE UNIQUE INDEX on the existing omninode_internal.work_ledger_rows; DROP TRIGGER IF EXISTS on the new ledger_line_citation, declared forward-only per the checker's rule
+  forward/nodes/node_projection_work_ledger/0009_work_ledger_seq_unique.sql: forward-only # CREATE TABLE IF NOT EXISTS work_ledger_seq_conflicts, UPDATE of duplicate ledger_seq on omninode_internal.work_ledger_rows to NULL after copying them whole into the conflicts table, then CREATE UNIQUE INDEX IF NOT EXISTS, declared forward-only per the checker's rule
+  forward/nodes/node_projection_work_ledger/0008_grant_omninode_runtime_ledger_line_citation.sql: expand-only # additive GRANT
+  forward/nodes/node_projection_work_ledger/0010_grant_work_ledger_seq_conflicts.sql: expand-only # additive GRANT
+  forward/nodes/node_projection_overlay_store/0000_create_overlay_store.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the overlay store table
+  forward/nodes/node_projection_overlay_store/0001_grant_omninode_runtime_overlay_store.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the overlay store table
+  forward/nodes/node_view_seam_reading_reducer/0001_create_view_seam_readings.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the view seam readings table
+  forward/nodes/node_view_seam_reading_reducer/0002_grant_tenant_projection_writer_view_seam_readings.sql: expand-only # GRANT SELECT, INSERT, UPDATE to tenant_projection_writer on the view seam readings table
   forward/nodes/node_projection_work_questions/0000_create_work_questions.sql: forward-only # CREATE TABLE IF NOT EXISTS and ADD COLUMN IF NOT EXISTS for the five work-question tables
   forward/nodes/node_projection_work_questions/0001_grant_omninode_runtime_work_questions.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the five work-question tables
   forward/nodes/node_projection_worktree_reconcile/0000_create_worktree_reconcile_hosts.sql: expand-only # additive

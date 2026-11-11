@@ -36,12 +36,13 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
 from tests.helpers.lane_census_fixtures import NEUTRAL_MANIFEST
+from tests.helpers.prepr_pool_overlay import pool_overlay_env
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POOL_PY = REPO_ROOT / "scripts" / "runtime_build" / "prepr_runtime_pool.py"
 PROVE_SH = REPO_ROOT / "scripts" / "runtime_build" / "prepr_pool_prove.sh"
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("pool_overlay_env")]
 
 
 def _load(name: str, path: Path) -> Any:
@@ -2959,8 +2960,8 @@ def test_local_transport_runs_locally_without_ssh(
     assert str(Path.home()) in output
     assert "marker" in output
     assert all(argv[0] != "ssh" for argv in calls)
-    assert calls[0] == ["bash", "-c", command]
-    assert calls[0][2] == command
+    assert calls[0] == ["bash", "-c", pool.settings().local_command_prefix + command]
+    assert calls[0][2].endswith(command)
 
 
 def test_local_transport_put_copies_file(tmp_path: Path) -> None:
@@ -2991,4 +2992,7 @@ def test_local_transport_remote_host_still_uses_ssh(
         "ok",
     )
     assert calls[0][:3] == ["ssh", "-o", "BatchMode=yes"]
-    assert calls[0][-2:] == [host.ssh_target, pool.REMOTE_PATH + command]
+    assert calls[0][-2:] == [
+        host.ssh_target,
+        pool.settings().remote_command_prefix + command,
+    ]

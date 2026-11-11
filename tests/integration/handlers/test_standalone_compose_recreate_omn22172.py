@@ -39,6 +39,9 @@ from omnibase_infra.nodes import node_standalone_compose_recreate_effect
 
 pytestmark = pytest.mark.integration
 
+# The checkout this test runs from is the git clone the carried nginx.conf is read from, at HEAD.
+REPO_CHECKOUT = Path(__file__).resolve().parents[3]
+
 
 async def _docker(
     repo_root: Path,
@@ -53,6 +56,7 @@ async def _docker(
     policy = ModelStandaloneComposeRecreatePolicy.from_contract(contract_path)
     config = ModelStandaloneComposeDockerConfig(
         repo_root=repo_root,
+        source_root=REPO_CHECKOUT,
         command=command,
         environment=dict(os.environ if environment is None else environment),
         timeout_seconds=policy.docker_timeout_seconds
@@ -158,7 +162,7 @@ async def test_contract_handler_process_and_full_host_readback(
         runtime_lane="dev",
         compose_file=target.compose_file,
         service=target.service,
-        git_ref="origin/dev",
+        git_ref="HEAD",
     )
 
     # Admission rejects the request before any subprocess, even a read-only ps.
@@ -169,6 +173,11 @@ async def test_contract_handler_process_and_full_host_readback(
     result = handler.handle(request)
     state = json.loads(state_path.read_text())
     assert [call[0] for call in state["calls"]] == ["ps", "compose", "ps"]
+    assert result.carried_files == target.carried_files
+    for carried in target.carried_files:
+        assert (tmp_path / carried).read_bytes() == (
+            REPO_CHECKOUT / carried
+        ).read_bytes()
     assert state["calls"][1] == expected_recreate
     assert result.correlation_id == request.correlation_id
     assert result.containers_before[target.container_key] == "a" * 64
@@ -242,7 +251,7 @@ async def test_compose_process_failure_is_a_typed_failure_with_after_readback(
         runtime_lane="dev",
         compose_file=target.compose_file,
         service=target.service,
-        git_ref="origin/dev",
+        git_ref="HEAD",
     )
     result = recreate_standalone_compose(adapter, policy, request)
     assert result.outcome is EnumStandaloneComposeRecreateOutcome.FAILED

@@ -20,9 +20,39 @@
 #   pre-commit install                    # Install pre-commit hooks
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
+#   pre-commit run --all-files --hook-stage manual  # Run the CI-backed whole-repo hooks
+#
+# COMMIT BUDGET (OMN-22364): a commit touching a few files finishes pre-commit in
+# under two minutes. A whole-repo scan or suite that already runs as a required
+# CI job (CI Summary) has `stages: [manual]`: it never runs at commit and is
+# never auto-installed, and CI is the enforcement. Each such hook is registered
+# with its CI job in tests/ci/test_precommit_commit_budget.py, which fails when a
+# manual hook has no registered job, when the job is gone or not gated by CI
+# Summary, or when the job no longer runs the hook's command.
 repos:
   - repo: local
     hooks:
+      - id: lane-entry-point-census-fixture
+        name: Census reports planted entry points by name (OMN-21923)
+        entry: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_handler_lane_entry_point_census.py -q --no-cov
+        language: system
+        files: ^(deploy/lane-census/runtime-entry-points\.yaml|src/omnibase_infra/(handlers/handler_lane_entry_point_census\.py|models/lane_entry_point_census/.*|nodes/node_lane_entry_point_census_effect/.*)|tests/unit/nodes/node_lane_entry_point_census_effect/.*|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: lane-entry-point-census-dev-recording
+        name: Census rebuilds the dev numbers from inspection (OMN-21923)
+        entry: uv run --frozen pytest tests/unit/nodes/node_lane_entry_point_census_effect/test_dev_lane_recorded_census.py -q --no-cov
+        language: system
+        files: ^(deploy/lane-census/runtime-entry-points\.yaml|src/omnibase_infra/(handlers/handler_lane_entry_point_census\.py|models/lane_entry_point_census/.*|nodes/node_lane_entry_point_census_effect/.*)|tests/unit/nodes/node_lane_entry_point_census_effect/.*|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: lane-entry-point-census-bus
+        name: Census dispatches through the runtime bus (OMN-21923)
+        entry: uv run --frozen pytest tests/integration/runtime/test_lane_entry_point_census_omn21923.py -m "not kafka" -q --no-cov
+        language: system
+        files: ^(deploy/lane-census/runtime-entry-points\.yaml|src/omnibase_infra/(handlers/handler_lane_entry_point_census\.py|models/lane_entry_point_census/.*|nodes/node_lane_entry_point_census_effect/.*)|tests/(unit/nodes/node_lane_entry_point_census_effect/.*|integration/runtime/test_lane_entry_point_census_omn21923\.py)|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-19998: a ticket contract loads through the strict loader at commit, so
       # a merge that keeps both sides' description and command under one
       # `- kind: tests` item is refused before CI. The same test runs in the CI
@@ -185,7 +215,7 @@ repos:
         language: system
         files: ^(src/.*\.py|tests/ci/test_linear_transport_consolidation\.py|tests/ci/fixtures/linear_graphql_issue_omn17678\.json|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
   # OMN-20304: canonical-file-shape ratchet (operator ruling 2026-10-01). No
   # new code file outside the canonical contract/node/handler/models/
   # protocols/tests/docs locations, no new imperative lines in a SKILL.md, no
@@ -213,7 +243,7 @@ repos:
   #     its hook repository exports.
   #   - detect-secrets has no hook id in the omnibase_core hook repository.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261101023710-a66b5ff79cc0
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: canonical-file-shape
         args: [--rules, file-shape]
@@ -231,6 +261,11 @@ repos:
       - id: handler-di-gate
         require_serial: true
         args: [--baseline, .onex_ratchets/handler_di_baseline.txt]
+      # OMN-22358: producer/consumer topic-normalization symmetry. The local entry named
+      # a module that never existed and ran manual-stage and skipped, so it never
+      # ran; core's own hook id runs at pre-commit and in pre-commit.ci.
+      - id: normalization-symmetry
+        require_serial: true
       # OMN-21939: four validators this repo used to run from its own script
       # copies. The rule code is omnibase_core's; only the inputs stay here.
       # OMN-17320 exposed-identifier gate: salted-SHA256 denylist of customer
@@ -257,13 +292,33 @@ repos:
       # `uv run python <script>`. CI twin: .github/workflows/precommit-parity-gate.yml.
       - id: precommit-interpreter-resolution
         require_serial: true
+  # OMN-19998: a public workflow selects no lab runner. No baseline: a job still on the
+  # lab has a typed route packaged with this core, and the routes only shrink. CI twin:
+  # the last steps of job public-runner-placement in .github/workflows/ci.yml read this rev.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: dev-20261105190003-87a6f5ddcbcc
+    hooks:
+      - id: check-public-lab-selection
+        args: [--repo, omnibase_infra, --visibility, public]
+        require_serial: true
   # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
   # "Ci runners should be for private repos only"). Refuses a staged workflow job
   # whose runs-on is, or can resolve to, a self-hosted label unless omnibase_core's
   # shrink-only baseline records it. CI twin job public-runner-placement in
-  # .github/workflows/ci.yml; keep this rev equal to that job's pin.
+  # .github/workflows/ci.yml reads this rev from here.
+  # OMN-22360: this is the one core hook rev that is not the dev-merge tag of the
+  # other core blocks. From omnibase_core#2072 (OMN-21280) the check runs with no
+  # baseline and refuses the computed runs-on of every job in this repository's
+  # workflows; adopting it requires the hosted-runner migration and the new CLI.
+  # This rev still enforces the existing placement ratchet. It is subject to the
+  # same hook_rev_max_releases_behind policy as every other core hook: the required
+  # dependency-pins job refuses it when more than 14 release tags are newer.
+  # OMN-23246 (RULING 2026-11-09T01:57:48Z): this one rev is past that bound (15 tags) and
+  # omnibase_core's policy exempts exactly it until 2026-11-16, after which the job fails
+  # on it; OMN-22867 moves the remaining self-hosted jobs off internal runners, bumps this
+  # rev to the dev-merge tag and deletes the exemption. No baseline is added.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: c880801d4deeaa1627535c8622ab6c4ab8cfbecd
+    rev: 1c9566e2c249fe54257a4b3ef3ff2e71de027b89
     hooks:
       - id: check-public-runner-placement
         args: [--repo, omnibase_infra, --visibility, public]
@@ -272,9 +327,9 @@ repos:
   # OMN-17427). Refuses any new import crossing a node boundary. Shrink-only
   # baseline .onex_ratchets/node_boundary_import_baseline.yaml; no allowlist,
   # no suppression marker. CI twin job node-boundary-imports in
-  # .github/workflows/ci.yml; keep this rev equal to that job's pin.
+  # .github/workflows/ci.yml reads this rev from here.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 031148215620031436cba30619bbae67c0bb38ad
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       # OMN-17427: a whole-repo import-graph scan (~12s) run on every commit is
       # the commit path's second-largest fixed cost, and ci.yml's
@@ -293,10 +348,10 @@ repos:
   # claude -p or llama-cli; a model SDK import; or a caller of one) must sit in a
   # sanctioned delegation node package named in omnibase_core's policy.yaml.
   # Shrink-only baseline .onex_ratchets/direct_model_call_baseline.yaml; no
-  # suppression marker. Keep this rev equal to the pin in
-  # .github/workflows/direct-model-call.yml. Server-side backstop: OMN-20299.
+  # suppression marker. .github/workflows/direct-model-call.yml reads this rev
+  # from here. Server-side backstop: OMN-20299.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       # OMN-17427: the gate always scans the whole repository (a new call site can
       # be a new caller of an old one), ~40s on every commit; direct-model-call.yml
@@ -313,7 +368,7 @@ repos:
   # sourced from omnibase_core. Rev bumped to OMN-13026 (transport-mock-lint
   # hook added); OMN-13281 wires receipt-honesty to this block.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 309d89fa7254701347f95bf99205cccfb3f6c1df # pragma: allowlist secret
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: check-stub-implementations
         require_serial: true
@@ -339,7 +394,7 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/canonical_inference_baseline.json;
   # baseline is burn-down only. Suppression: # canonical-inference-ok: <reason>
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24 # pragma: allowlist secret
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: check-canonical-inference
         require_serial: true
@@ -350,7 +405,7 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/url_authority_baseline.json.
   # Baseline is burn-down only. Suppress with: # url-authority-ok: <reason>
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: be4f95460dcd6865264ab0713a5b1cc48b41aef9 # pragma: allowlist secret
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: check-url-authority
         require_serial: true
@@ -366,14 +421,24 @@ repos:
   # job in .github/workflows/ci.yml (registered in scripts/ci/ci_summary_gate.py
   # STRICT_GATE_JOBS); this local hook is dev-ergonomics.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 63635097705d832e0ee9c4811093efb31349105c # pragma: allowlist secret
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: no-noncanonical-lifecycle-classes
         require_serial: true
         args: [--allowlist, .onex_ratchets/noncanonical_class_allowlist.yaml, src/omnibase_infra]
         files: ^src/omnibase_infra/.*\.py$
+        stages: [manual]
   - repo: local
     hooks:
+      # Collected by CI's existing unit-test gate as well as this focused hook.
+      - id: delegation-boot-priority
+        name: Delegation boot priority and recorded effects holds (OMN-19998)
+        entry: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/(runtime/auto_wiring/handler_wiring|event_bus/model_topic_readiness_config|models/model_runtime_boot_policy)\.py|contracts/services/runtime_policy\.contract\.yaml|docker/(runtime-policy\.env|docker-compose\.(infra|dev-lane)\.yml)|tests/(unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority\.py|fixtures/delegate_skill_effects_held\.json)|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       # OMN-18713: CI's required Lint job runs the same discovery reconciliation gate.
       - id: contract-discovery-reconciliation
         name: Contract discovery reports every path outcome (OMN-18713)
@@ -486,7 +551,7 @@ repos:
   # last TOPIC_* literals. The file holds DLQ builders only and the gate now fails
   # closed on any reintroduced literal — A5-full is complete.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 6f70e56604a9f9d98b34bb9c3768a4468aeca71e
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       # OMN-18691 adds ONE path to this exclude: docker/docker-compose.ci-bus.yml.
       # Read the reason before adding a second — an allowlist entry is never a way
@@ -523,7 +588,7 @@ repos:
   # no-bare-feature-flags comes from omnibase_core (omnibase_core#1936, OMN-20919,
   # OCC retirement S8). A separate block keeps no-hardcoded-topics on the rev above.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 9218fe703b08d329f76eecd37fabbbc7b0c2baad # pragma: allowlist secret
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: no-bare-feature-flags
         require_serial: true
@@ -1382,7 +1447,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
+        stages: [manual]
       - id: delegation-response-contract-seam
         name: Delegation response contract terminal seam (OMN-18929)
         entry: uv run --frozen pytest -q tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py
@@ -1543,7 +1608,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
+        stages: [manual]
       - id: no-bare-compose-teardown
         name: No bare compose teardown (OMN-13886)
         entry: uv run --frozen python tests/test_compose_profile_teardown_policy.py
@@ -1558,7 +1623,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
+        stages: [manual]
       # Architecture validation - one model per file
       - id: onex-validate-architecture
         name: ONEX Architecture Validation
@@ -1566,7 +1631,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # ARCH-004 imperative-orchestrator ratchet (OMN-13472).
       #
       # Changed-node ratchet (BLOCKING): for any node directory touched by this
@@ -1655,7 +1720,7 @@ repos:
         language: system
         files: '\.yaml$'
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-12957: runtime_profiles contract validator (omnibase_core).
       # Enforces three rules on every node contract.yaml:
       #   - runtime_profiles_missing (OMN-9886)
@@ -1674,7 +1739,7 @@ repos:
         language: system
         files: 'contract\.yaml$'
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-13290: backend secret-ref / credential-ref discipline (omnibase_core).
       # Rejects literal credentials (PEM keys, service-account JSON, bearer/sk-/AIza/ya29.
       # tokens) in committed config, and requires a logical secret_ref/api_key_ref/
@@ -1698,7 +1763,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # Naming convention validation - file and class naming [OMN-1305]
       # Validates Handler*, Dispatcher*, Store*, Adapter*, etc. naming patterns
       # Runtime: <3s (single pass with caching)
@@ -1757,7 +1822,7 @@ repos:
         language: system
         files: ^src/omnibase_infra/.*\.py$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       - id: handler-any-signature
         require_serial: true
         name: Block Any in handler signatures (OMN-10820)
@@ -1781,7 +1846,7 @@ repos:
         language: system
         files: ^src/omnibase_infra/.*\.(py|yaml)$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-14605: a handler_routing entry whose assigned topics span >1 real category
       # (.cmd/.evt/.intent) gets ONE category stamped on every route by handler_wiring,
       # so the off-category topics were permanent NO_DISPATCHER (silent DLQ/drop) while
@@ -1798,7 +1863,7 @@ repos:
         language: system
         files: ^src/omnibase_infra/.*\.(py|yaml)$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-18013 (operator ruling item 2): the event type a handler matches is READ
       # FROM the contract that declares the topic, never hand-typed. Refuses a
       # handler_routing `event_type:` matching none of the entry's own topics (the
@@ -1812,7 +1877,7 @@ repos:
         language: system
         files: ^src/omnibase_infra/.*\.(py|yaml)$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-18013 (operator ruling item 4): a golden chain builds its input from the
       # publisher's contract. The bus carries the DERIVED ALIAS for a topic
       # (OMN-17296), never the topic string, so a test feeding a topic as an envelope
@@ -1824,7 +1889,7 @@ repos:
         language: system
         files: ^tests/.*\.py$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-18013 (operator ruling item 5): the burned baselines stay deleted. A file
       # that does not exist cannot take a row; a shrink-only ratchet can, and every
       # OMN-16939 live victim was a baselined row. SYNC with the ci.yml step
@@ -1864,7 +1929,7 @@ repos:
         language: system
         files: ^src/omnibase_infra/.*\.(py|yaml)$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-16088 (split from OMN-15978 AC4): an operation_match handler_routing entry
       # (carries `operation:`) with no `topic:`/`event_type:` scoping falls through to
       # _topics_for_handler_entry's unscoped branch and is assigned EVERY subscribe
@@ -1884,7 +1949,7 @@ repos:
         language: system
         files: ^src/omnibase_infra/.*\.(py|yaml)$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-10822: Budget gate for # type: ignore[arg-type] and [union-attr].
       # Budget: 74 (57 arg-type + 17 union-attr) — initial baseline 2026-05-22.
       # Decrement --max-violations as violations are fixed. Target: 0.
@@ -1906,7 +1971,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # Circular import check
       - id: onex-validate-imports
         name: ONEX Circular Import Check
@@ -1914,7 +1979,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # Any type validation (OMN-1276)
       # Ensures no `Any` types are used in the codebase
       - id: onex-validate-any-types
@@ -1923,7 +1988,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # Bare model_dump() Detection (OMN-4912)
       # Prevents bare model_dump() calls that produce non-JSON-safe types at
       # serialization boundaries. Baseline: 23 violations (2026-03-13).
@@ -2019,7 +2084,7 @@ repos:
         types_or: [yaml, python]
         files: (contract.*\.yaml|\.py)$
         pass_filenames: false
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-4885: Validate published_events topics appear in event_bus.publish_topics
       - id: onex-validate-published-events
         name: Contract published_events consistency
@@ -2027,7 +2092,7 @@ repos:
         language: system
         pass_filenames: false
         files: contract\.yaml$
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-10741 / OMN-20568: localhost/hardcoded-endpoint fallback validator.
       # Covers all 6 pattern types from OMN-10658 enforcement sweep. The check is
       # the omnibase_core node_no_env_fallbacks_check_compute node, run from this
@@ -2170,9 +2235,9 @@ repos:
       # per-file plant loop (judges the tree once per compose file) runs in the CI job only.
       - id: stack-shape
         name: Check every compose service is the runtime, a dependency, a one-shot or baselined
-        entry: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py -q --no-cov -k "not every_compose_file"
+        entry: uv run --frozen pytest tests/unit/validation/test_checker_stack_shape.py tests/unit/docker/test_allowed_commands.py -q --no-cov -k "not every_compose_file"
         language: system
-        files: ^(docker/docker-compose[^/]*\.yml|docker/catalog/.*\.ya?ml|config/validation/stack_shape\.yaml|tests/(unit/validation/test_checker_stack_shape\.py|fixtures/stack_shape/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(docker/docker-compose[^/]*\.yml|docker/catalog/.*\.ya?ml|config/validation/stack_shape\.yaml|pyproject\.toml|uv\.lock|src/omnibase_infra/nodes/node_architecture_validator/.*|tests/(unit/validation/test_checker_stack_shape\.py|unit/docker/test_allowed_commands\.py|fixtures/stack_shape/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: dev-tenant-projection-fold
@@ -2256,12 +2321,6 @@ repos:
         pass_filenames: false
         files: ^src/omnibase_infra/runtime/(auto_wiring/handler_wiring|service_kernel)\.py$
         stages: [pre-commit]
-      - id: normalization-symmetry
-        name: normalization-symmetry
-        entry: uv run python -m omnibase_core.validators.normalization-symmetry
-        language: system
-        pass_filenames: false
-        stages: [manual]
       # OMN-13034 (retro B-6): Lane-boundary attestation gate.
       # Rejects any staged file that contains lane-boundary attestation language
       # (markdown lane tables, compose_project declarations, GENERATED_LANE_TABLE
@@ -2410,9 +2469,8 @@ repos:
   # required gates for omnibase_infra against omnibase_core's
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
   # repo's own architecture-handshakes/validator-requirements-baseline.yaml.
-  # Re-pin rev to the merged-dev SHA once the omnibase_core export PR lands.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24 # pragma: allowlist secret
+    rev: dev-20261105190003-87a6f5ddcbcc
     hooks:
       - id: validate-validator-requirements
         require_serial: true
@@ -2662,7 +2720,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
+        stages: [manual]
       # OMN-19998: omnibase_infra must not depend on omnimarket (market depends
       # on infra). Same focused module as the Lint job's step in ci.yml.
       # OMN-21279: the module also scans the runtime Dockerfile, ci.yml and
@@ -2673,14 +2731,14 @@ repos:
         language: system
         pass_filenames: false
         files: '^(pyproject\.toml|uv\.lock|src/omnibase_infra/.*\.py|tests/.*\.py|docker/Dockerfile\.runtime|\.github/workflows/ci\.yml|\.github/actions/.*\.yml)$'
-        stages: [pre-commit]
+        stages: [manual]
       - id: subscribe-wiring-health
         name: Subscribe wiring health + allowlist hygiene (OMN-16795)
         entry: uv run python scripts/check_subscribe_wiring_health.py
         language: system
         pass_filenames: false
         files: '^(src/omnibase_infra/nodes/.*/contract\.yaml|src/omnibase_infra/runtime/topics\.yaml|scripts/check_subscribe_wiring_health\.py)$'
-        stages: [pre-commit]
+        stages: [manual]
   - repo: local
     hooks:
       - id: validate-gitignore-baseline
@@ -2790,4 +2848,4 @@ ci:
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
   # CI runs the same node with --base: the `migration-freeze` job)
-  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
+  skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]

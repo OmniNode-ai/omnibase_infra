@@ -1,0 +1,1562 @@
+TLC2 Version 2026.11.03.180953 (rev: 309e489)
+Running breadth-first search Model-Checking with fp 119 and seed 3311851942576089358 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 36482] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tmpn_s0h2bk/RuntimeStartFirst.tla
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-12086202078870968792/Naturals.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-12086202078870968792/Integers.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-12086202078870968792/FiniteSets.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-12086202078870968792/TLC.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/1h/z37k4b691hxb6jkyhllgmqpw0000gn/T/tlc-12086202078870968792/Sequences.tla (jar:file:/Users/jonah/.cache/runtime-start-first-tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module RuntimeStartFirst
+Linting of module RuntimeStartFirst
+Starting... (2026-11-04 02:10:28)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-04 02:10:29.
+Error: Invariant NotRedeployed is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "idle"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 0
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 2: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "wait_ready"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 3: <Boot(2) line 179, col 5 to line 182, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "wait_ready"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 4: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_attach"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 5: <Attach1(2) line 266, col 5 to line 270, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attaching",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_attach"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 6: <Attach2(2) line 274, col 5 to line 279, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_attach"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 7: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "retire"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 8: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "stopping",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> TRUE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_exit"
+/\ faulted = FALSE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 0
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 9: <Crash(1) line 234, col 5 to line 244, col 54 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "exited",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_exit"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 10: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "exited",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "remove"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 11: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "record"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 1,
+  inst |-> 1,
+  src |-> 0,
+  srcg |-> 0,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 12: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_active"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 13: <Activate(2) line 221, col 5 to line 229, col 67 of module RuntimeStartFirst>
+/\ cur = 1
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_active"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 14: <RActive line 444, col 5 to line 447, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "none",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "idle"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 1
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 15: <RCreate line 389, col 5 to line 394, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "wait_ready"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 16: <Boot(3) line 179, col 5 to line 182, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "wait_ready"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 17: <Attach1(3) line 266, col 5 to line 270, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attaching",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "wait_ready"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 18: <Attach2(3) line 274, col 5 to line 279, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "wait_ready"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 19: <RReady line 397, col 5 to line 400, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_attach"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 20: <RAttach line 404, col 5 to line 408, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "retire"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 21: <RStop line 412, col 5 to line 419, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "stopping",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> TRUE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_exit"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 1
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 22: <Crash(2) line 234, col 5 to line 244, col 54 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "exited",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_exit"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 2
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 23: <RExit line 422, col 5 to line 425, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "exited",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "remove"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 2
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 24: <RRemove line 428, col 5 to line 432, col 75 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "record"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 2,
+  inst |-> 2,
+  src |-> 1,
+  srcg |-> 1,
+  snap |-> [has |-> TRUE, off |-> 0, ep |-> 1] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 2
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 25: <RRecord line 436, col 5 to line 441, col 70 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 0,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "passive",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_active"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 3,
+  inst |-> 3,
+  src |-> 2,
+  srcg |-> 2,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 2
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 26: <Activate(3) line 221, col 5 to line 229, col 67 of module RuntimeStartFirst>
+/\ cur = 2
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 3,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = TRUE
+/\ now = 0
+/\ pc = "wait_active"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 3,
+  inst |-> 3,
+  src |-> 2,
+  srcg |-> 2,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 2
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+State 27: <RActive line 444, col 5 to line 447, col 75 of module RuntimeStartFirst>
+/\ cur = 3
+/\ S = << [ ep |-> 1,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 2,
+     proc |-> "removed",
+     ready |-> FALSE,
+     role |-> "passive",
+     lst |-> "detached",
+     conf |-> FALSE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ],
+   [ ep |-> 3,
+     proc |-> "up",
+     ready |-> TRUE,
+     role |-> "active",
+     lst |-> "attached",
+     conf |-> TRUE,
+     stop |-> FALSE,
+     rev |-> FALSE,
+     pos |-> 0,
+     infl |-> FALSE ] >>
+/\ handover = FALSE
+/\ now = 0
+/\ pc = "idle"
+/\ faulted = TRUE
+/\ nRev = 0
+/\ commit = ( 0 :> [has |-> FALSE, off |-> 0, ep |-> 0] @@
+  1 :> [has |-> TRUE, off |-> 0, ep |-> 1] @@
+  2 :> [has |-> FALSE, off |-> 0, ep |-> 0] )
+/\ rec = [ ep |-> 3,
+  inst |-> 3,
+  src |-> 2,
+  srcg |-> 2,
+  snap |-> [has |-> FALSE, off |-> 0, ep |-> 0] ]
+/\ rd = 2
+/\ nAg = 0
+/\ tAt = 0
+/\ grantTo = 0
+/\ agent = "up"
+/\ ip = "pre"
+/\ nCrash = 2
+/\ x2 = (0 :> 0)
+/\ Lopen = TRUE
+/\ legEp = 0
+/\ effects = (0 :> 0)
+
+37260 states generated, 12745 distinct states found, 1241 states left on queue.
+The depth of the complete state graph search is 29.
+Finished in 01s at (2026-11-04 02:10:30)

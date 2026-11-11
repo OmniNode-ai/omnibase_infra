@@ -41,6 +41,7 @@ SIBLING_REPOS = (
     "omnibase_core",
     "onex_change_control",
     "omnimarket",
+    "omniintelligence",
 )
 _DIST_NAME = {
     "omnibase_core": "omnibase-core",
@@ -49,6 +50,7 @@ _DIST_NAME = {
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
     "omnibase_spi": "omnibase-spi",
+    "omniintelligence": "omninode-intelligence",
 }
 _PIN_VERSION = "9.9.9"
 
@@ -96,7 +98,8 @@ def _write_consumer_lock(omni_home: Path) -> None:
     # committed here too -- RT-1's `git clean -fdx` would wipe an untracked lock.
     blocks = [
         f'[[package]]\nname = "{dist}"\nversion = "{_PIN_VERSION}"\n'
-        for dist in _DIST_NAME.values()
+        for repo, dist in _DIST_NAME.items()
+        if repo != "omniintelligence"  # no lock pins it (OMN-22153)
     ]
     market = omni_home / "omnimarket"
     (market / "uv.lock").write_text("\n".join(blocks), encoding="utf-8")
@@ -406,7 +409,7 @@ def test_build_context_git_clone_stays_untracked_clean(tmp_path: Path) -> None:
     assert porcelain == "", porcelain
 
 
-PINNED_SIBLINGS = ("omnibase_core", "omnibase_spi", "omnimarket")
+PINNED_SIBLINGS = ("omnibase_core", "omnibase_spi", "omnimarket", "omniintelligence")
 
 
 def _current_repo_refs(omni_home: Path) -> list[str]:
@@ -470,6 +473,7 @@ def test_per_repo_pin_errors_preserve_every_clone(tmp_path: Path, invalid: str) 
     refs = [
         f"omnibase_core={target_core}",
         f"omnibase_spi={'b' * 40}",
+        f"omniintelligence={'d' * 40}",
         f"omnimarket={'c' * 40}",
     ]
     if invalid == "missing":

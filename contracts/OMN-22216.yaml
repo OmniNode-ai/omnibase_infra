@@ -1,0 +1,48 @@
+# OMN-22216 contract file for omnibase_infra: onex delegate resolves a boundary failure terminal and prints its own failure code and text.
+schema_version: "1.0.0"
+ticket_id: "OMN-22216"
+title: "onex delegate reports \"no resolvable delegation terminal\" for a deployed-lane boundary failure terminal and hides the DatabaseError it carries"
+summary: "resolve_delegate_terminal also accepts a consume-boundary failure terminal (bare or inside its envelope) and resolves it to a failed delegation terminal with no attempts, whose cause is the boundary's failure class and ONEX code and whose reason is the boundary's failure text. A receipt with no terminal at all still raises the no-resolvable-terminal sentence."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22216-failure-terminal
+    statement: "A delegate receipt whose only terminal is a boundary failure terminal is resolved and reported with that terminal's own failure code and text; a receipt with no terminal keeps the no-resolvable-terminal sentence."
+    acceptance:
+      - id: AC1
+        statement: "AC1: a receipt whose only terminal is a boundary failure terminal is resolved, and the CLI prints that terminal's failure code and text -- falsifier: uv run pytest tests/unit/cli/test_delegate_terminal_resolver_failure_terminal.py -q -k failure_terminal_resolved, a stub receipt with a DatabaseError failure terminal, which prints the no-resolvable-terminal sentence today"
+      - id: AC2
+        statement: "AC2: a receipt with no terminal at all still prints the no-resolvable-terminal sentence -- falsifier: uv run pytest tests/unit/cli/test_delegate_terminal_resolver_failure_terminal.py -q -k no_terminal_sentence_kept"
+evidence_requirements:
+  - kind: tests
+    description: "The boundary failure terminal resolver tests pass."
+    command: "uv run --frozen pytest tests/unit/cli/test_delegate_terminal_resolver_failure_terminal.py -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22216-failure-terminal-resolved
+    description: "A stub receipt carrying a DatabaseError boundary failure terminal (in its envelope and bare) resolves to a failed terminal, and the human failure line names DatabaseError, its ONEX code and its failure text and not the no-resolvable-terminal sentence. On the base the resolver raises and these tests fail."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_delegate_terminal_resolver_failure_terminal.py -q -k failure_terminal_resolved --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22216-no-terminal-sentence-kept
+    description: "A receipt with no terminal, an unrelated payload, or a boundary-shaped payload whose status is not failed still raises DelegateTerminalUnresolvedError with the no-resolvable-terminal sentence."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_delegate_terminal_resolver_failure_terminal.py -q -k "no_terminal_sentence_kept or failure_terminal_resolved" --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22216-deploy
+    description: "CLI read-side change: the resolver module at the branch head imports the boundary failure envelope mirror model. Runs on a pull request runner with no lab host."
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python -c "import omnibase_infra.cli.delegate_terminal_resolver as m; assert hasattr(m, 'ModelDelegateBoundaryFailureEnvelope')"
+        cwd: ${OMNI_HOME}/omnibase_infra

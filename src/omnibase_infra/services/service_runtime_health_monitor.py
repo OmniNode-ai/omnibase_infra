@@ -421,7 +421,7 @@ def _worst(statuses: list[_HealthStatus]) -> _HealthStatus:
 #: in container logs and in ``docker inspect`` output on every probe interval;
 #: a runtime with fifty wedged groups has one problem, and the first few name
 #: it.
-_MAX_NAMED_SYNC_GROUPS = 5
+_MAX_NAMED_SYNC = 5
 
 #: What the dimension reports when the transport cannot answer the question --
 #: the in-memory bus, and any process that consumes nothing. Stated rather
@@ -445,42 +445,50 @@ def describe_consumer_sync(statuses: Sequence[ModelConsumerSyncStatus]) -> str:
         return "no consumer groups attached yet"
 
     out_of_sync = [status for status in statuses if not status.ready]
+    # OMN-22291: a group that CARRIES a stall the declared window is still
+    # covering is named rather than omitted. The self-heal owns it until the
+    # window passes, so it is correctly not out of sync -- but a reader could
+    # not tell that from the group never having been measured, because both
+    # read as absence. That is the confusion this dimension exists to end, and
+    # it is what let a CRITICAL verdict rest on three groups whose own reason
+    # string cleared them.
+    held = [status for status in statuses if status.stalled and status.ready]
+    inside = "; ".join(_describe_one_group(s) for s in held[:_MAX_NAMED_SYNC])
+    preamble = f"; {len(held)} group(s) carrying a stall held inside the window: "
+    excluded = preamble + inside if held else ""
     if not out_of_sync:
-        max_lag = max(status.backlog_records for status in statuses)
-        newest_advance = min(status.seconds_since_last_record for status in statuses)
         return (
-            f"{len(statuses)} consumer group(s) in sync; "
-            f"max lag {max_lag} record(s), "
-            f"last advance {newest_advance:.0f}s ago"
+            f"{len(statuses)} consumer group(s) in sync; max lag "
+            f"{max(s.backlog_records for s in statuses)} record(s), last advance "
+            f"{min(s.seconds_since_last_record for s in statuses):.0f}s ago{excluded}"
         )
 
-    named = [
-        _describe_one_group(status) for status in out_of_sync[:_MAX_NAMED_SYNC_GROUPS]
-    ]
-    remainder = len(out_of_sync) - len(named)
-    if remainder > 0:
-        named.append(f"+{remainder} more")
+    named = [_describe_one_group(s) for s in out_of_sync[:_MAX_NAMED_SYNC]]
+    if len(out_of_sync) > len(named):
+        named.append(f"+{len(out_of_sync) - len(named)} more")
     return (
         f"{len(out_of_sync)} of {len(statuses)} consumer group(s) out of sync: "
         + "; ".join(named)
+        + excluded
     )
 
 
 def _describe_one_group(status: ModelConsumerSyncStatus) -> str:
-    """One out-of-sync group, with the two facts that prove it."""
-    parts = [
-        status.consumer_group,
-        f"lag={status.backlog_records}",
-        f"stalled={status.stalled_seconds:.0f}s",
-        f"last_advance={status.seconds_since_last_record:.0f}s",
-        f"reason={status.reason.value}",
-    ]
-    if status.last_rejoin_failed:
-        # Named separately from the stall: the group being behind and the
-        # self-heal being unable to fix it are two findings, and only the
-        # second one says the container needs outside help.
-        parts.append(f"rejoin_failed(attempts={status.rejoin_count})")
-    return " ".join(parts)
+    """One group, with the facts that prove its verdict and the window it met."""
+    # ``window`` is carried for every group, in or out of sync: the stall
+    # figure means nothing without the number it was judged against, and a held
+    # group's whole point is that its stall has not outlived it (OMN-22291).
+    # rejoin_failed is named separately from the stall: the group being behind
+    # and the self-heal being unable to fix it are two findings, and only the
+    # second one says the container needs outside help.
+    failed = f" rejoin_failed(attempts={status.rejoin_count})"
+    return (
+        f"{status.consumer_group} lag={status.backlog_records} "
+        f"stalled={status.stalled_seconds:.0f}s of "
+        f"{status.unready_after_seconds:.0f}s window "
+        f"last_advance={status.seconds_since_last_record:.0f}s "
+        f"reason={status.reason.value}{failed if status.last_rejoin_failed else ''}"
+    )
 
 
 def evaluate_consumer_sync(

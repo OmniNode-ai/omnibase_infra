@@ -1,0 +1,162 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 123 and seed 4198482080082460976 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/FindingPublication.tla
+Parsing file /tmp/tlc-12318190239402090884/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-12318190239402090884/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-12318190239402090884/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-12318190239402090884/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module FindingPublication
+Linting of module FindingPublication
+Starting... (2026-11-03 03:27:02)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:27:02.
+Progress(13) at 2026-11-03 03:27:02: 559 states generated, 239 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 239 total distinct states at (2026-11-03 03:27:02)
+Error: Temporal property PrGetsRecorded was violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {}
+/\ prs = 0
+/\ pc = [r1 |-> "new", r2 |-> "new"]
+/\ branch = FALSE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 2: <StepB("r2") line 98, col 3 to line 103, col 77 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {}
+/\ prs = 0
+/\ pc = [r1 |-> "new", r2 |-> "b_done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 3: <Emit1("r2") line 107, col 3 to line 110, col 79 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {<<"r2", 1>>}
+/\ prs = 0
+/\ pc = [r1 |-> "new", r2 |-> "b_rec"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 4: <StepP("r2") line 114, col 3 to line 118, col 80 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {<<"r2", 1>>}
+/\ prs = 1
+/\ pc = [r1 |-> "new", r2 |-> "p_done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 5: <Emit2("r2") line 138, col 3 to line 141, col 79 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {<<"r2", 1>>, <<"r2", 2>>}
+/\ prs = 1
+/\ pc = [r1 |-> "new", r2 |-> "done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 6: <StepB("r1") line 98, col 3 to line 103, col 77 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {<<"r2", 1>>, <<"r2", 2>>}
+/\ prs = 1
+/\ pc = [r1 |-> "b_done", r2 |-> "done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 7: <Emit1("r1") line 107, col 3 to line 110, col 79 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {<<"r1", 1>>, <<"r2", 1>>, <<"r2", 2>>}
+/\ prs = 1
+/\ pc = [r1 |-> "b_rec", r2 |-> "done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 8: <StepP("r1") line 114, col 3 to line 118, col 80 of module FindingPublication>
+/\ hiRec = 0
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 0
+/\ pend = {<<"r1", 1>>, <<"r2", 1>>, <<"r2", 2>>}
+/\ prs = 1
+/\ pc = [r1 |-> "p_done", r2 |-> "done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 9: <Next line 165, col 12 to line 165, col 35 of module FindingPublication>
+/\ hiRec = 1
+/\ crashes = 0
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 1
+/\ pend = {<<"r1", 1>>, <<"r2", 2>>}
+/\ prs = 1
+/\ pc = [r1 |-> "p_done", r2 |-> "done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "none"
+
+State 10: <Crash("r1") line 145, col 3 to line 150, col 65 of module FindingPublication>
+/\ hiRec = 1
+/\ crashes = 1
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 1
+/\ pend = {<<"r1", 1>>, <<"r2", 2>>}
+/\ prs = 1
+/\ pc = [r1 |-> "dead", r2 |-> "done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "p_done"
+
+State 11: <Next line 165, col 12 to line 165, col 35 of module FindingPublication>
+/\ hiRec = 1
+/\ crashes = 1
+/\ looked = [r1 |-> FALSE, r2 |-> FALSE]
+/\ rec = 1
+/\ pend = {<<"r2", 2>>}
+/\ prs = 1
+/\ pc = [r1 |-> "dead", r2 |-> "done"]
+/\ branch = TRUE
+/\ ignored = FALSE
+/\ crashedAt = "p_done"
+
+State 12: Stuttering
+Warning: The stuttering counterexample above may be caused by the absence of a fairness constraint in the behavior specification SpecNoFair defined at line 168, col 1 to line 168, col 35 of module FindingPublication. To rule out such counterexamples, conjoin a suitable fairness constraint to SpecNoFair (compare Chapter 8, page 87ff of Specifying Systems at https://lamport.azurewebsites.net/tla/book.html).
+(Use the -nowarning option to disable this warning.)
+Finished checking temporal properties in 00s at 2026-11-03 03:27:02
+559 states generated, 239 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 13.
+Finished in 00s at (2026-11-03 03:27:02)

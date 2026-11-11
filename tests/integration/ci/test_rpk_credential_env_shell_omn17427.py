@@ -22,6 +22,9 @@ import pytest
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
     ConsumerFlowLane,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_lane import (
+    ModelConsumerFlowLane,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -57,7 +60,10 @@ def test_password_is_in_rpk_environment_and_not_in_its_argv(tmp_path: Path) -> N
         )
 
     lane = ConsumerFlowLane(
-        docker="fake-docker", base_url="http://projection.test", runner=runner
+        containers=ModelConsumerFlowLane.from_compose_project("omnibase-infra"),
+        docker="fake-docker",
+        base_url="http://projection.test",
+        runner=runner,
     )
     lane.rpk("topic", "describe", "-p", "some.topic")
 

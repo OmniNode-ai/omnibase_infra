@@ -1,0 +1,81 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22377
+title: >-
+  The dev runtime accepts on a shared host listener only while ready and stops accepting before its readiness changes
+summary: >
+  Task T1 of the OMN-22151 stage-2 design (rules A1 to A6). Behind the /run/onex-handover mount, ServiceHealth fetches the host listener from the deploy agent broker by SCM_RIGHTS, serves it with a second aiohttp runner, attaches only when ready and unlatched, and drains it on SIGTERM before the shutdown order of service_kernel.py changes readiness.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22377-shared-listener
+    statement: The runtime serves a host listener it received by SCM_RIGHTS and stops accepting before its readiness changes.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: a runtime handed a listening socket by SCM_RIGHTS serves /ready on it, and a test asserts a SIGTERM stops accepting before readiness_check flips and still answers a connection accepted before its request bytes arrived
+      - id: AC2
+        statement: >-
+          AC2: with two processes attached, a test asserts every connection queued while one detaches is answered 200 by the other, and an attach racing SIGTERM never accepts
+      - id: AC3
+        statement: >-
+          AC3: a detach request answered wait or refused keeps the runtime accepting, and a test asserts a revocation hold answers 200 inside the probe client timeout
+      - id: AC4
+        statement: >-
+          AC4: without the handover mount the runtime binds and serves exactly as before, and the runtime-startup test still passes
+evidence_requirements:
+  - kind: tests
+    description: "Shared listener tests over a real socket handed by SCM_RIGHTS"
+    command: "uv run pytest tests/unit/services/test_shared_listener.py tests/unit/services/test_shared_listener_handover.py tests/unit/services/test_shared_listener_hold.py tests/unit/services/test_shared_listener_inventory.py -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22377-ac1-shared-listener
+    description: >-
+      A runtime serves /ready on a socket received by SCM_RIGHTS; SIGTERM stops accepting before readiness flips and the silent connection is still answered. Fails at the merge base, which has no shared listener tests.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/services/test_shared_listener.py tests/unit/services/test_shared_listener_handover.py tests/unit/services/test_shared_listener_hold.py tests/unit/services/test_shared_listener_inventory.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn22377-ac2-handover
+    description: >-
+      Two attached listeners share one accept queue; queued connections are answered by the other and an attach racing SIGTERM never accepts.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/services/test_shared_listener_handover.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn22377-ac3-hold
+    description: >-
+      A wait or refused detach keeps the runtime accepting; a revocation hold answers 200 inside the probe client timeout, and the policy refuses a hold larger than that timeout.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/services/test_shared_listener_hold.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn22377-ac4-unmounted
+    description: >-
+      Without the handover mount ServiceHealth builds no listener and the /ready body is unchanged; kernel bootstrap starts and stops normally. The unmounted-listener test is absent at the merge base, so this check fails there.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/services/test_shared_listener.py::test_shared_listener_unmounted_runtime_is_unchanged tests/unit/runtime/test_kernel.py::TestBootstrap::test_bootstrap_starts_and_stops_runtime -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn22377-deploy-gate-probe
+    description: >-
+      Deploy probe: the pinned Python image parses the committed listener module and finds the SharedListener class, the single owner of the attach, drain and hold state machine. A tree without the module fails this check at the mount, before any parse.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          docker run --rm -v "$PWD/src/omnibase_infra/handlers/shared_listener.py:/m.py:ro" python:3.12-slim@sha256:dd29372629eeba2dd003fd9e9d35a5b8236c44727875a0364254b5127af88e65 python -c "import ast; names = {c.name for c in ast.parse(open('/m.py').read()).body if isinstance(c, ast.ClassDef)}; assert 'SharedListener' in names, names"
+        cwd: ${OMNI_HOME}/omnibase_infra

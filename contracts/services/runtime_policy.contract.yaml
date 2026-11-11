@@ -67,6 +67,15 @@ profiles:
         source:
           source_type: env
           source_path: GEMINI_API_KEY
+      # OMN-22650: the TypeSafe Jev typed-decision rung (cloud-typesafe-jev in
+      # omnimarket bifrost_delegation.yaml) declares secret_ref
+      # llm.typesafe.api_key. The value lives in the secret store at
+      # /shared/env/LLM_TYPESAFE_API_KEY (dev) and reaches the container through
+      # x-runtime-env; the value is never committed.
+      - logical_name: llm.typesafe.api_key
+        source:
+          source_type: env
+          source_path: LLM_TYPESAFE_API_KEY
       # OMN-12971: Vertex bearer-token ref. ADDITIVE to the Gemini API-key path.
       # The logical ref MUST match the cloud-vertex-gemini backend's secret_ref in
       # omnimarket bifrost_delegation.yaml (llm.vertex.access_token). The effect
@@ -187,13 +196,26 @@ profiles:
         source:
           source_type: env
           source_path: GITHUB_WEBHOOK_SECRET
+      # OMN-22685: the Linear key for node_create_ticket and node_linear_ticket_write_effect,
+      # which lab lanes reach over the bus (`onex ticket`). The handler resolves it through
+      # contract_secret_ref(_CONTRACT_PATH, "LINEAR_API_KEY"), the LITERAL name from the node's own
+      # contract.yaml secrets: block, the same shape as SLACK_BOT_TOKEN and ONEXBOT_OCC_* above.
+      # Unmapped, this lane's enable_convention_fallback: false made every lab ticket write
+      # terminate secret_unavailable (linear_api_key_unresolved) while the container env already
+      # held the key (docker-compose.infra.yml, x-runtime-env). Source of truth: secret store key
+      # dev:/shared/env/LINEAR_API_KEY. The value never appears here.
+      - logical_name: LINEAR_API_KEY
+        source:
+          source_type: env
+          source_path: LINEAR_API_KEY
     services:
       main:
         runtime_id: dev-main
-        # OMN-21288: tenant projection nodes and the five projection writers
+        # OMN-21288: tenant projection nodes and the six projection writers
         # that dispatch in-process (omnimarket handler_runtime_writer) share
-        # the main runtime. The delegation and hook-ledger writers still run a
-        # standalone consume loop and keep their containers.
+        # the main runtime. The delegation writer joined them in plan task T10
+        # (OMN-22664): its contract names the retired container's consumer
+        # group under consumer_group_handover, so main resumes its offsets.
         folded_profiles:
           - tenant-projection
           - projection-writer-live-events
@@ -201,18 +223,99 @@ profiles:
           - projection-writer-savings
           - projection-writer-tenant-credentials
           - projection-writer-tenant-registry
+          - projection-writer-delegation
+          # OMN-22930 (T8): the effects role runs as nodes inside main. The
+          # separate runtime-effects service is retired through the same
+          # contract mapping as the writers; its consumer groups resume from
+          # the committed offsets through the fold handover (OMN-22877).
+          - effects
+          # OMN-21288 (T9): the worker role runs as nodes inside main. The
+          # separate runtime-worker service is retired through the same
+          # contract mapping; its consumer groups resume from the committed
+          # offsets through the same handover as effects, so a queued workflow
+          # event is neither skipped nor run twice across the fold.
+          - workers
+          # OMN-21288 (T17): the projection API is the query node
+          # node_projection_query_api_effect. Main serves it on its own HTTP port
+          # under the http_mount prefix its contract declares, so the separate
+          # projection-api service is retired through the same contract mapping.
+          # The service holds no consumer group, so there is no fold handover.
+          - projection-api
+        fold_handovers:
+          workers:
+            # KAFKA_INSTANCE_ID the retired runtime-worker service set
+            # (docker-compose.infra.yml). A repeat of a workflow event is not
+            # tolerated, so the rule is last_ran, never copy_if_uncommitted.
+            from_instance_id: runtime-worker
+            from_auto_offset_reset: latest
+            handover_rule: last_ran
+          effects:
+            # KAFKA_INSTANCE_ID the retired runtime-effects service set
+            # (docker-compose.infra.yml), and the event bus default it ran
+            # with (kafka_event_bus_config.yaml, KAFKA_AUTO_OFFSET_RESET).
+            from_instance_id: runtime-effects
+            from_auto_offset_reset: latest
+            # Effects handlers cannot take a repeat (plan T8).
+            handover_rule: last_ran
         foldable_services:
+          effects: runtime-effects
+          workers: runtime-worker
           tenant-projection: tenant-projection-writer
           projection-writer-live-events: projection-live-events-writer
           projection-writer-registration: projection-registration-writer
           projection-writer-savings: projection-savings-writer
           projection-writer-tenant-credentials: projection-tenant-credentials-writer
           projection-writer-tenant-registry: projection-tenant-registry-writer
+          projection-writer-delegation: projection-delegation-writer
+          projection-api: projection-api
+        # OMN-21288: the claude hook-events projection node runs in main with no
+        # profile of its own; its writer container of the previous revision is
+        # retired by name, from this list, by the deploy agent and handler.
+        # OMN-23066 (T13): the context audit projection node runs in main, so the
+        # context-audit-consumer container of the previous revision is retired the
+        # same way. The node's contract names the retired consumer's group under
+        # consumer_group_handover (from_group_id context-audit-postgres), so main
+        # resumes from that group's committed offsets and the table has one writer.
+        # OMN-21288 (T16): the contract resolver is mounted in main (the
+        # node_contract_resolver_bridge http_mount), so its container of the
+        # previous revision is retired by name the same way. The deploy handler
+        # no longer restarts it on the dev lane either.
+        # OMN-21933 (T12): the skill lifecycle projection node runs in main, so the
+        # skill-lifecycle-consumer container of the previous revision is retired the
+        # same way. The node's contract names the retired consumer's group under
+        # consumer_group_handover (from_group_id skill-lifecycle-postgres), and the
+        # consumer would otherwise hold that group live and fence the node's own.
+        # OMN-23043: the agent actions projection node runs in main, so the
+        # agent-actions-consumer container of the previous revision is retired the
+        # same way. The consumer holds its group (agent-observability-postgres) and
+        # fences the node's own group while it runs, which leaves the runtime
+        # reading DEGRADED projection_attachment and turns main unhealthy.
+        retired_services:
+          - projection-claude-hook-events-writer
+          - context-audit-consumer
+          # OMN-22391 (T15): the intelligence API is the app node_pattern_storage_effect's
+          # contract mounts under /api/v1 on main's HTTP port, so the separate
+          # intelligence-api container of the previous revision is retired by name.
+          - intelligence-api
+          - omninode-contract-resolver
+          - skill-lifecycle-consumer
+          - agent-actions-consumer
+          # OMN-23525: omnibase_infra#5803 (OMN-23072) dropped the infra routing
+          # decisions consumer from the dev compose files, but its container of the
+          # previous revision kept running and holding its group
+          # (infra-routing-decisions-postgres), which fences the attach of
+          # projection_infra_routing_decisions in main. It is retired by name too.
+          - infra-routing-decisions-consumer
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof
           - workflow.orchestration
           - runtime.main
+          # OMN-21288 (T9): the capabilities the retired runtime-worker declared,
+          # so the workflow capabilities resolve on main once the role is folded.
+          - workflow.dispatch
+          - contract.update
+          - runtime.worker
         bifrost_verify_endpoints: true
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
@@ -231,13 +334,31 @@ profiles:
           ready_bound_seconds: 600
           max_concurrent_contract_attach: 4
           # Delegation and hook-event consumers subscribe before every other
-          # contract's, in this order.
+          # contract's, in this order. The work-ledger query node answers the
+          # board's readings and the seam probe by bus request, with a 30 s
+          # deadline; discovered 1225th of 1243 contracts it joined 197 s and
+          # 318 s after the container started on 2026-11-10, so a request sent
+          # during a roll waited unconsumed and was answered 151 s to 211 s late.
           priority_contracts:
+            - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
             - node_delegation_chain_ledger_effect
             - projection_claude_hook_events
             - projection_hook_ledger
+            - work_ledger_query_effect
           memory_limit: 3072M
+        # OMN-22930 (T8): the BYOK credential READ that only the separate
+        # effects service resolved (OMN-20533) now happens in main, because the
+        # provider call runs there once the role is folded. The rule is the
+        # same one the effects process declares below (kept for the other dev
+        # instances, which still render a separate effects role), so the folded
+        # main resolves every name the retired service resolved, from the same
+        # sources. Renders as DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON.
+        secret_resolver_namespaces:
+          - namespace: tenant_inference_credentials
+            ref_pattern: "^cred_[A-Za-z0-9._:-]+_[A-Za-z0-9_-]+_[0-9a-f]{32}$"
+            source_type: infisical
+            source_path_template: "/tenant-inference-credentials/{ref}"
       effects:
         runtime_id: dev-effects
         runtime_address: runtime://omninode-pc/dev/effects
@@ -249,6 +370,14 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
+        # The client checks first-hop membership before publishing, including
+        # when this separate effects carrier has never received a request.
+        boot:
+          ready_bound_seconds: 600
+          max_concurrent_contract_attach: 4
+          priority_contracts:
+            - node_delegate_skill_orchestrator
+          memory_limit: 1536M
         # OMN-20533: the READ half of BYOK on the .201 dev lane. onex-api writes
         # a tenant's provider key to Infisical env dev, folder
         # /tenant-inference-credentials, under a ref minted per request

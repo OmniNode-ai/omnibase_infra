@@ -1,0 +1,36 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 50 and seed 671796830601739193 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/FallbackStoreOnce.tla
+Parsing file /tmp/tlc-8866311439485314164/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-8866311439485314164/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-8866311439485314164/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-8866311439485314164/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module FallbackStoreOnce
+Linting of module FallbackStoreOnce
+Starting... (2026-11-03 03:20:46)
+Implied-temporal checking--satisfiability problem has 4 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:20:46.
+Progress(4) at 2026-11-03 03:20:46: 16 states generated, 13 distinct states found, 0 states left on queue.
+Checking 4 branches of temporal properties for the complete state space with 52 total distinct states at (2026-11-03 03:20:46)
+Error: Temporal properties EveryCallAnswered and SomeResultStored were violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ out = [c1 |-> "wait", c2 |-> "wait", c3 |-> "wait"]
+/\ seen = [c1 |-> "none", c2 |-> "none", c3 |-> "none"]
+/\ wrote = {}
+/\ stored = "none"
+/\ pc = [c1 |-> "new", c2 |-> "new", c3 |-> "new"]
+/\ writes = 0
+
+State 2: Stuttering
+Finished checking temporal properties in 00s at 2026-11-03 03:20:46
+16 states generated, 13 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 4.
+Finished in 00s at (2026-11-03 03:20:46)

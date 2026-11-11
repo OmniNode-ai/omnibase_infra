@@ -1,0 +1,45 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 109 and seed 8382104324857857105 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/FallbackStoreOnce.tla
+Parsing file /tmp/tlc-6674282080968401583/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-6674282080968401583/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-6674282080968401583/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-6674282080968401583/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module FallbackStoreOnce
+Linting of module FallbackStoreOnce
+Starting... (2026-11-03 03:20:49)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:20:49.
+Error: Invariant DifferentRefused is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ out = [c1 |-> "wait", c2 |-> "wait", c3 |-> "wait"]
+/\ seen = [c1 |-> "none", c2 |-> "none", c3 |-> "none"]
+/\ wrote = {}
+/\ stored = "none"
+/\ pc = [c1 |-> "new", c2 |-> "new", c3 |-> "new"]
+/\ writes = 0
+
+State 2: <WriteOnArrival("c1") line 80, col 3 to line 87, col 19 of module FallbackStoreOnce>
+/\ out = [c1 |-> "stored", c2 |-> "wait", c3 |-> "wait"]
+/\ seen = [c1 |-> "none", c2 |-> "none", c3 |-> "none"]
+/\ wrote = {"a"}
+/\ stored = "a"
+/\ pc = [c1 |-> "done", c2 |-> "new", c3 |-> "new"]
+/\ writes = 1
+
+State 3: <WriteOnArrival("c2") line 80, col 3 to line 87, col 19 of module FallbackStoreOnce>
+/\ out = [c1 |-> "stored", c2 |-> "stored", c3 |-> "wait"]
+/\ seen = [c1 |-> "none", c2 |-> "none", c3 |-> "none"]
+/\ wrote = {"a", "b"}
+/\ stored = "b"
+/\ pc = [c1 |-> "done", c2 |-> "done", c3 |-> "new"]
+/\ writes = 2
+
+9 states generated, 9 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 4.
+Finished in 00s at (2026-11-03 03:20:49)

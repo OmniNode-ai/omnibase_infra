@@ -1,0 +1,19 @@
+{
+  "base_ref": "65e3994c3d870c6d24a9c233872b3498c3c9ec39",
+  "canonical_handler_module": "omnibase_infra.nodes.node_rsd_data_fetch_effect.handlers.handler_rsd_data_fetch",
+  "legacy_handler_module": "omnibase_infra.nodes.node_rsd_data_fetch_effect.handlers.handler_rsd_data_fetch",
+  "node_id": "omnibase_infra.nodes.node_rsd_data_fetch_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:f24a6cc76b29ff1d938a60013cf2b124107e1fab846bad1e588b8e1654576236"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_handler_shape_signatures_omn21536.py::test_rsd_data_fetch_effect_handle_takes_one_typed_request"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerRsdDataFetch.handler_type"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

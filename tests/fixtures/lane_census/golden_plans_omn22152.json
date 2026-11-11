@@ -1,0 +1,131 @@
+{
+  "cases": {
+    "host-a": {
+      "envelope": {
+        "lane": null,
+        "host": "box-a",
+        "containers": [
+          {
+            "Names": "example-dogfood-postgres",
+            "State": "running",
+            "Status": "Up 2 hours",
+            "Image": "example-runtime:1",
+            "Labels": {
+              "com.docker.compose.project": "example-dogfood"
+            }
+          },
+          {
+            "Names": "example-dogfood-redpanda",
+            "State": "running",
+            "Status": "Up 2 hours",
+            "Image": "example-runtime:1",
+            "Labels": {
+              "com.docker.compose.project": "example-dogfood"
+            }
+          },
+          {
+            "Names": "example-dogfood-forward-migration",
+            "State": "exited",
+            "Status": "Exited (0) 1 hour ago",
+            "Image": "example-runtime:1",
+            "Labels": {
+              "com.docker.compose.project": "example-dogfood"
+            }
+          },
+          {
+            "Names": "example-dogfood-migration-gate",
+            "State": "running",
+            "Status": "Up 2 hours",
+            "Image": "example-runtime:1",
+            "Labels": {
+              "com.docker.compose.project": "example-dogfood"
+            }
+          },
+          {
+            "Names": "example-dogfood-runtime-effects",
+            "State": "running",
+            "Status": "Up 2 hours",
+            "Image": "example-runtime:1",
+            "Labels": {
+              "com.docker.compose.project": "example-dogfood"
+            }
+          },
+          {
+            "Names": "example-dogfood-runtime",
+            "State": "exited",
+            "Status": "Exited (137) 1 hour ago",
+            "Image": "example-runtime:1",
+            "Labels": {
+              "com.docker.compose.project": "example-dogfood"
+            }
+          }
+        ],
+        "networks": [
+          "example-dogfood-network"
+        ],
+        "runtime_tag": null
+      },
+      "plan": {
+        "schema_version": "1.1.0",
+        "host": "host-a",
+        "lanes_checked": [
+          "dogfood",
+          "dev"
+        ],
+        "lanes_not_applicable": [
+          "principal-issuer"
+        ],
+        "lanes_skipped_optional_down": [
+          "dev"
+        ],
+        "lab_sync_evaluated": false,
+        "findings": [
+          {
+            "lane": "dogfood",
+            "kind": "container_absent",
+            "container": "example-dogfood-runtime",
+            "detail": "required service container 'example-dogfood-runtime' is not running (desired replicas=1); lane 'dogfood' is degraded",
+            "severity": "critical"
+          }
+        ],
+        "has_drift": true
+      }
+    },
+    "host-b": {
+      "envelope": {
+        "lane": null,
+        "host": "box-b",
+        "containers": [
+          {
+            "Names": "example-principal-issuer-runtime",
+            "State": "running",
+            "Status": "Up 2 hours",
+            "Image": "example-runtime:1",
+            "Labels": {
+              "com.docker.compose.project": "example-principal-issuer"
+            }
+          }
+        ],
+        "networks": [
+          "example-principal-issuer-network"
+        ],
+        "runtime_tag": null
+      },
+      "plan": {
+        "schema_version": "1.1.0",
+        "host": "host-b",
+        "lanes_checked": [
+          "principal-issuer"
+        ],
+        "lanes_not_applicable": [
+          "dogfood",
+          "dev"
+        ],
+        "lanes_skipped_optional_down": [],
+        "lab_sync_evaluated": false,
+        "findings": [],
+        "has_drift": false
+      }
+    }
+  }
+}

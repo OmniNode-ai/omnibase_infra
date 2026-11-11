@@ -103,22 +103,6 @@ def _ci_job() -> dict[str, object]:
     return job
 
 
-def _hook_rev() -> str:
-    repos = _load(PRECOMMIT)["repos"]
-    assert isinstance(repos, list)
-    revs = [
-        repo["rev"]
-        for repo in repos
-        if isinstance(repo, dict)
-        and any(
-            isinstance(hook, dict) and hook.get("id") == HOOK_ID
-            for hook in repo.get("hooks", [])
-        )
-    ]
-    assert len(revs) == 1, f"expected one {HOOK_ID} hook, found {len(revs)}"
-    return str(revs[0])
-
-
 def test_ci_job_runs_the_core_check_unconditionally_on_a_hosted_runner() -> None:
     job = _ci_job()
     assert job["name"] == JOB_NAME
@@ -134,11 +118,20 @@ def test_ci_job_runs_the_core_check_unconditionally_on_a_hosted_runner() -> None
 
 
 def test_ci_job_and_hook_share_one_core_pin() -> None:
-    env = _ci_job()["env"]
-    assert isinstance(env, dict)
-    pin = _CORE_PIN.search(str(env["RUNNER_PLACEMENT_CORE"]))
-    assert pin is not None
-    assert pin.group(1) == _hook_rev()
+    """The job has no pin of its own: it reads the hook's rev from the config."""
+    job = _ci_job()
+    assert "env" not in job
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    reads = [
+        str(step.get("run", ""))
+        for step in steps
+        if step.get("name") == "Read the core pin from .pre-commit-config.yaml"
+    ]
+    assert len(reads) == 1
+    assert f'"id"] == "{HOOK_ID}"' in reads[0]
+    assert 'RUNNER_PLACEMENT_CORE=${spec}" >> "$GITHUB_ENV"' in reads[0]
+    assert not _CORE_PIN.search(yaml.safe_dump(job))
 
 
 def test_ci_summary_registers_the_job() -> None:
@@ -161,3 +154,19 @@ def test_precommit_hook_names_this_public_repository() -> None:
         "--visibility",
         "public",
     ]
+
+
+def test_the_lab_selection_refusal_is_in_the_required_job() -> None:
+    """The refusal runs in the job CI Summary sweeps, with its failing control first."""
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["public-runner-placement"]["steps"]
+    runs = [str(step.get("run", "")) for step in steps]
+    control = next(i for i, run in enumerate(runs) if "FAILING CONTROL FAILED" in run)
+    refusal = next(
+        i
+        for i, run in enumerate(runs)
+        if "validator_public_lab_selection" in run and "--variables-json" in run
+    )
+    assert control < refusal

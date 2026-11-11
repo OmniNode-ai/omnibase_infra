@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21604
 title: "The onex delegate CLI and dispatch port take a task class's time limit from the site overlay instead of 240 seconds"
 summary: >-
-  The delegate CLI's terminal model now reads the budget_source a delegation terminal names, which says where the run's execution budget came from: a task-class contract entry or a site overlay file. receipt.json records it beside the budget evidence or refusal it describes, and it is omitted when the terminal names none. This PR covers AC2's receipt side. The CLI's overlay-aware budget (AC1) arrives through the task-class authority omnimarket registers, and a test now pins the CLI's terminal wait to the budget that authority answers. The dispatch port's 240 s and 60 s defaults are removed in favour of the class's declared budget, and the port refuses at load a class whose ceiling plus margin passes the consumer dispatch deadline. AC3 stays unbound: a 240 literal remains in runtime/dogfood_delegation_fault_routes.py.
+  The delegate CLI's terminal model now reads the budget_source a delegation terminal names, which says where the run's execution budget came from: a task-class contract entry or a site overlay file. receipt.json records it beside the budget evidence or refusal it describes, and it is omitted when the terminal names none. This PR covers AC2's receipt side. The CLI's overlay-aware budget (AC1) arrives through the task-class authority omnimarket registers, and a test now pins the CLI's terminal wait to the budget that authority answers. The dispatch port's 240 s and 60 s defaults are removed in favour of the class's declared budget, and the port refuses at load a class whose ceiling plus margin passes the consumer dispatch deadline. The dogfood fault route no longer pins its own 240 s: its timeout is the figure omnimarket's lane declaration gives, and the consumer guard admits only a request asking for exactly that, so no 240 literal remains in the delegate path (AC3).
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -21,6 +21,13 @@ requirements:
       - id: AC1
         statement: >-
           AC1: the delegate CLI resolves a class's budget through omnimarket's overlay-aware resolver, so with an overlay ceiling of 600 s a request for 300 s waits 300 s plus the delivery margin and is not refused -- falsifier: uv run pytest on a cli_delegate test that sets a 600 s delegation_budgets overlay and asserts the terminal wait and the absence of a ceiling refusal
+  - id: req-omn21604-no-fixed-budget
+    statement: >-
+      The infra delegate path holds no fixed 240 s budget, and a class the consumer dispatch deadline would cancel is refused at load.
+    acceptance:
+      - id: AC3
+        statement: >-
+          AC3: no 240 s constant remains in the infra delegate path, and a class whose ceiling plus margin exceeds the consumer dispatch deadline is refused when it loads rather than cancelled mid-run -- falsifier: uv run pytest on the dispatch port default and the deadline check, plus git grep for the 240 constant under src/omnibase_infra returning nothing
 evidence_requirements:
   - kind: tests
     description: >-
@@ -30,6 +37,10 @@ evidence_requirements:
     description: >-
       With a 600 s overlay a 300 s request waits its remaining seconds plus the 60 s margin and is not clamped to 240 s; without the overlay the same request is clamped to the contract.
     command: uv run --frozen pytest tests/unit/cli/test_delegate_overlay_budget_omn21604.py -q -n 0
+  - kind: tests
+    description: >-
+      A dogfood fault route declared at 300 s resolves at 300 s and admits only a 300 s request; no delegate-path module holds a 240 literal; a class whose ceiling plus margin passes the dispatch deadline is refused at load.
+    command: uv run --frozen pytest tests/unit/runtime/test_delegate_path_fixed_budget_omn21604.py tests/unit/runtime/test_delegation_budget_deadline_check_omn21604.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -60,3 +71,21 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/cli/test_delegate_overlay_budget_omn21604.py tests/unit/runtime/test_delegation_budget_deadline_check_omn21604.py -q -n 0 -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn21604-ac3-no-fixed-budget
+    description: >-
+      A dogfood fault route declared at 300 s resolves at 300 s and the consumer guard refuses a 240 s request for it; an AST scan of the six delegate-path modules (CLI, terminal model, dispatch budget, dispatch port protocol and service, fault routes) finds no 240 literal; and the dispatch port refuses at load a class whose ceiling plus margin passes the consumer dispatch deadline. At the merge base the fault-route model refuses any timeout but 240, so the first file fails. Mutation check: restoring the exact-240 check fails three cases.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_delegate_path_fixed_budget_omn21604.py tests/unit/runtime/test_delegation_budget_deadline_check_omn21604.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21604-ac3-consumer-dispatch-integration
+    description: >-
+      A serialized delegation envelope crosses the real consumer callback, wire-model coercion and YAML fault-route admission guard before reaching a recording handler. Both HTTP 429 and 503 routes admit their declared 300 s or 240 s budget unchanged, refuse a 240 s or 301 s request against a 300 s declaration before invoking the handler, and refuse a non-dogfood runtime identity. Restoring the merge-base exact-240 validator makes the non-default budget cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_dogfood_fault_budget_dispatch_omn21604.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]

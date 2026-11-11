@@ -1,0 +1,90 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 38 and seed 339748410452360884 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/MirrorConditionalUpload.tla
+Parsing file /tmp/tlc-10085311083801056382/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-10085311083801056382/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-10085311083801056382/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-10085311083801056382/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module MirrorConditionalUpload
+Linting of module MirrorConditionalUpload
+Starting... (2026-11-03 03:20:56)
+Implied-temporal checking--satisfiability problem has 3 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:20:56.
+Progress(11) at 2026-11-03 03:20:56: 922 states generated, 533 distinct states found, 0 states left on queue.
+Checking 3 branches of temporal properties for the complete state space with 1599 total distinct states at (2026-11-03 03:20:56)
+Error: Temporal property EverySnapshotCovered was violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 0, B |-> 0]
+/\ taken = {}
+/\ pc = [A |-> "idle", B |-> "idle"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 0, B |-> 0]
+/\ local = 1
+
+State 2: <Read("B") line 75, col 12 to line 81, col 77 of module MirrorConditionalUpload>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 0, B |-> 1]
+/\ taken = {1}
+/\ pc = [A |-> "idle", B |-> "read"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 0, B |-> 1]
+/\ local = 1
+
+State 3: <Read("A") line 75, col 12 to line 81, col 77 of module MirrorConditionalUpload>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 1, B |-> 1]
+/\ taken = {1}
+/\ pc = [A |-> "read", B |-> "read"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 1, B |-> 1]
+/\ local = 1
+
+State 4: <Grow line 71, col 9 to line 73, col 91 of module MirrorConditionalUpload>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 1, B |-> 1]
+/\ taken = {1}
+/\ pc = [A |-> "read", B |-> "read"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 1, B |-> 1]
+/\ local = 2
+
+State 5: <Grow line 71, col 9 to line 73, col 91 of module MirrorConditionalUpload>
+/\ store = 0
+/\ maxPut = 0
+/\ refusedShort = FALSE
+/\ hiStore = 0
+/\ snaps = [A |-> 1, B |-> 1]
+/\ taken = {1}
+/\ pc = [A |-> "read", B |-> "read"]
+/\ head = [A |-> 0, B |-> 0]
+/\ snap = [A |-> 1, B |-> 1]
+/\ local = 3
+
+State 6: Stuttering
+Warning: The stuttering counterexample above may be caused by the absence of a fairness constraint in the behavior specification SpecNoFair defined at line 109, col 1 to line 109, col 35 of module MirrorConditionalUpload. To rule out such counterexamples, conjoin a suitable fairness constraint to SpecNoFair (compare Chapter 8, page 87ff of Specifying Systems at https://lamport.azurewebsites.net/tla/book.html).
+(Use the -nowarning option to disable this warning.)
+Finished checking temporal properties in 00s at 2026-11-03 03:20:56
+922 states generated, 533 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 11.
+Finished in 00s at (2026-11-03 03:20:56)

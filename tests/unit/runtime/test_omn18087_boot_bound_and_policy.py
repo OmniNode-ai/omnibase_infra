@@ -69,6 +69,13 @@ def test_dev_main_declares_the_boot_policy_and_memory_limit() -> None:
     assert boot.max_concurrent_contract_attach >= 1
     assert "node_delegation_orchestrator" in boot.priority_contracts
     assert "projection_claude_hook_events" in boot.priority_contracts
+    # The board's readings and the seam probe ask this node by bus request with a
+    # 30 s deadline; undeclared, it joined 197 s to 318 s after start.
+    assert "work_ledger_query_effect" in boot.priority_contracts
+    rendered = renderer.render_env(_contract())
+    assert "work_ledger_query_effect" in rendered[
+        "DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"
+    ].split(",")
 
 
 def test_dev_main_memory_limit_fits_the_four_kernel_figure() -> None:
@@ -102,7 +109,13 @@ def test_the_renderer_writes_main_policy_and_the_committed_env_matches() -> None
 
 
 def test_a_process_that_declares_no_boot_policy_renders_none() -> None:
-    rendered = renderer.render_env(_contract())
+    contract = _contract()
+    effects = contract.profiles["dev"].processes["effects"]
+    # Exercise an absent policy explicitly; dev effects now declares one.
+    contract.profiles["dev"].processes["effects"] = effects.model_copy(
+        update={"boot": None}
+    )
+    rendered = renderer.render_env(contract)
 
     assert not [
         key

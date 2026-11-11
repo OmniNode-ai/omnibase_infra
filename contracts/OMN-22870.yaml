@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: OMN-22870
+title: The CI bus overlay model accepts the lane table's pattern-declared secret namespaces, so the binding gate stops refusing the live file
+summary: The dev lane's secret_resolver gained a namespaces block (iLO per-host account names declared by pattern, the lane table's own OMN-22870 change). ModelCiBusOverlay is extra="forbid", so the overlay binding gate went red on dev itself and on every pull request behind it. The field is now typed on the consumer side; the strictness is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22870-typed-namespaces
+    statement: A lane's injected secret resolver may declare a family of secret references by pattern, and the publisher's strict overlay model parses that block as a typed namespace rather than refusing it as an unknown key.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the live dev-lane secret_resolver, namespaces block included, validates under ModelCiBusOverlay, and a resolver with no namespaces still validates -- falsifier: uv run --frozen pytest tests/unit/scripts/test_omn_22870_lane_secret_namespaces.py -q -k 'live_namespaces_block or without_namespaces'"
+      - id: AC2
+        statement: "AC2: extra='forbid' still bites around the new field -- an unknown key inside a namespace, a misspelled namespaces key, and a namespace missing its source_path_template are each refused -- falsifier: uv run --frozen pytest tests/unit/scripts/test_omn_22870_lane_secret_namespaces.py -q -k 'refused'"
+evidence_requirements:
+  - kind: tests
+    description: The lane secret namespace tests of this change.
+    command: uv run --frozen pytest tests/unit/scripts/test_omn_22870_lane_secret_namespaces.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22870-ac1-live-block-parses
+    description: The live dev-lane secret_resolver with its namespaces block parses under the publisher's strict overlay model, and a resolver that declares no namespaces still parses. At the merge base both cases fail on "lanes.dev.secret_resolver.namespaces Extra inputs are not permitted", which is the exact message the overlay binding gate reported on dev (job 128488372447).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_omn_22870_lane_secret_namespaces.py -q -n 0 --no-cov -k 'live_namespaces_block or without_namespaces'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22870-ac2-strictness-retained
+    description: A source_value key inside a namespace (a secret by VALUE, the one shape the overlay contract forbids), a misspelled namespaces key, and a namespace with no source_path_template are each refused, so the fix is a typed field and not a widening of extra="forbid".
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_omn_22870_lane_secret_namespaces.py -q -n 0 --no-cov -k refused
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22870-binding-gate-reads-live
+    description: The cross-repo binding gate's own cases pass against the live lane table under the fixed model. Run with CI_BUS_OVERLAY_LIVE_PATH set to the checked-out lane table, which is what the overlay binding workflow exports; without it the cases skip by design.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_ci_bus_overlay_live_binding.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

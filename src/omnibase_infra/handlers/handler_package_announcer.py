@@ -54,6 +54,7 @@ from omnibase_core.models.nodes.package_announce.model_node_catalog import (
 )
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.protocols.services.protocol_announce_bus import ProtocolAnnounceBus
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors.error_contract_content_hash import (
     ContractContentHashError,
@@ -165,30 +166,6 @@ def resolve_contract_path(node_cls: type) -> Path:
     )
 
 
-def read_contract_yaml(contract_path: Path) -> object:
-    """Read contract YAML safely for discovery and pre-subscription wiring.
-
-    Cold wiring re-reads contract extensions after discovery. Keep those reads
-    on the same fast safe parser so they do not restore the pure-Python parse
-    delay before the first consumer bind (OMN-18843). I/O and parse errors
-    propagate to the caller, which owns the field's refusal semantics.
-    """
-    with open(contract_path) as f:
-        # OMN-18843: cold discovery gates the first consumer bind. Use the
-        # safe LibYAML parser when available; the memo only helps later scans.
-        # Both loaders reject Python object tags, with a portable fallback.
-        loader_class = (
-            yaml.CSafeLoader if hasattr(yaml, "CSafeLoader") else yaml.SafeLoader
-        )
-        loader = loader_class(f)
-        try:
-            raw = loader.get_single_data()
-        finally:
-            loader.dispose()
-
-    return raw
-
-
 def load_boot_runtime_config(
     contract_path: Path | None = None,
 ) -> ModelBootRuntimeConfig:
@@ -255,6 +232,24 @@ def _read_contract(
     )
 
 
+def _entry_point_is_active(
+    ep: object, dist_name: str, active_packages: frozenset[str] | None
+) -> bool:
+    """Whether the lane lists the distribution or the import package the entry point loads.
+
+    ``ONEX_ACTIVE_RUNTIME_PACKAGES`` names import packages (``omniintelligence``), and a
+    distribution may carry another name (``omninode-intelligence``), so either one
+    listed admits the entry point (OMN-22958).
+    """
+    if is_runtime_package_active(dist_name, active_packages):
+        return True
+    value = getattr(ep, "value", "")
+    import_package = str(value).split(":", 1)[0].split(".", 1)[0]
+    return bool(import_package) and is_runtime_package_active(
+        import_package, active_packages
+    )
+
+
 def read_package_inventory(
     active_packages: frozenset[str] | None = None,
 ) -> ModelPackageInventory:
@@ -271,7 +266,7 @@ def read_package_inventory(
         dist_name = dist.name if dist is not None else "unknown"
         dist_version = str(dist.version) if dist is not None else "0.0.0"
         fingerprint.append((ep.name, dist_name, dist_version))
-        if not is_runtime_package_active(dist_name, active_packages):
+        if not _entry_point_is_active(ep, dist_name, active_packages):
             logger.debug(
                 "Skipping contract discovery for inactive runtime package '%s'",
                 dist_name,

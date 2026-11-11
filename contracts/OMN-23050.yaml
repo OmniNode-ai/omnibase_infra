@@ -1,0 +1,36 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23050
+title: "omnibase_infra's repo-evidence caller pins the receipt gate at a tag that holds the pin-train hook rev swap rule"
+summary: >-
+  The repo-evidence caller on dev called the omnibase_core receipt-gate at the dev-merge tag dev-20261101005012-ac2f26e3e5bf, from before omnibase_core#2284, which counts a pin-train hook rev swap in .pre-commit-config.yaml as pin-only (operator ruling 2026-11-08T00:17:32Z). The caller, the required-checks.yaml cross_repo_ref and the test-side pin constants now pin the first dev-merge tag that holds that rule, dev-20261108023315-fe0d8082717e, and a floor test fails on the previous pin. No check, bound or gate was widened.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23050-infra-caller-pin
+    statement: >-
+      The omnibase_infra repo-evidence caller, its required-checks.yaml cross_repo_ref and tests/ci/receipt_gate_pin.py all name the omnibase_core receipt-gate commit of dev-20261108023315-fe0d8082717e or a later dev-merge tag.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the caller workflow, required-checks.yaml and the pin constants pin the commit of dev-20261108023315-fe0d8082717e, and the previous pin reads below the floor -- falsifier: uv run --frozen pytest tests/ci/test_receipt_gate_caller_hook_rev_floor_omn23050.py -q --no-cov fails at the merge base, where the caller pins dev-20261101005012-ac2f26e3e5bf
+evidence_requirements:
+  - kind: tests
+    description: The caller pin sits at or after the first receipt-gate tag that holds the hook rev swap rule in all three places, and the floor test fails on the previous pin.
+    command: uv run --frozen pytest tests/ci/test_receipt_gate_caller_hook_rev_floor_omn23050.py tests/ci/test_receipt_gate_caller_pin_omn20134.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23050-caller-pin-hook-rev-floor
+    description: The receipt-gate pin is at or after the hook rev swap tag in the caller, in required-checks.yaml and in the pin constants, and the previous pin reads below the floor.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_receipt_gate_caller_hook_rev_floor_omn23050.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -n "receipt-gate.yml@fe0d8082717eec6717f138825c0aad71efc27ee0" .github/workflows/call-repo-evidence-gate.yml
+        cwd: ${OMNI_HOME}/omnibase_infra

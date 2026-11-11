@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Topics whose consumers read committed records only (OMN-22430).
+#
+# Shipped as a resource of the wheel. The event bus refuses to start when this
+# file is unavailable, and refuses a name that is not one of the declared host
+# state event topics (see ModelReadCommittedTopics).
+schema_version: "1.0.0"
+topics:
+  - onex.evt.omnimarket.host-layer-decided.v1
+  - onex.evt.omnimarket.host-desired-state.v1
+  - onex.evt.omnimarket.host-observed-state.v1

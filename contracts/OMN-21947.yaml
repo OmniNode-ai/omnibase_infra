@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-21947
+title: Adjudicate the work ledger verb disagreement between file and database and import the history with legacy_ordinal and the line-citation table
+summary: 'omnibase_infra half of OMN-21947: vendors the work-ledger history-import migrations 0007 (creates ledger_line_citation) and 0008 (grants the runtime SELECT, INSERT, UPDATE, never DELETE) ahead of the omnimarket change, and bridges the relation in the table-grant derivation until the contract pin advances. The behavioural proof of every criterion is in the omnimarket contract for this ticket; this change makes that code wireable.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21947-infra-grant
+    statement: The runtime principal holds a declared grant on the citation table so the omnimarket projection wires.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: each differing hold and claim of M8 is classified as file-window truncation, database fold difference or before the first database row, with one test per class -- falsifier: uv run pytest tests -k "hold_class or claim_class" -q in omnimarket and in omnibase_core'
+      - id: AC2
+        statement: 'AC2: holds, open-claims, open-rulings and inbox return the same items from both sources for one UTC day after the 14-day stale-hold rule, stale holds listed under a separate stale heading with their age -- falsifier: the L1 receipt of that day shows verb_diff=0 for every verb'
+      - id: AC3
+        statement: 'AC3: the database''s earliest row equals the oldest archive split''s first stamp, the 99,042 assigned ledger_seq values are unchanged and unique, and imported rows keep ledger_seq null with a legacy_ordinal -- falsifier: select min(row_ts) against the oldest split, a before-and-after hash of the ledger_seq column, and select count(*), count(distinct ledger_seq) equal over assigned rows'
+      - id: AC4
+        statement: 'AC4: ledger_line_citation is built with generation-aware keys and every ledger:line citation in ACK and amends cells of the last 14 days resolves to the row_id the file guard resolves -- falsifier: uv run pytest tests -k citation_resolution -q over a recorded 14 days'
+evidence_requirements:
+  - kind: tests
+    description: The vendored migration applies to fresh and existing tables, preserves assigned sequences, and enforces generation-aware citation keys, immutability and runtime grants.
+    command: uv run pytest tests/integration/migrations/test_work_ledger_citation_vendor_omn21947.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21947-infra-ac1
+    description: 'This is the omnibase_infra half of OMN-21947 and carries only the prerequisite: the vendored work-ledger migrations 0007 and 0008 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.ledger_line_citation, which omnimarket''s projection auto-wiring requires before it will wire. It adds no classification code; the one-test-per-class proof for AC1 runs in omnimarket and omnibase_core. This prerequisite check applies the vendored SQL and exercises the runtime grant and immutable generation-aware citation keys; it does not claim to satisfy the cross-repository criterion.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/migrations/test_work_ledger_citation_vendor_omn21947.py -k generation_and_immutable -q -n 0 --no-cov -p no:cacheprovider
+  - id: dod-omn21947-infra-ac2
+    description: 'This is the omnibase_infra half of OMN-21947 and carries only the prerequisite: the vendored work-ledger migrations 0007 and 0008 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.ledger_line_citation, which omnimarket''s projection auto-wiring requires before it will wire. It adds no verb code; the verb parity proof for AC2 is the L1 receipt and omnimarket''s tests. This prerequisite check applies the vendored SQL and exercises the runtime grant and immutable generation-aware citation keys; it does not claim to satisfy the cross-repository criterion.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/migrations/test_work_ledger_citation_vendor_omn21947.py -k generation_and_immutable -q -n 0 --no-cov -p no:cacheprovider
+  - id: dod-omn21947-infra-ac3
+    description: 'This is the omnibase_infra half of OMN-21947 and carries only the prerequisite: the vendored work-ledger migrations 0007 and 0008 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.ledger_line_citation, which omnimarket''s projection auto-wiring requires before it will wire. It carries the migration that adds legacy_ordinal; this prerequisite check applies 0007 twice, preserves assigned ledger_seq values, leaves imported rows unsequenced, and enforces legacy_ordinal uniqueness. The live archive import and its full sequence hash remain outside this PR.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/migrations/test_work_ledger_citation_vendor_omn21947.py -k primary_key -q -n 0 --no-cov -p no:cacheprovider
+  - id: dod-omn21947-infra-ac4
+    description: 'This is the omnibase_infra half of OMN-21947 and carries only the prerequisite: the vendored work-ledger migrations 0007 and 0008 and the runtime''s SELECT, INSERT, UPDATE grant on omninode_internal.ledger_line_citation, which omnimarket''s projection auto-wiring requires before it will wire. It carries the migration that creates ledger_line_citation and its grant; this prerequisite check applies the SQL, verifies generation-aware citation identity, and exercises immutable UPDATE and DELETE rejection and the effective runtime grants. The recorded 14-day file-to-row resolution proof remains in omnimarket.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/migrations/test_work_ledger_citation_vendor_omn21947.py -k generation_and_immutable -q -n 0 --no-cov -p no:cacheprovider

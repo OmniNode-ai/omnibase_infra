@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: 1.0.0
+ticket_id: OMN-22547
+title: The lab principal issuer issues a read_only row with no ledger append and no PR write commands, and one more device for that row
+summary: A read_only overlay row is issued the shared grant set less the topics read_only_withholds names, so the broker refuses a ledger append and the PR handoff and PR polish start commands from that principal. The lab cap per login moves from seven to eight so the operator login can hold that row beside its seven machines.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22547-read-only-role
+    statement: The issuer issues a read_only row the shared set less the withheld topics, and a by-name audit fails on any ACL beyond that set.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a developer row is issued WRITE on its append topic and a read_only row is issued neither that WRITE nor one on the PR handoff or PR polish start topics, a withhold naming no shared grant is refused at load, and auditing that principal by name fails on the EXTRA append WRITE -- falsifier: uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -p no:cacheprovider"
+  - id: req-omn22547-device-cap
+    statement: The lab declaration admits the read_only row beside the operator login's seven machines and refuses more.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the lab declaration admits eight principals per login and refuses a ninth, and a fresh login stays bound by the same value -- falsifier: uv run --frozen pytest -o addopts='' tests/scripts/test_lab_device_cap_omn22356.py -q -p no:cacheprovider"
+evidence_requirements:
+  - kind: tests
+    description: The issuer role tests and the device cap tests fail at the merge base.
+    command: uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/scripts/test_lab_device_cap_omn22356.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn22547-ac1-read-only-role
+    description: The added tests issue a developer row and a read_only row through a fake broker, read the grants each is given, then audit a read_only principal holding the withheld write.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -p no:cacheprovider
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn22547-ac2-device-cap
+    description: The issuer driven with the lab declaration issues eight devices to one login and refuses the ninth.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest -o addopts='' tests/scripts/test_lab_device_cap_omn22356.py -q -p no:cacheprovider
+        cwd: .
+    binds_ac:
+      - AC2

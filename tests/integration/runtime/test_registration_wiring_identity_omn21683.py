@@ -13,9 +13,11 @@ import pytest
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
+)
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
 )
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration.model_event_bus_topic_entry import (
@@ -75,13 +77,14 @@ async def test_introspection_topics_reach_catalog_through_real_registry(
 
     now = datetime(2026, 11, 1, tzinfo=UTC)
     correlation_id = uuid4()
-    request: ModelEventEnvelope[ModelTopicCatalogRequest] = ModelEventEnvelope(
-        payload=ModelTopicCatalogRequest(
+    request: ModelInjectedRequest[ModelTopicCatalogRequest] = ModelInjectedRequest(
+        event=ModelTopicCatalogRequest(
             correlation_id=correlation_id,
             requested_at=now,
             requester="registration-wiring-readback",
         ),
-        envelope_timestamp=now,
+        now=now,
+        input_id=uuid4(),
         correlation_id=correlation_id,
     )
     cold = await catalog.handle(request)
@@ -99,9 +102,10 @@ async def test_introspection_topics_reach_catalog_through_real_registry(
         ),
     )
     await introspected.handle(
-        ModelEventEnvelope(
-            payload=event,
-            envelope_timestamp=now,
+        ModelInjectedRequest(
+            event=event,
+            now=now,
+            input_id=uuid4(),
             correlation_id=correlation_id,
         )
     )

@@ -33,6 +33,23 @@ from deploy_agent import executor as executor_mod
 
 
 @pytest.fixture(autouse=True)
+def _stub_cost_estimator_build_settings(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unrelated deploy tests keep their existing image-build boundary.
+
+    The estimator suite opts in to source, gate and image delivery checks. Other
+    unit tests neither clone a foreign source nor require operator secrets.
+    """
+    if request.node.get_closest_marker("cost_estimator_build") is not None:
+        return
+    effect = executor_mod.load_dev_boot_guard(
+        "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+    )
+    monkeypatch.setattr(effect, "dev_lane_build_settings", lambda *args: None)
+
+
+@pytest.fixture(autouse=True)
 def _stub_dev_boot_guard(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -96,6 +113,25 @@ def _stub_promotion_guard(
     if request.node.get_closest_marker("promotion_guard") is not None:
         return
     monkeypatch.setattr(executor_mod, "_load_promotion_guard", _NoopPromotionGuard)
+
+
+@pytest.fixture(autouse=True)
+def _stub_service_pin_guard(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep unrelated rebuild tests off the host's compose files and code clone.
+
+    The guard (OMN-23368) reads the lane's compose files and counts commits in the
+    agent's code clone, neither of which exists in the unit sandbox. The marked
+    tests drive the real guard through ``rebuild_scope``.
+    """
+    if request.node.get_closest_marker("service_pin_guard") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod.load_dev_boot_guard("handler_dev_lane_pin_compose_guard"),
+        "guard_before_build",
+        lambda *args, **kwargs: "",
+    )
 
 
 @pytest.fixture(autouse=True)

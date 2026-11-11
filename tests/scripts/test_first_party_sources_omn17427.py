@@ -59,18 +59,22 @@ COMMITS = {
     "omnibase_core": "66d35d2283c3" + "a" * 28,
     "omnibase_spi": "f79fd4dce71e" + "b" * 28,
     "omnimarket": "2b214bdc0c13" + "d" * 28,
+    # OMN-22153: the tag that holds the http_mount merge of omniintelligence#1202.
+    "omniintelligence": "8b5209d38346" + "f" * 28,
     "omnibase_infra": "62fb83e4bd0c" + "e" * 28,
 }
 TAGS = {
     "omnibase_core": "dev-20261030152335-66d35d2283c3",
     "omnibase_spi": "dev-20261030141310-f79fd4dce71e",
     "omnimarket": "dev-20261030152625-2b214bdc0c13",
+    "omniintelligence": "dev-20261102114831-8b5209d38346",
     "omnibase_infra": "dev-20261030140409-62fb83e4bd0c",
 }
 DISTRIBUTIONS = {
     "omnibase_core": "omnibase-core",
     "omnibase_spi": "omnibase-spi",
     "omnimarket": "omnimarket",
+    "omniintelligence": "omninode-intelligence",
     "omnibase_infra": "omnibase-infra",
 }
 
@@ -88,7 +92,8 @@ def _record(repo: str, **override: Any) -> dict[str, Any]:
 
 def _provenance(**records: dict[str, Any]) -> dict[str, Any]:
     siblings = {
-        repo: _record(repo) for repo in ("omnibase_core", "omnibase_spi", "omnimarket")
+        repo: _record(repo)
+        for repo in ("omnibase_core", "omnibase_spi", "omnimarket", "omniintelligence")
     }
     context = {"omnibase_infra": _record("omnibase_infra")}
     for repo, record in records.items():
@@ -117,6 +122,7 @@ def _clean_environment() -> dict[str, dict[str, Any] | None]:
         "omnibase_core": _local("omnibase_core"),
         "omnibase_spi": _local("omnibase_spi"),
         "omnimarket": {"url": "file:///opt/omnimarket", "dir_info": {}},
+        "omniintelligence": _local("omniintelligence"),
         "omnibase_infra": {"url": "file:///app", "dir_info": {"editable": True}},
     }
 
@@ -296,6 +302,30 @@ PLANTED = [
         "tag-mismatch",
         id="spi-staged-record-carries-another-repos-tag",
     ),
+    # OMN-22153: omniintelligence is a first-party package of the dev lane. The
+    # registry install it used to take (an index install records no direct_url)
+    # and a staging at a sha or on a branch are all refused.
+    pytest.param(
+        "omniintelligence",
+        None,
+        None,
+        "exact-version",
+        id="intelligence-registry-install",
+    ),
+    pytest.param(
+        "omniintelligence",
+        _local("omniintelligence"),
+        _record("omniintelligence", dev_merge_tag=""),
+        "sha",
+        id="intelligence-staged-at-a-sha",
+    ),
+    pytest.param(
+        "omniintelligence",
+        _local("omniintelligence"),
+        _record("omniintelligence", dev_merge_tag="", vcs_branch="dev"),
+        "branch",
+        id="intelligence-staged-on-a-branch",
+    ),
 ]
 
 
@@ -314,6 +344,19 @@ def test_a_planted_violation_is_refused(
     assert [(s.repo, s.kind) for s in bad] == [(repo, kind)], [
         fps.describe(s) for s in bad
     ]
+
+
+def test_a_dev_lane_image_without_omniintelligence_is_refused(tmp_path: Path) -> None:
+    """The build requires omninode-intelligence (OMN-22153), so an image that
+    kept no install of it fails the audit instead of passing on the others."""
+    urls = _clean_environment()
+    del urls["omniintelligence"]
+    sources = _audit(
+        tmp_path, urls, required=("omnibase-core", "omninode-intelligence")
+    )
+    assert [(s.repo, s.kind) for s in fps.violations(sources)] == [
+        ("omniintelligence", "absent")
+    ], [fps.describe(s) for s in sources]
 
 
 def test_a_local_install_with_no_staging_record_is_unbound(tmp_path: Path) -> None:
@@ -634,3 +677,30 @@ def test_the_image_installs_every_workspace_package_from_the_staged_tree() -> No
     start = tokens.index("-c") + 2
     required = tokens[start : tokens.index(";", start)]
     assert required == [*provenance.WORKSPACE_PACKAGES.values(), "omnibase-infra"]
+
+
+def test_non_dev_lanes_keep_the_registry_install_of_omniintelligence() -> None:
+    """OMN-22153: only the dev lane (BUILD_SOURCE=workspace) builds
+    omniintelligence from its staged dev-merge tag. The registry range install
+    stays in the image for the release build, and the staged-tree install sits
+    inside the workspace branch, ahead of the release branch's ``else``."""
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile.runtime").read_text(
+        encoding="utf-8"
+    )
+    logical = re.sub(r"\\\s*\n", " ", dockerfile)
+    instructions = [
+        line[4:] for line in logical.splitlines() if line.startswith("RUN ")
+    ]
+    registry = [
+        line
+        for line in instructions
+        if '"omninode-intelligence>=' in line and "file://" not in line
+    ]
+    assert len(registry) == 1, registry
+    workspace = next(
+        line for line in instructions if "--reinstall-package omnibase-core" in line
+    )
+    staged = "omninode-intelligence @ file:///workspace/sibling-repos/omniintelligence"
+    assert staged in workspace
+    assert re.search(r"\belse\b", workspace[workspace.index(staged) :])
+    assert '"omninode-intelligence' not in workspace.split("else", 1)[1]

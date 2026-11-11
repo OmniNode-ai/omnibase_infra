@@ -30,6 +30,7 @@ from tests.helpers.lane_census_fixtures import (
     NEUTRAL_LANE,
     NEUTRAL_LANE_NETWORK,
     NEUTRAL_MANIFEST,
+    NEUTRAL_REGISTRY,
 )
 
 pytestmark = pytest.mark.unit
@@ -91,6 +92,7 @@ def _run(
     env["HOME"] = str(tmp_path)  # log dir under tmp, never ~
     # OMN-20934: the census reads the neutral manifest, never a lab's.
     env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+    env["LANE_CENSUS_REGISTRY"] = str(NEUTRAL_REGISTRY)
     env.pop("LANE_MANIFEST", None)
     env.pop("LANE_MEMORY_BROKER_CONTAINER", None)
     env.pop("LANE_CENSUS_DESIRED_STATE", None)

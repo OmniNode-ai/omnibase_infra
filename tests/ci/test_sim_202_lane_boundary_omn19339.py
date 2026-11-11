@@ -42,6 +42,7 @@ from scripts.preflight_lane_deploy_attribution import (
 )
 from tests.helpers.lane_census_fixtures import (
     LAB_MANIFEST,
+    lab_registry,
     lanes_declared_on_host,
 )
 from tests.helpers.lane_overlay_fixtures import (
@@ -162,9 +163,10 @@ def test_stability_test_deploy_attribution_preflight_still_refuses_without_reaso
 @pytest.mark.lab_overlay
 def test_manifest_declares_sim_202_on_lab_202_only() -> None:
     lane = _manifest()["lanes"][LANE]
-    assert lane["hosts"] == [HOST_ID], (
+    hosts = lab_registry().hosts_of(LANE)
+    assert hosts == [HOST_ID], (
         f"sim-202 runs on .202 only; a second host would make the census expect "
-        f"it there too. Got {lane['hosts']}"
+        f"it there too. Got {hosts}"
     )
     assert lane["compose_project"] == COMPOSE_PROJECT
     assert lane["network"] == NETWORK
@@ -183,9 +185,9 @@ LANES_ON_202 = ["dev-202", LANE]
 @pytest.mark.lab_overlay
 def test_lab_202_resolves_from_its_hostname_and_carries_only_its_own_lanes() -> None:
     manifest = _manifest()
-    validate_hosts(manifest)
-    assert resolve_host(HOSTNAME_ON_HOST, manifest) == HOST_ID
-    lanes_on_host = lanes_declared_on_host(manifest, HOST_ID)
+    validate_hosts(manifest, lab_registry())
+    assert resolve_host(HOSTNAME_ON_HOST, manifest, lab_registry()) == HOST_ID
+    lanes_on_host = lanes_declared_on_host(lab_registry(), HOST_ID)
     assert set(LANES_ON_202) <= set(lanes_on_host)
 
 
@@ -268,7 +270,7 @@ def _plan_on_202(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "networks": [NETWORK],
         "runtime_tag": None,
     }
-    return build_plan(envelope, _manifest())
+    return build_plan(envelope, _manifest(), lab_registry())
 
 
 @pytest.mark.lab_overlay
@@ -278,7 +280,7 @@ def test_census_on_202_reads_sim_202_clean_and_every_other_lane_not_applicable()
     plan = _plan_on_202(_healthy_sim_202_rows())
     manifest = _manifest()
     assert plan["host"] == HOST_ID
-    on_host = set(lanes_declared_on_host(manifest, HOST_ID))
+    on_host = set(lanes_declared_on_host(lab_registry(), HOST_ID))
     assert set(LANES_ON_202) <= on_host
     assert set(plan["lanes_checked"]) == on_host
     assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - on_host

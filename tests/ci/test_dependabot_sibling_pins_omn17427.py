@@ -46,7 +46,11 @@ def test_every_sibling_uses_is_pinned_to_a_full_sha() -> None:
     uses = _sibling_uses()
     assert uses, "expected sibling workflow or action uses"
     floating = {
-        name: sorted(ref for ref in refs if not re.fullmatch(r"[0-9a-f]{40}", ref))
+        name: sorted(
+            ref
+            for ref in refs
+            if not re.fullmatch(r"[0-9a-f]{40}|dev-\d{14}-[0-9a-f]{12}", ref)
+        )
         for name, refs in uses.items()
     }
     assert not {name: refs for name, refs in floating.items() if refs}

@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_hostile_review_fix_verifier_effect
+contract_name: node_hostile_review_fix_verifier_effect
+node_name: node_hostile_review_fix_verifier_effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+description: Verify a hostile-review fixed-in disposition against the PR's own git history. A commit a rebase rewrote is matched by patch-id to the PR commit that carries the same change; a change absent from the PR is refused (OMN-17427).
+input_model:
+  name: ModelFixVerifyRequest
+  module: omnibase_infra.models.hostile_review.model_fix_verify_request
+  description: The named commit, the cited lines, and the PR head and base.
+output_model:
+  name: ModelFixVerifyResult
+  module: omnibase_infra.models.hostile_review.model_fix_verify_result
+  description: Accepted or refused, with the reason the gate prints.
+handler:
+  module: "omnibase_infra.handlers.handler_git_fix_verifier"
+  class: "HandlerGitFixVerifier"
+  input_model: "omnibase_infra.models.hostile_review.model_fix_verify_request.ModelFixVerifyRequest"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: hostile_review_fix.verify
+      handler:
+        name: HandlerGitFixVerifier
+        module: omnibase_infra.handlers.handler_git_fix_verifier
+      description: Read the checkout's git history for the named commit and the cited lines.
+      supported_operations: [hostile_review_fix.verify]
+      input_model:
+        name: ModelFixVerifyRequest
+        module: omnibase_infra.models.hostile_review.model_fix_verify_request
+        description: Typed verify request.
+      output_fields: [accepted, reason]
+io_operations:
+  - operation: hostile_review_fix.verify
+    description: Verify one fixed-in disposition.
+    input_fields: [sha, path, original_commit, start, end, head, base]
+    output_fields: [accepted, reason]
+capabilities:
+  - name: hostile_review_fix.verify
+    description: Verify a fixed-in commit against the PR history, including a commit a rebase rewrote.
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  description: "Reads the PR's own git history to decide whether a named fixed-in commit touches the lines a hostile-review thread cites, matching a commit a rebase rewrote by patch-id"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-11-04"
+  tags:
+    - effect
+    - hostile_review

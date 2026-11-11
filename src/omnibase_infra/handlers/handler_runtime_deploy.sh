@@ -193,7 +193,6 @@ readonly RUNTIME_SERVICES=(
     projection-api
     agent-actions-consumer
     skill-lifecycle-consumer
-    intelligence-api
     omninode-contract-resolver
 )
 
@@ -209,12 +208,8 @@ readonly RUNTIME_SERVICES=(
 # consumes every message, commits every offset, and writes nothing, silently.
 # The onex-dev k8s overlay has run these as Deployments since OMN-15905; the
 # compose lane ran zero of them until this ticket.
-# OMN-16025 adds infra-routing-decisions-consumer to the same array for the same
-# reason: it is declared only in docker/docker-compose.dev-lane.yml. It is not a
-# standalone projection RUNNER -- it is the observability consumer that owns
-# infra_routing_decisions -- but it shares the property that makes membership
-# here mandatory and membership in RUNTIME_SERVICES fatal: the service name does
-# not exist in the prod, stability-test or judge merged compose.
+# The infra routing-decision consumer (OMN-16025) left this array when it was
+# retired into the runtime (OMN-23072, one-runtime plan T14).
 #
 # OMN-17530 adds onex-api for a third reason, stated separately because it is
 # not the writers' reason. It is TAG-REFERENCED, not lane-built, so it cannot go
@@ -249,19 +244,14 @@ readonly RUNTIME_SERVICES=(
 # START the carrier on a lane that never opted into it, defeating the compose
 # profile that keeps it inert there. Membership here scopes the restart to the
 # two lanes whose overlays put it in the `runtime` compose profile.
-# OMN-19513 adds projection-claude-hook-events-writer for the same reason as
-# the carrier: declared in the base compose file, started only by the dev lane
-# overlay that moves it into the `runtime` profile.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     tenant-projection-writer
-    projection-claude-hook-events-writer
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
-    infra-routing-decisions-consumer
     onex-api
     cost-estimator-web
 )
@@ -350,8 +340,7 @@ resolve_lane_folded_services() {
     # an unknown profile fails loud. The result is LANE_FOLDED_SERVICES; with a
     # second argument (an array name) the folded services are also removed
     # from that array in place.
-    local compose_project="$1"
-    local filter_name="${2:-}"
+    local compose_project="$1" filter_name="${2:-}"
     local -A folded_profile_services=(
         [effects]=runtime-effects
         [workers]=runtime-worker
@@ -361,12 +350,20 @@ resolve_lane_folded_services() {
         [projection-writer-savings]=projection-savings-writer
         [projection-writer-tenant-credentials]=projection-tenant-credentials-writer
         [projection-writer-tenant-registry]=projection-tenant-registry-writer
+        [projection-writer-delegation]=projection-delegation-writer [projection-api]=projection-api
     )
     LANE_FOLDED_SERVICES=()
     # Each folding lane is selected by its declared project and policy.
     local folded_profiles=""
+    # OMN-21288: services whose node main runs with no profile of its own (the
+    # claude hook-events projection). Their container of the previous revision
+    # is retired with the folded ones, from the same policy (the dev branch below
+    # seeds LANE_FOLDED_SERVICES with them), so the node's
+    # consumer group has one owner at a time; main's KAFKA_INSTANCE_ID is the
+    # group id the retired writer used, so main resumes from its offsets.
     if [[ -n "${DEV_COMPOSE_PROJECT:-}" && "${compose_project}" == "${DEV_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}"
+        IFS=',' read -r -a LANE_FOLDED_SERVICES <<< "${DEV_RUNTIME_MAIN_RETIRED_SERVICES:-}"
     elif [[ -n "${STABILITY_TEST_COMPOSE_PROJECT:-}" \
         && "${compose_project}" == "${STABILITY_TEST_COMPOSE_PROJECT}" ]]; then
         folded_profiles="${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:-}"

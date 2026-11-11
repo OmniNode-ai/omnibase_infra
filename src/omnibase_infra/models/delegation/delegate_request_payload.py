@@ -18,7 +18,16 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
+from pathlib import Path
 
+import yaml
+
+from omnibase_core.enums.enum_delegation_traffic_class import (
+    EnumDelegationTrafficClass,
+)
+from omnibase_core.models.delegation.wire.model_delegation_provenance import (
+    ModelDelegationProvenance,
+)
 from omnibase_infra.models.delegation.model_delegate_session_model import (
     ModelDelegateSessionModel,
 )
@@ -26,7 +35,9 @@ from omnibase_infra.models.delegation.model_delegate_session_model import (
 __all__ = [
     "DELEGATE_CALLER_LANE_METADATA_KEY",
     "DELEGATE_TICKET_METADATA_KEY",
+    "build_delegate_provenance",
     "build_delegate_request_payload",
+    "load_probe_ladder",
 ]
 
 #: The request ``metadata`` key that names the ticket a delegation works
@@ -57,6 +68,48 @@ def _merge_metadata(
     metadata.update(entries)
 
 
+def build_delegate_provenance(
+    *, source: str, traffic_class: str | None, source_surface: str | None
+) -> dict[str, object] | None:
+    """The typed provenance the traffic flags describe, or ``None`` when unset.
+
+    Raises ``ValueError`` when the core provenance model refuses the pair, such
+    as synthetic traffic with no ``source_surface`` (OMN-23163).
+    """
+    if traffic_class is None and source_surface is None:
+        return None
+    return ModelDelegationProvenance(
+        source=source,
+        traffic_class=EnumDelegationTrafficClass(
+            traffic_class or EnumDelegationTrafficClass.UNCLASSIFIED
+        ),
+        source_surface=source_surface,
+    ).model_dump(mode="json")
+
+
+def load_probe_ladder(
+    path: Path | None, *, traffic_class: str | None
+) -> dict[str, object] | None:
+    """The committed ladder file's mapping, or ``None`` when no file was named.
+
+    A probe ladder forces a climb on purpose, so only synthetic traffic may
+    carry one (OMN-23164). Raises ``ValueError`` when a file is named without
+    ``--traffic-class synthetic``, or when the file is not a YAML or JSON
+    mapping. The consumer's request model owns the ladder's own shape.
+    """
+    if path is None:
+        return None
+    if traffic_class != EnumDelegationTrafficClass.SYNTHETIC.value:
+        raise ValueError("--probe-ladder is only valid with --traffic-class synthetic")
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"--probe-ladder file {path} is unreadable: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise ValueError(f"--probe-ladder file {path} must hold a mapping of rungs")
+    return {str(key): value for key, value in loaded.items()}
+
+
 def build_delegate_request_payload(
     *,
     prompt: str,
@@ -80,8 +133,18 @@ def build_delegate_request_payload(
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
     session_model: str | None = None,
+    traffic_class: str | None = None,
+    source_surface: str | None = None,
+    probe_ladder: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Build the delegate request, setting only the fields the caller supplied."""
+    """Build the delegate request, setting only the fields the caller supplied.
+
+    ``traffic_class`` and ``source_surface`` (OMN-23163) are stamped on the
+    request's typed ``provenance`` field, whose ``source`` is the request's own
+    ``source``. The core provenance model owns the rule that synthetic traffic
+    names its producer surface; its refusal surfaces here as a ``ValueError``,
+    before anything is written or dispatched.
+    """
     payload: dict[str, object] = {
         "prompt": prompt,
         "task_type": task_type,
@@ -147,6 +210,18 @@ def build_delegate_request_payload(
         payload["metadata"] = metadata
     if session_id is not None:
         payload["session_id"] = session_id
+    # OMN-23163: a probe or experiment marks its run as not a user's run. The
+    # typed provenance is omitted entirely when neither flag was given, so an
+    # existing caller's payload keeps its shape and stays unclassified.
+    provenance = build_delegate_provenance(
+        source=source, traffic_class=traffic_class, source_surface=source_surface
+    )
+    if provenance is not None:
+        payload["provenance"] = provenance
+    # OMN-23164: the committed ladder file's rungs, for a synthetic probe run.
+    # Omitted entirely when no file was named, like every other optional field.
+    if probe_ladder is not None:
+        payload["probe_ladder"] = dict(probe_ladder)
     # OMN-17427: the tenant of the install the command runs under, written to
     # the ``tenant_id`` field the request model has declared since OMN-14058.
     # Omitted entirely when unresolved (the in-process first-delegation path),

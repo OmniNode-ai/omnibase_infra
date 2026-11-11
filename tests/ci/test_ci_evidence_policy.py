@@ -67,6 +67,8 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "c11-negative-paths",
     # OMN-19195: the C12 provider-catalogue record.
     "c12-provider-catalogue",
+    # OMN-23176: the C16 pinned-backend record (dispatch only).
+    "c16-pinned-backends",
     # OMN-19181: the C16 receipt-identity record.
     "c16-receipt-identity",
     # OMN-19812: the C28 consumer-flow record.
@@ -87,7 +89,6 @@ EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
     "lab-pass-receipt-compose-dev-reemitted",
     # OMN-18268: the same lane, keyed by a SIBLING repository's merged sha.
     "lab-pass-receipt-compose-dev-sibling",
-    "lab-pass-receipt-onex-lab-k3s",
     "nonrequired-check-report",
     # OMN-19258: the zombie detector's receipt; its `scanned` map is the only
     # record that tells a clean detector run from a blind one.

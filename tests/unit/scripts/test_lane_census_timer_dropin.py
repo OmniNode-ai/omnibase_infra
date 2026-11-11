@@ -24,7 +24,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.lane_census_fixtures import NEUTRAL_CONFIG_ROOT, NEUTRAL_MANIFEST
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_CONFIG_ROOT,
+    NEUTRAL_MANIFEST,
+    NEUTRAL_REGISTRY,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -105,7 +109,12 @@ def _installer_env(
     stub = bin_dir / "systemctl"
     stub.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{calls}"\nexit 0\n')
     stub.chmod(0o755)
-    env = {"HOME": str(home), "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    # OMN-22152: the unit carries the host registry, so the install needs one.
+    env = {
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "LANE_CENSUS_REGISTRY": str(NEUTRAL_REGISTRY),
+    }
     if config_root:
         root = tmp_path / "config-root"
         _write_units(root)

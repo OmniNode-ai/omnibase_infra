@@ -231,6 +231,7 @@ def _never_read(ticket: str) -> str | None:
     raise AssertionError(f"no contract should be read: {ticket}")
 
 
+@pytest.mark.timeout(300)
 def test_the_prerequisite_runs_in_the_verifier_installed_from_the_callers_tag() -> None:
     caller = yaml.safe_load(_CALLER.read_text(encoding="utf-8"))
     with_block = caller["jobs"]["repo-evidence"]["with"]
@@ -259,6 +260,7 @@ def test_the_prerequisite_runs_in_the_verifier_installed_from_the_callers_tag() 
     )
 
 
+@pytest.mark.timeout(300)
 def test_a_prose_check_value_is_refused_and_the_check_named(
     tmp_path: Path, released_judge
 ) -> None:
@@ -274,6 +276,7 @@ def test_a_prose_check_value_is_refused_and_the_check_named(
     )
 
 
+@pytest.mark.timeout(300)
 def test_a_command_shaped_contract_passes_the_released_guard(released_judge) -> None:
     decision = classify_ticket_contracts(
         ["OMN-99001"], lambda _t: _contract(_COMMAND), released_judge

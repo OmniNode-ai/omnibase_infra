@@ -1,0 +1,93 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21920
+title: omnibase_infra grants tenant_projection_writer the agent_actions tables and a consumer group handover can name a bare group
+summary: >-
+  Vendors the two node_projection_agent_actions migrations byte for byte (the six agent_* tables and the tenant_projection_writer grant), with checksum-bound ledger rows, migration classes and one interim table-grant declaration per table listed in the OMN-18863 expiry module, and regenerates the three topology instances and the nine rendered catalogs from them. ModelConsumerGroupHandover gains from_group_id, a validated optional field that names a retired consumer group that is a bare name, so the agent-actions consumer's group agent-observability-postgres can be declared. This is the infrastructure half of OMN-21920; the omnimarket node needs an omnibase_infra release that carries it.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn21920-grants
+    statement: >-
+      The role the agent-actions node writes as, tenant_projection_writer, holds SELECT, INSERT and UPDATE on the six agent_* tables it writes in every shipped topology instance; the seventh table of the retired consumer, agent_routing_decisions, was granted before this change.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra topology grants tenant_projection_writer write on all seven agent_actions tables in the local, dev and prod topology instances, and ModelConsumerGroupHandover accepts the old group name as from_group_id -- falsifier: uv run pytest tests/unit/contracts/test_every_node_auto_wires_in_process_omn17427.py -q in omnimarket against the omnibase_infra branch
+evidence_requirements:
+  - kind: tests
+    description: The vendored bytes, ledger rows, classes, grants in every topology instance and rendered catalog, and the application database SQL gate on both migrations.
+    command: uv run pytest tests/unit/migrations/test_omn21920_agent_actions_vendor.py -q --no-cov
+  - kind: tests
+    description: The handover accepts from_group_id, refuses it beside the derivation fields, and keeps the four-field form valid.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_from_group_id_omn21920.py -q --no-cov
+  - kind: tests
+    description: The RED control derives from guarded column additions that carry no marker comments, and keeps indexes and other statements.
+    command: uv run pytest tests/unit/migrations/test_migration_red_control_omn21920.py -q --no-cov
+  - kind: tests
+    description: The agent_status_events drift proof is deselected from the sharded splits by marker, named by the Migration Integration Test job, and absent from the skipping OMN-15376 module and the skip baseline.
+    command: uv run pytest tests/ci/test_agent_status_events_drift_wiring_omn21920.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21920-ac1-grants
+    description: The six agent_* tables are vendored with ledger rows and classes, granted to tenant_projection_writer in the local, dev and prod topology instances and in every rendered catalog, and both migrations pass the application database SQL gate for every shipped profile. The tests fail at the merge base, which has neither the vendored files nor the grants.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21920_agent_actions_vendor.py -q --no-cov
+        cwd: .
+  - id: dod-omn21920-ac1-handover-group-id
+    description: ModelConsumerGroupHandover accepts from_group_id, returns it as the source group in every environment, refuses it beside from_service, from_node or from_version and refuses a name that is not a Kafka group name; the four-field form still derives its group. The tests fail at the merge base, whose model has no from_group_id.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_from_group_id_omn21920.py tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -q --no-cov
+        cwd: .
+  - id: dod-omn21920-ac1-derivation
+    description: The shipped topology instances and rendered catalogs still match the grant derivation and the application database topology, and the six vendored tables carry flat-vs-node shape-parity ledger entries. The run includes the vendor test, which fails at the merge base.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21920_agent_actions_vendor.py tests/ci/test_flat_node_migration_shape_parity.py tests/unit/topology/test_application_database_table_grants.py tests/unit/topology/test_application_database_topology.py -q --no-cov
+        cwd: .
+  - id: dod-omn21920-red-control
+    description: The RED-control transformation removes only guarded column additions and preserves the statements that expose a missing column. The agent_status_events drift proof lives in an ephemeral_pg module, so the sharded splits deselect it instead of collecting and skipping it, and the Migration Integration Test job names it. Neither the skipping OMN-15376 module nor the skip baseline carries an OMN-21920 id. At the head before this change the OMN-21920 case sat in the skipping module and added two ids to the skipped set, which the Skip Count Ratchet refused.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_migration_red_control_omn21920.py tests/ci/test_agent_status_events_drift_wiring_omn21920.py tests/ci/test_skip_count_ratchet_omn18776.py tests/unit/migrations/test_omn21920_agent_actions_vendor.py::test_the_create_migration_builds_the_six_tables -q --no-cov
+        cwd: .
+  - id: dod-omn21920-drift-postgres
+    execution_scope: hosted_and_local
+    description: PostgreSQL execution proves the agent-actions migration with its guarded column additions stripped fails on the missing correlation_id column of a pre-existing agent_status_events table, and the shipped migration restores the column and its index on the same table.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_102_tenant_projection_writer_role_omn15425.py -m ephemeral_pg -k agent_status_events -q --no-cov -p no:randomly
+        cwd: .
+  - id: dod-omn21920-hosted-deploy-grants
+    description: >-
+      Deploy both vendored migrations inside a rolled-back transaction on the hosted verifier's PostgreSQL service. The grant migration asserts SELECT, INSERT and UPDATE on all six tables, then the writer role reads the reconciled correlation_id column. Connection coordinates must explicitly name the integration service; no ambient database is selected.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: >-
+          env PGHOST="${INTEGRATION_POSTGRES_HOST:?}" PGPORT="${INTEGRATION_POSTGRES_PORT:?}" PGUSER="${INTEGRATION_POSTGRES_USER:?}" PGPASSWORD="${INTEGRATION_POSTGRES_PASSWORD:?}" PGDATABASE="${INTEGRATION_POSTGRES_DB:?}" psql -X -v ON_ERROR_STOP=1 -c 'BEGIN' -c "DO \$role\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tenant_projection_writer') THEN CREATE ROLE tenant_projection_writer NOSUPERUSER NOBYPASSRLS; END IF; END \$role\$;" -f docker/migrations/forward/nodes/node_projection_agent_actions/0000_create_agent_observability_tables.sql -f docker/migrations/forward/nodes/node_projection_agent_actions/0001_grant_tenant_projection_writer_agent_observability_tables.sql -c 'SET LOCAL ROLE tenant_projection_writer' -c 'SELECT correlation_id FROM public.agent_status_events LIMIT 0' -c 'ROLLBACK'
+        cwd: .

@@ -640,6 +640,67 @@ class TestBootstrap:
         mock_health_instance.start.assert_called_once()
         mock_health_instance.stop.assert_called_once()
 
+    @pytest.mark.parametrize("mounted", [False, True])
+    async def test_bootstrap_shared_listener_lifecycle_requires_mount(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        mounted: bool,
+    ) -> None:
+        """Only opted-in boots latch and drain, before the runtime stops."""
+        import asyncio
+        import signal
+
+        from omnibase_infra.handlers import mixin_shared_listener
+
+        mount = tmp_path / "handover"
+        if mounted:
+            mount.mkdir()
+        monkeypatch.setattr(mixin_shared_listener, "HANDOVER_MOUNT", mount)
+        health = mock_health_server.return_value
+
+        async def drain() -> None:
+            mock_runtime_host.return_value.stop.assert_not_called()
+            health.mark_stopping.assert_called_once()
+
+        # An unmounted provider retains its existing API: its new method is
+        # deliberately not an AsyncMock, so awaiting it would fail bootstrap.
+        if mounted:
+            health.drain_shared_listener = AsyncMock(side_effect=drain)
+
+        loop = asyncio.get_running_loop()
+        with (
+            patch.object(loop, "add_signal_handler") as register_signal,
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as event,
+        ):
+
+            async def shutdown() -> None:
+                handlers = [
+                    call.args[1]
+                    for call in register_signal.call_args_list
+                    if call.args[0] == signal.SIGTERM
+                ]
+                if not handlers:
+                    return  # Earlier boot steps also wait on asyncio.Event.
+                if mounted:
+                    mount.rmdir()  # Shutdown must retain the boot-time opt-in.
+                handlers[0](signal.SIGTERM)
+
+            event.return_value.wait = AsyncMock(side_effect=shutdown)
+            assert await bootstrap() == 0
+
+        if mounted:
+            health.mark_stopping.assert_called_once()
+            health.drain_shared_listener.assert_awaited_once()
+        else:
+            health.mark_stopping.assert_not_called()
+            health.drain_shared_listener.assert_not_called()
+
     async def test_bootstrap_returns_error_on_unexpected_exception(
         self,
         mock_wire_infrastructure: MagicMock,

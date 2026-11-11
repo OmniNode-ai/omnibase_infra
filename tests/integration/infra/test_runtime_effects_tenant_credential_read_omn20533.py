@@ -64,12 +64,20 @@ _HOUSE_VAR = "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON"
 _IDENTITY_PREFIX = "RUNTIME_EFFECTS_INFISICAL_"
 _NAMESPACE = "tenant_inference_credentials"
 
+# OMN-22930 (T8): primary dev folds the effects role into main, so main
+# resolves the tenant refs the retired runtime-effects service resolved. Its
+# store config is the main profile's house config plus the same rule, bound by
+# the dev tenant-fold overlay on the one runtime service.
+_MAIN_STORE_VAR = "DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON"
+_MAIN_HOUSE_VAR = "DEV_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON"
+_FOLD_OVERLAY = "docker-compose.dev-tenant-fold.yml"
+_FOLDED_MAIN = "omninode-runtime"
+
 # Every lane that layers docker-compose.dev-lane.yml under its own overlay.
 # Named, not discovered: test_every_other_dev_lane_layer_is_listed below fails
 # when a new overlay claims the dev-lane layering and is missing here.
 _BORROWER_OVERLAYS = (
     "docker-compose.dev-105.yml",
-    "docker-compose.dev-200.yml",
     "docker-compose.dev-202.yml",
     "docker-compose.prepr.yml",
 )
@@ -111,7 +119,7 @@ def _contract() -> ModelRuntimePolicyContract:
     )
 
 
-def test_the_rule_is_declared_on_dev_effects_and_nowhere_else() -> None:
+def test_the_rule_is_declared_on_dev_effects_and_on_the_main_that_folds_it() -> None:
     contract = _contract()
     declared = {
         (profile_name, process_name): [
@@ -121,8 +129,14 @@ def test_the_rule_is_declared_on_dev_effects_and_nowhere_else() -> None:
         for process_name, process in profile.processes.items()
         if process.secret_resolver_namespaces
     }
-    assert declared == {("dev", "effects"): [_NAMESPACE]}
-    # No profile-level rule anywhere: that would reach main, worker and
+    # Effects keeps its rule for the dev instances that still render a separate
+    # effects role; main carries the same rule because the fold runs the effects
+    # nodes there (OMN-22930). Nothing else declares one.
+    assert declared == {
+        ("dev", "effects"): [_NAMESPACE],
+        ("dev", "main"): [_NAMESPACE],
+    }
+    # No profile-level rule anywhere: that would reach worker and
     # tenant-projection too, each of which would then demand an identity.
     assert all(
         not profile.secret_resolver_namespaces for profile in contract.profiles.values()
@@ -151,10 +165,33 @@ def test_the_rendered_store_config_is_the_house_config_plus_the_rule() -> None:
     assert not house.namespaces
     assert config_declares_infisical_source(store)
     assert not config_declares_infisical_source(house)
-    # Exactly one store variant exists: no other lane or process gained one.
-    assert [key for key in env if "_STORE_SECRET_RESOLVER_CONFIG_JSON" in key] == [
-        _STORE_VAR
-    ]
+    # Exactly two store variants exist: effects' own and the folded main's. No
+    # other lane or process gained one.
+    assert sorted(
+        key for key in env if "_STORE_SECRET_RESOLVER_CONFIG_JSON" in key
+    ) == sorted([_STORE_VAR, _MAIN_STORE_VAR])
+
+
+def test_the_folded_main_store_config_is_its_house_config_plus_the_rule() -> None:
+    env = _policy_env()
+    store = ModelSecretResolverConfig.model_validate(json.loads(env[_MAIN_STORE_VAR]))
+    house = ModelSecretResolverConfig.model_validate(json.loads(env[_MAIN_HOUSE_VAR]))
+
+    assert store.mappings == house.mappings
+    assert [rule.namespace for rule in store.namespaces] == [_NAMESPACE]
+    assert not house.namespaces
+    assert config_declares_infisical_source(store)
+    assert not config_declares_infisical_source(house)
+
+
+def test_the_fold_overlay_binds_the_main_store_config_and_the_effects_identity() -> (
+    None
+):
+    env = _compose(_FOLD_OVERLAY)["services"][_FOLDED_MAIN]["environment"]
+    assert env["ONEX_SECRET_RESOLVER_CONFIG_JSON"].startswith(f"${{{_MAIN_STORE_VAR}:?")
+    for name in ("ADDR", "PROJECT_ID", "CLIENT_ID", "CLIENT_SECRET"):
+        assert env[f"INFISICAL_{name}"] == f"${{{_IDENTITY_PREFIX}{name}:-}}"
+    assert env["INFISICAL_ENVIRONMENT_SLUG"] == "dev"
 
 
 def test_a_ref_minted_after_render_resolves_to_the_tenant_folder() -> None:
@@ -187,10 +224,19 @@ def test_the_identity_and_store_config_reach_no_other_service() -> None:
         for service_name, service in services.items():
             if path == _DEV_LANE and service_name == "runtime-effects":
                 continue
+            # The one runtime that folds the effects role carries the identity
+            # and its own store config (OMN-22930); asserted by
+            # test_the_fold_overlay_binds_the_main_store_config_and_the_effects_identity.
+            if path.name == _FOLD_OVERLAY and service_name == _FOLDED_MAIN:
+                continue
             text = yaml.safe_dump(
                 service.get("environment", {}) if isinstance(service, dict) else {}
             )
-            if _IDENTITY_PREFIX in text or _STORE_VAR in text:
+            if (
+                _IDENTITY_PREFIX in text
+                or _STORE_VAR in text
+                or _MAIN_STORE_VAR in text
+            ):
                 offenders.append(f"{path.name}:{service_name}")
     assert offenders == []
 

@@ -1,0 +1,221 @@
+TLC2 Version 2026.11.02.164701 (rev: dc6a944)
+Running breadth-first search Model-Checking with fp 28 and seed -6844511542357277565 with 4 workers on 56 cores with 27305MB heap and 64MB offheap memory [pid: 1] (Linux 6.8.0-147-generic amd64, Eclipse Adoptium 17.0.20.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /w/TranscriptIngestReducer.tla
+Parsing file /tmp/tlc-6607605244710085183/Naturals.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-6607605244710085183/FiniteSets.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-6607605244710085183/TLC.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-6607605244710085183/Sequences.tla (jar:file:/tlc/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TranscriptIngestReducer
+Linting of module TranscriptIngestReducer
+Starting... (2026-11-03 03:21:28)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-03 03:21:29.
+Error: Invariant SentWasPublished is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 0, dig |-> 0], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 0, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 0, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 2: <Emit(<<"r1", <<"k1", 2, 1>>>>) line 146, col 3 to line 151, col 49 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {<<"r1", <<"k1", 2, 1>>>>}
+/\ row = [k1 |-> [rev |-> 0, dig |-> 0], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {<<"r1", <<"k1", 2, 1>>>>}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 0, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 0, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 3: <Emit(<<"r1", <<"k2", 1, 1>>>>) line 146, col 3 to line 151, col 49 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ row = [k1 |-> [rev |-> 0, dig |-> 0], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 0, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 0, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 4: <Next line 343, col 12 to line 343, col 52 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {<<"r1", <<"k2", 1, 1>>>>}
+/\ row = [k1 |-> [rev |-> 2, dig |-> 1], k2 |-> [rev |-> 0, dig |-> 0]]
+/\ applied = {<<"r1", <<"k1", 2, 1>>>>}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 2, k2 |-> 0]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 2, k2 |-> 0]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 5: <Next line 343, col 12 to line 343, col 52 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 2, dig |-> 1], k2 |-> [rev |-> 1, dig |-> 1]]
+/\ applied = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ outbox = [r1 |-> "none", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 2, k2 |-> 1]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> FALSE, r2 |-> FALSE]
+/\ seen = [k1 |-> 2, k2 |-> 1]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 6: <Close("r1") line 207, col 3 to line 217, col 49 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 2, dig |-> 1], k2 |-> [rev |-> 1, dig |-> 1]]
+/\ applied = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ outbox = [r1 |-> "pending", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 2, k2 |-> 1]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> TRUE, r2 |-> FALSE]
+/\ seen = [k1 |-> 2, k2 |-> 1]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 7: <MarkFirst("r1") line 268, col 3 to line 275, col 49 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "marked", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 2, dig |-> 1], k2 |-> [rev |-> 1, dig |-> 1]]
+/\ applied = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ outbox = [r1 |-> "sent", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 2, k2 |-> 1]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 0
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> TRUE, r2 |-> FALSE]
+/\ seen = [k1 |-> 2, k2 |-> 1]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+State 8: <PublisherCrash line 290, col 3 to line 296, col 49 of module TranscriptIngestReducer>
+/\ pubSt = [r1 |-> "idle", r2 |-> "idle"]
+/\ dseen = 0
+/\ ignored = FALSE
+/\ mid = [r1 |-> FALSE, r2 |-> FALSE]
+/\ pend = {}
+/\ row = [k1 |-> [rev |-> 2, dig |-> 1], k2 |-> [rev |-> 1, dig |-> 1]]
+/\ applied = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ outbox = [r1 |-> "sent", r2 |-> "none"]
+/\ conflict = FALSE
+/\ pubd = {<<"r1", <<"k1", 2, 1>>>>, <<"r1", <<"k2", 1, 1>>>>}
+/\ pubTotal = [r1 |-> 0, r2 |-> 0]
+/\ dpend = {}
+/\ dhi = 0
+/\ hiRow = [k1 |-> 2, k2 |-> 1]
+/\ redeliv = FALSE
+/\ bus = [r1 |-> 0, r2 |-> 0]
+/\ dpubd = {}
+/\ crashes = 1
+/\ dedupIds = {}
+/\ dres = 0
+/\ closed = [r1 |-> TRUE, r2 |-> FALSE]
+/\ seen = [k1 |-> 2, k2 |-> 1]
+/\ effects = [r1 |-> 0, r2 |-> 0]
+
+9256 states generated, 3027 distinct states found, 1693 states left on queue.
+The depth of the complete state graph search is 8.
+Finished in 01s at (2026-11-03 03:21:29)

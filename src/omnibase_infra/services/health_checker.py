@@ -85,6 +85,7 @@ from omnibase_infra.event_bus.enum_runtime_readiness_state import (
     EnumRuntimeReadinessState,
 )
 from omnibase_infra.handlers.http_mount import AsgiMounts
+from omnibase_infra.handlers.mixin_shared_listener import MixinSharedListener
 from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 from omnibase_infra.runtime.health.runtime_health_block import (
     RUNTIME_HEALTH_DETAIL_KEY,
@@ -183,7 +184,7 @@ def _read_runtime_health_verdict(
         return None
 
 
-class ServiceHealth:
+class ServiceHealth(MixinSharedListener):
     """Minimal HTTP server for liveness and readiness endpoints.
 
     This server provides separate liveness (``/health``) and readiness
@@ -748,20 +749,7 @@ class ServiceHealth:
         )
 
         try:
-            # Create aiohttp application
-            self._app = web.Application(middlewares=[self._http_mounts.middleware])
-
-            # Register routes (OMN-1931: /ready has its own handler)
-            self._app.router.add_get("/health", self._handle_health)
-            self._app.router.add_get("/ready", self._handle_readiness)
-            # OMN-519: Detailed diagnostics endpoint
-            self._app.router.add_get("/health/detailed", self._handle_health_detailed)
-            # OMN-10860: Skill dispatch endpoint
-            self._app.router.add_post("/skill", self._handle_skill)
-            # OMN-11198: Manifest introspection endpoint (internal only)
-            self._app.router.add_get(
-                "/v1/introspection/manifest", self._handle_introspection_manifest
-            )
+            self._app = self._build_app()
 
             # Create and start runner
             self._runner = web.AppRunner(self._app)
@@ -772,6 +760,7 @@ class ServiceHealth:
             await self._site.start()
 
             self._is_running = True
+            await self._start_shared_listener()
 
             logger.info(
                 "ServiceHealth started (correlation_id=%s)",
@@ -868,6 +857,7 @@ class ServiceHealth:
 
         correlation_id = generate_correlation_id()
         logger.info("Stopping ServiceHealth (correlation_id=%s)", correlation_id)
+        await self.drain_shared_listener()
         await self._http_mounts.stop()
 
         # Cleanup in reverse order of creation
@@ -1321,7 +1311,9 @@ class ServiceHealth:
             response = ModelHealthCheckResponse.success(
                 status=status,
                 version=self._version,
-                details=cast("dict[str, JsonType]", readiness_details),
+                details=self._with_listener_fields(
+                    cast("dict[str, JsonType]", readiness_details)
+                ),
             )
 
             return web.Response(

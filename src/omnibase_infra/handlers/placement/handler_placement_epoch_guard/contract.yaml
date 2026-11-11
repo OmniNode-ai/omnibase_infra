@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# This existing handler is compute-side. Its nearer declaration keeps K4
+# active beneath the shared handlers package's effect boundary.
+node_type: "COMPUTE_GENERIC"
+descriptor:
+  node_archetype: compute
+handler:
+  name: HandlerPlacementEpochGuard
+  module: omnibase_infra.handlers.placement.handler_placement_epoch_guard.handler

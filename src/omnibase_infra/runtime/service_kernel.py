@@ -1761,6 +1761,7 @@ async def bootstrap() -> int:
     """
     # Lazy import to break circular dependency chain - see "Circular Import Note"
     # comment near line 98 for detailed explanation of the import cycle.
+    from omnibase_infra.handlers.mixin_shared_listener import HANDOVER_MOUNT
     from omnibase_infra.services.health_checker import (
         DEFAULT_HTTP_PORT,
         ServiceHealth,
@@ -1769,6 +1770,8 @@ async def bootstrap() -> int:
     # Initialize resources to None for cleanup guard in finally block
     runtime: RuntimeHostProcess | None = None
     health_server: ServiceHealth | None = None
+    # Retain the boot opt-in through shutdown, even if the mount disappears.
+    shared_listener_enabled = HANDOVER_MOUNT.is_dir()
     # Plugin system owns resource lifecycle (pools, publishers, dispatchers)
     plugin_registry: RegistryDomainPlugin | None = None
     registration_service: ServiceRegistration | None = None
@@ -4868,6 +4871,8 @@ async def bootstrap() -> int:
             """Handle shutdown signal with correlation tracking."""
             nonlocal shutdown_reason
             shutdown_reason = f"signal:{sig.name}"
+            if health_server is not None and shared_listener_enabled:
+                health_server.mark_stopping()
             logger.info(
                 "Received %s, initiating graceful shutdown... (correlation_id=%s)",
                 sig.name,
@@ -5394,6 +5399,10 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
+        # OMN-22377 (A5): drain before readiness teardown, only when opted in.
+        if health_server is not None and shared_listener_enabled:
+            await health_server.drain_shared_listener()
+
         # Stop ServiceRuntimeHealthMonitor before tearing down runtime consumers.
         if runtime_health_monitor is not None:
             try:
@@ -5633,17 +5642,7 @@ async def bootstrap() -> int:
         # Stop health server (fast, non-blocking)
         if health_server is not None:
             try:
-                health_stop_start_time = time.time()
                 await health_server.stop()
-                health_stop_duration = time.time() - health_stop_start_time
-                logger.debug(
-                    "Health server stopped in %.3fs (correlation_id=%s)",
-                    health_stop_duration,
-                    correlation_id,
-                    extra={
-                        "duration_seconds": health_stop_duration,
-                    },
-                )
             except Exception as health_stop_error:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(
                     "Failed to stop health server: %s (correlation_id=%s)",

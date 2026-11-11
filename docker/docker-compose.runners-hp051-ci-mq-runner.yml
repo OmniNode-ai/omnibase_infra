@@ -1,0 +1,222 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-22123 -- the reserved merge-queue pool `omnibase-ci-mq` on h051.
+#
+# WHY IT EXISTS. A merge_group job of a private repository asks for [self-hosted, omnibase-ci-mq], a label no
+# pull-request job names, so pull-request CI can never take its runner (OMN-14074). The runners that carried that label
+# lived on another lab host and are gone while it is in repair, and config/runner_fleet.yaml declared none. The merge queue of
+# a private repository then waited 14 to 60 minutes per job and a group took hours, with more than ten green fix pull
+# requests held behind it. This pool declares four runners here (four more on the other lab host) so a group's four
+# validator-tests shards, validate-plugin and the two small jobs find a runner at once.
+#
+# SAME RUNNER, ONE LABEL SET. The anchors are hp051-ci-runner's with these changes, each deliberate:
+#   - RUNNER_LABELS is self-hosted,omnibase-ci-mq,linux,x64,arch-amd64 and nothing else. There is no `omnibase-ci` and no
+#     `omnibase-ci-multiarch`, so no pull-request job can land here and the pool serves only the jobs that name the
+#     reserved label. OMN-23387: the runner group is the private-only group the operator places, named by MQ_RUNNER_GROUP in
+#     the host's docker/.env, exactly as on the h053 pool (OMN-23156), and the unit refuses to render without it. The queue
+#     then rests on two hosts that one group serves, so neither host's stop can empty it. A runner that is already
+#     registered keeps its cached registration: moving the four existing h051 runners into the group is the operator's
+#     runner group setting, read back before anything depends on it.
+#   - its own container, runner and volume names (hp051-ci-mq-runner-N) and its own compose project (`-p hp051-ci-mq-runner`).
+#   - 10 GiB per runner (memswap the same, so nothing swaps), not 6: the job directories are tmpfs mounts charged to the
+#     container (next item). The pool shares the host's omnirunners.slice (96G high, 112G max); its four runners add at
+#     most 40 GiB of limits to it, beside the general pool's 24.
+#   - the per-runner cache, work and tmp directories are in memory (OMN-22123, operator RULING 2026-11-04T07:03:44Z: the
+#     runners were to be on the memory drive, not on the spinning data volume). Each is a tmpfs mount of the container (with `exec`, below),
+#     so there is no host path to create, own or refill after a reboot, and a recreate cannot bring a disk path back.
+#     A tmpfs is a ceiling, not a reservation, and its pages are charged to the runner's own memory limit, which is why
+#     the limit is 10 GiB and not 4: a shard measured 3.2 to 3.5 GiB of job workspace on 2026-11-04 (checkout 1.1,
+#     runner temp 1.1 to 1.3, uv cache 0.6, tool Python 0.4), more than the 3 GiB work slot of the host RAM pool, and
+#     the 4 GiB limit had been reached 4400 to 6200 times per runner. memswap equals the limit so none of it swaps to disk.
+#
+# DEPLOYING. From a machine with ssh to the host and an org-admin registration token supplied to the installer through
+# its environment or stdin, never on a command line:
+#   scripts/deploy-runners.sh --host=h051 --pool=hp051-ci-mq-runner [--limit=N]
+# --limit=1 is the canary step. Nothing registers until an org-admin registration token exists. GITHUB_ORG_URL and
+# UV_HTTP_TIMEOUT go in the host's ~/.omnibase/runners/docker/.env (mode 600) beside the keys already there.
+# OMN-18829: the same host-owned declaration is read by native jobs and CI.
+# Two values are read from the host's docker/.env here, GITHUB_ORG_URL (the organisation URL the runners register
+# against) and UV_HTTP_TIMEOUT (600 seconds on the other pools), because the hardcoded-config ratchet refuses a new file
+# that spells an organisation URL or an operational number.
+# Container paths use ${RUNNER_USER_HOME:-<runner image home>}, as docker-compose.runners.yml does, so no
+# machine path is spelled in this file (the local-path hook and the suppression ratchet both refuse one).
+# Refuse container creation when it is absent; never create an empty directory.
+x-lab-host-table: &lab-host-table
+  type: bind
+  source: ${RUNNER_LAB_HOST_TABLE:?RUNNER_LAB_HOST_TABLE must name the host's lab host table file (runner host docker/.env)}
+  target: /etc/onex/lab_run_hosts.yaml
+  read_only: true
+  bind:
+    create_host_path: false
+# Long-form bind mounts keep variable defaults out of Compose's short-volume parser.
+# This also lets `compose config --no-interpolate` validate the shipped declaration.
+x-runner-disk-admission-pause: &runner-disk-admission-pause
+  type: bind
+  source: ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}
+  target: ${RUNNER_USER_HOME:-/home/runner}/.onex-disk-admission-pause
+  bind:
+    create_host_path: true
+x-runner-lab-credentials: &runner-lab-credentials
+  type: bind
+  source: ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-~/.omnibase/runners/lab-credentials}
+  target: ${RUNNER_USER_HOME:-/home/runner}/.lab-credentials
+  read_only: true
+  bind:
+    create_host_path: true
+# The runner image carries no timezone database, and a merge_group job of a private repository runs tests that resolve
+# `America/New_York` (zoneinfo.ZoneInfoNotFoundError otherwise, measured 2026-11-04 on the first mq-pool jobs). The host
+# has tzdata, so each runner reads it read-only instead of the shared image growing a package for one pool.
+x-runner-host-zoneinfo: &runner-host-zoneinfo
+  type: bind
+  source: /usr/share/zoneinfo
+  target: /usr/share/zoneinfo
+  read_only: true
+  bind:
+    create_host_path: false
+# In-memory job directories (see the header), one list shared by the four runners. They are the service-level `tmpfs:`
+# form, not the long `type: tmpfs` volume, because only this form can pass `exec`: Docker mounts a tmpfs noexec unless told
+# otherwise, and the job workspace holds the interpreters and the compiled extensions the jobs run (measured 2026-11-04
+# on the first in-memory runners: `./python: Permission denied` in setup-python and an ImportError on pydantic_core's
+# shared object, so both merge groups went red). Each entry is `<container path>:<options>`; `size` is a ceiling.
+# The two job directories are 16 and 12 GiB because the lane probe the repository's tests run reads free space under the
+# workspace and refuses a volume with under 10 GiB free (`disk free 8.0G < 10G` on the 8 GiB first try, 2026-11-04). The
+# real bound on what they hold is the container's memory limit.
+x-runner-ram-dirs: &runner-ram-dirs
+  - ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work:exec,mode=1777,size=16g
+  - ${RUNNER_USER_HOME:-/home/runner}/tmp:exec,mode=1777,size=12g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pip:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/ms-playwright:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.cache/omni/ci-envs:exec,mode=1777,size=2g
+  - ${RUNNER_USER_HOME:-/home/runner}/.npm:exec,mode=1777,size=2g
+x-runner-base: &runner-base
+  image: omninode-runner:latest
+  restart: unless-stopped
+  mem_limit: 10g
+  # RAM plus swap, and equal to mem_limit, so the runner has no swap: its job directories are tmpfs mounts and must
+  # stay in memory. The 96G/112G parent RAM bounds leave room for docker-socket job containers in the slice; the four
+  # runner containers themselves total at most 40G.
+  memswap_limit: 10g
+  # Five CPUs, not the 2.0 of the other pools. Measured 2026-11-04: the h051 CPU is an Ivy Bridge Xeon E5-4650 v2
+  # (2.4 GHz), and the same private-repository test file ran in 586 s on it against 229 s on the primary host's Ryzen 9
+  # 9950X3D, both under a 2.0 quota. With the work on the memory drive the disk reads idle (1 to 4 percent util), and the
+  # runner cgroups were throttled in 55 to 70 percent of their periods: a shard (four xdist workers and the subprocesses
+  # its tests start) wants more than two of these cores. Four runners at 5.0 take 20 of the host's 80 threads.
+  cpus: "5.0"
+  pids_limit: 4096
+  cgroup_parent: omnirunners.slice
+  environment: &runner-env
+    # OMN-18829: the host row, not the container install identity, owns lab delegations.
+    ONEX_LANE_HOST: h051
+    ONEX_LAB_RUN_HOSTS: /etc/onex/lab_run_hosts.yaml
+    RUNNER_LABELS: self-hosted,omnibase-ci-mq,linux,x64,arch-amd64
+    GITHUB_ORG_URL: ${GITHUB_ORG_URL:?GITHUB_ORG_URL must be set (runner host docker/.env)}
+    KUBECONFIG: ${RUNNER_USER_HOME:-/home/runner}/.lab-credentials/lab-ci-reader.kubeconfig
+    LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}
+    LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
+    RUNNER_TOKEN: ${RUNNER_TOKEN}
+    RUNNER_GROUP: ${MQ_RUNNER_GROUP:?MQ_RUNNER_GROUP must be set (runner host docker/.env) to the private-only merge-queue runner group the operator placed}
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
+    UV_CONCURRENT_DOWNLOADS: "1"
+    UV_CONCURRENT_BUILDS: "1"
+    UV_CONCURRENT_INSTALLS: "1"
+    UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:?UV_HTTP_TIMEOUT must be set (runner host docker/.env)}
+    # OMN-19998: the uv cache lives INSIDE the job-workspace mount (/data/scratch/runners/<N>/work),
+    # so uv hardlinks wheel contents into a venv instead of copying them. See the header.
+    UV_CACHE_DIR: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/.uv-cache
+    TMPDIR: ${RUNNER_USER_HOME:-/home/runner}/tmp
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./runners:/opt/onex-runner-hooks:ro
+    - *runner-disk-admission-pause
+    - *runner-lab-credentials
+    - *lab-host-table
+  group_add:
+    - "988" # h051 docker group GID (getent group docker on the host, read 2026-10-29)
+  healthcheck:
+    test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
+    interval: 30s
+    timeout: 12s
+    retries: 3
+    start_period: 120s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+services:
+  hp051-ci-mq-runner-1:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-mq-runner-1
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-mq-runner-1
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
+      - *lab-host-table
+      - *runner-host-zoneinfo
+      - hp051-ci-mq-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+  hp051-ci-mq-runner-2:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-mq-runner-2
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-mq-runner-2
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
+      - *lab-host-table
+      - *runner-host-zoneinfo
+      - hp051-ci-mq-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+  hp051-ci-mq-runner-3:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-mq-runner-3
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-mq-runner-3
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
+      - *lab-host-table
+      - *runner-host-zoneinfo
+      - hp051-ci-mq-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+  hp051-ci-mq-runner-4:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-mq-runner-4
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-mq-runner-4
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    tmpfs: *runner-ram-dirs
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
+      - *lab-host-table
+      - *runner-host-zoneinfo
+      - hp051-ci-mq-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+volumes:
+  hp051-ci-mq-runner-1-creds:
+    name: hp051-ci-mq-runner-1-creds
+  hp051-ci-mq-runner-2-creds:
+    name: hp051-ci-mq-runner-2-creds
+  hp051-ci-mq-runner-3-creds:
+    name: hp051-ci-mq-runner-3-creds
+  hp051-ci-mq-runner-4-creds:
+    name: hp051-ci-mq-runner-4-creds
