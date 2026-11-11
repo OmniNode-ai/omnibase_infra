@@ -125,6 +125,10 @@ databases:
               - ledger_line_citation
               - live_events
               - log_entries
+              - merge_override_open_findings
+              - merge_override_pending
+              - merge_override_receipts
+              - merge_override_verdicts
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
