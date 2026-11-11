@@ -350,12 +350,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ("compaction_current_context", None),
         )
     ),
-    # OMN-19986: the same window for node_projection_local_identity/0000-0002,
-    # the API Keys page's local identity. 0001 grants tenant_projection_writer
-    # SELECT, INSERT, UPDATE. Retired when omnimarket's
-    # node_projection_local_identity contract merges and the pin advances past
-    # it; the expiry module names it.
-    _vendored_read_write("local_identity", schema="public"),
     # OMN-21920 and OMN-21970: the six agent_* bridges
     # (node_projection_agent_actions) and projection_delegation_daily were
     # DELETED by the pin advance to e7258b346065, which declares all seven in
@@ -490,21 +484,9 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # that change can merge. The table's own trigger refuses every UPDATE and
     # DELETE. Retired when the contract merges and the omnimarket pin advances
     # past it; the OMN-18863 expiry module names this bridge.
-    # OMN-23152: infra vendors the work-ledger sequence migrations (0007 creates
-    # work_ledger_seq_conflicts and the unique ledger_seq index, 0008 grants the
-    # runtime SELECT, INSERT, UPDATE and never DELETE) ahead of the omnimarket
-    # change whose node_projection_work_ledger contract declares the relation
-    # with write access. Its auto-wiring refuses a principal with no declared
-    # privilege, so this grant must exist before that change can merge. The
-    # writer only inserts a conflict row. Retired when the contract merges and
-    # the omnimarket pin advances past it; the OMN-18863 expiry module names
-    # this bridge.
     *(
         _vendored_read_write(t, "node_projection_work_ledger", f, access="write")
-        for t, f in (
-            ("ledger_line_citation", "0007_work_ledger_history_import.sql"),
-            ("work_ledger_seq_conflicts", "0009_work_ledger_seq_unique.sql"),
-        )
+        for t, f in (("ledger_line_citation", "0007_work_ledger_history_import.sql"),)
     ),
 )
 

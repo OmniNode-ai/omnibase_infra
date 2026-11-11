@@ -26,6 +26,10 @@ node_version:
   patch: 0
 # Node type
 node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on
+# it, and EFFECT_GENERIC above is not a value that hook recognizes.
+descriptor:
+  node_archetype: effect
 # Description
 description: >
   Effect node for contract registry persistence. Routes intents from ContractRegistryReducer to PostgreSQL handlers for contract and topic management. Supports upsert, update, deactivate, and cleanup operations with circuit breaker protection and retry policies.
