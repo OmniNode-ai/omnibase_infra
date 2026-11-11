@@ -117,6 +117,10 @@ databases:
               - ledger_line_citation
               - live_events
               - log_entries
+              - merge_override_open_findings
+              - merge_override_pending
+              - merge_override_receipts
+              - merge_override_verdicts
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
@@ -480,5 +484,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 786e77a06419045a503ace0be91a554be5c13c16d104c28a6e9e100865adbfaa
+  sha256: 2c054bc257ba2394f29b8d219449424483ec1ff43d0ab6b00027889f54882084
 topology_instance: local

@@ -154,6 +154,8 @@ migrations:
   forward/nodes/node_llm_delegation_projection/0001_create_llm_delegation_daily_projection.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT LLM_DELEGATION_DAILY_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT UQ_LLM_DE
   forward/nodes/node_llm_delegation_projection/0002_grant_omninode_runtime_llm_delegation_daily_projection.sql: expand-only
   forward/nodes/node_log_persistence_effect/0000_create_log_entries.sql: forward-only # ALTER TABLE ALTER COLUMN; EXECUTE; ALTER TABLE ADD CONSTRAINT LOG_ENTRIES_PKEY
+  forward/nodes/node_merge_override_alarm_effect/0001_create_merge_override_tables.sql: expand-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the four merge override tables
+  forward/nodes/node_merge_override_alarm_effect/0002_grant_omninode_runtime_merge_override_tables.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the four merge override tables
   forward/nodes/node_merge_state_projection/0001_create_merge_state_transitions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT MERGE_STATE_TRANSITIONS_PKEY; ALTER TABLE ADD CONSTRAINT MERGE_STATE_TRANS
   forward/nodes/node_merge_state_projection/0002_grant_omninode_runtime_merge_state_transitions.sql: expand-only
   forward/nodes/node_merge_state_projection/0003_grant_omninode_runtime_merge_state_sequence.sql: expand-only
