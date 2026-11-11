@@ -5556,6 +5556,7 @@ jobs:
             tests/integration/migrations/test_delegation_updated_at_absorb_omn19561.py \
             tests/integration/migrations/test_102_tenant_projection_writer_role_omn15425.py \
             tests/integration/migrations/test_omn18992_projection_zero_rows.py \
+            tests/integration/migrations/test_contract_persistence_handlers_sql_live.py \
             -m ephemeral_pg \
             -v -rs --tb=short -p no:randomly
 
