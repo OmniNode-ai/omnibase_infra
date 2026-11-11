@@ -87,10 +87,7 @@ WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
 # it by hand on the one relation it prunes (OMN-17427,
 # node_projection_consumer_flow/0006 for omninode_internal.consumer_flow_windows).
 PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
-    {
-        EnumDatabasePrivilege.SELECT,
-        EnumDatabasePrivilege.DELETE,
-    }
+    {EnumDatabasePrivilege.SELECT, EnumDatabasePrivilege.DELETE}
 )
 
 # Relations whose vendored migration also grants DELETE, which no ``access`` mode
@@ -170,6 +167,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("delegation_workflow_state", "090_create_delegation_workflow_state.sql"),
         ("session_phase_state", "102_create_session_phase_state.sql"),
         ("pr_landing_workflow_state", "108_create_pr_landing_workflow_state.sql"),
+        ("code_eval_trial_state", "114_create_code_eval_trial_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )
 )

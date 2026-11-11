@@ -365,6 +365,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - code_eval_trial_state
               - delegation_workflow_state
               - infra_routing_decisions
               - pr_landing_workflow_state

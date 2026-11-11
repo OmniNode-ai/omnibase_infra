@@ -416,6 +416,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - code_eval_trial_state
               - delegation_workflow_state
               - infra_routing_decisions
               - pr_landing_workflow_state
@@ -484,5 +485,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: de73144df9727fa78f08df75e1f6fe055ff9c2a5e90b16d7733ed639d474f8e3
+  sha256: eac8f6010e1e9ca3dc6351ab0104113a62c04e68bb38b35a298190ee0a3c6a37
 topology_instance: onex-dev
