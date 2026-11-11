@@ -9,6 +9,7 @@ the workspace config root. Every field is required and none has a default, so an
 overlay that omits one is refused when it is read, not when a run reaches it.
 """
 
+import os
 from functools import cache
 from importlib.resources import files
 from pathlib import Path
@@ -16,6 +17,10 @@ from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.prepr_pool.model_prepr_pool_judge_overlay import (
+    ModelPreprPoolJudgeOverlay,
+)
 
 OVERLAY_RELATIVE = (
     Path("config") / "onex" / "overlays" / "prepr_runtime_pool" / "overlay.yaml"
@@ -39,15 +44,26 @@ class ModelPreprPoolOverlay(BaseModel):
     probe_poll_s: int = Field(gt=0)
     remote_command_prefix: str
     local_command_prefix: str
-    #: the argv prefix of node_lab_proof_judge_compute's command; empty leaves changed_path_live unjudged
+    #: the argv of node_lab_proof_judge_compute's command, read from an overlay root (never this file); empty leaves changed_path_live unjudged
     lab_proof_judge_command: str = ""
 
     @classmethod
     @cache
     def read(cls, config_root: Path) -> "ModelPreprPoolOverlay":
-        """The overlay under ``config_root``; a missing file or key is a loud refusal."""
+        """The overlay under ``config_root``; a missing file or key is a loud refusal.
+
+        The judge command is not in this file: it comes from the overlays repository's
+        ``prepr_runtime_pool`` overlay (``ModelPreprPoolJudgeOverlay``), and this file carrying
+        it is refused (OMN-23715).
+        """
         path = config_root / OVERLAY_RELATIVE
-        return cls.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if "lab_proof_judge_command" in raw:
+            raise ValueError(
+                f"{path}: lab_proof_judge_command belongs in the overlays repository"
+            )
+        command = ModelPreprPoolJudgeOverlay.command(os.environ, config_root)
+        return cls.model_validate({**raw, "lab_proof_judge_command": command})
 
     def clone_base_url(self) -> str:
         """The clone base of every first-party repository: this git host and the layer map's organisation."""

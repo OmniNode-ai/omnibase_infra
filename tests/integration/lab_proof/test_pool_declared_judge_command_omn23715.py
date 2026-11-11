@@ -15,16 +15,14 @@ from __future__ import annotations
 import importlib.util
 import json
 import shlex
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
-from omnibase_infra.models.prepr_pool.model_prepr_pool_overlay import (
-    ModelPreprPoolOverlay,
-)
+from omnibase_infra.models.prepr_pool import ModelPreprPoolOverlay
 
 pytestmark = pytest.mark.integration
 
@@ -33,7 +31,6 @@ POOL_PY = REPO_ROOT / "scripts" / "runtime_build" / "prepr_runtime_pool.py"
 FIXTURE_ROOT = (
     REPO_ROOT / "tests" / "unit" / "scripts" / "fixtures" / "pool_config_root"
 )
-OVERLAY_REL = Path("config/onex/overlays/prepr_runtime_pool/overlay.yaml")
 ECHO = (
     "import json, sys; request = json.load(sys.stdin); "
     "print(json.dumps({'verdict': 'PASS', 'ok': True, "
@@ -52,14 +49,21 @@ def _pool() -> Any:
     return module
 
 
-def _config_root(tmp_path: Path, command: str | None) -> Path:
-    root = tmp_path / "config_root"
-    shutil.copytree(FIXTURE_ROOT, root)
+def _overlay_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str | None
+) -> None:
+    """Name an overlay root; it holds the judge overlay only when ``command`` is given."""
+    root = tmp_path / "overlays_root"
+    root.mkdir()
     if command is not None:
-        with (root / OVERLAY_REL).open("a", encoding="utf-8") as overlay:
-            overlay.write(f"lab_proof_judge_command: {json.dumps(command)}\n")
+        (root / "prepr_runtime_pool").mkdir()
+        (root / "prepr_runtime_pool" / "overlay.yaml").write_text(
+            yaml.safe_dump({"schema_version": 1, "lab_proof_judge_command": command}),
+            encoding="utf-8",
+        )
+    monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(root))
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(FIXTURE_ROOT))
     ModelPreprPoolOverlay.read.cache_clear()
-    return root
 
 
 def test_the_overlay_command_is_run_with_the_phase_text_on_stdin(
@@ -67,9 +71,7 @@ def test_the_overlay_command_is_run_with_the_phase_text_on_stdin(
 ) -> None:
     monkeypatch.setenv("JUDGE_TEST_PYTHON", sys.executable)
     command = f"${{JUDGE_TEST_PYTHON}} -c {shlex.quote(ECHO)}"
-    monkeypatch.setenv(
-        "ONEX_WORKSPACE_CONFIG_ROOT", str(_config_root(tmp_path, command))
-    )
+    _overlay_root(tmp_path, monkeypatch, command)
     answer = _pool().declared_changed_path({"clone": "c", "probe": "p", "tests": "t"})
     assert answer == {
         "verdict": "PASS",
@@ -82,7 +84,7 @@ def test_the_overlay_command_is_run_with_the_phase_text_on_stdin(
 def test_an_overlay_without_the_key_runs_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(_config_root(tmp_path, None)))
+    _overlay_root(tmp_path, monkeypatch, None)
     assert _pool().declared_changed_path({"clone": "c", "probe": "p"}) is None
 
 
@@ -90,7 +92,5 @@ def test_a_command_that_exits_non_zero_is_no_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     command = f"{sys.executable} -c {shlex.quote('import sys; sys.exit(3)')}"
-    monkeypatch.setenv(
-        "ONEX_WORKSPACE_CONFIG_ROOT", str(_config_root(tmp_path, command))
-    )
+    _overlay_root(tmp_path, monkeypatch, command)
     assert _pool().declared_changed_path({"clone": "c", "probe": "p"}) is None

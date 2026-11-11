@@ -18,7 +18,9 @@ from typing import Any
 from unittest import mock
 
 import pytest
+import yaml
 
+from omnibase_infra.models.prepr_pool import ModelPreprPoolOverlay
 from tests.helpers.declared_changed_path import (
     NO_CHECK,
     NODE_LIVE,
@@ -46,32 +48,30 @@ fakes = _load(
     "prepr_pool_fakes_omn23715", _HERE.with_name("test_prepr_runtime_pool_omn18893.py")
 )
 pool = fakes.pool
-_real_settings = pool.settings
 OUTPUTS = {**fakes.GOOD, "clone": "clone text", "probe": "probe text"}
 RECEIPT_ID = "node_overlay_store_read_effect-6de58c0cd262-h202"
 NODE = "node_overlay_store_read_effect"
 
 
-def _command(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
-    monkeypatch.setattr(pool, "settings", lambda: _With(_real_settings(), text))
-
-
-class _With:
-    """The driver's settings with the judge command replaced."""
-
-    def __init__(self, settings: Any, command: str) -> None:
-        self._settings = settings
-        self.lab_proof_judge_command = command
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._settings, name)
+def _command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str) -> None:
+    """Declare the judge command in an overlay root, where the driver reads it."""
+    overlay = tmp_path / "prepr_runtime_pool" / "overlay.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(
+        yaml.safe_dump({"schema_version": 1, "lab_proof_judge_command": text}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(tmp_path))
+    ModelPreprPoolOverlay.read.cache_clear()
 
 
 def _done(stdout: str, returncode: int = 0) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], returncode, stdout=stdout, stderr="")
 
 
-def test_an_unset_command_asks_nothing_and_leaves_the_check_absent() -> None:
+def test_an_unset_command_asks_nothing_and_leaves_the_check_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     with mock.patch.object(pool.subprocess, "run") as run:
         assert pool.declared_changed_path(OUTPUTS) is None
         assert "changed_path_live" not in pool.judge(OUTPUTS).checks
@@ -79,10 +79,12 @@ def test_an_unset_command_asks_nothing_and_leaves_the_check_absent() -> None:
 
 
 def test_the_command_is_handed_the_clone_and_probe_text_unread(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("NODE_PROJECT_ROOT", "/p")
-    _command(monkeypatch, "uv run --project ${NODE_PROJECT_ROOT} python -m node_x")
+    _command(
+        monkeypatch, tmp_path, "uv run --project ${NODE_PROJECT_ROOT} python -m node_x"
+    )
     answer = json.dumps(NODE_LIVE)
     with mock.patch.object(pool.subprocess, "run", return_value=_done(answer)) as run:
         assert pool.declared_changed_path(OUTPUTS) == NODE_LIVE
@@ -124,9 +126,11 @@ def test_seam_with_the_node_the_answer_keys_the_driver_reads_are_the_nodes() -> 
     ids=["command-error", "unreadable-answer", "not-an-object"],
 )
 def test_failing_control_an_unavailable_node_never_turns_a_failure_into_a_pass(
-    monkeypatch: pytest.MonkeyPatch, done: subprocess.CompletedProcess[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    done: subprocess.CompletedProcess[str],
 ) -> None:
-    _command(monkeypatch, "node_x")
+    _command(monkeypatch, tmp_path, "node_x")
     with mock.patch.object(pool.subprocess, "run", return_value=done):
         judged = pool.judge(OUTPUTS)
     assert "changed_path_live" not in judged.checks
