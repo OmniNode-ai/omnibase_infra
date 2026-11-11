@@ -106,6 +106,8 @@ databases:
               - gate_store_state
               - gate_store_steps
               - gateway_link_health
+              - goal_trace_events
+              - goal_traces
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -479,5 +481,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: abece4bf821ec23666eb837e543666fd0b0453e069f69df073338a2893f4193d
+  sha256: f97a37bd2c8bb62f5e415044f6354a4a416cb2c362864075c5cf76c7fb13b564
 topology_instance: onex-prod
