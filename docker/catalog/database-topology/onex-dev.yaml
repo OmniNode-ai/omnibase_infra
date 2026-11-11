@@ -135,6 +135,7 @@ databases:
               - topic_activity
               - topic_produce_windows
               - work_events
+              - work_ledger_latest
               - work_ledger_rows
               - work_ledger_seq_conflicts
               - work_ledger_state
@@ -479,5 +480,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 7b1328e305067bd398adbe009e8e8189dcde4e449a7a9afe956aef50e6c2b623
+  sha256: 62466fb760cbec1d4092b9891d6c8d391fd2f7dd4e5a325e26ab0f0a645e0988
 topology_instance: onex-dev
