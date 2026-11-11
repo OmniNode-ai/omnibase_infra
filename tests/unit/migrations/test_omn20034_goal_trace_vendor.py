@@ -20,8 +20,8 @@ _FORWARD = _ROOT / "docker/migrations/forward"
 _VENDORED = [
     (
         "node_projection_goal_trace/0000_create_goal_trace_events.sql",
-        "f60991c58e48c3eadcf8c5c0e681e18843596767c8b27a1eab23d1c6f647babd",
-        "expand-only",
+        "44eb77617d5adfffabdcb0273ac4eacd1ae3af204da44bb6b66da09d0abe2e85",
+        "forward-only",
     ),
     (
         "node_projection_goal_trace/0001_grant_omninode_runtime_goal_trace.sql",
