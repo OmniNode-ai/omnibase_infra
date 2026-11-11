@@ -35,12 +35,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_declared_judge_omn23642.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn23715-existing-driver-tests
-    description: The pool driver tests that exercised the moved rule still pass, now over the node's recorded answers.
+    description: The pool driver tests that exercised the moved rule still pass, now over the node's recorded answers. Tests marked lab_overlay read the lab's private lane manifest, which a hosted runner does not carry, so they are deselected here.
     source: manual
     execution_scope: hosted_and_local
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py tests/unit/scripts/test_prepr_pool_live_names_omn18893.py tests/unit/scripts/test_prepr_pool_composed_containers_omn21217.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py tests/unit/scripts/test_prepr_pool_live_names_omn18893.py tests/unit/scripts/test_prepr_pool_composed_containers_omn21217.py -q -m 'not lab_overlay' --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn23715-declared-and-integrated
     description: The three timer nodes are declared in the judge overlay (the overlays repository) and a substitute receipt is recorded for each at the shard-crash fix's head; a lab proof run at that head, with the judge command installed on the pool driver's host, posts a lab-proof-receipt check run of success with the class in its evidence. A hosted runner cannot reach the lab host, so the reading is the lane's runtime report.
