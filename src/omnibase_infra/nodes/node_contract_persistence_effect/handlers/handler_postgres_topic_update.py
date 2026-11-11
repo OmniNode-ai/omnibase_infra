@@ -80,14 +80,17 @@ _ENVIRONMENT_PREFIXES: tuple[str, ...] = (
 
 # SQL statement for topic upsert with JSONB array merge.
 # Uses ON CONFLICT to handle existing topic+direction combinations.
+# Keep this text pure SQL: a Python-style # comment inside the string is a
+# PostgreSQL syntax error. $3 is cast to text everywhere it is used because the
+# server cannot infer one type for it from jsonb_build_array and the ? operator.
 # The JSONB containment operator (?) checks if contract_id already exists in array.
 # If not present, appends to array; otherwise keeps existing array unchanged.
-SQL_UPSERT_TOPIC = """  # onex-topic-allow: pending contract auto-wiring
+SQL_UPSERT_TOPIC = """
 INSERT INTO topics (topic_suffix, direction, contract_ids, first_seen_at, last_seen_at, is_active)
-VALUES ($1, $2, jsonb_build_array($3), $4, $5, TRUE)
+VALUES ($1, $2, jsonb_build_array($3::text), $4, $5, TRUE)
 ON CONFLICT (topic_suffix, direction) DO UPDATE SET
     contract_ids = CASE
-        WHEN NOT topics.contract_ids ? $3
+        WHEN NOT topics.contract_ids ? $3::text
         THEN topics.contract_ids || to_jsonb($3::text)
         ELSE topics.contract_ids
     END,
