@@ -127,8 +127,6 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "goal_trace_events": "omnimarket OMN-20034 (node_projection_goal_trace)",
     "goal_traces": "omnimarket OMN-20034 (node_projection_goal_trace)",
-    "host_disk_class": "omnimarket OMN-23865 (node_projection_host_disk)",
-    "host_disk_volume": "omnimarket OMN-23865 (node_projection_host_disk)",
 }
 
 _SKIP_REASON = (
