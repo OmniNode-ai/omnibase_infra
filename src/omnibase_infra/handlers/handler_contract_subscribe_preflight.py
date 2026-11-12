@@ -92,6 +92,7 @@ from uuid import uuid4
 
 from aiokafka import AIOKafkaConsumer
 from aiokafka.client import CoordinationType
+from aiokafka.errors import KafkaError
 from aiokafka.protocol.admin import DescribeGroupsRequest, ListGroupsRequest
 from aiokafka.structs import TopicPartition
 
@@ -594,12 +595,26 @@ async def hand_over_from_version_predecessors(
     """
     if not policy.enabled:
         return ()
-    if isinstance(event_bus, ProtocolConsumerGroupLister):
-        listed: Iterable[str] = await event_bus.list_consumer_groups()
-    elif isinstance(event_bus, EventBusKafka) and event_bus._started:
-        # A bus that has not started holds no broker connection and no group.
-        listed = await list_groups_on_kafka(event_bus)
-    else:
+    try:
+        if isinstance(event_bus, ProtocolConsumerGroupLister):
+            listed: Iterable[str] = await event_bus.list_consumer_groups()
+        elif isinstance(event_bus, EventBusKafka) and event_bus._started:
+            # A bus that has not started holds no broker connection and no group.
+            listed = await list_groups_on_kafka(event_bus)
+        else:
+            return ()
+    except (RuntimeError, OSError, KafkaError) as exc:
+        # The handover is a repair of a gap, never a condition of booting: a
+        # broker that refuses the listing (ACL, timeout) must not stop the
+        # runtime. The failure is logged at ERROR so a lost gap is not silent.
+        logger.exception(
+            "Version handover could not list consumer groups, joining at the "
+            "bus default: topic=%s to=%s (%s: %s)",
+            topic,
+            to_group,
+            type(exc).__name__,
+            exc,
+        )
         return ()
     successor = await resolve_successor_group(event_bus, to_group=to_group, topic=topic)
     results: list[ModelOffsetHandoverResult] = []
@@ -614,7 +629,18 @@ async def hand_over_from_version_predecessors(
                 handover_rule="last_ran",
                 fence=policy.fence,
             )
-        except ConsumerGroupFenceError as exc:
+        except (RuntimeError, OSError, KafkaError, ValueError) as exc:
+            if not isinstance(exc, ConsumerGroupFenceError):
+                logger.exception(
+                    "Version handover from %s failed, joining at the bus "
+                    "default: topic=%s to=%s (%s: %s)",
+                    predecessor,
+                    topic,
+                    successor,
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
             logger.warning(
                 "Version handover skipped a predecessor that still has members: "
                 "topic=%s from=%s to=%s (%s)",

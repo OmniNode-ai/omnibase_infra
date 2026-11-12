@@ -384,6 +384,31 @@ async def test_a_predecessor_with_members_is_skipped_not_fatal(
     )
 
 
+@pytest.mark.asyncio
+async def test_a_broker_that_refuses_the_listing_does_not_stop_the_boot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC3, error chain: the repair never becomes a condition of booting."""
+    monkeypatch.delenv(VERSION_HANDOVER_ENV_VAR, raising=False)
+    _projected.clear()
+    bus = _VersionedFake(environment=ENVIRONMENT)
+    await bus.start()
+
+    async def refused() -> list[str]:
+        raise RuntimeError("listing groups is not authorized")
+
+    monkeypatch.setattr(bus, "list_consumer_groups", refused)
+
+    with caplog.at_level(logging.ERROR):
+        await _wire(_contract(tmp_path, (1, 2, 0)), bus)
+
+    await _publish(bus, ["after-0"])
+    await bus.settle()
+    await bus.stop_loops()
+    assert "could not list consumer groups" in caplog.text
+    assert _projected == ["after-0"]
+
+
 @pytest.mark.parametrize("value", ["not json", "[1]", '{"enabled": "maybe"}'])
 @pytest.mark.asyncio
 async def test_an_unreadable_policy_refuses_the_wiring(
