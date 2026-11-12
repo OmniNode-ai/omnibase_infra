@@ -6,6 +6,13 @@ summary: >-
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19565-ac4-accepted-20261112t1945z:
+      - label: AC4
+        criterion_hash: 2b782e0ea318a7e376eee90842e756233c5add1a3afd346598e6ef283f7eb3a8
+        proposed_by: lane=dod-closeout-bind-2026-11-12T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-12T1945Z-c3
 requirements:
   - id: req-omn19565-transcribed-acceptance-criteria
     statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
@@ -63,6 +70,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "workflow or github"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn19565-ac4-accepted-20261112t1945z
+    description: 'AC4: a .github/-only diff classifies to script_replay, never exempt, and the registry models and the validator script refuse a .github/-only match rule set to exempt. Fails with the product changes of omnibase_infra#5374 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest -q tests/unit/scripts/ci/test_validate_lab_proof_profiles.py::test_workflow_only_diff_classifies_to_script_replay tests/unit/scripts/ci/test_validate_lab_proof_profiles.py::test_an_exempt_match_rule_on_github_only_paths_is_refused tests/unit/scripts/ci/test_validate_lab_proof_profiles.py::test_script_refuses_a_copy_with_a_github_only_row_set_to_exempt
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
