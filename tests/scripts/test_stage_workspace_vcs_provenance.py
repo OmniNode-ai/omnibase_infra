@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -402,14 +403,97 @@ def test_stage_derived_version_aborts_when_clone_is_behind_locked_commit(
     assert "git SHA drift" in result.stderr
 
 
+def _dockerfile_core_pretend_variable() -> str:
+    """The env var the Dockerfile exports in the core_version block."""
+    text = (REPO_ROOT / "docker" / "Dockerfile.runtime").read_text(encoding="utf-8")
+    match = re.search(
+        r'if \[ -n "\$\{core_version\}" \]; then \s*\\?\s*\n'
+        r"\s*([A-Za-z_][A-Za-z0-9_]*)=\"\$\{core_version\}\";\s*\\?\s*\n"
+        r"\s*export \1;\s*\\?\s*\n",
+        text,
+    )
+    assert match is not None, (
+        "core_version export block not found in Dockerfile.runtime"
+    )
+    return match.group(1)
+
+
 @pytest.mark.unit
 def test_dockerfile_derived_version_exports_pretend_version_before_core_install() -> (
     None
 ):
     text = (REPO_ROOT / "docker" / "Dockerfile.runtime").read_text(encoding="utf-8")
-    export = "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OMNIBASE_CORE"
+    export = _dockerfile_core_pretend_variable()
+    assert export == "SETUPTOOLS_SCM_PRETEND_VERSION"
     source = "/workspace/sibling-pin-comparison.json"
     install = '"omnibase-core @ file:///workspace/sibling-repos/omnibase_core"'
-    assert export in text
-    assert text.index(source, text.index("core_version=")) > text.index("core_version=")
-    assert text.index("core_version=") < text.index(export) < text.index(install)
+    core_at = text.index("core_version=")
+    assert text.index(source, core_at) > core_at
+    assert core_at < text.index(export, core_at) < text.index(install, core_at)
+
+
+@pytest.mark.integration
+def test_stage_derived_version_dockerfile_variable_builds_a_git_less_hatch_vcs_package(
+    tmp_path: Path,
+) -> None:
+    """A git-less hatch-vcs package builds only under the generic pretend var."""
+    pkg = tmp_path / "pkg"
+    (pkg / "pretend_probe_pkg").mkdir(parents=True)
+    (pkg / "pretend_probe_pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "pyproject.toml").write_text(
+        "[build-system]\n"
+        'requires = ["hatchling", "hatch-vcs"]\n'
+        'build-backend = "hatchling.build"\n\n'
+        "[project]\n"
+        'name = "pretend-probe-pkg"\n'
+        "dynamic = ['version']\n\n"
+        "[tool.hatch.version]\n"
+        'source = "vcs"\n\n'
+        "[tool.hatch.build.targets.wheel]\n"
+        'packages = ["pretend_probe_pkg"]\n',
+        encoding="utf-8",
+    )
+    assert not (pkg / ".git").exists()
+
+    def _build_env(**extra: str) -> dict[str, str]:
+        env = scrub_git_location_env(
+            {
+                k: v
+                for k, v in os.environ.items()
+                if not k.startswith("SETUPTOOLS_SCM_PRETEND_VERSION")
+            }
+        )
+        env.update(extra)
+        return env
+
+    name = _dockerfile_core_pretend_variable()
+    ctl = tmp_path / "ctl"
+    ctl.mkdir()
+    control = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(ctl), str(pkg)],
+        env=_build_env(SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PRETEND_PROBE_PKG="9.8.7"),
+        capture_output=True,
+        text=True,
+        timeout=240,
+        check=False,
+    )
+    assert control.returncode != 0
+    assert "No distribution name is known" in (control.stderr + control.stdout)
+
+    ok = tmp_path / "ok"
+    ok.mkdir()
+    good = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(ok), str(pkg)],
+        env=_build_env(**{name: "9.8.7"}),
+        capture_output=True,
+        text=True,
+        timeout=240,
+        check=False,
+    )
+    assert good.returncode == 0, good.stderr + good.stdout
+    wheels = [
+        p
+        for p in ok.iterdir()
+        if p.name.startswith("pretend_probe_pkg-9.8.7-") and p.name.endswith(".whl")
+    ]
+    assert wheels, f"no pretend_probe_pkg-9.8.7 wheel in {ok}: {good.stderr}"
