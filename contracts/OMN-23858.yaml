@@ -75,10 +75,10 @@ dod_evidence:
         check_value: 'env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-23858 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topology/test_merge_override_runtime_grants_omn23858.py tests/unit/topology/test_application_database_table_grants.py -q --no-cov -n 0 -p no:randomly'
         cwd: "."
   - id: "dod-omn23858-readback-file-hosted"
-    description: "Hosted proxy for the checked-in readback: the readback file exists at the head and names the dev-lane host, the image revision, the grant rows and the release line; the file is absent at the merge base, so the command fails there. The local Done gate items above read the same file."
+    description: "Hosted proxy for the checked-in readback: the readback file exists at the head and names the dev-lane host, the image revision, the grant rows and the release line; the file is absent at the merge base, so the command fails there. The test file is added by this change, so the command fails at the merge base."
     source: "manual"
     checks:
-      - check_type: "command"
-        check_value: "grep -q '^host=' docs/readbacks/OMN-23858_dev_grants.txt && grep -q '^image_revision=' docs/readbacks/OMN-23858_dev_grants.txt && grep -q '^omninode_runtime|merge_override_verdicts|' docs/readbacks/OMN-23858_dev_grants.txt && grep -q '^omnibase_infra_release=' docs/readbacks/OMN-23858_dev_grants.txt"
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/topology/test_merge_override_readback_omn23858.py -q"
         cwd: "."
     binds_ac: ["AC4"]
