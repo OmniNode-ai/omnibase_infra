@@ -48,6 +48,6 @@ dod_evidence:
     binds_ac:
       - AC3
     checks:
-      - check_type: command
-        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_sibling_clone_pin.py?ref=omn-23947-sibling-version-node --jq .content | base64 -d | grep -q 'def resolve_clone_pin'
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/handlers/test_sibling_clone_pin_node_omn23947.py -q
         cwd: .
