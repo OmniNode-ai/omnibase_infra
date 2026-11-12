@@ -4,8 +4,7 @@ title: The ledger query command accepts the open-rulings question the node answe
 summary: 'The dev work-ledger query client declares the questions it accepts in its packaged contract, and that list left out open-rulings, which the omnimarket node answers from its state table as a point query. onex ledger query refused the question with "Unsupported work-ledger query", so the read of open operator decisions was unreadable on the deployed path. The client contract now names open-rulings in queries and in point_queries, so the command accepts it and the client checks the answer for status ok, a watermark and a page size, as it does for holds, inbox and open-claims. No code changes: the declaration is the whole fix. The live reading from the deployed command against the dev bus is AC4.'
 is_seam_ticket: true
 interface_change: false
-interfaces_touched:
-  - public_api
+interfaces_touched: []
 requirements:
   - id: req-open-rulings-accepted
     statement: The ledger query client accepts every question the node answers from its state table, open-rulings included.
