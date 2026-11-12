@@ -1,0 +1,64 @@
+schema_version: 1.0.0
+ticket_id: OMN-23988
+title: Retire the omnibase_compat build and lab-proof uses
+summary: The retired package omnibase_compat is removed from docker/Dockerfile.runtime (two ARG lines and the release-mode tarball install), the deploy agent's _compose_build, handler_runtime_deploy.sh, deploy-gateway.sh, the docker-build foundation import smoke, config/lab_proof_profiles.yaml (registry entry and foundation_override profile) and the lab proof plan node contract (consumer_modules). The host reconcile retirement scan reads 3 findings in this repository at the base commit and 1 at the change head (onex_change_control in the lab proof registry list, left for its own decision). The change is held as a draft until omnibase_infra 5908 has merged and dev has rebuilt.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23988-no-compat-live-use
+    statement: The image build, the deploy agent, both deploy scripts, the docker-build smoke and the lab-proof settings name the retired package on no non-comment line, and the host reconcile scan reads no omnibase_compat finding in this repository.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the image build, the deploy agent, both deploy scripts, the docker-build smoke and the lab-proof settings name the retired package on no non-comment line -- falsifier: pytest tests/ci/test_no_omnibase_compat_live_use.py -q (seven cases fail on the files at the base commit)'
+      - id: AC2
+        statement: 'AC2: the hourly host check finds the retired package in no file of this repository -- falsifier: run python -m omnimarket.nodes.node_host_reconcile_effect --check over a copy of the repository tree and see a retired-repository-targets line naming omnibase_compat under omnibase_infra'
+      - id: AC3
+        statement: 'AC3: the lab-proof and deploy-agent tests still pass without the retired package -- falsifier: pytest tests/integration/lab_proof tests/unit/nodes/node_lab_proof_plan_compute scripts/deploy-agent/tests/unit/test_executor_cache_bust.py -q'
+      - id: AC4
+        statement: 'AC4: integrated: the dev runtime image rebuilt from this change carries no omnibase_compat and the dev runtime reads healthy on it -- falsifier: the running dev image''s build provenance (labels, read-only) lists omnibase-compat, or the runtime reads unhealthy after the deploy'
+evidence_requirements:
+  - kind: tests
+    description: The guard test over the seven files and the positive controls, plus the updated gateway and Dockerfile tests.
+    command: uv run --frozen pytest tests/ci/test_no_omnibase_compat_live_use.py tests/scripts/test_deploy_gateway.py tests/scripts/test_dockerfile_runtime_git_refresh.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23988-no-compat-live-use
+    description: The seven files name no omnibase_compat token on a non-comment line; the seven cases fail against the base commit's files and pass at the change head, and the two positive controls prove the scan can fail.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_no_omnibase_compat_live_use.py -q --no-cov -p no:randomly
+        cwd: .
+  - id: dod-omn23988-lab-proof-and-agent-tests
+    description: The lab proof registry, the lab proof plan node and the deploy agent build-argument tests pass with no omnibase_compat entry or argument.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/lab_proof tests/unit/nodes/node_lab_proof_plan_compute -q --no-cov -p no:randomly
+        cwd: .
+  - id: dod-omn23988-deploy-readback
+    description: Deploy-scope readback that a hosted runner can run; it goes red while docker/Dockerfile.runtime still names OMNIBASE_COMPAT, and needs docker on the runner.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: docker --version && ! grep -q OMNIBASE_COMPAT docker/Dockerfile.runtime
+        cwd: .
+  - id: dod-omn23988-integration-proof-dev
+    description: After the change is on dev and the dev runtime has rebuilt, the running dev runtime image has no omnibase_compat module. Hosted CI cannot reach the dev runtime, so only the local Done gate runs this unbound item.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: docker ps --filter label=com.omninode.build_source --format '{{.Image}}' | head -1 | xargs -I{} docker run --rm --entrypoint /app/.venv/bin/python {} -c "import importlib.util as u; raise SystemExit(u.find_spec('omnibase_compat') is not None)"
+        cwd: .
