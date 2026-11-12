@@ -506,6 +506,23 @@ for repo in "${SIBLING_REPOS[@]}"; do
     fi
     echo "${vcs_ref}" > "${dst}/.build-sha"
 
+    # OMN-23947: a sibling whose pyproject leaves its version to git (hatch-vcs)
+    # cannot derive it in the build context, because rsync drops .git above. The
+    # preflight derived the version from the source clone; hand it to the image
+    # build as .build-version (the Dockerfile exports it as the pretend version).
+    derived_version="$(python3 - "${PIN_COMPARISON_OUT}" "${repo//_/-}" <<'PY'
+import json
+import sys
+
+for entry in json.load(open(sys.argv[1], encoding="utf-8"))["comparisons"]:
+    if entry["package"] == sys.argv[2] and entry.get("version_derived"):
+        print(entry["actual_version"])
+PY
+)"
+    if [[ -n "${derived_version}" ]]; then
+        printf '%s\n' "${derived_version}" > "${dst}/.build-version"
+    fi
+
     # OMN-13030: capture full per-repo VCS provenance at staging time. A repo
     # whose git history is unreadable for the branch/status probes is just as
     # unverifiable as one missing a HEAD SHA — abort rather than stamp "unknown".

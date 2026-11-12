@@ -388,7 +388,12 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
             fi; \
         done; \
         uv-with-retry pip uninstall omnibase-core; \
-        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+        ( cd / && \
+            if [ -f /workspace/sibling-repos/omnibase_core/.build-version ]; then \
+                SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OMNIBASE_CORE="$(cat /workspace/sibling-repos/omnibase_core/.build-version)"; \
+                export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OMNIBASE_CORE; \
+            fi; \
+            VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnibase-core \
             "omnibase-core @ file:///workspace/sibling-repos/omnibase_core" ); \
         uv-with-retry pip uninstall omnibase-spi; \
