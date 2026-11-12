@@ -18,7 +18,6 @@ import re
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import Any
 
 from omnibase_infra.models.sibling_pin.model_sibling_clone_pin_request import (
     ModelSiblingClonePinRequest,
@@ -33,7 +32,7 @@ _GIT_DESCRIBE_RE: re.Pattern[str] = re.compile(
 )
 
 
-def derive_git_version(repo_root: Path, project_data: dict[str, Any]) -> str:
+def derive_git_version(repo_root: Path, git_describe_command: list[str]) -> str:
     """Derive a version from git using the pyproject's git_describe_command.
 
     Runs the pyproject's own ``tool.hatch.version.raw-options.git_describe_command``
@@ -51,25 +50,14 @@ def derive_git_version(repo_root: Path, project_data: dict[str, Any]) -> str:
 
     Args:
         repo_root: Filesystem path to the repository root.
-        project_data: The parsed ``pyproject.toml`` data (full dict).
+        git_describe_command: The pyproject's own ``git describe`` command.
 
     Returns:
         The derived version string.
 
     Raises:
-        ValueError: If no ``git_describe_command`` is found, or the output
-            cannot be parsed.
+        ValueError: If the output cannot be parsed.
     """
-    raw_options = (
-        project_data.get("tool", {})
-        .get("hatch", {})
-        .get("version", {})
-        .get("raw-options", {})
-    )
-    git_describe_command = raw_options.get("git_describe_command")
-    if not git_describe_command:
-        raise ValueError(f"no git_describe_command in pyproject for {repo_root}")
-
     # Drop a leading "git" element if present.
     args: list[str] = list(git_describe_command)
     if args and args[0] == "git":
@@ -143,7 +131,16 @@ def resolve_clone_pin(
     version = project.get("version")
     version_derived = False
     if not version and "version" in project.get("dynamic", []):
-        version = derive_git_version(repo_root, data)
+        raw_options = (
+            data.get("tool", {})
+            .get("hatch", {})
+            .get("version", {})
+            .get("raw-options", {})
+        )
+        command = raw_options.get("git_describe_command")
+        if not command:
+            raise ValueError(f"no git_describe_command in pyproject for {repo_root}")
+        version = derive_git_version(repo_root, list(command))
         version_derived = True
     if not version:
         raise ValueError(f"no project.version in {pyproject_path}")
