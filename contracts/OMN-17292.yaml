@@ -179,7 +179,7 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py tests/ci/test_retired_interim_declarations_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn-17292-integration-proof-work-ledger-latest-bridge-retired
+  - id: dod-omn-17292-integration-proof-wl-latest-retired
     description: The pin advance makes the work_ledger_latest supplemental declaration redundant, so it is absent from the declaration tuple while the vendored migrations and the omninode_runtime grant survive in every shipped instance.
     source: manual
     execution_scope: local_done_gate
