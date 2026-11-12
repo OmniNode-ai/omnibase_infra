@@ -288,6 +288,20 @@ async def _first_request(demand_source: FakeDemandSource, topic: str) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _lane_declares_on_demand(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The lane's overlay row declares on_demand (OMN-21318); a control removes it."""
+    root = tmp_path / "overlays"
+    (root / "runtime_contract_hotload").mkdir(parents=True)
+    (root / "runtime_contract_hotload" / "overlay.yaml").write_text(
+        "schema_version: 1\nlanes:\n  dogfood:\n    enabled: true\n"
+        "    mode: on_demand\n    allowed_environments: [local]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(root))
+    monkeypatch.setenv("ONEX_RUNTIME_LANE", "dogfood")
+
+
+@pytest.fixture(autouse=True)
 def _no_retry_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     """A demand start that fails is retried; the unit run never waits on it."""
     monkeypatch.setattr(
@@ -430,3 +444,32 @@ class TestDemandDeferredContractTopicsAreCreatedWhenItStarts:
 
         assert ("provision", PUBLISH_ONLY_TOPIC) in shared
         assert ("provision", IN_USE_PUBLISH_TOPIC) in shared
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_a_lane_with_no_overlay_row_creates_the_deferred_contract_topics_at_boot(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Failing control (OMN-21318): no row for the lane, so boot is as OMN-23951 made it.
+
+        Red if start-up ignores the lane's mode: the deferred contract's publish
+        topic would be withheld on every lane, rows or none.
+        """
+        monkeypatch.delenv("ONEX_RUNTIME_LANE")
+        provisioner = RecordingProvisioner()
+        demand = FakeDemandSource(in_use={IN_USE_SUBSCRIBE_TOPIC})
+
+        calls, subscriptions, exclusions = await _boot(
+            (_in_use_contract(), _deferred_contract()), provisioner, demand
+        )
+
+        # The contract still waits for its first request: only the topic
+        # creation differs, never the split.
+        assert [
+            e.contract_name
+            for e in exclusions
+            if e.reason is EnumContractAttachExclusionReason.DEMAND_DEFERRED
+        ] == ["node_deferred"]
+        assert "node_deferred" not in subscriptions
+        assert ("provision", DEFERRED_PUBLISH_TOPIC) in calls
+        assert ("provision", IN_USE_PUBLISH_TOPIC) in calls

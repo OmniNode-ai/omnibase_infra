@@ -131,6 +131,9 @@ from omnibase_infra.handlers.handler_projection_write_cursor import (
 )
 from omnibase_infra.handlers.projection_failure_classification import is_content_failure
 from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
+from omnibase_infra.models.model_contract_hotload_lane_overlay import (
+    lane_defers_topics_to_first_request,
+)
 from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.models.projection import ModelProjectionDerivedWriteRequest
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
@@ -10448,10 +10451,7 @@ async def subscribe_wired_contract_topics(
                 "plugin-managed contract '%s' (OMN-10864)",
                 contract.name,
             )
-            _exclude(
-                contract.name,
-                EnumContractAttachExclusionReason.PLUGIN_MANAGED,
-            )
+            _exclude(contract.name, EnumContractAttachExclusionReason.PLUGIN_MANAGED)
             continue
         # OMN-17562. The same withholding as the immediate seam, applied here
         # too because this path re-derives eligibility from the wiring REPORT
@@ -10504,7 +10504,9 @@ async def subscribe_wired_contract_topics(
                 auto_offset_reset=auto_offset_reset,
             )
 
-    scheduled = {contract.name for _, contract in eligible}
+    # OMN-21318: the lane's hot-load mode on_demand leaves a demand-deferred contract's
+    # topics to its first request; any other lane creates them at boot (OMN-23951).
+    scheduled = {c.name for _, c in eligible if lane_defers_topics_to_first_request()}
     if demand_source is not None:
         eligible = await _split_boot_set_by_demand(
             eligible,
@@ -10524,7 +10526,7 @@ async def subscribe_wired_contract_topics(
     # topics are created when its first request starts it.
     await provision_unattached_publish_topics(
         manifest,
-        scheduled,
+        scheduled.union(r.contract_name for r in attach_results),
         provisioner,
         max_concurrent=knobs.max_concurrent_contract_attach,
     )

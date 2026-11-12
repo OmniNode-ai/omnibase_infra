@@ -295,6 +295,20 @@ async def _boot(
         )
 
 
+@pytest.fixture(autouse=True)
+def _lane_declares_on_demand(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The lane's overlay row declares on_demand (OMN-21318); a control removes it."""
+    root = tmp_path / "overlays"
+    (root / "runtime_contract_hotload").mkdir(parents=True)
+    (root / "runtime_contract_hotload" / "overlay.yaml").write_text(
+        "schema_version: 1\nlanes:\n  dogfood:\n    enabled: true\n"
+        "    mode: on_demand\n    allowed_environments: [local]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(root))
+    monkeypatch.setenv("ONEX_RUNTIME_LANE", "dogfood")
+
+
 async def _prepare(bootstrap: str, names: _Names) -> None:
     """In-use: its subscribe topic holds a record. Deferred: its topic is empty."""
     await _create_topic(bootstrap, names.in_use_subscribe)
@@ -355,6 +369,32 @@ async def test_policy_refusal_on_publish_only_topic_still_ends_boot(
         assert apply_topic_namespace(names.deferred_publish) not in (
             await _broker_topics(broker_bootstrap)
         )
+    finally:
+        for stop in stops:
+            await stop()
+
+
+async def test_a_lane_with_no_overlay_row_creates_the_deferred_topic_at_boot(
+    broker_bootstrap: str,
+    bus: EventBusKafka,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failing control (OMN-21318): the lane's row, not the code, withholds the topic."""
+    monkeypatch.delenv("ONEX_RUNTIME_LANE")
+    names = _Names()
+    await _prepare(broker_bootstrap, names)
+    provisioner = TopicProvisioner(
+        bootstrap_servers=broker_bootstrap, contracts_root=tmp_path
+    )
+    stops: list[Callable[[], Awaitable[None]]] = []
+
+    try:
+        await _boot(names, bus, provisioner, [], stops)
+        at_boot = await _broker_topics(broker_bootstrap)
+        assert apply_topic_namespace(names.deferred_publish) in at_boot
+        assert apply_topic_namespace(names.in_use_publish) in at_boot
+        assert apply_topic_namespace(names.publish_only) in at_boot
     finally:
         for stop in stops:
             await stop()
