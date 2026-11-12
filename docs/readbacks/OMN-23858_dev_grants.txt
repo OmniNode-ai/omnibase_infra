@@ -1,0 +1,20 @@
+host=first PC, the dev lane host
+lane=dev
+read_at=2026-11-11T23:41:02Z
+read_by=infra-land-5160, read-only: the database session was opened READ ONLY and rolled back; the image revision comes from the container's labels
+runtime_container=omninode-runtime
+runtime_container_health=healthy
+runtime_container_started_at=2026-11-11T23:25:45.181472329Z
+image_revision=df3f14f5e6b910abd721ea27b53e0dce4f3d3106
+image_version=0.38.77
+database=omnidash_analytics
+grant_query=SELECT grantee, table_name, string_agg(privilege_type, ',' ORDER BY privilege_type) FROM information_schema.role_table_grants WHERE grantee = 'omninode_runtime' AND table_name LIKE 'merge_override%' GROUP BY 1,2 ORDER BY 2
+grant_rows=grantee|table_name|privileges
+omninode_runtime|merge_override_open_findings|INSERT,SELECT,UPDATE
+omninode_runtime|merge_override_pending|INSERT,SELECT,UPDATE
+omninode_runtime|merge_override_receipts|INSERT,SELECT,UPDATE
+omninode_runtime|merge_override_verdicts|INSERT,SELECT,UPDATE
+omnibase_infra_release=dev-20261111211012-df3f14f5e6b9
+omnibase_infra_release_note=the dev merge tag of omnibase_infra#5896 at df3f14f5e6b9, the revision the runtime container above runs
+omnimarket_lock_at_reading=dev-20261111190933-a349fbf4478e
+omnimarket_lock_note=this lock predates the release above and does not carry the grants; the move to the release above is ticket OMN-23892, so AC3 of the OMN-23858 contract is not yet read as met

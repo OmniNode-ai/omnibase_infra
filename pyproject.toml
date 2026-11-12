@@ -160,7 +160,7 @@ dependencies = [
     "pydantic-settings>=2.2.1,<3.0.0", # Settings management
     "jsonschema>=4.20.0,<5.0.0", # JSON schema validation
     "watchdog>=4.0.0", # Filesystem event monitoring (HandlerContractFileWatcher, OMN-3940)
-    "a2a-sdk>=0.3.4,<2.0.0", # Real A2A client/server protocol support for remote-agent invocation
+    "a2a-sdk>=0.3.4,<1.0.0", # Held below 1.0.0: 1.x is unchecked against handler_a2a_task.py (OMN-23843); real A2A client/server support for remote-agent invocation
     # Security: CVE-2026-32597 (HIGH) - PyJWT <2.12.0 accepts unknown `crit` header extensions.
     # Security: CVE-2026-48526 (HIGH) - PyJWT <2.13.0 authentication bypass via forged tokens.
     # Security: GHSA-9j54-fg26-wv3r, GHSA-9v7f-9g4p-ffgj, GHSA-ffc3-869f-jxw9 (CRITICAL),
@@ -275,7 +275,7 @@ override-dependencies = [
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261109065232-cd128b790ec6" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261111183916-a85cb916d4c1" }
 
 
 [tool.ruff]

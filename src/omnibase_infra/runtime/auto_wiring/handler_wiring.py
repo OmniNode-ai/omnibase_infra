@@ -94,7 +94,6 @@ from omnibase_infra.errors import (
     ProjectionNotMaterializedError,
     ProjectionQueryRowBudgetError,
     QuarantinePublishUnconfirmedError,
-    TopicReplicationPolicyError,
 )
 from omnibase_infra.event_bus.enum_contract_attach_exclusion_reason import (
     EnumContractAttachExclusionReason,
@@ -119,6 +118,10 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 )
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
+)
+from omnibase_infra.handlers.boot_topic_provisioning import (
+    ensure_topics_exist,
+    provision_unattached_publish_topics,
 )
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
@@ -10516,6 +10519,14 @@ async def subscribe_wired_contract_topics(
         *(_provision_ready_attach(result, contract) for result, contract in eligible)
     )
 
+    # OMN-23951: the publish topics of every contract the interleave never reached.
+    await provision_unattached_publish_topics(
+        manifest,
+        {r.contract_name for r in attach_results},
+        provisioner,
+        max_concurrent=knobs.max_concurrent_contract_attach,
+    )
+
     if attach_results_out is not None:
         attach_results_out.extend(attach_results)
 
@@ -10663,24 +10674,9 @@ async def _interleave_contract(
     readiness: ModelTopicSetReadiness | None = None
     if provisioner is not None and provision_topics:
         # (1) Provision the contract's topics (idempotent), in declared order.
-        for topic in provision_topics:
-            try:
-                await provisioner.ensure_topic_exists(topic_name=topic)
-            except TopicReplicationPolicyError:
-                # OMN-15395: a durability-policy violation is fail-closed and
-                # must escape this best-effort boundary. Attaching a consumer to
-                # a contract whose topics were silently skipped because one of
-                # them declares RF1 on MSK is the exact outcome the policy
-                # exists to prevent.
-                raise
-            except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal
-                logger.warning(
-                    "Topic provisioning failed for contract '%s' topic '%s' "
-                    "(non-fatal, contract will be NOT-READY)",
-                    name,
-                    topic,
-                    exc_info=True,
-                )
+        # OMN-15395: a durability-policy violation is fail-closed and escapes;
+        # any other failure leaves the contract NOT-READY at the confirm below.
+        await ensure_topics_exist(provisioner, provision_topics, contract_name=name)
         # (2) Confirm broker metadata converged before attaching the consumer.
         try:
             readiness = await provisioner.confirm_topics_ready(
@@ -11441,7 +11437,6 @@ async def _subscribe_contract_topics(
     from omnibase_infra.enums import EnumConsumerGroupPurpose
     from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
         HandlerContractSubscribePreflight,
-        load_contract_handover,
     )
     from omnibase_infra.models import ModelNodeIdentity
     from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request import (
@@ -11523,10 +11518,10 @@ async def _subscribe_contract_topics(
     # OMN-18852 consume_concurrency and OMN-21753 consumer_group_handover: read
     # both declarations and refuse a bus that cannot honour either, before any
     # topic of this contract is subscribed. See the handler's module docstring.
-    preflight = HandlerContractSubscribePreflight(
-        contract_name=contract.name,
+    preflight = HandlerContractSubscribePreflight.from_contract(
+        contract,
         concurrency=load_consume_concurrency(contract.contract_path),
-        handover=load_contract_handover(contract, os.environ),
+        environ=os.environ,
         event_bus=event_bus,
         environment=environment,
         consumer_group=consumer_group,

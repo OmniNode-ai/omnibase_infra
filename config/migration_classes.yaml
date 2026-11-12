@@ -122,6 +122,7 @@ migrations:
   forward/110_add_ledger_chain_chain_state.sql: forward-only # DROP; ALTER TABLE public.ledger_chain DROP CONSTRAINT IF; ALTER TABLE public.ledger_chain ADD CONSTRAINT CK_LEDGER_CHAIN_CHAIN_STATE (ADD CONSTRAINT class)
   forward/111_widen_runtime_error_triage_active_unique_to_escalated.sql: forward-only # UNIQUE INDEX on an existing table; DROP
   forward/113_create_floor_fill_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
+  forward/114_create_code_eval_trial_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -155,6 +156,8 @@ migrations:
   forward/nodes/node_llm_delegation_projection/0001_create_llm_delegation_daily_projection.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT LLM_DELEGATION_DAILY_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT UQ_LLM_DE
   forward/nodes/node_llm_delegation_projection/0002_grant_omninode_runtime_llm_delegation_daily_projection.sql: expand-only
   forward/nodes/node_log_persistence_effect/0000_create_log_entries.sql: forward-only # ALTER TABLE ALTER COLUMN; EXECUTE; ALTER TABLE ADD CONSTRAINT LOG_ENTRIES_PKEY
+  forward/nodes/node_merge_override_alarm_effect/0001_create_merge_override_tables.sql: expand-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the four merge override tables
+  forward/nodes/node_merge_override_alarm_effect/0002_grant_omninode_runtime_merge_override_tables.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the four merge override tables
   forward/nodes/node_merge_state_projection/0001_create_merge_state_transitions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT MERGE_STATE_TRANSITIONS_PKEY; ALTER TABLE ADD CONSTRAINT MERGE_STATE_TRANS
   forward/nodes/node_merge_state_projection/0002_grant_omninode_runtime_merge_state_transitions.sql: expand-only
   forward/nodes/node_merge_state_projection/0003_grant_omninode_runtime_merge_state_sequence.sql: expand-only
@@ -540,3 +543,5 @@ migrations:
   forward/nodes/node_context_install_confirm_trigger_effect/0001_grant_compaction_activations.sql: expand-only
   forward/nodes/node_projection_delegation_budget_readings/0000_create_delegation_budget_readings.sql: forward-only
   forward/nodes/node_projection_delegation_budget_readings/0001_grant_omninode_runtime_delegation_budget_readings.sql: expand-only
+  forward/nodes/node_projection_host_disk/0000_create_host_disk.sql: forward-only # CREATE UNIQUE INDEX on host_disk_class and host_disk_volume
+  forward/nodes/node_projection_host_disk/0001_grant_omninode_runtime_host_disk.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the two host disk tables

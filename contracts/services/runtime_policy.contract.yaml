@@ -208,6 +208,17 @@ profiles:
         source:
           source_type: env
           source_path: LINEAR_API_KEY
+      # OMN-23903: the read-only DSN of the analytics projection database for the
+      # tenant read nodes (omnimarket node_tenant_savings_read_effect and
+      # node_tenant_delegations_read_effect, config.analytics_dsn_secret). Unmapped,
+      # this lane's enable_convention_fallback: false left their postgres reader
+      # with no DSN, and every read answered not_configured. The container env
+      # already carries the value (docker-compose.dev-lane.yml, x-runtime-env,
+      # rendered as role_omnidash). The value never appears here.
+      - logical_name: omnidash.analytics.db_url
+        source:
+          source_type: env
+          source_path: OMNIDASH_ANALYTICS_DB_URL
     services:
       main:
         runtime_id: dev-main

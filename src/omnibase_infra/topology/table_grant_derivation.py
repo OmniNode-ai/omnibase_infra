@@ -71,9 +71,7 @@ __all__ = [
 # Mirrors ``_require_projection_binding_privileges``: PostgreSQL needs SELECT
 # alongside INSERT/UPDATE because the projection adapter issues
 # ``INSERT ... ON CONFLICT DO UPDATE``.
-READ_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
-    {EnumDatabasePrivilege.SELECT}
-)
+READ_PRIVILEGES = frozenset({EnumDatabasePrivilege.SELECT})
 WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
     {
         EnumDatabasePrivilege.SELECT,
@@ -168,6 +166,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("session_phase_state", "102_create_session_phase_state.sql"),
         ("pr_landing_workflow_state", "108_create_pr_landing_workflow_state.sql"),
         ("floor_fill_state", "113_create_floor_fill_state.sql"),
+        ("code_eval_trial_state", "114_create_code_eval_trial_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )
 )
@@ -197,6 +196,9 @@ def _vendored_read_write(
             role=role or table,
         ),
     )
+
+
+_BRIDGES = Path(__file__).with_name("vendored_table_bridges.yaml")
 
 
 # Some migration-owned projection relations landed before their producing node's
@@ -319,25 +321,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
     ),
-    # OMN-23055: node_gate_store_effect/0000 creates the four gate store relations and
-    # 0001 grants omninode_runtime on them ahead of the omnimarket node contract
-    # reaching the pin (the node's contract declares no db_io binding: the store opens
-    # its own connection); expire this bridge when that contract reaches the pin.
+    # OMN-23055, OMN-23341, OMN-23858: vendored_table_bridges.yaml.
     *(
-        _vendored_read_write(
-            f"gate_store_{s}", "node_gate_store_effect", "0000_create_gate_store.sql"
-        )
-        for s in ("state", "reservations", "safety", "steps")
-    ),
-    # OMN-23341: node_projection_goal_trace/0000 creates goal_trace_events and
-    # goal_traces and 0001 grants omninode_runtime SELECT, INSERT, UPDATE on both,
-    # ahead of the omnimarket node contract reaching the pin; expire this bridge
-    # when that contract reaches the pin.
-    *(
-        _vendored_read_write(
-            t, "node_projection_goal_trace", "0000_create_goal_trace_events.sql"
-        )
-        for t in ("goal_trace_events", "goal_traces")
+        _vendored_read_write(f"{b['prefix']}{t}", b["node"], b["create"])
+        for b in yaml.safe_load(_BRIDGES.read_text(encoding="utf-8"))
+        for t in b["tables"]
     ),
     # The bridges below share one shape: 0000_create_<table>.sql under the
     # node directory named beside it, or under node_projection_<table>.
@@ -493,19 +481,9 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # that change can merge. The table's own trigger refuses every UPDATE and
     # DELETE. Retired when the contract merges and the omnimarket pin advances
     # past it; the OMN-18863 expiry module names this bridge.
-    # OMN-23705: infra vendors the work-ledger latest-state migrations (0011
-    # creates work_ledger_latest, 0012 grants the runtime SELECT, INSERT, UPDATE
-    # and never DELETE) ahead of the omnimarket change whose
-    # node_projection_work_ledger contract declares the relation with write
-    # access. The writer upserts the newest row per subject and type and never
-    # deletes. Retired when the contract merges and the omnimarket pin advances
-    # past it; the OMN-18863 expiry module names this bridge.
     *(
         _vendored_read_write(t, "node_projection_work_ledger", f, access="write")
-        for t, f in (
-            ("ledger_line_citation", "0007_work_ledger_history_import.sql"),
-            ("work_ledger_latest", "0011_work_ledger_latest.sql"),
-        )
+        for t, f in (("ledger_line_citation", "0007_work_ledger_history_import.sql"),)
     ),
 )
 

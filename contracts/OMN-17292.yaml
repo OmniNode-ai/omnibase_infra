@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to 932c240449cd110c46a1a0cc10bdc9cb603aaa3a"
+title: "The omnimarket contract pin advances to 179aa12807225952ed8b9086c7b919cab189981c"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,7 +10,7 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 932c240449cd110c46a1a0cc10bdc9cb603aaa3a -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 179aa12807225952ed8b9086c7b919cab189981c -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
@@ -32,7 +32,7 @@ requirements:
     statement: The runtime image upgrades filelock and npm's bundled undici past their HIGH CVEs, so the Trivy scan in Build runtime stability-candidate no longer fails on dev.
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 932c240449cd110c46a1a0cc10bdc9cb603aaa3a.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 179aa12807225952ed8b9086c7b919cab189981c.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
@@ -58,7 +58,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 932c240449cd110c46a1a0cc10bdc9cb603aaa3a.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 179aa12807225952ed8b9086c7b919cab189981c.
     source: manual
     checks:
       - check_type: test_passes
@@ -172,10 +172,18 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2, AC3, AC4]
   - id: dod-omn-17292-interim-entries-retired-at-pin
-    description: The omnimarket pin advance makes the supplemental table declarations for context_audit_events, local_alerts, overlay_store and view_seam_readings redundant, so they are absent from the declaration tuple and the expiry test passes against the pinned contracts.
+    description: The omnimarket pin advance makes the supplemental table declarations for context_audit_events, local_alerts, overlay_store, view_seam_readings and the four merge_override tables redundant, so they are absent from the declaration tuple and the expiry test passes against the pinned contracts.
     source: manual
     checks:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py tests/ci/test_retired_interim_declarations_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn-17292-integration-proof-wl-latest-retired
+    description: The pin advance makes the work_ledger_latest supplemental declaration redundant, so it is absent from the declaration tuple while the vendored migrations and the omninode_runtime grant survive in every shipped instance.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_work_ledger_latest_bridge_retired_omn17292.py -q -n 0"
+        cwd: ${OMNI_HOME}/omnibase_infra

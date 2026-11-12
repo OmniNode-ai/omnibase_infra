@@ -108,6 +108,8 @@ databases:
               - gateway_link_health
               - goal_trace_events
               - goal_traces
+              - host_disk_class
+              - host_disk_volume
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -117,6 +119,10 @@ databases:
               - ledger_line_citation
               - live_events
               - log_entries
+              - merge_override_open_findings
+              - merge_override_pending
+              - merge_override_receipts
+              - merge_override_verdicts
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
@@ -412,6 +418,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - code_eval_trial_state
               - delegation_workflow_state
               - floor_fill_state
               - infra_routing_decisions
@@ -481,5 +488,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: a49f65310945adddc123f7c5377efbd296104825c861fd842f68bde11a9c8b3f
+  sha256: 8110e7bf5de72e5a3b560fd8625dec961a0752f4f455080aef5b2ce2d25de26a
 topology_instance: local

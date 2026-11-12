@@ -106,6 +106,8 @@ databases:
               - gateway_link_health
               - goal_trace_events
               - goal_traces
+              - host_disk_class
+              - host_disk_volume
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -115,6 +117,10 @@ databases:
               - ledger_line_citation
               - live_events
               - log_entries
+              - merge_override_open_findings
+              - merge_override_pending
+              - merge_override_receipts
+              - merge_override_verdicts
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
@@ -361,6 +367,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - code_eval_trial_state
               - delegation_workflow_state
               - floor_fill_state
               - infra_routing_decisions

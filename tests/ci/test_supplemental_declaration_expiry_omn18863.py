@@ -111,7 +111,6 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
     "ledger_line_citation": "omnimarket OMN-21947 (node_projection_work_ledger)",
-    "work_ledger_latest": "omnimarket OMN-23694 (node_projection_work_ledger)",
     **dict.fromkeys(
         (
             "work_outcome_units",
@@ -128,6 +127,8 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "goal_trace_events": "omnimarket OMN-20034 (node_projection_goal_trace)",
     "goal_traces": "omnimarket OMN-20034 (node_projection_goal_trace)",
+    "host_disk_class": "omnimarket OMN-23865 (node_projection_host_disk)",
+    "host_disk_volume": "omnimarket OMN-23865 (node_projection_host_disk)",
 }
 
 _SKIP_REASON = (

@@ -1,0 +1,53 @@
+schema_version: 1.0.0
+ticket_id: OMN-23932
+title: Move omnibase_infra to the shared-library build that carries the dev-tag version field
+summary: 'omnibase_infra moves its omnibase-core dev merge tag to dev-20261111183916-a85cb916d4c1 (core 0.47.76, which carries the derived-version field of omnibase_core#2311) with the files that must agree with it: uv.lock, the pin tests, the recorded lineage fixture, the handshake checkout ref and the runner image lock. omnimarket then moves both of its pins in one change, because omnimarket reads the core tag its infra pin names and its moved dev-tag lineage handler fills the new field.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23932-core-pin
+    statement: The omnibase-core dev merge tag in pyproject.toml, uv.lock and every exact-tag follower name the same revision.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra pins omnibase-core to dev-20261111183916-a85cb916d4c1 in pyproject.toml and uv.lock, and the pin tests agree -- falsifier: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q fails on origin/dev''s pin and passes on the branch'
+      - id: AC2
+        statement: 'AC2: the recorded dependency lineage fixture and the runner image lock identity name the same core tag -- falsifier: uv run pytest tests/ci/test_runner_image_identity.py -q fails when the lock identity does not match uv.lock'
+      - id: AC3
+        statement: 'AC3: integrated: the dev runtime built from the merged change reports omnibase-core at the new tag, read in the running runtime -- falsifier: the runtime''s installed omnibase-core revision on the dev lane names a85cb916d4c1'
+evidence_requirements:
+  - kind: tests
+    description: The focused pin tests pass at the pushed head.
+    command: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov -p no:cacheprovider -k test_core_tag_alone_range_and_lock_agree
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23932-ac1
+    description: 'AC1: omnibase_infra pins omnibase-core to dev-20261111183916-a85cb916d4c1 in pyproject.toml and uv.lock, and the pin tests agree'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov -p no:cacheprovider -k test_core_tag_alone_range_and_lock_agree
+        cwd: .
+  - id: dod-omn23932-ac2
+    description: 'AC2: the recorded dependency lineage fixture and the runner image lock identity name the same core tag'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py::test_recorded_core_validator_response_matches_the_pin tests/ci/test_dep_provenance_core_lineage_live_contact_omn17427.py tests/ci/test_runner_image_identity.py::test_recorded_identity_matches_recomputed_identity -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn23932-ac3
+    description: 'AC3: integrated: the dev runtime built from the merged change reports omnibase-core at the new tag'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov -p no:cacheprovider -k test_recorded_core_validator_response_matches_the_pin
+        cwd: .
