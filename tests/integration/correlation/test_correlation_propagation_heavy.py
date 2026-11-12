@@ -65,7 +65,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncGenerator
+import socket
+import time
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -129,11 +131,12 @@ CORRELATION_HEADER = "X-Correlation-ID"
 MESSAGE_DELIVERY_WAIT_SECONDS = 20.0
 TEST_TIMEOUT_SECONDS = 30
 
-# A broker address that cannot resolve, ever. ``.invalid`` is reserved by
-# RFC 2606 precisely so a name is guaranteed NXDOMAIN, which makes the failure
-# tests deterministic and fast instead of dependent on whatever a resolver does
-# with an unqualified made-up hostname.
-UNREACHABLE_BROKER = "kafka-unreachable.invalid:9092"
+# A broker address that refuses at once and involves no resolver: a loopback
+# port below the ephemeral range, where nothing listens. The earlier
+# ``.invalid`` name was guaranteed NXDOMAIN but not fast: a slow name lookup
+# longer than the 2 second connect bound turned the connection error these
+# tests expect into ``InfraTimeoutError`` (OMN-24009).
+UNREACHABLE_BROKER = "127.0.0.1:1"
 
 
 # =============================================================================
@@ -300,11 +303,11 @@ class TestCorrelationHttpBoundary:
 
 @pytest.fixture
 def unreachable_bus_config() -> object:
-    """Config for a bus pointed at a broker that cannot resolve.
+    """Config for a bus pointed at a broker that refuses connections.
 
     ``circuit_breaker_threshold=1`` so the circuit opens on the first failure:
-    the second ``start()`` is then refused by the breaker rather than by DNS,
-    which is what the second test needs to observe.
+    the second ``start()`` is then refused by the breaker rather than by the
+    loopback refusal, which is what the second test needs to observe.
     """
     from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
@@ -369,12 +372,88 @@ class TestCorrelationErrorContextFromRealFailures:
     ) -> None:
         """Once the breaker opens, the refusal is its own traceable error.
 
-        The first ``start()`` fails against DNS and trips the breaker
-        (threshold 1). The second never reaches the network: the breaker
-        refuses it with ``InfraUnavailableError``, carrying a correlation id of
-        its own and a ``circuit_state`` the connection error above does not
-        have. Two different failure modes, two distinguishable contexts -- the
-        property an operator reading a trace depends on.
+        The first ``start()`` fails against the loopback refusal and trips the
+        breaker (threshold 1). The second never reaches the network: the
+        breaker refuses it with ``InfraUnavailableError``, carrying a
+        correlation id of its own and a ``circuit_state`` the connection error
+        above does not have. Two different failure modes, two distinguishable
+        contexts -- the property an operator reading a trace depends on.
+        """
+        with pytest.raises(InfraConnectionError) as first:
+            await unreachable_bus.start()
+
+        with pytest.raises(InfraUnavailableError) as second:
+            await unreachable_bus.start()
+
+        refusal = second.value
+        assert refusal.correlation_id is not None
+        assert refusal.correlation_id != first.value.correlation_id, (
+            "each failure needs its own correlation id, or two incidents "
+            "collapse into one in a trace"
+        )
+
+        context = refusal.model.context
+        assert context is not None
+        assert context["operation"] == "start"
+        assert context["circuit_state"] == "open"
+
+
+class TestFailureKindIgnoresSlowNameLookup:
+    """A slow resolver must not turn a refusal into a timeout."""
+
+    @pytest.fixture(autouse=True)
+    def slow_name_lookup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Patch ``socket.getaddrinfo`` to sleep 3 seconds before delegating.
+
+        The 2 second connect bound plus one second: any name lookup that
+        happens during ``start()`` will exceed the timeout, so a test that
+        still observes ``InfraConnectionError`` proves the failure kind is
+        determined by the refusal, not by resolver latency.
+        """
+        original_getaddrinfo: Callable[..., object] = socket.getaddrinfo
+
+        def slow_getaddrinfo(*args: object, **kwargs: object) -> object:
+            time.sleep(3.0)
+            return original_getaddrinfo(*args, **kwargs)
+
+        monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+
+    @pytest.mark.asyncio
+    async def test_slow_name_lookup_does_not_turn_a_refusal_into_a_timeout(
+        self,
+        unreachable_bus: EventBusKafka,
+    ) -> None:
+        """Even with a 3-second resolver, a loopback refusal is a connection error.
+
+        The first ``start()`` still raises ``InfraConnectionError`` (not
+        ``InfraTimeoutError``) because the refusal arrives before the timeout
+        bound, and the context names the loopback broker.
+        """
+        with pytest.raises(InfraConnectionError) as exc_info:
+            await unreachable_bus.start()
+
+        error = exc_info.value
+
+        assert error.correlation_id is not None
+        assert error.model.correlation_id == error.correlation_id
+
+        context = error.model.context
+        assert context is not None
+        assert context["operation"] == "start"
+        assert context["target_name"] == "kafka.correlation-test"
+        assert context["servers"] == UNREACHABLE_BROKER
+
+    @pytest.mark.asyncio
+    async def test_slow_name_lookup_does_not_change_the_circuit_refusal(
+        self,
+        unreachable_bus: EventBusKafka,
+    ) -> None:
+        """The circuit breaker still opens on the first refusal and refuses the second.
+
+        With a slow resolver in place, the first ``start()`` still produces
+        ``InfraConnectionError`` (not a timeout), and the second still produces
+        ``InfraUnavailableError`` with ``circuit_state == "open"`` and a
+        different correlation id.
         """
         with pytest.raises(InfraConnectionError) as first:
             await unreachable_bus.start()

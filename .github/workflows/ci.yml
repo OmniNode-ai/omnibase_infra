@@ -1662,7 +1662,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 179aa12807225952ed8b9086c7b919cab189981c # .github/sibling-pins.yaml
+          ref: 778285a39bfa2d8c0c3b602b7d0e0dfe87daf62b # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -3913,7 +3913,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: 7a42607746cc5edc57195bed6ca5a0a9229fbd48
+          ref: 0e156a757bc09af4df28a61d91f86ba5b1bf9cac
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
