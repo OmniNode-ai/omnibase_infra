@@ -85,6 +85,11 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - gate_store_reservations
+            privileges: [DELETE, SELECT]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
               - alert_channel_liveness_verdicts
               - automation_alarm_episodes
               - automation_liveness_state
@@ -104,7 +109,15 @@ databases:
               - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
+              - gate_store_reservations
+              - gate_store_safety
+              - gate_store_state
+              - gate_store_steps
               - gateway_link_health
+              - goal_trace_events
+              - goal_traces
+              - host_disk_class
+              - host_disk_volume
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -114,6 +127,10 @@ databases:
               - ledger_line_citation
               - live_events
               - log_entries
+              - merge_override_open_findings
+              - merge_override_pending
+              - merge_override_receipts
+              - merge_override_verdicts
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
@@ -132,6 +149,7 @@ databases:
               - topic_activity
               - topic_produce_windows
               - work_events
+              - work_ledger_latest
               - work_ledger_rows
               - work_ledger_seq_conflicts
               - work_ledger_state
@@ -359,6 +377,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - code_eval_trial_state
               - delegation_workflow_state
               - infra_routing_decisions
               - pr_landing_workflow_state

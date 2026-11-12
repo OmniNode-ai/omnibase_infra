@@ -273,15 +273,6 @@ evidence_artifacts:
       - ${LAB_PASS_DIR}/receipt.json
     rationale: >-
       The .201 compose dev lane's lab pass for an OMNINODE_INFRA commit that changed the lane's onex-api image (rule 24(a), OMN-18572). Keyed by the omninode_infra sha, because that is the revision the lane's onex-api container was proven to carry; it collides with neither the omnibase_infra receipt nor a sibling's, which are claims about different repositories' commits. It lands on the omninode_infra run, since a called reusable workflow's artifacts belong to the caller.
-  - id: lab-pass-receipt-onex-lab-k3s
-    workflow: .github/workflows/runtime-rebuild-trigger.yml
-    job: verify-lab-overlay-converged
-    producer_step: "Emit the onex-lab-k3s lab-pass receipt"
-    artifact_name: lab-pass-receipt-onex-lab-k3s-${{ needs.trigger-rebuild.outputs.source_sha }}
-    required_paths:
-      - ${LAB_PASS_DIR}/receipt.json
-    rationale: >-
-      The k3s onex-lab overlay's half of rule 24(a), on its own lane name so it cannot supersede the boot gate's onex-lab receipt for the same sha.
   # --- the non-required check failure-rate report (OMN-18254) --------------
   #
   # Declared because its ABSENCE is the failure it exists to prevent. This

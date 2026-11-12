@@ -1,0 +1,53 @@
+schema_version: '1.0.0'
+ticket_id: OMN-23888
+title: "The coding-trial coordinator keeps each run's progress in a new database table"
+summary: 'Forward migration 114 creates public.code_eval_trial_state keyed on correlation_id with the StateStoreAdapter column shape of migrations 102 and 108, and STATE_IO_TABLE_DECLARATIONS declares it so every shipped topology instance and catalog grants it to the runtime role.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23888-code-eval-trial-state-table
+    statement: omnimarket's node_code_eval_trial_orchestrator declares state_io on table code_eval_trial_state keyed on correlation_id in the omnibase_infra database; the table exists with the adapter's columns, the runtime role is granted it in every shipped profile, the migration is idempotent, and the real StateStoreAdapter seeds, CAS-updates and reads a row of it.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: migration 114 creates public.code_eval_trial_state with correlation_id as primary key and the columns the state store adapter reads and writes, plus its two adapter indexes and the updated_at trigger -- falsifier: uv run pytest tests/unit/db/test_migration_114_code_eval_trial_state_omn23888.py -q'
+      - id: AC2
+        statement: 'AC2: the derived grants give the runtime account read and write on code_eval_trial_state in every shipped topology profile, and the generator check passes -- falsifier: uv run pytest tests/integration/topology/test_code_eval_trial_state_grant_omn23888.py -q'
+      - id: AC3
+        statement: 'AC3: integrated: on a real PostgreSQL the migration applies twice without error, the table exists, and the real StateStoreAdapter seeds, CAS-updates and reads a row of it -- falsifier: uv run pytest tests/integration/migrations/test_114_code_eval_trial_state_omn23888.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The migration shape and grant tests pass at the head; with the STATE_IO_TABLE_DECLARATIONS entry removed the derivation grants nothing and the grant test fails.
+    command: uv run --frozen pytest tests/unit/db/test_migration_114_code_eval_trial_state_omn23888.py tests/integration/topology/test_code_eval_trial_state_grant_omn23888.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23888-migration-shape
+    description: Migration 114 is a CREATE TABLE IF NOT EXISTS on correlation_id with the adapter columns, the two partial indexes and the updated_at trigger; the file is absent at the merge base, so the test fails there.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/db/test_migration_114_code_eval_trial_state_omn23888.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23888-runtime-grant
+    description: The grant is derived for code_eval_trial_state in the omnibase_infra database for the runtime role, and every shipped instance and rendered catalog carries it.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/topology/test_code_eval_trial_state_grant_omn23888.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -rlq code_eval_trial_state src/omnibase_infra/topology/instances docker/catalog/database-topology
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23888-postgres-apply
+    description: The migration applies idempotently on a real PostgreSQL and the adapter seeds, CAS-updates and reads a row; the migration file is absent at the merge base, so the test fails there.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_114_code_eval_trial_state_omn23888.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

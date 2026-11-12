@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18534
+title: omnibase_infra vendors omnimarket node migration 0069, the delegation turn count column
+summary: Vendors omnimarket node_projection_delegation migration 0069 byte for byte (sha256 43a0a993223d7c71e392860334aaa9c47a81b1bf7afadd7f4884112dd2d4c0e3). It adds the nullable integer column turn_count to delegation_events, with no default and no row rewrite. One ledger row (tenant domain) and an expand-only class declaration accompany it, so the omnimarket pull request that writes the column passes the vendor parity gate.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18534-vendored-0069
+    statement: The delegation turn count column reaches deployed databases through a migration this repository vendors byte-identical from omnimarket.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the vendored file's sha256 equals the omnimarket source's, it has exactly one tenant ledger row with that checksum and an expand-only class, and it adds only a nullable turn_count column with no default"
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0069 matches the omnimarket source's checksum, has its tenant ledger row and expand-only class, adds a nullable column and rewrites no row.
+    command: uv run --frozen pytest tests/unit/migrations/test_omn18534_turn_count_vendored.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn18534-vendored-0069-test
+    description: The vendored 0069 matches the omnimarket source checksum, has its tenant ledger row and expand-only class, adds only a nullable turn_count column and rewrites no row. At the merge base the file is absent and the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn18534_turn_count_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

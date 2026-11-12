@@ -1662,7 +1662,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: d059bd84147a96ed1e9765945cde7f2ffe6ffab0 # .github/sibling-pins.yaml
+          ref: c1846cea179afc55bc7283f3ce061ba032596d03 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -5556,6 +5556,7 @@ jobs:
             tests/integration/migrations/test_delegation_updated_at_absorb_omn19561.py \
             tests/integration/migrations/test_102_tenant_projection_writer_role_omn15425.py \
             tests/integration/migrations/test_omn18992_projection_zero_rows.py \
+            tests/integration/migrations/test_contract_persistence_handlers_sql_live.py \
             -m ephemeral_pg \
             -v -rs --tb=short -p no:randomly
 

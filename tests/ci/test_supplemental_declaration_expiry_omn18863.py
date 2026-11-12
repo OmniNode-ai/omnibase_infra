@@ -109,17 +109,8 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_activations": "omnimarket OMN-21115 (node_context_install_confirm_trigger_effect)",
     "compaction_current_context": "omnimarket OMN-21090 (node_projection_compaction_current_context)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
-    "agent_actions": "omnimarket OMN-21920 (node_projection_agent_actions)",
-    "agent_transformation_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
-    "router_performance_metrics": "omnimarket OMN-21920 (node_projection_agent_actions)",
-    "agent_detection_failures": "omnimarket OMN-21920 (node_projection_agent_actions)",
-    "agent_execution_logs": "omnimarket OMN-21920 (node_projection_agent_actions)",
-    "agent_status_events": "omnimarket OMN-21920 (node_projection_agent_actions)",
-    "local_identity": "omnimarket OMN-19986 (node_projection_local_identity)",
-    "projection_delegation_daily": "omnimarket OMN-21970 (node_projection_delegation)",
     "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
     "ledger_line_citation": "omnimarket OMN-21947 (node_projection_work_ledger)",
-    "work_ledger_seq_conflicts": "omnimarket OMN-23152 (node_projection_work_ledger)",
     **dict.fromkeys(
         (
             "work_outcome_units",
@@ -130,6 +121,18 @@ _INTERIM_ENTRIES: dict[str, str] = {
         ),
         "omnimarket OMN-22320 writer half (node_projection_work_questions)",
     ),
+    "gate_store_reservations": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
+    "gate_store_safety": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
+    "gate_store_state": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
+    "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
+    "goal_trace_events": "omnimarket OMN-20034 (node_projection_goal_trace)",
+    "goal_traces": "omnimarket OMN-20034 (node_projection_goal_trace)",
+    "merge_override_receipts": "omnimarket OMN-23836 (node_merge_override_alarm_effect)",
+    "merge_override_pending": "omnimarket OMN-23836 (node_merge_override_alarm_effect)",
+    "merge_override_verdicts": "omnimarket OMN-23836 (node_merge_override_alarm_effect)",
+    "merge_override_open_findings": "omnimarket OMN-23836 (node_merge_override_alarm_effect)",
+    "host_disk_class": "omnimarket OMN-23865 (node_projection_host_disk)",
+    "host_disk_volume": "omnimarket OMN-23865 (node_projection_host_disk)",
 }
 
 _SKIP_REASON = (
