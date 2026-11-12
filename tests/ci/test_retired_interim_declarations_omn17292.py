@@ -20,6 +20,10 @@ _RETIRED = (
     "local_alerts",
     "overlay_store",
     "view_seam_readings",
+    "merge_override_receipts",
+    "merge_override_pending",
+    "merge_override_verdicts",
+    "merge_override_open_findings",
 )
 
 
