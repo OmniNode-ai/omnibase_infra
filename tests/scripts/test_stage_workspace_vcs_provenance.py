@@ -308,3 +308,108 @@ def test_schema_declares_per_repo_vcs_provenance_and_infra_vcs_ref() -> None:
         "build_context" in schema["properties"]["per_repo_vcs_provenance"]["properties"]
     )
     assert "first_party_sources" in schema["properties"]
+
+
+# --- OMN-23947: a sibling whose pyproject leaves its version to git ------------
+
+_DYNAMIC_CORE_PYPROJECT = (
+    "[project]\nname = 'omnibase-core'\ndynamic = ['version']\n\n"
+    "[tool.hatch.version.raw-options]\n"
+    "git_describe_command = ['git', 'describe', '--dirty', '--tags', '--long',"
+    " '--match', 'v[0-9]*']\n"
+)
+
+
+def _git_out(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**scrub_git_location_env(os.environ), "GIT_TERMINAL_PROMPT": "0"},
+    ).stdout.strip()
+
+
+def _make_derived_core_registry(tmp_path: Path, *, lock_at_latest: bool) -> Path:
+    """omnibase_core leaves its version to git: tag v1.2.3, then one commit.
+
+    The consumer lock names the tagged commit (``lock_at_latest`` False) or the
+    newest commit (True) through a dev-tag git source with a ``#<sha>`` fragment.
+    """
+    clones = tmp_path / "clones"
+    for repo in (*SIBLING_REPOS, "omnibase_infra"):
+        _init_repo(clones / repo, _DIST_NAME[repo])
+    _write_consumer_lock(clones)
+    core = clones / "omnibase_core"
+    (core / "pyproject.toml").write_text(_DYNAMIC_CORE_PYPROJECT, encoding="utf-8")
+    _git(core, "add", "-A")
+    _git(core, "commit", "-q", "-m", "dynamic version")
+    _git(core, "tag", "v1.2.3")
+    tagged = _git_out(core, "rev-parse", "HEAD")
+    (core / "later.txt").write_text("later\n", encoding="utf-8")
+    _git(core, "add", "-A")
+    _git(core, "commit", "-q", "-m", "later")
+    locked = _git_out(core, "rev-parse", "HEAD") if lock_at_latest else tagged
+    if lock_at_latest:
+        _git(core, "checkout", "-q", "--detach", "HEAD~1")
+    lock = clones / "omnimarket" / "uv.lock"
+    text = lock.read_text(encoding="utf-8")
+    old = f'name = "omnibase-core"\nversion = "{_PIN_VERSION}"\n'
+    assert old in text
+    lock.write_text(
+        text.replace(
+            old,
+            f'name = "omnibase-core"\nversion = "{_PIN_VERSION}"\n'
+            'source = { git = "https://example.test/omnibase_core.git'
+            f'?tag=dev-x#{locked}" }}\n',
+        ),
+        encoding="utf-8",
+    )
+    return clones
+
+
+@pytest.mark.unit
+def test_stage_derived_version_records_version_in_staged_pin_comparison(
+    tmp_path: Path,
+) -> None:
+    clones = _make_derived_core_registry(tmp_path, lock_at_latest=False)
+    build_ctx = tmp_path / "ctx"
+    result = _run_stage(clones, build_ctx)
+    assert result.returncode == 0, result.stderr
+
+    short = _git_out(clones / "omnibase_core", "rev-parse", "--short", "HEAD")
+    comparison = json.loads(
+        (build_ctx / "workspace" / "sibling-pin-comparison.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    by_package = {c["package"]: c for c in comparison["comparisons"]}
+    assert by_package["omnibase-core"]["version_derived"] is True
+    assert by_package["omnibase-core"]["actual_version"] == f"1.2.4.dev1+g{short}"
+    # A sibling with a static version is not marked derived.
+    assert by_package["omnibase-spi"]["version_derived"] is False
+
+
+@pytest.mark.unit
+def test_stage_derived_version_aborts_when_clone_is_behind_locked_commit(
+    tmp_path: Path,
+) -> None:
+    clones = _make_derived_core_registry(tmp_path, lock_at_latest=True)
+    build_ctx = tmp_path / "ctx"
+    result = _run_stage(clones, build_ctx)
+    assert result.returncode != 0
+    assert "git SHA drift" in result.stderr
+
+
+@pytest.mark.unit
+def test_dockerfile_derived_version_exports_pretend_version_before_core_install() -> (
+    None
+):
+    text = (REPO_ROOT / "docker" / "Dockerfile.runtime").read_text(encoding="utf-8")
+    export = "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OMNIBASE_CORE"
+    source = "/workspace/sibling-pin-comparison.json"
+    install = '"omnibase-core @ file:///workspace/sibling-repos/omnibase_core"'
+    assert export in text
+    assert text.index(source, text.index("core_version=")) > text.index("core_version=")
+    assert text.index("core_version=") < text.index(export) < text.index(install)

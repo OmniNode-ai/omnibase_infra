@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23947
+title: "The dev build derives the version of a library that takes its version from git"
+summary: "omnibase_core leaves its version to git (dynamic version, hatch-vcs) since omnibase_core 2310, and the deploy agent's sibling-pin preflight read project.version from the clone and refused every dev build from 07:25Z on 2026-11-12. node_sibling_clone_pin_effect now answers a sibling clone's version (static, or derived with the pyproject's own git describe command) and the preflight proves the pin by commit ancestry against the commit the lock names; the image build installs the core with the derived version recorded in the staged pin comparison."
+is_seam_ticket: true
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23947-derived-version-pin
+    statement: A sibling whose pyproject leaves its version to git passes the sibling-pin preflight only when its commit equals or descends from the commit the lock names, and the staged pin comparison carries the derived version for the image build.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the sibling-pin check accepts a clone whose settings file leaves its version to git and still refuses one behind or unrelated to the locked revision -- falsifier: uv run pytest tests/scripts/test_check_sibling_lock_pins.py -q -k derived_version fails at the base commit and passes at the head'
+      - id: AC2
+        statement: 'AC2: the staged build context carries the derived version of each such library and the image build installs it with that version -- falsifier: uv run pytest tests/scripts/test_stage_workspace_vcs_provenance.py -q -k derived_version fails at the base commit and passes at the head'
+      - id: AC3
+        statement: 'AC3: integrated: after this merges, the deploy agent accepts a dev merge and omninode-runtime on the first PC reports build provenance at that merge and a healthy state -- falsifier: the agent job ends failed with a sibling-pin or staging error, or the runtime provenance revision stays at 24c619c0f67c'
+evidence_requirements:
+  - kind: tests
+    description: The pin check and staging tests pass at the pushed head; the derived-version tests fail at the base commit.
+    command: uv run pytest tests/scripts/test_check_sibling_lock_pins.py tests/scripts/test_stage_workspace_vcs_provenance.py -q -k derived_version
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23947-ac1
+    description: 'AC1: the sibling-pin check accepts a git-derived clone at or ahead of the locked commit and refuses one behind it'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_check_sibling_lock_pins.py -q -k derived_version
+        cwd: .
+  - id: dod-omn23947-ac2
+    description: 'AC2: the staged pin comparison carries the derived version and the image build exports it before the core install'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_stage_workspace_vcs_provenance.py -q -k derived_version
+        cwd: .
+  - id: dod-omn23947-ac3
+    description: 'AC3: integrated: the deploy agent accepts a dev merge and the dev runtime reports build provenance at it'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_check_sibling_lock_pins.py tests/scripts/test_stage_workspace_vcs_provenance.py -q -k derived_version
+        cwd: .
