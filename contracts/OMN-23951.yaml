@@ -3,7 +3,7 @@ ticket_id: OMN-23951
 title: Startup creates the sending topics of send-only pieces
 summary: 'The per-contract boot provisioning created topics only for contracts that wire and attach a consumer. A contract that publishes but declares no subscribe topics and no handler routing is skipped by auto-wiring, so its declared publish topics were never created. subscribe_wired_contract_topics now also ensures, through the same topic provisioner, the declared publish topics of every contract the interleave never reached (publish-only, plugin-managed, demand-deferred).'
 is_seam_ticket: true
-interface_change: false
+interface_change: true
 interfaces_touched:
   - topics
 requirements:
