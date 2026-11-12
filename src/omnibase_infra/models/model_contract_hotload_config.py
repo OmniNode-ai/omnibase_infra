@@ -142,18 +142,19 @@ class ModelContractHotloadConfig(BaseModel):
         )
 
         # The lane's own overlay row answers for the shared file's block (OMN-21318).
-        gate = ModelContractHotloadLaneOverlay.row_of_this_lane()
+        lane_row = ModelContractHotloadLaneOverlay.row_of_this_lane()
         raw = (runtime_config or {}).get("contract_hotload")
-        if gate is None:
-            if raw is None:
-                return cls()
-            try:
-                gate = cls.model_validate(raw)
-            except ValidationError as exc:
-                raise ProtocolConfigurationError(
-                    f"invalid contract_hotload configuration: {sanitize_error_message(exc)}",
-                    context=context,
-                ) from exc
+        if lane_row is not None:
+            raw = lane_row.model_dump(mode="json")
+        if raw is None:
+            return cls()
+        try:
+            gate = cls.model_validate(raw)
+        except ValidationError as exc:
+            raise ProtocolConfigurationError(
+                f"invalid contract_hotload configuration: {sanitize_error_message(exc)}",
+                context=context,
+            ) from exc
         if not gate.enabled:
             return gate
         named = [name.strip().lower() for name in environments]
