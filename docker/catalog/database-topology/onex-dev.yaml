@@ -108,6 +108,8 @@ databases:
               - gateway_link_health
               - goal_trace_events
               - goal_traces
+              - host_disk_class
+              - host_disk_volume
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -485,5 +487,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: eac8f6010e1e9ca3dc6351ab0104113a62c04e68bb38b35a298190ee0a3c6a37
+  sha256: e33c6fe0547a34fb0b880d3edbc1230852b0bacef34b9fb4e5235b7278d4a41c
 topology_instance: onex-dev

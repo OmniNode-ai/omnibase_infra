@@ -116,6 +116,8 @@ databases:
               - gateway_link_health
               - goal_trace_events
               - goal_traces
+              - host_disk_class
+              - host_disk_volume
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
