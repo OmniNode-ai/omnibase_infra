@@ -83,7 +83,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -688,9 +687,9 @@ class HandlerContractSubscribePreflight:
             consumer_group: The group id ``subscribe`` resolves to for this
                 contract (``compute_consumer_group_id`` of its identity).
             version_policy: How a bumped contract version seeds its group from
-                the other versions of itself (OMN-19998). Not given, it is
-                read from ``ONEX_RUNTIME_VERSION_HANDOVER`` before the first
-                subscribe, and an unreadable value refuses the wiring.
+                the other versions of itself (OMN-19998). Not given, the
+                model's defaults apply; the runtime wiring injects the policy
+                ``ONEX_RUNTIME_VERSION_HANDOVER`` declares.
 
         Raises:
             ValueError: A declaration is malformed.
@@ -724,7 +723,7 @@ class HandlerContractSubscribePreflight:
         self._environment = environment
         # OMN-19998: the policy of the automatic version-predecessor handover.
         # It applies only to a contract that declares no handover of its own.
-        self._version_policy = version_policy
+        self._version_policy = version_policy or ModelVersionHandoverPolicy()
         # A static declaration names one retired group for every topic; one by
         # instance has a group per topic, resolved in ``handle`` (OMN-22714).
         self._retired_group = (
@@ -733,15 +732,32 @@ class HandlerContractSubscribePreflight:
             else ""
         )
 
-    def _resolved_version_policy(self) -> ModelVersionHandoverPolicy:
-        """The injected policy, else the one the environment declares (OMN-19998).
+    @classmethod
+    def from_contract(
+        cls,
+        contract: ModelDiscoveredContract,
+        *,
+        concurrency: ModelConsumeConcurrency,
+        environ: Mapping[str, str],
+        event_bus: object,
+        environment: str,
+        consumer_group: str,
+    ) -> HandlerContractSubscribePreflight:
+        """Wire the preflight of a discovered contract from ``environ`` (OMN-19998).
 
-        Read on first use, strictly before the first ``subscribe`` of this
-        contract, and refused when unreadable.
+        The contract's handover and the version handover policy are read from
+        the given mapping, so the handler itself never touches the process
+        environment. An unreadable policy refuses the wiring.
         """
-        if self._version_policy is None:
-            self._version_policy = load_version_handover_policy(os.environ)
-        return self._version_policy
+        return cls(
+            contract_name=contract.name,
+            concurrency=concurrency,
+            handover=load_contract_handover(contract, environ),
+            event_bus=event_bus,
+            environment=environment,
+            consumer_group=consumer_group,
+            version_policy=load_version_handover_policy(environ),
+        )
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -813,7 +829,7 @@ class HandlerContractSubscribePreflight:
                 handover.fenced_group,
                 self._contract_name,
             )
-        elif self._resolved_version_policy().enabled:
+        elif self._version_policy.enabled:
             # OMN-19998: a contract version bump names a new group; seed it from
             # the committed offsets of the other versions of itself, so the rows
             # published while no version was joined are not skipped.
@@ -821,7 +837,7 @@ class HandlerContractSubscribePreflight:
                 self._event_bus,
                 topic=topic,
                 to_group=self._consumer_group,
-                policy=self._resolved_version_policy(),
+                policy=self._version_policy,
             )
         return ModelContractSubscribePreflightResult(
             topic=topic, max_in_flight_records=bound, handover=handover
