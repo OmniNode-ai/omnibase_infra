@@ -10368,15 +10368,14 @@ async def subscribe_wired_contract_topics(
         detail: str = "",
     ) -> None:
         """Report a contract this function will never attempt (OMN-17372)."""
-        if exclusions_out is None:
-            return
-        exclusions_out.append(
-            ModelContractAttachExclusion(
-                contract_name=contract_name,
-                reason=reason,
-                detail=detail,
+        if exclusions_out is not None:
+            exclusions_out.append(
+                ModelContractAttachExclusion(
+                    contract_name=contract_name,
+                    reason=reason,
+                    detail=detail,
+                )
             )
-        )
 
     knobs = readiness_config or ModelTopicReadinessConfig()
     for result in _prioritize_subscription_results(
@@ -10505,6 +10504,7 @@ async def subscribe_wired_contract_topics(
                 auto_offset_reset=auto_offset_reset,
             )
 
+    scheduled = {contract.name for _, contract in eligible}
     if demand_source is not None:
         eligible = await _split_boot_set_by_demand(
             eligible,
@@ -10519,10 +10519,12 @@ async def subscribe_wired_contract_topics(
         *(_provision_ready_attach(result, contract) for result, contract in eligible)
     )
 
-    # OMN-23951: the publish topics of every contract the interleave never reached.
+    # OMN-23951: the publish topics of every contract the interleave never reaches.
+    # A demand-deferred contract is scheduled, not unattached (OMN-23953): its
+    # topics are created when its first request starts it.
     await provision_unattached_publish_topics(
         manifest,
-        {r.contract_name for r in attach_results},
+        scheduled,
         provisioner,
         max_concurrent=knobs.max_concurrent_contract_attach,
     )
