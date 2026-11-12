@@ -44,11 +44,11 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-deferred-topics-merged-source-ac3
-    description: Hermetic source readback of the checked-out tree that the start-up wiring hands the unattached publish pass the scheduled contract set (attached at boot or demand-deferred) rather than only the attached-at-boot names. The live reading on the development runtime is taken after the deploy.
+    description: Hermetic source readback of the checked-out tree that the start-up wiring hands the unattached publish pass the scheduled contract set (attached at boot or, on a lane whose overlay row says on_demand, demand-deferred) beside the attached-at-boot names. The live reading on the development runtime is taken after the deploy.
     source: manual
     binds_ac:
       - AC3
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'grep -A3 "await provision_unattached_publish_topics(" src/omnibase_infra/runtime/auto_wiring/handler_wiring.py | grep -qx "        scheduled,"'
+        check_value: bash -o pipefail -c 'grep -A3 "await provision_unattached_publish_topics(" src/omnibase_infra/runtime/auto_wiring/handler_wiring.py | grep -qxF "        scheduled.union(r.contract_name for r in attach_results),"'
         cwd: ${OMNI_HOME}/omnibase_infra
