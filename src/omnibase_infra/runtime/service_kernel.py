@@ -998,6 +998,19 @@ def _build_runtime_handler_dependencies(
         if webhook_dependencies is not None:
             dependencies["HandlerGitHubWebhookIngress"] = webhook_dependencies
 
+        # OMN-23929: the two omnimarket tenant read bus handlers resolve the
+        # analytics database DSN through their SecretResolver instead of
+        # reading a secret from the environment. Same shape as the webhook
+        # ingress above: only a lane whose profile maps the logical name gets
+        # the dependency; on every other lane the handlers are built with no
+        # resolver and answer not_configured, the fail-closed state.
+        tenant_dependencies = _tenant_read_bus_dependencies(
+            gateway_secret_resolver_config_path
+        )
+        if tenant_dependencies is not None:
+            for handler_name in TENANT_READ_BUS_HANDLERS:
+                dependencies[handler_name] = dict(tenant_dependencies)
+
     if not dependencies:
         return None
     return dependencies
@@ -1008,6 +1021,19 @@ def _build_runtime_handler_dependencies(
 # (node_github_webhook_ingress_effect, WEBHOOK_SECRET_REF); this runtime builds
 # its SecretResolver only for a lane that maps the same name.
 GITHUB_WEBHOOK_SECRET_REF: str = "github.webhook.secret"
+
+# The logical secret name the lane's rendered resolver config maps to the
+# omnimarket analytics database DSN. It is config.analytics_dsn_secret of the
+# omnimarket node_tenant_savings_read_effect and
+# node_tenant_delegations_read_effect contracts; this runtime builds the
+# SecretResolver for their bus handlers only on a lane that maps the same
+# name, exactly as for GITHUB_WEBHOOK_SECRET_REF above.
+TENANT_ANALYTICS_DSN_SECRET_REF: str = "omnidash.analytics.db_url"
+
+TENANT_READ_BUS_HANDLERS: tuple[str, ...] = (
+    "HandlerTenantSavingsReadBus",
+    "HandlerTenantDelegationsReadBus",
+)
 
 
 def _github_webhook_ingress_dependencies(
@@ -1039,6 +1065,40 @@ def _github_webhook_ingress_dependencies(
             "GitHub webhook ingress: no secret-resolver mapping found for the "
             "configured webhook secret reference on this lane; the ingress "
             "handler will refuse every delivery"
+        )
+        return None
+    return {"secret_resolver": SecretResolver(config=resolver_config)}
+
+
+def _tenant_read_bus_dependencies(
+    config_path: Path,
+) -> dict[str, object] | None:
+    """The tenant read bus handlers' resolver, or None when the lane maps no secret.
+
+    OMN-23929. Returns ``None`` (the handlers then answer ``not_configured``)
+    when the rendered resolver config does not map the analytics database
+    DSN's logical name; raises ``ProtocolConfigurationError`` when the config
+    itself cannot be read, the same posture as the webhook ingress above.
+    """
+    from omnibase_infra.runtime.models.model_secret_resolver_config import (
+        ModelSecretResolverConfig,
+    )
+    from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+    try:
+        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        resolver_config = ModelSecretResolverConfig.model_validate(raw_config)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ProtocolConfigurationError(
+            "Tenant read bus dependency wiring requires a valid rendered "
+            f"secret-resolver config at {config_path}"
+        ) from exc
+    mapped = {mapping.logical_name for mapping in resolver_config.mappings}
+    if TENANT_ANALYTICS_DSN_SECRET_REF not in mapped:
+        logger.info(
+            "Tenant read bus: no secret-resolver mapping found for the "
+            "analytics database secret on this lane; the handlers answer "
+            "not_configured"
         )
         return None
     return {"secret_resolver": SecretResolver(config=resolver_config)}
