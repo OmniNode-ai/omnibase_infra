@@ -44,11 +44,11 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-deferred-topics-merged-source-ac3
-    description: Hermetic source readback at the evaluated commit that the start-up wiring passes the demand-deferred contract names to the unattached publish pass, absent at the merge base. The live reading on the development runtime is taken after the deploy.
+    description: Hermetic source readback of the checked-out tree that the start-up wiring hands the unattached publish pass the scheduled contract set (attached at boot or demand-deferred) rather than only the attached-at-boot names. The live reading on the development runtime is taken after the deploy.
     source: manual
     binds_ac:
       - AC3
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'src=$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d); printf %s "$src" | grep -F "demand_deferred_contract_names=demand_deferred" >/dev/null'
+        check_value: bash -o pipefail -c 'grep -A3 "await provision_unattached_publish_topics(" src/omnibase_infra/runtime/auto_wiring/handler_wiring.py | grep -qx "        scheduled,"'
         cwd: ${OMNI_HOME}/omnibase_infra
