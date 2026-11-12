@@ -16,9 +16,15 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import ModuleType
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import JsonValue
+
+if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_dev_roll_events import (
+        ProtocolDevRollEvents,
+    )
 
 _NODE = "src/omnibase_infra/nodes/node_dev_roll_events_effect"
 
@@ -43,16 +49,21 @@ EnumDevStartCause = events.EnumDevStartCause
 docker_started_at = events.docker_started_at
 
 
+def declaration_at(repo_root: Path) -> dict[str, JsonValue]:
+    """The node's declared topics and settings, from the checkout's contract."""
+    contract = repo_root / _NODE / "contract.yaml"
+    declared: dict[str, JsonValue] = yaml.safe_load(
+        contract.read_text(encoding="utf-8")
+    )
+    return declared
+
+
 def declaration(execution: ModuleType) -> dict[str, JsonValue]:
     """The node's declared topics and settings, from the agent checkout's contract."""
     module_file = execution.__file__
     if not module_file:
         raise RuntimeError("dev roll events need the deploy agent source location")
-    contract = Path(module_file).resolve().parents[3] / _NODE / "contract.yaml"
-    declared: dict[str, JsonValue] = yaml.safe_load(
-        contract.read_text(encoding="utf-8")
-    )
-    return declared
+    return declaration_at(Path(module_file).resolve().parents[3])
 
 
 def log_byte_cap(execution: ModuleType) -> int:
@@ -88,9 +99,18 @@ def agent_send() -> Callable[[str, str, dict[str, JsonValue]], bool]:
 
 def build_events(execution: ModuleType) -> object:
     """The publisher of the running deploy agent."""
-    topics = declaration(execution)["topics"]
+    module_file = execution.__file__
+    if not module_file:
+        raise RuntimeError("dev roll events need the deploy agent source location")
+    return build_events_at(Path(module_file).resolve().parents[3])
+
+
+def build_events_at(repo_root: Path) -> ProtocolDevRollEvents:
+    """The publisher built from the checkout's contract, from the repo root."""
+    topics = declaration_at(repo_root)["topics"]
     if not isinstance(topics, dict):
         raise RuntimeError("the dev roll events contract declares no topics")
-    return events.DevRollEventsPublisher(
+    publisher: ProtocolDevRollEvents = events.DevRollEventsPublisher(
         agent_send(), {str(k): str(v) for k, v in topics.items()}
     )
+    return publisher
