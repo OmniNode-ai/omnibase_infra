@@ -10526,7 +10526,7 @@ async def subscribe_wired_contract_topics(
     # topics are created when its first request starts it.
     await provision_unattached_publish_topics(
         manifest,
-        scheduled | {r.contract_name for r in attach_results},
+        scheduled.union(r.contract_name for r in attach_results),
         provisioner,
         max_concurrent=knobs.max_concurrent_contract_attach,
     )
