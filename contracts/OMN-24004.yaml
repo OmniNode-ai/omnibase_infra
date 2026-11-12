@@ -1,0 +1,50 @@
+schema_version: 1.0.0
+ticket_id: OMN-24004
+title: The ledger query command accepts the open-rulings question the node answers
+summary: 'The dev work-ledger query client declares the questions it accepts in its packaged contract, and that list left out open-rulings, which the omnimarket node answers from its state table as a point query. onex ledger query refused the question with "Unsupported work-ledger query", so the read of open operator decisions was unreadable on the deployed path. The client contract now names open-rulings in queries and in point_queries, so the command accepts it and the client checks the answer for status ok, a watermark and a page size, as it does for holds, inbox and open-claims. No code changes: the declaration is the whole fix. The live reading from the deployed command against the dev bus is AC4.'
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - cli
+requirements:
+  - id: req-open-rulings-accepted
+    statement: The ledger query client accepts every question the node answers from its state table, open-rulings included.
+    acceptance:
+      - id: AC1
+        statement: the work-ledger query client accepts the open-rulings question and returns the node's point answer instead of refusing it as unsupported.
+      - id: AC2
+        statement: every question the node answers from its state table is in the client's declared point questions, so the client checks such an answer for status, watermark and page size.
+      - id: AC3
+        statement: the command's own query option lists open-rulings, and a ledger query command run for it with a ticket is accepted.
+      - id: AC4
+        statement: 'integrated: on a lab host the ledger query command, run for open-rulings with a ticket against the running dev bus from the branch, exits 0 and prints the node''s answer.'
+evidence_requirements:
+  - kind: tests
+    description: The client and the command run over the reply-wire stand-in of the client's own tests, with the node's open-rulings answer as it serialises it.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_work_ledger_query_open_rulings.py tests/unit/cli/test_work_ledger_query_point_answers_omn22478.py -q -n 0 --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-open-rulings-accepted-ac1-ac3
+    description: The client and the command accept open-rulings and print the node's answer; they fail without the name in the client contract (the injected break) and pass with it; an undeclared question is still refused and an answer without its watermark is refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_work_ledger_query_open_rulings.py tests/unit/cli/test_work_ledger_query_point_answers_omn22478.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+  - id: dod-open-rulings-source-ac4
+    description: Hermetic source readback at the evaluated commit that the client contract names open-rulings as a point query. The live reading from the deployed command against the dev bus is taken after the branch install.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'git show HEAD:src/omnibase_infra/contracts/work_ledger_query_client.contract.yaml | grep -F "point_queries: [open-claims, holds, inbox, open-rulings]" >/dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
