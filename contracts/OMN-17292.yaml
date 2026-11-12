@@ -187,4 +187,3 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_work_ledger_latest_bridge_retired_omn17292.py -q -n 0"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC1]
