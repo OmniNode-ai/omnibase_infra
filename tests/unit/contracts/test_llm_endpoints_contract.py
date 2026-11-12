@@ -297,29 +297,42 @@ class TestLlmEndpointsContract:
         assert coder["model_hf_id"] == "Qwen/Qwen3.8-27B"
         assert coder["context_window_budgeted"] == 131072
 
-        # GET .201:8002/v1/models -> id "text-embedding-qwen3",
+        # GET .201:8100/v1/models -> id "text-embedding-qwen3",
         # artifact Qwen/Qwen3-Embedding-0.6B, 1024-dim output.
         emb = by_slot["embeddings-201"]
         assert emb["status"] == "running"
-        assert emb["endpoint_url"] == "http://192.168.86.201:8002"
+        assert emb["endpoint_url"] == "http://192.168.86.201:8100"
         assert emb["model_hf_id"] == "Qwen/Qwen3-Embedding-0.6B"
 
-    def test_embeddings_201_endpoint_reconciled_to_8002(self) -> None:
-        """LLM_EMBEDDING_URL slot resolves to :8002, not the dead :8100.
+    def test_embeddings_201_endpoint_reconciled_to_8100(self) -> None:
+        """LLM_EMBEDDING_URL slot resolves to :8100; the :8002 server is removed.
 
-        The .201 embedding backend moved from :8100 to :8002 (vllm-embeddings)
-        per OMN-13664/OMN-13807. The legacy :8100 process is down, so the
-        canonical LLM_EMBEDDING_URL slot must point at :8002.
+        The .201 embedding backend moved :8002 -> :8100 on 2026-11-12 (the
+        :8002 vllm-embeddings.service shared the RTX 5090 with the 27B and was
+        pushed into CUDA OOM); the :8002 server is removed, so the canonical
+        LLM_EMBEDDING_URL slot must point at :8100.
         """
         by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
         ep = by_slot.get("embeddings-201")
         assert ep is not None, "Missing required slot 'embeddings-201'"
         assert ep["url_env_var"] == "LLM_EMBEDDING_URL"
-        assert ep["port"] == 8002, (
-            "embeddings-201 must resolve to :8002 (not dead :8100)"
+        assert ep["port"] == 8100, (
+            "embeddings-201 must resolve to :8100 (the :8002 server is removed)"
         )
-        assert ep["endpoint_url"] == "http://192.168.86.201:8002"
+        assert ep["endpoint_url"] == "http://192.168.86.201:8100"
         assert ep["role"] == "embedding"
+
+    def test_no_slot_names_the_removed_embedding_endpoint(self) -> None:
+        """No endpoint may still reference the removed :8002 embedding server."""
+        for ep in _load_endpoints():
+            if ep.get("host") == "192.168.86.201":
+                assert ep.get("port") != 8002, (
+                    f"slot {ep.get('slot_id')!r} still names the removed :8002 server"
+                )
+            url = ep.get("endpoint_url")
+            assert not (isinstance(url, str) and url.endswith(":8002")), (
+                f"slot {ep.get('slot_id')!r} endpoint_url {url!r} ends :8002"
+            )
 
     def test_runtime_required_env_vars_are_owned_by_running_slots(self) -> None:
         """Runtime-required URL env vars must point at running canonical slots."""

@@ -85,7 +85,7 @@ def test_accepts_running_embedding_endpoint(tmp_path: Path) -> None:
         "\n".join(
             [
                 "LLM_CODER_URL=http://192.168.86.201:8000",
-                "LLM_EMBEDDING_URL=http://192.168.86.201:8002",
+                "LLM_EMBEDDING_URL=http://192.168.86.201:8100",
             ]
         )
     )
@@ -94,6 +94,28 @@ def test_accepts_running_embedding_endpoint(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert "passed" in result.stdout
+
+
+@pytest.mark.unit
+def test_refuses_removed_embedding_endpoint(tmp_path: Path) -> None:
+    """A removed :8002 embedding endpoint must be refused, not accepted."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_CODER_URL=http://192.168.86.201:8000",
+                "LLM_EMBEDDING_URL=http://192.168.86.201:8002",
+            ]
+        )
+    )
+
+    result = _run_check(env_file)
+
+    assert result.returncode == 1
+    assert (
+        "LLM_EMBEDDING_URL=http://192.168.86.201:8002 does not match canonical running slot"
+        in result.stderr
+    )
 
 
 @pytest.mark.unit
@@ -116,7 +138,7 @@ def test_accepts_host_shaped_env_with_released_variable_set(tmp_path: Path) -> N
         "\n".join(
             [
                 "LLM_CODER_URL=http://192.168.86.201:8000",
-                "LLM_EMBEDDING_URL=http://192.168.86.201:8002",
+                "LLM_EMBEDDING_URL=http://192.168.86.201:8100",
                 "LLM_DEEPSEEK_R1_URL=http://llm.test:8000",
                 # Released by OMN-16442 (slot coder-fast-4090, hardware removed);
                 # kept seeded per config/shared_key_registry.yaml because

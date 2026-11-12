@@ -134,23 +134,25 @@ endpoints:
       REPLACEMENT hardware, not re-enabling this one.
   - slot_id: embeddings-201
     host: 192.168.86.201
-    port: 8002
-    endpoint_url: http://192.168.86.201:8002
+    port: 8100
+    endpoint_url: http://192.168.86.201:8100
     url_env_var: LLM_EMBEDDING_URL
     role_env_alias: null
     model_hf_id: Qwen/Qwen3-Embedding-0.6B
     role: embedding
     status: running
-    hardware: RTX 5090 (.201)
+    hardware: RTX 4090 (.201)
     context_window_budgeted: 8192
     launchd_unit_or_none: null
     notes: |
-      Canonical runtime embedding endpoint for LLM_EMBEDDING_URL. Moved
-      :8100 -> :8002 (vllm-embeddings) per OMN-13664/OMN-13807; the legacy
-      :8100 process is down.
+      Canonical runtime embedding endpoint for LLM_EMBEDDING_URL; served by
+      onex-media-embed.service on the RTX 4090 at :8100. Moved :8002 -> :8100
+      on 2026-11-12 because the :8002 vllm-embeddings.service shared the RTX 5090
+      with the 27B and pushed it into CUDA out of memory at 14:58Z; the :8002
+      server is removed.
       OMN-16442 reconcile (2026-08-28): model_hf_id corrected from
       Alibaba-NLP/gte-Qwen2-1.5B-instruct, which is NOT what this endpoint
-      serves. Live readback, GET http://192.168.86.201:8002/v1/models: id
+      serves. Live readback, GET http://192.168.86.201:8100/v1/models: id
       "text-embedding-qwen3", owned_by "vllm", root
       /data/inference/hf-cache/qwen3-embedding-0.6b, max_model_len 8192. The
       artifact is Qwen/Qwen3-Embedding-0.6B (BF16) — confirmed by the HF hub
@@ -159,17 +161,10 @@ endpoints:
       is a HARD placement constraint — a consumer collection sized for any other
       width CANNOT be served by this endpoint. gte-Qwen2-1.5B-instruct emitted a
       different width, so the stale id here was an actively misleading claim.
-      `hardware` also corrected: the 4090 was removed for RMA (OMN-16407); this
-      service runs on the surviving RTX 5090.
-      CO-RESIDENCY BUDGET (OMN-14379, 2026-09-03): this service shares cuda:0
-      with the coder-5090 slot's vllm-gpu0.service. Its
-      --gpu-memory-utilization 0.08 budgets 2.51 GiB but it holds ~3.04 GiB
-      resident, because each vLLM process's CUDA context (~0.53 GiB) is
-      allocated OUTSIDE the fraction. Changing EITHER fraction requires redoing
-      the arithmetic for BOTH; the numbers live in
-      deploy/systemd/vllm-gpu0-qwen-coder.service. NOTE: this unit is NOT
-      repo-owned yet — it exists only as a hand-managed
-      /etc/systemd/system/vllm-embeddings.service on .201.
+      `hardware` follows the serving unit: the RTX 4090 (.201) since 2026-11-12.
+      CO-RESIDENCY BUDGET: the :8100 server's unit onex-media-embed.service has
+      Conflicts= onex-media-video.service, so starting the on-demand video model
+      stops it.
   - slot_id: reasoning-deepseek-32b
     host: null
     port: null
