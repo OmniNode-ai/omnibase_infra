@@ -19,6 +19,8 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+from omnibase_infra.enums.enum_handler_type import EnumHandlerType
+from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
 from omnibase_infra.models.sibling_pin.model_sibling_clone_pin_request import (
     ModelSiblingClonePinRequest,
 )
@@ -175,6 +177,16 @@ class HandlerSiblingClonePin:
 
     Reads the clone's ``pyproject.toml`` and runs ``git`` in the clone; writes nothing.
     """
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure handler over a sibling clone's pyproject and git."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Effect: reads the clone's files and runs git."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(
         self, request: ModelSiblingClonePinRequest

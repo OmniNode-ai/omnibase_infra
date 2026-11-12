@@ -28,7 +28,7 @@ def _mount_bare_packages() -> None:
     omnibase_core).
     """
     base = Path(__file__).resolve().parents[2]
-    for parts in (("handlers",), ("models",), ()):
+    for parts in (("enums",), ("handlers",), ("models",), ()):
         name = ".".join(("omnibase_infra", *parts))
         mod = types.ModuleType(name)
         mod.__path__ = [str(base.joinpath(*parts))]
