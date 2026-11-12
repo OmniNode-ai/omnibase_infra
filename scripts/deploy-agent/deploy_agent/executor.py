@@ -5593,7 +5593,7 @@ class DeployExecutor:
 
         Without this arg, Docker serves a cached layer even after git pull, so
         the running container silently ships pre-pull code (root cause: PR #1231).
-        OMNIBASE_COMPAT_REF and OMNIMARKET_REF are passed as full commit SHAs so the
+        OMNIMARKET_REF is passed as a full commit SHA so the
         uv cache mount (keyed on URL) misses and fetches fresh code every time main
         advances (OMN-10728 / OMN-11542; ONEX_CHANGE_CONTROL_REF went with OMN-16296).
 
@@ -5639,9 +5639,8 @@ class DeployExecutor:
         assert_release_build_promoted(selected_source, runtime_lane=runtime_lane)
 
         # OMN-16442: the sibling-repo fallback branch is the declared tracking
-        # ref, not a literal. It used to be "dev" for omnimarket and "main" for
-        # omnibase_compat — an asymmetry with no stated reason, on two repos
-        # that both integrate on `dev`.
+        # ref, not a literal. It used to be "dev" for omnimarket — an asymmetry
+        # with no stated reason, on a repo that integrates on `dev`.
         sibling_fallback = load_tracking_ref_from_env()
 
         if selected_source == BuildSource.WORKSPACE and stage_workspace:
@@ -5653,7 +5652,7 @@ class DeployExecutor:
             # staging script asserts the INFRA clone against.
             # OMN-17135: it is a pin on that ONE repository. The CI path
             # publishes an omnibase_infra commit SHA, which names no commit in
-            # omnibase_core / omnibase_compat / omnimarket, so passing it as
+            # omnibase_core / omnimarket, so passing it as
             # every sibling's ref made RT-1 abort on the first one and took
             # every CI-triggered rebuild red. Each sibling resolves the declared
             # tracking head instead, and the SHA it lands on is recorded.
@@ -5680,17 +5679,9 @@ class DeployExecutor:
             if omni_home
             else sibling_fallback
         )
-        compat_ref = resolved_refs.get("omnibase_compat") or (
-            self._resolve_plugin_ref(
-                f"{omni_home}/omnibase_compat", fallback=sibling_fallback
-            )
-            if omni_home
-            else sibling_fallback
-        )
         logger.info(
-            "_compose_build: BUILD_SOURCE=%s OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s",
+            "_compose_build: BUILD_SOURCE=%s OMNIMARKET_REF=%s",
             selected_source.value,
-            compat_ref[:12],
             omnimarket_ref[:12],
         )
 
@@ -5725,8 +5716,6 @@ class DeployExecutor:
             f"BUILD_DATE={build_date}",
             "--build-arg",
             f"RUNTIME_VERSION={runtime_version}",
-            "--build-arg",
-            f"OMNIBASE_COMPAT_REF={compat_ref}",
             "--build-arg",
             f"OMNIMARKET_REF={omnimarket_ref}",
         ]

@@ -50,7 +50,6 @@ registry_repos:
   - OmniNode-ai/omnimarket
   - OmniNode-ai/omnibase_infra
   - OmniNode-ai/omnibase_core
-  - OmniNode-ai/omnibase_compat
   - OmniNode-ai/omnibase_spi
   - OmniNode-ai/omniintelligence
   - OmniNode-ai/omnimemory
@@ -241,49 +240,6 @@ profiles:
         foundation:
           distribution: omnibase-core
           import_package: omnibase_core
-        timeout_minutes: 60
-        budget_minutes: 40
-        budget_basis: estimate
-  - profile_key: omnibase_compat.foundation_override
-    profile_version: 1
-    repo: OmniNode-ai/omnibase_compat
-    exempt_classes: [docs_only]
-    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
-    enforce: false
-    variants:
-      - variant_key: foundation
-        proof_kind: foundation_override
-        status: pilot
-        status_reason: "the PR head is installed over the runtime image's omnibase_compat tarball pin and the laptop bundle is booted on it; not yet run end to end"
-        execution: node
-        match:
-          base_branches: [main]
-          include_globs: ["**"]
-        host_selector:
-          allowed_hosts: ["192.168.86.202"]
-          required_tools: [git, docker, uv, make, python3]
-          min_free_mem_mib: 8192
-          max_load_ratio: 1.0
-        steps:
-          - "node_lab_proof_plan_compute:lab_proof.plan"
-          - "node_lab_proof_run_effect:lab_proof.run"
-          - "node_lab_proof_plan_compute:lab_proof.verdict"
-        mandatory_checks:
-          - subject_head_identity
-          - focused_tests
-          - override_installed_identity
-          - migration_gate_healthy
-          - runtime_main_healthy
-          - runtime_effects_healthy
-          - consumer_import_smoke
-          - no_wiring_failures
-          - golden_chain_delegation
-        negative_control:
-          kind: sabotage_import
-          sabotage_path: src/omnibase_compat/__init__.py
-        foundation:
-          distribution: omnibase-compat
-          import_package: omnibase_compat
         timeout_minutes: 60
         budget_minutes: 40
         budget_basis: estimate
