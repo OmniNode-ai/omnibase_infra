@@ -484,19 +484,9 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # that change can merge. The table's own trigger refuses every UPDATE and
     # DELETE. Retired when the contract merges and the omnimarket pin advances
     # past it; the OMN-18863 expiry module names this bridge.
-    # OMN-23705: infra vendors the work-ledger latest-state migrations (0011
-    # creates work_ledger_latest, 0012 grants the runtime SELECT, INSERT, UPDATE
-    # and never DELETE) ahead of the omnimarket change whose
-    # node_projection_work_ledger contract declares the relation with write
-    # access. The writer upserts the newest row per subject and type and never
-    # deletes. Retired when the contract merges and the omnimarket pin advances
-    # past it; the OMN-18863 expiry module names this bridge.
     *(
         _vendored_read_write(t, "node_projection_work_ledger", f, access="write")
-        for t, f in (
-            ("ledger_line_citation", "0007_work_ledger_history_import.sql"),
-            ("work_ledger_latest", "0011_work_ledger_latest.sql"),
-        )
+        for t, f in (("ledger_line_citation", "0007_work_ledger_history_import.sql"),)
     ),
 )
 
