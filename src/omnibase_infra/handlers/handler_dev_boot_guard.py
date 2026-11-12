@@ -12,16 +12,18 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import json
 import logging
 import math
 import re
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import JsonValue, RootModel
@@ -41,11 +43,16 @@ from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_string,
 )
 
+if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_dev_roll_events import ProtocolDevRollEvents
+
 logger = logging.getLogger(__name__)
 DEV_BOOT_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
 POLL_SECONDS = 5
 DOCKER_READ_SECONDS = 10
 REPORT_SECONDS = 20
+# A full container log (json-file rotation holds up to 30 MB) is read before recovery.
+LOG_READ_SECONDS = 60
 
 
 class DevBootFailedError(RuntimeError):
@@ -64,6 +71,18 @@ class DevCompanionLaneFailedError(RuntimeError):
     runtime that is up and healthy (OMN-21645). The guard still restores the
     retained family when the runtime is unhealthy or absent.
     """
+
+
+def _roll_events_module(execution: ModuleType) -> Any:
+    """The dev roll events composition root, loaded by the agent's own effect loader."""
+    return execution.load_dev_boot_guard(
+        "nodes.node_dev_roll_events_effect.runtime_dev_roll_events"
+    )
+
+
+def _load_roll_events(execution: ModuleType) -> Any:
+    """The real events object of the running deploy agent."""
+    return _roll_events_module(execution).build_events(execution)
 
 
 def _checked(
@@ -473,11 +492,18 @@ class HandlerDevBootGuard:
         verify_recovery: Callable[[Callable[[StrEnum, StrEnum], None]], None],
         execution: ModuleType,
         reporting: ModelDevBootReportConfig,
+        log_byte_cap: int | None = None,
     ) -> None:
         self.execution = execution
         self.reporting = reporting
         self.config_hashes = config_hashes
         self.verify_recovery = verify_recovery
+        if log_byte_cap is not None and log_byte_cap <= 0:
+            raise ValueError("log_byte_cap must be positive when set")
+        self.log_byte_cap = log_byte_cap
+        self.events: ProtocolDevRollEvents | None = None
+        self._command: Mapping[str, JsonValue] | None = None
+        self._prepared_at: datetime | None = None
         self.config = self.execution.lane_config_for(self.execution.EnumRuntimeLane.DEV)
         self.services = _dev_lane_services(self.config.disabled_services)
         self._retained_services = self.services
@@ -714,8 +740,46 @@ class HandlerDevBootGuard:
         )
         return point
 
-    def prepare(self) -> None:
-        """Retain the live healthy family BEFORE git updates compose settings."""
+    def prepare(self, command: Mapping[str, JsonValue] | None = None) -> None:
+        """Retain the live healthy family BEFORE git updates compose settings.
+
+        Given the roll's command (the deploy agent always gives it) this is a real
+        roll with an issuer: the guard then announces the roll through the dev roll
+        events and keeps each failing container's log (OMN-24013). Without one it
+        behaves as it always did and announces nothing.
+        """
+        if command is not None:
+            self._command = command
+            if self.events is None:
+                try:
+                    self.events = _load_roll_events(self.execution)
+                except Exception:
+                    # The events are evidence; a sender that cannot be built (no
+                    # broker settings) never fails or delays a roll.
+                    logger.exception(
+                        "dev roll events unavailable friction_type=dev_event_publish_failed"
+                    )
+            if self.log_byte_cap is None:
+                self.log_byte_cap = _roll_events_module(self.execution).log_byte_cap(
+                    self.execution
+                )
+            self._prepared_at = datetime.now(UTC)
+        self._retain()
+        if command is not None:
+            self._announce(lambda events: events.manifest(command))
+
+    def _announce(self, call: Callable[[ProtocolDevRollEvents], None]) -> None:
+        """Run one announcement; evidence never fails or delays a roll."""
+        if self.events is None:
+            return
+        try:
+            call(self.events)
+        except Exception:
+            logger.exception(
+                "dev roll event failed friction_type=dev_event_publish_failed"
+            )
+
+    def _retain(self) -> None:
         try:
             self.point.hold(self._capture())
             return
@@ -825,7 +889,9 @@ class HandlerDevBootGuard:
         try:
             yield
             self.point.hold(self._capture())
+            self._announce_start(job, success=True)
         except Exception as exc:
+            self._announce_start(job, success=False)
             # Recovery restores the retained generation, which ran the services
             # the guard was built with, not the ones the failed candidate runs.
             self.services = self._retained_services
@@ -833,6 +899,10 @@ class HandlerDevBootGuard:
             # OMN-23431: recovery recreates the failed container, which destroys
             # Docker's probe history; keep it on the incident first.
             health_probes: list[JsonValue] = []
+            log_captures: list[dict[str, JsonValue]] = []
+            # The kept log text goes to the sink only; the incident file holds the
+            # artifact path and the digest, not a second copy of the log.
+            captured_logs: dict[str, str] = {}
             try:
                 for container in self._containers():
                     reading = health_probe_reading(container)
@@ -841,20 +911,59 @@ class HandlerDevBootGuard:
                     if summary is not None:
                         boot_causes.append(summary)
                     logs = _checked(
-                        ["docker", "logs", "--tail", "80", container["Id"]],
+                        ["docker", "logs", "--timestamps", container["Id"]],
+                        LOG_READ_SECONDS,
                         execution=self.execution,
                     )
+                    tail = "\n".join(logs.splitlines()[-80:])
                     # Some entrypoints summarize the counter as "preflight
                     # exited 1" and log the setting diagnosis separately.
                     boot_causes.extend(
                         line
-                        for line in logs.splitlines()
+                        for line in tail.splitlines()
                         if "BIFROST_BASE_CONTRACT_PATH" in line
                         or "ONEX_ACTIVE_RUNTIME_PACKAGES" in line
                     )
                     boot_causes.extend(
-                        line for line in logs.splitlines() if "BOOT FAILED" in line
+                        line for line in tail.splitlines() if "BOOT FAILED" in line
                     )
+                    if self.log_byte_cap is not None and summary is not None:
+                        encoded = logs.encode("utf-8")
+                        bytes_total = len(encoded)
+                        raw_text = encoded[-self.log_byte_cap :].decode(
+                            "utf-8", errors="replace"
+                        )
+                        # Logs can hold secrets: the sanitizer replaces the whole
+                        # text when it finds a credential pattern, and is told not
+                        # to truncate (its default cuts an error string to 500).
+                        kept_text = sanitize_error_string(
+                            raw_text, max_length=len(raw_text) + 64
+                        )
+                        kept_bytes = kept_text.encode("utf-8")
+                        artifact_path = (
+                            self.root / f"incident-{job}-{reading['service']}.log"
+                        )
+                        error: str | None = None
+                        try:
+                            artifact_path.parent.mkdir(parents=True, exist_ok=True)
+                            artifact_path.write_text(kept_text, encoding="utf-8")
+                        except OSError as write_error:
+                            error = sanitize_error_string(str(write_error))
+                        log_captures.append(
+                            {
+                                "service": reading["service"],
+                                "container": reading["container"],
+                                "bytes_total": bytes_total,
+                                "bytes_kept": len(kept_bytes),
+                                "complete": bytes_total <= self.log_byte_cap
+                                and kept_text == raw_text,
+                                "redacted": kept_text != raw_text,
+                                "sha256": hashlib.sha256(kept_bytes).hexdigest(),
+                                "artifact_path": str(artifact_path),
+                                "error": error,
+                            }
+                        )
+                        captured_logs[str(reading["service"])] = kept_text
             except (
                 OSError,
                 ValueError,
@@ -876,6 +985,8 @@ class HandlerDevBootGuard:
                 "exception_pending": True,
                 "health_probes": health_probes,
             }
+            if self.log_byte_cap is not None:
+                incident["log_captures"] = cast("JsonValue", log_captures)
             path = self.root / f"incident-{job}.json"
             # Best effort reporting must never get in front of lane recovery.
             try:
@@ -931,10 +1042,80 @@ class HandlerDevBootGuard:
                 )
             except (OSError, RuntimeError):
                 logger.exception("Dev deploy failure report remains pending")
+            if self.events is not None and self._command is not None:
+                try:
+                    sunk_incident: Mapping[str, JsonValue] = (
+                        {
+                            **incident,
+                            "log_captures": [
+                                {
+                                    **capture,
+                                    "log": captured_logs.get(
+                                        str(capture["service"]), ""
+                                    ),
+                                }
+                                for capture in log_captures
+                            ],
+                        }
+                        if self.log_byte_cap is not None
+                        else incident
+                    )
+                    self.events.incident(
+                        sunk_incident,
+                        issuer=str(self._command["requested_by"]),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Dev boot incident publish failed; recovery already ran"
+                    )
             raise DevBootRecoveryError(
                 f"commit={commit}: {reason}; forward redeploy revision={self.point.current.revision} "
                 f"verified={incident['recovery_verified']}"
             ) from exc
+
+    def _announce_start(self, job: str, *, success: bool) -> None:
+        if self.events is None or self._command is None:
+            return
+        try:
+            raw = self.runtime_started_at()
+            now = datetime.now(UTC)
+            events_module = _roll_events_module(self.execution)
+            started = events_module.docker_started_at(raw, fallback=now)
+            if raw is not None:
+                if self._prepared_at is not None and started < self._prepared_at:
+                    return
+            elif not success:
+                return
+            self.events.started(
+                job, started, events_module.EnumDevStartCause.ROLL_RECREATE
+            )
+        except Exception:
+            logger.exception(
+                "Dev boot start announce failed",
+                extra={"friction_type": "dev_event_publish_failed"},
+            )
+
+    def runtime_started_at(self) -> str | None:
+        """The runtime container's Docker start time, or None when unreadable."""
+        try:
+            for container in self._containers():
+                service = container["Config"]["Labels"].get(
+                    "com.docker.compose.service"
+                )
+                if service != "omninode-runtime":
+                    continue
+                started_at = container.get("State", {}).get("StartedAt")
+                if isinstance(started_at, str) and started_at:
+                    return started_at
+                return None
+        except (
+            OSError,
+            ValueError,
+            RuntimeError,
+            self.execution.subprocess.SubprocessError,
+        ):
+            return None
+        return None
 
 
 def health_probe_reading(container: ModelDevBootContainer) -> dict[str, JsonValue]:

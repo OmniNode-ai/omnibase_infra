@@ -1985,7 +1985,7 @@ class DeployAgent:
                     Scope.FULL,
                 ):
                     dev_guard = DevBootGuard(self.executor, STATE_DIR)
-                    dev_guard.prepare()
+                    dev_guard.prepare(cmd.model_dump(mode="json"))
 
                 # Git pull -- OMN-18124: under the lane's host lock, the same
                 # per-compose-project lock refresh_dev_lane.sh takes. The

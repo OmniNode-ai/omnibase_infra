@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_dev_roll_events_effect
+contract_name: node_dev_roll_events_effect
+node_name: node_dev_roll_events_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Five whys plan roots R1 and R2 on the dev runtime dropouts of 2026-11-10. Host-local effect of the deploy agent, which cannot import omnimarket: publishes the typed dev_runtime_started, dev_roll_manifest (the command id and its issuer) and dev_roll_incident (health probes and the failed container's captured log) events that omnimarket's node_dev_roll_verify_compute and node_dev_roll_failure_capture_effect read. Evidence only: a failed publication is logged and never fails or delays a deploy.
+input_model:
+  name: ModelDevRuntimeStarted
+  module: omnibase_infra.models.model_dev_runtime_started
+  description: The start event, the one the start-count node pins; the manifest and incident models sit beside it.
+output_model:
+  name: ModelDevRuntimeStarted
+  module: omnibase_infra.models.model_dev_runtime_started
+  description: The published event; the effect returns nothing to its caller.
+# The topics by role; contracts/dev_roll_event_topics.py holds the same values (a test pins them).
+topics:
+  dev_runtime_started: onex.evt.omnimarket.dev-runtime-started.v1
+  dev_roll_manifest: onex.evt.omnimarket.dev-roll-manifest.v1
+  dev_roll_incident: onex.evt.omnimarket.dev-roll-incident.v1
+# One incident event carries each failing container's log tail, and a broker message must stay
+# under its size limit.
+settings:
+  log_byte_cap: 262144
+capabilities:
+  - name: dev_roll.announce
+    description: Announce each dev runtime start, each accepted dev roll with its issuer, and each failed roll with its evidence.
+metadata:
+  ticket: OMN-24013
+  author: OmniNode Team
+  description: Host-local effect called by the dev boot guard inside the deploy agent. Publishes through the agent's own producer.
+  tags: [effect, deployment, dev]
