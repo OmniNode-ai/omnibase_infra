@@ -43,6 +43,14 @@ def _declared(profile: str, table: str) -> set[str]:
     }
 
 
+def _declared_from(grants: list[tuple[str, str, str]], table: str) -> set[str]:
+    return {
+        privilege
+        for principal, relation, privilege in grants
+        if principal == _RUNTIME and relation == table
+    }
+
+
 @pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
 def test_the_runtime_role_may_read_and_write_the_two_host_disk_tables(
     profile: str,
@@ -54,10 +62,13 @@ def test_the_runtime_role_may_read_and_write_the_two_host_disk_tables(
         )
 
 
-def test_control_a_table_no_profile_grants_is_reported_as_missing() -> None:
-    """The reading is not vacuous: a table the topology does not name reads as an empty grant set."""
+def test_control_removing_the_grant_is_reported_as_missing() -> None:
+    """Removing the host_disk_class grant makes the runtime's read of it empty."""
     for profile in sorted(SUPPORTED_TOPOLOGY_PROFILES):
-        assert _declared(profile, "host_disk_class_not_granted") == set(), profile
+        grants = declared_acl(load_topology_profile(profile)).table_grants
+        assert _declared(profile, "host_disk_class"), profile
+        broken = [entry for entry in grants if entry[1] not in _TABLES]
+        assert _declared_from(broken, "host_disk_class") == set(), profile
 
 
 def test_both_host_disk_migrations_are_vendored() -> None:
