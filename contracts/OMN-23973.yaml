@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-23973
+title: Per-lane contract hot-load setting and a start-up that reads its mode
+summary: 'The runtime config file that carries contract_hotload is baked into the shared runtime image, so a block there cannot name one lane, and the mode inside it was only logged. A lane now reads its own row from the runtime_contract_hotload overlay (root named by ONEX_SKILL_OVERLAY_ROOTS, lane named by ONEX_RUNTIME_LANE) when the hot-load gate is resolved, and the row answers for the shared file block; a lane with no row resolves the gate from the shared file exactly as before. The resolved mode is consumed: with on_demand in the row of the lane, boot provisioning of publish topics skips every contract the interleave schedules, a demand-deferred one included (OMN-23953); on every other lane it skips only the contracts attached at boot as OMN-23951 did. The shared file block carries no lane, so only the lane row switches the topic behaviour. This change holds no lane name and no environment name; the overlay row is a separate change in the overlays repository and stays a draft until this code is on dev. The live reading on the development runtime is taken after the deploy and is AC4.'
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - topics
+requirements:
+  - id: req-lane-overlay-and-mode
+    statement: A lane declares its hot-load gate in its own overlay row, a lane with no row boots as today, and the declared mode decides which contracts have their topics created at start-up.
+    acceptance:
+      - id: AC1
+        statement: A lane with no row in the per-lane hot-load overlay resolves the gate from the shared runtime config exactly as before, and a row answers for its own lane and no other.
+      - id: AC2
+        statement: A row declaring on_demand turns the gate on with that mode for its lane, a row naming an environment the lane is not in ends the start, and a malformed overlay ends the start.
+      - id: AC3
+        statement: With on_demand declared, start-up creates topics only for contracts that attach at start, and with the mode absent it creates them as before, on fakes and on a real broker.
+      - id: AC4
+        statement: After the change runs on the development runtime, the hot-load gate log line reads mode on_demand from the lane overlay and the topics of contracts waiting for a first request are absent from the broker right after a start.
+evidence_requirements:
+  - kind: tests
+    description: Unit tests resolve the gate through a real host with planted overlay roots and drive subscribe_wired_contract_topics with a recording provisioner and a fake demand source; the real-broker test drives the production provisioner, bus and demand source against Redpanda.
+    command: uv run --frozen pytest tests/unit/models/test_model_contract_hotload_lane_overlay.py tests/unit/runtime/test_contract_hotload_lane_overlay_gate_omn21318.py tests/unit/runtime/test_contract_hotload_interim_gate.py tests/unit/runtime/auto_wiring/test_demand_deferred_topics_created_at_hotload_omn23953.py tests/integration/runtime/test_demand_deferred_topics_real_broker_omn23953.py -q -n 0 --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-lane-overlay-gate-ac1-ac2
+    description: The unit tests fail when the lookup ignores the lane name (the injected break) and pass with it; a lane with no overlay resolves the gate off, a row answers for its lane only, and a wrong environment or malformed overlay is a boot error.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/test_model_contract_hotload_lane_overlay.py tests/unit/runtime/test_contract_hotload_lane_overlay_gate_omn21318.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-mode-consumed-ac3
+    description: With the mode off the deferred contract's publish topic is created at boot, with on_demand it is absent until its first request, on fakes and on a real Redpanda broker; the controls fail when the start-up pass ignores the mode.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_demand_deferred_topics_created_at_hotload_omn23953.py tests/integration/runtime/test_demand_deferred_topics_real_broker_omn23953.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-mode-consumed-merged-source-ac4
+    description: Hermetic source readback at the evaluated commit that the start-up topic pass reads the lane's hot-load mode, absent at the merge base. The live reading on the development runtime is taken after the deploy.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'src=$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d); printf %s "$src" | grep -F "lane_defers_topics_to_first_request()" >/dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra

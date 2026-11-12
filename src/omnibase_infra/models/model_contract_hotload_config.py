@@ -56,9 +56,10 @@ class ModelContractHotloadConfig(BaseModel):
         enabled: Master switch for both hot-load paths. Default ``False``.
         mode: Which load policy applies once enabled. Required when ``enabled``
             is true so that turning the paths on is always a deliberate,
-            named choice; ignored while the switch is off. Reserved: the
-            interim gate does not branch on it (it only logs it); the load
-            policy is consumed by the hot-loading epic (OMN-21318).
+            named choice; ignored while the switch is off. ``on_demand`` makes
+            start-up create topics only for contracts that attach at start
+            (``defers_topics_to_first_request``); ``full_load`` keeps the
+            create-everything start-up.
         allowed_environments: The environment names where hot loading is
             permitted. Required (non-empty) when ``enabled`` is true. Names are
             matched case-insensitively after trimming. Anything not named here,
@@ -80,6 +81,11 @@ class ModelContractHotloadConfig(BaseModel):
         default=(),
         description="Environment names where hot loading is permitted (allowlist)",
     )
+
+    @property
+    def defers_topics_to_first_request(self) -> bool:
+        """True when start-up creates topics only for contracts that load."""
+        return self.enabled and self.mode == "on_demand"
 
     @field_validator("allowed_environments", mode="after")
     @classmethod
@@ -118,6 +124,11 @@ class ModelContractHotloadConfig(BaseModel):
         (``ONEX_ENVIRONMENT`` and the event bus environment). With the switch on,
         every one of them must be set and named by ``allowed_environments``.
 
+        The block is the lane's own row of the ``runtime_contract_hotload``
+        overlay when the lane has one (``ModelContractHotloadLaneOverlay``,
+        OMN-21318), else the shared file's ``contract_hotload`` block exactly as
+        before. The enforcement below is the same for both.
+
         Raises:
             ProtocolConfigurationError: The block is malformed, or the switch is
                 on while an environment is unset or is not on the allowlist.
@@ -126,7 +137,15 @@ class ModelContractHotloadConfig(BaseModel):
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="contract_hotload.gate",
         )
+        from omnibase_infra.models.model_contract_hotload_lane_overlay import (
+            ModelContractHotloadLaneOverlay,
+        )
+
+        # The lane's own overlay row answers for the shared file's block (OMN-21318).
+        lane_row = ModelContractHotloadLaneOverlay.row_of_this_lane()
         raw = (runtime_config or {}).get("contract_hotload")
+        if lane_row is not None:
+            raw = lane_row.model_dump(mode="json")
         if raw is None:
             return cls()
         try:
@@ -156,11 +175,5 @@ class ModelContractHotloadConfig(BaseModel):
                 "does not name; contract hot loading is refused there (OMN-20079)",
                 context=context,
             )
-        # The interim gate does not branch on the mode; it is recorded so an
-        # operator can see what was declared.
-        logger.info(
-            "Contract hot loading enabled: mode=%s (recorded, not yet consumed "
-            "by the interim gate)",
-            gate.mode,
-        )
+        logger.info("Contract hot loading enabled: mode=%s", gate.mode)
         return gate
