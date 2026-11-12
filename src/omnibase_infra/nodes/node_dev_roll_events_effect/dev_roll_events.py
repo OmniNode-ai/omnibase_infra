@@ -21,10 +21,15 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from pydantic import JsonValue
+
+if TYPE_CHECKING:
+    from omnibase_infra.models.model_dev_runtime_started import (
+        ModelDevRuntimeStarted as StartRequest,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +127,10 @@ class DevRollEventsPublisher:
                 rollback=command.get("rollback") is not None,
             ),
         )
+
+    def handle(self, request: StartRequest) -> None:
+        """Contract-bound entry: publish the start event the request carries."""
+        self.started(request.job_id, request.started_at, request.cause)
 
     def started(self, job_id: str, started_at: datetime, cause: str) -> None:
         self._publish(

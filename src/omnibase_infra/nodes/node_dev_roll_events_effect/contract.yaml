@@ -28,6 +28,16 @@ topics:
 # under its size limit.
 settings:
   log_byte_cap: 262144
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: dev_roll.announce_start
+      handler:
+        name: DevRollEventsPublisher
+        module: omnibase_infra.nodes.node_dev_roll_events_effect.dev_roll_events
+      event_model:
+        name: ModelDevRuntimeStarted
+        module: omnibase_infra.models.model_dev_runtime_started
 capabilities:
   - name: dev_roll.announce
     description: Announce each dev runtime start, each accepted dev roll with its issuer, and each failed roll with its evidence.
