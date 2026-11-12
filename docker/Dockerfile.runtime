@@ -388,7 +388,13 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
             fi; \
         done; \
         uv-with-retry pip uninstall omnibase-core; \
-        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+        core_version="$(/app/.venv/bin/python -c 'import json, sys; print(*(c["actual_version"] for c in json.load(open(sys.argv[1]))["comparisons"] if c["package"] == "omnibase-core" and c.get("version_derived")))' /workspace/sibling-pin-comparison.json)"; \
+        ( cd / && \
+            if [ -n "${core_version}" ]; then \
+                SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OMNIBASE_CORE="${core_version}"; \
+                export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OMNIBASE_CORE; \
+            fi; \
+            VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnibase-core \
             "omnibase-core @ file:///workspace/sibling-repos/omnibase_core" ); \
         uv-with-retry pip uninstall omnibase-spi; \

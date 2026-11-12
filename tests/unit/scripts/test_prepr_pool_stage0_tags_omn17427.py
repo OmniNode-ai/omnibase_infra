@@ -92,6 +92,18 @@ def _origins(tmp_path: Path) -> tuple[dict[str, str], dict[str, str], dict[str, 
                 shutil.copy2(
                     ROOT / "src/omnibase_infra/validation" / name, validation / name
                 )
+            src = ROOT / "src/omnibase_infra"
+            pin_files = (
+                "nodes/node_sibling_clone_pin_effect/runtime_sibling_clone_pin.py",
+                "handlers/handler_sibling_clone_pin.py",
+                "models/sibling_pin/__init__.py",
+                "models/sibling_pin/model_sibling_clone_pin_request.py",
+                "models/sibling_pin/model_sibling_clone_pin_result.py",
+            )
+            for rel in pin_files:
+                dest = origin / "src/omnibase_infra" / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src / rel, dest)
         if repo == "omnimarket":
             ladder = origin / "src/omnimarket/configs/routing_tiers.yaml"
             ladder.parent.mkdir(parents=True)
