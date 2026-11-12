@@ -5,7 +5,7 @@ summary: 'The dev work-ledger query client declares the questions it accepts in 
 is_seam_ticket: true
 interface_change: false
 interfaces_touched:
-  - cli
+  - public_api
 requirements:
   - id: req-open-rulings-accepted
     statement: The ledger query client accepts every question the node answers from its state table, open-rulings included.
