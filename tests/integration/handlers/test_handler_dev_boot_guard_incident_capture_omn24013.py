@@ -343,7 +343,7 @@ def test_runtime_started_at_reports_the_runtime_start(tmp_path: Path) -> None:
     guard = _guard(host, tmp_path)
     host.containers = _unhealthy_runtime_family()
 
-    assert guard.runtime_started_at() == "2026-11-10T04:07:46Z"
+    assert guard_mod.runtime_started_at(guard) == "2026-11-10T04:07:46Z"
 
 
 def test_runtime_started_at_is_none_when_no_containers(tmp_path: Path) -> None:
@@ -351,7 +351,7 @@ def test_runtime_started_at_is_none_when_no_containers(tmp_path: Path) -> None:
     guard = _guard(host, tmp_path)
     host.containers = []
 
-    assert guard.runtime_started_at() is None
+    assert guard_mod.runtime_started_at(guard) is None
 
 
 def test_a_log_holding_a_credential_is_redacted_and_never_reads_complete(

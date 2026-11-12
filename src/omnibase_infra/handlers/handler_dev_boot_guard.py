@@ -73,16 +73,19 @@ class DevCompanionLaneFailedError(RuntimeError):
     """
 
 
-def _roll_events_module(execution: ModuleType) -> Any:
+def _roll_events_module(execution: ModuleType) -> ModuleType:
     """The dev roll events composition root, loaded by the agent's own effect loader."""
     return execution.load_dev_boot_guard(
         "nodes.node_dev_roll_events_effect.runtime_dev_roll_events"
     )
 
 
-def _load_roll_events(execution: ModuleType) -> Any:
+def _load_roll_events(execution: ModuleType) -> ProtocolDevRollEvents:
     """The real events object of the running deploy agent."""
-    return _roll_events_module(execution).build_events(execution)
+    return cast(
+        "ProtocolDevRollEvents",
+        _roll_events_module(execution).build_events(execution),
+    )
 
 
 def _checked(
@@ -536,46 +539,6 @@ class HandlerDevBootGuard:
             deliver_reports(self.root, execution=self.execution, config=self.reporting)
         return ModelDevBootResult(operation=request.operation, status="pass")
 
-    def _containers(self) -> list[ModelDevBootContainer]:
-        ids = _checked(
-            [
-                "docker",
-                "ps",
-                "--all",
-                "-q",
-                "--no-trunc",
-                "--filter",
-                f"label=com.docker.compose.project={self.config.compose_project}",
-                "--filter",
-                "label=com.docker.compose.oneoff=False",
-            ],
-            execution=self.execution,
-        ).split()
-        if not ids:
-            raise DevBootFailedError("dev runtime containers are absent")
-        raw = (
-            RootModel[list[ModelDevBootContainer]]
-            .model_validate_json(
-                _checked(["docker", "inspect", *ids], execution=self.execution)
-            )
-            .root
-        )
-        containers: list[ModelDevBootContainer] = []
-        for container in raw:
-            labels = container["Config"]["Labels"]
-            if labels.get("com.docker.compose.project") != self.config.compose_project:
-                raise DevBootFailedError("container belongs to another compose project")
-            if labels.get("com.docker.compose.service") in self.services:
-                containers.append(container)
-        found = {
-            c["Config"]["Labels"]["com.docker.compose.service"] for c in containers
-        }
-        if found != set(self.services):
-            raise DevBootFailedError(
-                f"dev runtime containers absent: {sorted(set(self.services) - found)}"
-            )
-        return containers
-
     def wait(self, *, deployed_generation: bool = False) -> None:
         """All replicas must be Docker healthy; exhausted boots fail immediately.
 
@@ -595,7 +558,7 @@ class HandlerDevBootGuard:
             )
             self.services = _dev_lane_services(self.config.disabled_services)
         started = self.execution._dev_boot_clock()
-        containers = self._containers()
+        containers = _dev_containers(self)
         window = max(_window(c) for c in containers)
         logger.info(
             "Dev boot window project=%s seconds=%d", self.config.compose_project, window
@@ -637,10 +600,10 @@ class HandlerDevBootGuard:
                     f"dev boot window exhausted ({window}s): {', '.join(failures)}"
                 )
             time.sleep(min(POLL_SECONDS, remaining))
-            containers = self._containers()
+            containers = _dev_containers(self)
 
     def _capture(self) -> ModelDevBootPoint:
-        containers = self._containers()
+        containers = _dev_containers(self)
         if not all(_healthy(c) for c in containers):
             raise DevBootFailedError("cannot capture an unhealthy dev runtime")
         rendered = (
@@ -766,18 +729,7 @@ class HandlerDevBootGuard:
             self._prepared_at = datetime.now(UTC)
         self._retain()
         if command is not None:
-            self._announce(lambda events: events.manifest(command))
-
-    def _announce(self, call: Callable[[ProtocolDevRollEvents], None]) -> None:
-        """Run one announcement; evidence never fails or delays a roll."""
-        if self.events is None:
-            return
-        try:
-            call(self.events)
-        except Exception:
-            logger.exception(
-                "dev roll event failed friction_type=dev_event_publish_failed"
-            )
+            _announce(self.events, lambda events: events.manifest(command))
 
     def _retain(self) -> None:
         try:
@@ -861,7 +813,9 @@ class HandlerDevBootGuard:
                 raise DevBootFailedError("no last healthy dev revision")
             with_new_ids = last_healthy.model_copy(
                 update={
-                    "container_ids": tuple(sorted(c["Id"] for c in self._containers()))
+                    "container_ids": tuple(
+                        sorted(c["Id"] for c in _dev_containers(self))
+                    )
                 }
             )
             self.execution._atomic_write_private_json(
@@ -889,9 +843,9 @@ class HandlerDevBootGuard:
         try:
             yield
             self.point.hold(self._capture())
-            self._announce_start(job, success=True)
+            _announce_start(self, job, success=True)
         except Exception as exc:
-            self._announce_start(job, success=False)
+            _announce_start(self, job, success=False)
             # Recovery restores the retained generation, which ran the services
             # the guard was built with, not the ones the failed candidate runs.
             self.services = self._retained_services
@@ -904,7 +858,7 @@ class HandlerDevBootGuard:
             # artifact path and the digest, not a second copy of the log.
             captured_logs: dict[str, str] = {}
             try:
-                for container in self._containers():
+                for container in _dev_containers(self):
                     reading = health_probe_reading(container)
                     health_probes.append(reading)
                     summary = health_probe_summary(reading)
@@ -996,13 +950,17 @@ class HandlerDevBootGuard:
                 logger.exception("Cannot persist failed dev deploy before recovery")
             try:
                 unchanged = _unchanged_and_healthy(
-                    self.point.current, self._containers, execution=self.execution
+                    self.point.current,
+                    lambda: _dev_containers(self),
+                    execution=self.execution,
                 )
                 kept_revision: str | None = None
                 if (
                     isinstance(exc, DevCompanionLaneFailedError)
                     and not unchanged
-                    and _all_healthy(self._containers, execution=self.execution)
+                    and _all_healthy(
+                        lambda: _dev_containers(self), execution=self.execution
+                    )
                 ):
                     # OMN-21645: the companion lane failed after the new
                     # runtime was replaced and verified. Rolling that healthy
@@ -1072,50 +1030,6 @@ class HandlerDevBootGuard:
                 f"commit={commit}: {reason}; forward redeploy revision={self.point.current.revision} "
                 f"verified={incident['recovery_verified']}"
             ) from exc
-
-    def _announce_start(self, job: str, *, success: bool) -> None:
-        if self.events is None or self._command is None:
-            return
-        try:
-            raw = self.runtime_started_at()
-            now = datetime.now(UTC)
-            events_module = _roll_events_module(self.execution)
-            started = events_module.docker_started_at(raw, fallback=now)
-            if raw is not None:
-                if self._prepared_at is not None and started < self._prepared_at:
-                    return
-            elif not success:
-                return
-            self.events.started(
-                job, started, events_module.EnumDevStartCause.ROLL_RECREATE
-            )
-        except Exception:
-            logger.exception(
-                "Dev boot start announce failed",
-                extra={"friction_type": "dev_event_publish_failed"},
-            )
-
-    def runtime_started_at(self) -> str | None:
-        """The runtime container's Docker start time, or None when unreadable."""
-        try:
-            for container in self._containers():
-                service = container["Config"]["Labels"].get(
-                    "com.docker.compose.service"
-                )
-                if service != "omninode-runtime":
-                    continue
-                started_at = container.get("State", {}).get("StartedAt")
-                if isinstance(started_at, str) and started_at:
-                    return started_at
-                return None
-        except (
-            OSError,
-            ValueError,
-            RuntimeError,
-            self.execution.subprocess.SubprocessError,
-        ):
-            return None
-        return None
 
 
 def health_probe_reading(container: ModelDevBootContainer) -> dict[str, JsonValue]:
@@ -1272,3 +1186,98 @@ def deliver_reports(
                     incident["job"],
                     pending,
                 )
+
+
+def _dev_containers(guard: HandlerDevBootGuard) -> list[ModelDevBootContainer]:
+    ids = _checked(
+        [
+            "docker",
+            "ps",
+            "--all",
+            "-q",
+            "--no-trunc",
+            "--filter",
+            f"label=com.docker.compose.project={guard.config.compose_project}",
+            "--filter",
+            "label=com.docker.compose.oneoff=False",
+        ],
+        execution=guard.execution,
+    ).split()
+    if not ids:
+        raise DevBootFailedError("dev runtime containers are absent")
+    raw = (
+        RootModel[list[ModelDevBootContainer]]
+        .model_validate_json(
+            _checked(["docker", "inspect", *ids], execution=guard.execution)
+        )
+        .root
+    )
+    containers: list[ModelDevBootContainer] = []
+    for container in raw:
+        labels = container["Config"]["Labels"]
+        if labels.get("com.docker.compose.project") != guard.config.compose_project:
+            raise DevBootFailedError("container belongs to another compose project")
+        if labels.get("com.docker.compose.service") in guard.services:
+            containers.append(container)
+    found = {c["Config"]["Labels"]["com.docker.compose.service"] for c in containers}
+    if found != set(guard.services):
+        raise DevBootFailedError(
+            f"dev runtime containers absent: {sorted(set(guard.services) - found)}"
+        )
+    return containers
+
+
+def _announce(
+    events: ProtocolDevRollEvents | None, call: Callable[[ProtocolDevRollEvents], None]
+) -> None:
+    """Run one announcement; evidence never fails or delays a roll."""
+    if events is None:
+        return
+    try:
+        call(events)
+    except Exception:
+        logger.exception("dev roll event failed friction_type=dev_event_publish_failed")
+
+
+def _announce_start(guard: HandlerDevBootGuard, job: str, *, success: bool) -> None:
+    if guard.events is None or guard._command is None:
+        return
+    try:
+        raw = runtime_started_at(guard)
+        now = datetime.now(UTC)
+        events_module = _roll_events_module(guard.execution)
+        started = events_module.docker_started_at(raw, fallback=now)
+        if raw is not None:
+            if guard._prepared_at is not None and started < guard._prepared_at:
+                return
+        elif not success:
+            return
+        guard.events.started(
+            job, started, events_module.EnumDevStartCause.ROLL_RECREATE
+        )
+    except Exception:
+        logger.exception(
+            "Dev boot start announce failed",
+            extra={"friction_type": "dev_event_publish_failed"},
+        )
+
+
+def runtime_started_at(guard: HandlerDevBootGuard) -> str | None:
+    """The runtime container's Docker start time, or None when unreadable."""
+    try:
+        for container in _dev_containers(guard):
+            service = container["Config"]["Labels"].get("com.docker.compose.service")
+            if service != "omninode-runtime":
+                continue
+            started_at = container.get("State", {}).get("StartedAt")
+            if isinstance(started_at, str) and started_at:
+                return started_at
+            return None
+    except (
+        OSError,
+        ValueError,
+        RuntimeError,
+        guard.execution.subprocess.SubprocessError,
+    ):
+        return None
+    return None

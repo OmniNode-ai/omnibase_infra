@@ -3,9 +3,12 @@
 """The manifest of one dev roll command: which command, and who issued it."""
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+JobId = Annotated[str, Field(min_length=1)]
 
 
 class ModelDevRollManifest(BaseModel):
@@ -18,7 +21,7 @@ class ModelDevRollManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_id: UUID
-    job_id: str = Field(min_length=1)
+    job_id: JobId
     issuer: str = Field(min_length=1)
     git_ref: str
     scope: str

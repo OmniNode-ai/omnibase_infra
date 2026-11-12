@@ -3,12 +3,14 @@
 """The dev_runtime_started event: one dev runtime start on one roll job."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_dev_start_cause import EnumDevStartCause
+
+JobId = Annotated[str, Field(min_length=1)]
 
 
 class ModelDevRuntimeStarted(BaseModel):
@@ -21,7 +23,7 @@ class ModelDevRuntimeStarted(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_id: UUID
-    job_id: str = Field(min_length=1)
+    job_id: JobId
     runtime_lane: Literal["dev"]
     started_at: datetime
     cause: EnumDevStartCause

@@ -21,10 +21,10 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue
 
 if TYPE_CHECKING:
     from omnibase_infra.models.model_dev_runtime_started import (
@@ -100,7 +100,7 @@ class DevRollEventsPublisher:
         self._send = send
         self._topics = topics
 
-    def _publish(self, topic: str, key: str, build: Callable[[], Any]) -> None:
+    def _publish(self, topic: str, key: str, build: Callable[[], BaseModel]) -> None:
         try:
             payload = build().model_dump(mode="json")
             if not self._send(topic, key, payload):
@@ -110,21 +110,23 @@ class DevRollEventsPublisher:
         except Exception:
             logger.exception("dev event %s could not be published %s", key, FRICTION)
 
-    def manifest(self, command: Mapping[str, Any]) -> None:
+    def manifest(self, command: Mapping[str, object]) -> None:
         job_id = str(command.get("correlation_id", ""))
         self._publish(
             self._topics["dev_roll_manifest"],
             f"dev-roll-manifest/{job_id}",
-            lambda: ModelDevRollManifest(
-                event_id=uuid4(),
-                job_id=job_id,
-                issuer=command["requested_by"],
-                git_ref=command["git_ref"],
-                scope=str(command["scope"]),
-                requested_at=command.get("requested_at"),
-                accepted_at=datetime.now(UTC),
-                open_pr=command.get("open_pr", ""),
-                rollback=command.get("rollback") is not None,
+            lambda: ModelDevRollManifest.model_validate(
+                {
+                    "event_id": uuid4(),
+                    "job_id": job_id,
+                    "issuer": command["requested_by"],
+                    "git_ref": command["git_ref"],
+                    "scope": str(command["scope"]),
+                    "requested_at": command.get("requested_at"),
+                    "accepted_at": datetime.now(UTC),
+                    "open_pr": command.get("open_pr", ""),
+                    "rollback": command.get("rollback") is not None,
+                }
             ),
         )
 
@@ -145,7 +147,12 @@ class DevRollEventsPublisher:
             ),
         )
 
-    def incident(self, guard_incident: Mapping[str, Any], *, issuer: str) -> None:
+    def incident(
+        self,
+        guard_incident: Mapping[str, object],
+        *,
+        issuer: str,
+    ) -> None:
         """Publish the incident; a verified recovery recreate is one more start."""
         job_id = str(guard_incident.get("job", ""))
         self._publish(
