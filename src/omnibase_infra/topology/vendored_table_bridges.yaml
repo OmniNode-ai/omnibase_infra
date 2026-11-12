@@ -18,8 +18,3 @@
   create: 0000_create_goal_trace_events.sql
   prefix: ""
   tables: [goal_trace_events, goal_traces]
-- ticket: OMN-23896 # omnimarket OMN-23865
-  node: node_projection_host_disk
-  create: 0000_create_host_disk.sql
-  prefix: host_disk_
-  tables: [class, volume]
