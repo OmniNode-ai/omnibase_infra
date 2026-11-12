@@ -13,19 +13,13 @@ from typing import Any, cast
 
 import yaml
 
+from omnibase_infra.models.contracts.model_llm_endpoint_env_file import load_env_file
+from omnibase_infra.models.contracts.model_llm_endpoint_overlay import (
+    resolve_overlay_endpoints,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_CONTRACT = _REPO_ROOT / "contracts" / "llm_endpoints.yaml"
-
-
-def _load_env_file(path: Path) -> dict[str, str]:
-    env: dict[str, str] = {}
-    for raw_line in path.read_text().splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        env[key.strip()] = value.strip().strip("'\"")
-    return env
 
 
 def contract_env_vars(endpoints: list[dict[str, Any]]) -> tuple[str, ...]:
@@ -134,8 +128,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    env = _load_env_file(args.env_file) if args.env_file else dict(os.environ)
+    env = load_env_file(args.env_file) if args.env_file else dict(os.environ)
     endpoints = _load_endpoints(args.contract)
+    try:
+        endpoints = resolve_overlay_endpoints(endpoints, os.environ, env)
+    except ValueError as exc:
+        print(f"LLM endpoint env contract check failed:\n  - {exc}", file=sys.stderr)
+        return 1
     env_vars = tuple(args.env_vars) if args.env_vars else contract_env_vars(endpoints)
     errors = validate(env, endpoints, env_vars)
 

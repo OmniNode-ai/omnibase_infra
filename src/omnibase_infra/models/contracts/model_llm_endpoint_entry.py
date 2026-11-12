@@ -28,15 +28,22 @@ class ModelLlmEndpointEntry(BaseModel):
     slot_id: str = Field(..., description="Slot identifier.")  # ONEX_EXCLUDE: pattern_validator - slot_id is a human-readable natural key, not a UUID  # fmt: skip
     host: str | None = Field(
         default=None,
-        description="IP address; non-null when status=running.",
+        description="IP address; non-null when status=running unless endpoint_from_overlay.",
     )
     port: int | None = Field(
         default=None,
-        description="Integer port; non-null when status=running.",
+        description="Integer port; non-null when status=running unless endpoint_from_overlay.",
     )
     endpoint_url: str | None = Field(
         default=None,
-        description="Resolved URL convenience field; non-null when status=running.",
+        description="Resolved URL convenience field; non-null when status=running unless endpoint_from_overlay.",
+    )
+    endpoint_from_overlay: bool = Field(
+        default=False,
+        description=(
+            "Address is read from the llm_endpoints overlay at run time; "
+            "the public contract carries no address for this slot."
+        ),
     )
     url_env_var: str | None = Field(
         default=None,
@@ -156,6 +163,22 @@ class ModelLlmEndpointEntry(BaseModel):
 
     @model_validator(mode="after")
     def _validate_running_required_fields(self) -> ModelLlmEndpointEntry:
+        if self.endpoint_from_overlay:
+            carried = [
+                name
+                for name, value in (
+                    ("host", self.host),
+                    ("port", self.port),
+                    ("endpoint_url", self.endpoint_url),
+                )
+                if value is not None
+            ]
+            if carried:
+                raise ValueError(
+                    "endpoint_from_overlay slots must not carry an address "
+                    f"(host, port, endpoint_url must all be None); "
+                    f"carries: {', '.join(carried)}"
+                )
         if self.status == EnumLlmEndpointStatus.RUNNING:
             missing = [
                 name
@@ -166,6 +189,7 @@ class ModelLlmEndpointEntry(BaseModel):
                     ("model_hf_id", self.model_hf_id),
                 )
                 if value is None
+                and (not self.endpoint_from_overlay or name == "model_hf_id")
             ]
             if missing:
                 raise ValueError(
