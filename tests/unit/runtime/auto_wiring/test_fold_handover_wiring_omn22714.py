@@ -12,6 +12,7 @@ recorder; the manifest path, the profile list and the environment are real.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -51,8 +52,12 @@ class _RecordingPreflight:
 
     given: list[ModelConsumerGroupHandover | None] = []
 
-    def __init__(self, **kwargs: Any) -> None:
-        self.given.append(kwargs["handover"])
+    @classmethod
+    def from_contract(
+        cls, contract: Any, *, environ: Mapping[str, str], **_: Any
+    ) -> _RecordingPreflight:
+        cls.given.append(preflight.load_contract_handover(contract, environ))
+        return cls()
 
     async def handle(
         self, request: ModelContractSubscribePreflightRequest

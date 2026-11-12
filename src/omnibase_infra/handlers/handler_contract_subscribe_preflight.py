@@ -91,7 +91,8 @@ from uuid import uuid4
 
 from aiokafka import AIOKafkaConsumer
 from aiokafka.client import CoordinationType
-from aiokafka.protocol.admin import DescribeGroupsRequest
+from aiokafka.errors import KafkaError
+from aiokafka.protocol.admin import DescribeGroupsRequest, ListGroupsRequest
 from aiokafka.structs import TopicPartition
 
 from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
@@ -114,9 +115,17 @@ from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_result i
 from omnibase_infra.models.event_bus.model_offset_handover_result import (
     ModelOffsetHandoverResult,
 )
+from omnibase_infra.models.event_bus.model_version_handover_policy import (
+    ModelVersionHandoverPolicy,
+    load_version_handover_policy,
+    select_version_predecessors,
+)
 from omnibase_infra.models.model_fold_handover import ModelFoldHandover
 from omnibase_infra.protocols.protocol_consume_concurrency_declarer import (
     ProtocolConsumeConcurrencyDeclarer,
+)
+from omnibase_infra.protocols.protocol_consumer_group_lister import (
+    ProtocolConsumerGroupLister,
 )
 from omnibase_infra.protocols.protocol_consumer_group_offset_handover import (
     ProtocolConsumerGroupOffsetHandover,
@@ -134,6 +143,9 @@ __all__ = [
     "ConsumerGroupFenceError",
     "HandlerContractSubscribePreflight",
     "hand_over_committed_offsets",
+    "hand_over_from_version_predecessors",
+    "list_groups_on_kafka",
+    "resolve_successor_group",
     "load_contract_handover",
     "resolve_fold_handover",
     "resolve_retired_group",
@@ -528,6 +540,127 @@ async def hand_over_committed_offsets(
     )
 
 
+async def resolve_successor_group(
+    event_bus: object, *, to_group: str, topic: str
+) -> str:
+    """The group the bus actually joins for ``to_group`` on ``topic``."""
+    if isinstance(event_bus, EventBusKafka):
+        effective = event_bus._resolve_effective_group_id(
+            to_group, topic, uuid4(), (topic, to_group)
+        )
+        binding = event_bus.resolve_bus_binding(topic, consumer_group=effective)
+        return binding.consumer_group or effective
+    return to_group
+
+
+async def list_groups_on_kafka(bus: EventBusKafka) -> tuple[str, ...]:
+    """Every consumer group id the cluster lists, one ListGroups per broker.
+
+    Built on the sanctioned offset consumer's own connection, like the
+    handover's fence, so this module builds no raw client of its own.
+    """
+    config = bus.config.model_copy(update={"bootstrap_servers": bus.bootstrap_servers})
+    consumer = create_offset_consumer(config, group_id=None)
+    await consumer.start()
+    try:
+        client = consumer._client
+        cluster = await client.fetch_all_metadata()
+        found: set[str] = set()
+        for broker in cluster.brokers():
+            response = await client.send(broker.nodeId, ListGroupsRequest())
+            if response.error_code != 0:
+                raise RuntimeError(
+                    f"listing consumer groups on broker {broker.nodeId} returned "
+                    f"error code {response.error_code}; predecessor groups are unknown"
+                )
+            found.update(str(entry[0]) for entry in response.groups)
+        return tuple(sorted(found))
+    finally:
+        await consumer.stop()
+
+
+async def hand_over_from_version_predecessors(
+    event_bus: object,
+    *,
+    topic: str,
+    to_group: str,
+    policy: ModelVersionHandoverPolicy,
+) -> tuple[ModelOffsetHandoverResult, ...]:
+    """Seed ``to_group`` on ``topic`` from every older or newer version of itself.
+
+    Call strictly before ``subscribe`` joins ``to_group``. One result per
+    predecessor handed over; empty when disabled, when the bus keeps no group
+    state, or when the group has no predecessor (a new node).
+    """
+    if not policy.enabled:
+        return ()
+    try:
+        if isinstance(event_bus, ProtocolConsumerGroupLister):
+            listed: Iterable[str] = await event_bus.list_consumer_groups()
+        elif isinstance(event_bus, EventBusKafka) and event_bus._started:
+            # A bus that has not started holds no broker connection and no group.
+            listed = await list_groups_on_kafka(event_bus)
+        else:
+            return ()
+    except (RuntimeError, OSError, KafkaError) as exc:
+        # The handover is a repair of a gap, never a condition of booting: a
+        # broker that refuses the listing (ACL, timeout) must not stop the
+        # runtime. The failure is logged at ERROR so a lost gap is not silent.
+        logger.exception(
+            "Version handover could not list consumer groups, joining at the "
+            "bus default: topic=%s to=%s (%s: %s)",
+            topic,
+            to_group,
+            type(exc).__name__,
+            exc,
+        )
+        return ()
+    successor = await resolve_successor_group(event_bus, to_group=to_group, topic=topic)
+    results: list[ModelOffsetHandoverResult] = []
+    for predecessor in select_version_predecessors(successor, listed):
+        try:
+            result = await hand_over_committed_offsets(
+                event_bus,
+                topic=topic,
+                from_group=predecessor,
+                to_group=to_group,
+                from_auto_offset_reset=policy.from_auto_offset_reset,
+                handover_rule="last_ran",
+                fence=policy.fence,
+            )
+        except (RuntimeError, OSError, KafkaError, ValueError) as exc:
+            if not isinstance(exc, ConsumerGroupFenceError):
+                logger.exception(
+                    "Version handover from %s failed, joining at the bus "
+                    "default: topic=%s to=%s (%s: %s)",
+                    predecessor,
+                    topic,
+                    successor,
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
+            logger.warning(
+                "Version handover skipped a predecessor that still has members: "
+                "topic=%s from=%s to=%s (%s)",
+                topic,
+                predecessor,
+                successor,
+                exc,
+            )
+            continue
+        logger.info(
+            "Version handover: topic=%s from=%s to=%s committed=%s kept=%s",
+            topic,
+            result.from_group,
+            result.to_group,
+            result.committed,
+            list(result.kept),
+        )
+        results.append(result)
+    return tuple(results)
+
+
 class HandlerContractSubscribePreflight:
     """Apply a contract's pre-subscribe declarations to one bus, per topic."""
 
@@ -540,6 +673,7 @@ class HandlerContractSubscribePreflight:
         event_bus: object,
         environment: str,
         consumer_group: str,
+        version_policy: ModelVersionHandoverPolicy | None = None,
     ) -> None:
         """Validate injected declarations and refuse a bus that cannot honour them.
 
@@ -552,6 +686,10 @@ class HandlerContractSubscribePreflight:
                 is derived in it.
             consumer_group: The group id ``subscribe`` resolves to for this
                 contract (``compute_consumer_group_id`` of its identity).
+            version_policy: How a bumped contract version seeds its group from
+                the other versions of itself (OMN-19998). Not given, the
+                model's defaults apply; the runtime wiring injects the policy
+                ``ONEX_RUNTIME_VERSION_HANDOVER`` declares.
 
         Raises:
             ValueError: A declaration is malformed.
@@ -583,12 +721,42 @@ class HandlerContractSubscribePreflight:
                 "bus default would drop the handover window (OMN-21753)"
             )
         self._environment = environment
+        # OMN-19998: the policy of the automatic version-predecessor handover.
+        # It applies only to a contract that declares no handover of its own.
+        self._version_policy = version_policy or ModelVersionHandoverPolicy()
         # A static declaration names one retired group for every topic; one by
         # instance has a group per topic, resolved in ``handle`` (OMN-22714).
         self._retired_group = (
             self._handover.source_group(environment)
             if self._handover and self._handover.from_instance_id is None
             else ""
+        )
+
+    @classmethod
+    def from_contract(
+        cls,
+        contract: ModelDiscoveredContract,
+        *,
+        concurrency: ModelConsumeConcurrency,
+        environ: Mapping[str, str],
+        event_bus: object,
+        environment: str,
+        consumer_group: str,
+    ) -> HandlerContractSubscribePreflight:
+        """Wire the preflight of a discovered contract from ``environ`` (OMN-19998).
+
+        The contract's handover and the version handover policy are read from
+        the given mapping, so the handler itself never touches the process
+        environment. An unreadable policy refuses the wiring.
+        """
+        return cls(
+            contract_name=contract.name,
+            concurrency=concurrency,
+            handover=load_contract_handover(contract, environ),
+            event_bus=event_bus,
+            environment=environment,
+            consumer_group=consumer_group,
+            version_policy=load_version_handover_policy(environ),
         )
 
     @property
@@ -660,6 +828,16 @@ class HandlerContractSubscribePreflight:
                 list(handover.kept),
                 handover.fenced_group,
                 self._contract_name,
+            )
+        elif self._version_policy.enabled:
+            # OMN-19998: a contract version bump names a new group; seed it from
+            # the committed offsets of the other versions of itself, so the rows
+            # published while no version was joined are not skipped.
+            await hand_over_from_version_predecessors(
+                self._event_bus,
+                topic=topic,
+                to_group=self._consumer_group,
+                policy=self._version_policy,
             )
         return ModelContractSubscribePreflightResult(
             topic=topic, max_in_flight_records=bound, handover=handover
