@@ -1,0 +1,54 @@
+schema_version: 1.0.0
+ticket_id: OMN-23966
+title: Stop start-up creating topics for contracts that only start on first request
+summary: 'Boot topic provisioning (OMN-23951) created the publish topics of every contract the per-contract interleave never reached, which included the contracts the demand split defers until their first request (OMN-18087). A deferred contract goes through the whole provision, ready and attach interleave, publish topics included, when its first record arrives, so creating them at boot created topics for contracts that may never load. The unattached pass now skips the contracts the demand split deferred; publish-only, plugin-managed and no-live-dispatcher contracts, which nothing will ever interleave, are provisioned as before. The change does not turn contract_hotload on and does not delete any topic; the live reading on the development runtime is taken after the deploy and is the ticket''s AC3.'
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - topics
+requirements:
+  - id: req-deferred-contract-topics-at-start
+    statement: A contract whose start is deferred to its first request has its topics created when it starts, not at boot; a publish-only node's topic is still created at boot.
+    acceptance:
+      - id: AC1
+        statement: Start-up topic creation skips the publish topics of a contract whose start is deferred to its first request and creates them when that contract starts, on fakes and on a real broker.
+      - id: AC2
+        statement: A publish-only node's topic is still created at start-up, read from a real broker, and a replication-policy refusal on it still ends the start.
+      - id: AC3
+        statement: After the change runs on the development runtime, the number of topics on the development broker does not grow at the next runtime start and the count withheld is read from the running runtime.
+evidence_requirements:
+  - kind: tests
+    description: Unit tests drive subscribe_wired_contract_topics with a recording provisioner, a Kafka-typed recording bus and a fake demand source; the real-broker test drives the production provisioner, bus and demand source against Redpanda.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_demand_deferred_topics_created_at_hotload_omn23953.py tests/unit/runtime/auto_wiring/test_provision_unattached_publish_topics_omn23951.py tests/integration/runtime/test_demand_deferred_topics_real_broker_omn23953.py -q -n 0 --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-deferred-topics-unit-ac1
+    description: The unit test fails with the deferred set emptied in the start-up pass (the injected break) and passes with it, and the demand start creates the deferred contract's topics in provision, ready, attach order.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_demand_deferred_topics_created_at_hotload_omn23953.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-deferred-topics-real-broker-ac2
+    description: On a real Redpanda broker the publish-only and in-use contracts' topics exist after boot, the deferred contract's do not and appear after its first record, and a replication-policy refusal still ends the boot.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_demand_deferred_topics_real_broker_omn23953.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-deferred-topics-merged-source-ac3
+    description: Hermetic source readback at the evaluated commit that the start-up wiring passes the demand-deferred contract names to the unattached publish pass, absent at the merge base. The live reading on the development runtime is taken after the deploy.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'src=$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d); printf %s "$src" | grep -F "demand_deferred_contract_names=demand_deferred" >/dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
