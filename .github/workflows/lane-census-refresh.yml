@@ -132,8 +132,11 @@ jobs:
           # OMN-20934 exited 128 with no credential. The push below carries
           # the App token itself, so nothing is persisted here.
           persist-credentials: false
+          # OMN-23996 / OMN-22152: the lane census node's overlay is the host
+          # registry the collector reads; fetch it beside the lane manifest.
           sparse-checkout: |
             config/lab/lane-census
+            config/onex/overlays/node_lane_census_effect/overlay.yaml
           sparse-checkout-cone-mode: false
 
       - name: Place the CI overlay outside the workspace
@@ -145,6 +148,16 @@ jobs:
           if [ ! -s "$root/config/lab/lane-census/lane-manifest.yaml" ]; then
             echo "::error::the CI overlay carries no config/lab/lane-census/lane-manifest.yaml; the census has no desired state to read."
             exit 1
+          fi
+          # OMN-23996 / OMN-22152: the census host registry is the lane census
+          # node's overlay. When this overlay repository carries it, the
+          # collector finds it through ONEX_SKILL_OVERLAY_ROOTS and
+          # LANE_CENSUS_REGISTRY; a repository that does not carry it exports
+          # neither, and the collector stops with its not-configured exit 3.
+          overlays="$root/config/onex/overlays"
+          if [ -s "$overlays/node_lane_census_effect/overlay.yaml" ]; then
+            echo "ONEX_SKILL_OVERLAY_ROOTS=$overlays" >> "$GITHUB_ENV"
+            echo "LANE_CENSUS_REGISTRY=$overlays/node_lane_census_effect/overlay.yaml" >> "$GITHUB_ENV"
           fi
           echo "ONEX_WORKSPACE_CONFIG_ROOT=$root" >> "$GITHUB_ENV"
           echo "CENSUS_DIR=$root/config/lab/lane-census" >> "$GITHUB_ENV"

@@ -378,6 +378,10 @@ ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archi
 # alongside the content-parity gate in compute_workspace_provenance.py, which
 # hard-fails the build on ANY installed-vs-staged content drift regardless of
 # mechanism.
+# The staged core has no .git and takes its version from hatch-vcs, which calls
+# setuptools_scm.get_version with no distribution name: only the generic
+# SETUPTOOLS_SCM_PRETEND_VERSION is honored here (the per-distribution _FOR_<DIST>
+# form cannot match), and it is exported inside the core install subshell only.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
@@ -388,7 +392,13 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
             fi; \
         done; \
         uv-with-retry pip uninstall omnibase-core; \
-        ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
+        core_version="$(/app/.venv/bin/python -c 'import json, sys; print(*(c["actual_version"] for c in json.load(open(sys.argv[1]))["comparisons"] if c["package"] == "omnibase-core" and c.get("version_derived")))' /workspace/sibling-pin-comparison.json)"; \
+        ( cd / && \
+            if [ -n "${core_version}" ]; then \
+                SETUPTOOLS_SCM_PRETEND_VERSION="${core_version}"; \
+                export SETUPTOOLS_SCM_PRETEND_VERSION; \
+            fi; \
+            VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnibase-core \
             "omnibase-core @ file:///workspace/sibling-repos/omnibase_core" ); \
         uv-with-retry pip uninstall omnibase-spi; \

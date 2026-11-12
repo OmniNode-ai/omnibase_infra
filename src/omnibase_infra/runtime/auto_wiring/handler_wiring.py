@@ -94,7 +94,6 @@ from omnibase_infra.errors import (
     ProjectionNotMaterializedError,
     ProjectionQueryRowBudgetError,
     QuarantinePublishUnconfirmedError,
-    TopicReplicationPolicyError,
 )
 from omnibase_infra.event_bus.enum_contract_attach_exclusion_reason import (
     EnumContractAttachExclusionReason,
@@ -120,6 +119,10 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
 )
+from omnibase_infra.handlers.boot_topic_provisioning import (
+    ensure_topics_exist,
+    provision_unattached_publish_topics,
+)
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
@@ -128,6 +131,9 @@ from omnibase_infra.handlers.handler_projection_write_cursor import (
 )
 from omnibase_infra.handlers.projection_failure_classification import is_content_failure
 from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
+from omnibase_infra.models.model_contract_hotload_lane_overlay import (
+    lane_defers_topics_to_first_request,
+)
 from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.models.projection import ModelProjectionDerivedWriteRequest
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
@@ -10365,15 +10371,14 @@ async def subscribe_wired_contract_topics(
         detail: str = "",
     ) -> None:
         """Report a contract this function will never attempt (OMN-17372)."""
-        if exclusions_out is None:
-            return
-        exclusions_out.append(
-            ModelContractAttachExclusion(
-                contract_name=contract_name,
-                reason=reason,
-                detail=detail,
+        if exclusions_out is not None:
+            exclusions_out.append(
+                ModelContractAttachExclusion(
+                    contract_name=contract_name,
+                    reason=reason,
+                    detail=detail,
+                )
             )
-        )
 
     knobs = readiness_config or ModelTopicReadinessConfig()
     for result in _prioritize_subscription_results(
@@ -10446,10 +10451,7 @@ async def subscribe_wired_contract_topics(
                 "plugin-managed contract '%s' (OMN-10864)",
                 contract.name,
             )
-            _exclude(
-                contract.name,
-                EnumContractAttachExclusionReason.PLUGIN_MANAGED,
-            )
+            _exclude(contract.name, EnumContractAttachExclusionReason.PLUGIN_MANAGED)
             continue
         # OMN-17562. The same withholding as the immediate seam, applied here
         # too because this path re-derives eligibility from the wiring REPORT
@@ -10502,6 +10504,9 @@ async def subscribe_wired_contract_topics(
                 auto_offset_reset=auto_offset_reset,
             )
 
+    # OMN-21318: the lane's hot-load mode on_demand leaves a demand-deferred contract's
+    # topics to its first request; any other lane creates them at boot (OMN-23951).
+    scheduled = {c.name for _, c in eligible if lane_defers_topics_to_first_request()}
     if demand_source is not None:
         eligible = await _split_boot_set_by_demand(
             eligible,
@@ -10514,6 +10519,16 @@ async def subscribe_wired_contract_topics(
 
     attach_results = await asyncio.gather(
         *(_provision_ready_attach(result, contract) for result, contract in eligible)
+    )
+
+    # OMN-23951: the publish topics of every contract the interleave never reaches.
+    # A demand-deferred contract is scheduled, not unattached (OMN-23953): its
+    # topics are created when its first request starts it.
+    await provision_unattached_publish_topics(
+        manifest,
+        scheduled.union(r.contract_name for r in attach_results),
+        provisioner,
+        max_concurrent=knobs.max_concurrent_contract_attach,
     )
 
     if attach_results_out is not None:
@@ -10663,24 +10678,9 @@ async def _interleave_contract(
     readiness: ModelTopicSetReadiness | None = None
     if provisioner is not None and provision_topics:
         # (1) Provision the contract's topics (idempotent), in declared order.
-        for topic in provision_topics:
-            try:
-                await provisioner.ensure_topic_exists(topic_name=topic)
-            except TopicReplicationPolicyError:
-                # OMN-15395: a durability-policy violation is fail-closed and
-                # must escape this best-effort boundary. Attaching a consumer to
-                # a contract whose topics were silently skipped because one of
-                # them declares RF1 on MSK is the exact outcome the policy
-                # exists to prevent.
-                raise
-            except Exception:  # noqa: BLE001 — boundary: per-contract, never fatal
-                logger.warning(
-                    "Topic provisioning failed for contract '%s' topic '%s' "
-                    "(non-fatal, contract will be NOT-READY)",
-                    name,
-                    topic,
-                    exc_info=True,
-                )
+        # OMN-15395: a durability-policy violation is fail-closed and escapes;
+        # any other failure leaves the contract NOT-READY at the confirm below.
+        await ensure_topics_exist(provisioner, provision_topics, contract_name=name)
         # (2) Confirm broker metadata converged before attaching the consumer.
         try:
             readiness = await provisioner.confirm_topics_ready(
