@@ -175,7 +175,7 @@ class TestModelLlmEndpointEntry:
                 role="embedding",
                 status="planned",
                 lane_overlay_binding={
-                    "backend_id": "local-embedding",
+                    "backend": "local-embedding",
                     "env_var": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
                 },
             )
@@ -188,12 +188,12 @@ class TestModelLlmEndpointEntry:
             endpoint_from_overlay=True,
             model_hf_id="test/model",
             lane_overlay_binding={
-                "backend_id": "local-embedding",
+                "backend": "local-embedding",
                 "env_var": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
             },
         )
         assert entry.lane_overlay_binding is not None
-        assert entry.lane_overlay_binding.backend_id == "local-embedding"
+        assert entry.lane_overlay_binding.backend == "local-embedding"
         assert (
             entry.lane_overlay_binding.env_var == "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"
         )
@@ -206,7 +206,7 @@ class TestModelLlmEndpointEntry:
                 status="planned",
                 endpoint_from_overlay=True,
                 model_hf_id="test/model",
-                lane_overlay_binding={"backend_id": "", "env_var": "X"},
+                lane_overlay_binding={"backend": "", "env_var": "X"},
             )
         with pytest.raises(ValidationError):
             ModelLlmEndpointEntry(
@@ -215,7 +215,7 @@ class TestModelLlmEndpointEntry:
                 status="planned",
                 endpoint_from_overlay=True,
                 model_hf_id="test/model",
-                lane_overlay_binding={"backend_id": "b", "env_var": ""},
+                lane_overlay_binding={"backend": "b", "env_var": ""},
             )
 
 

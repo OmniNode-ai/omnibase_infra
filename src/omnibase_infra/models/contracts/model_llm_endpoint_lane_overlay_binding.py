@@ -17,10 +17,10 @@ class ModelLlmEndpointLaneOverlayBinding(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    backend_id: str
+    backend: str
     env_var: str
 
-    @field_validator("backend_id", "env_var", mode="after")
+    @field_validator("backend", "env_var", mode="after")
     @classmethod
     def _non_empty(cls, value: str) -> str:
         value = value.strip()

@@ -83,7 +83,7 @@ class ModelLlmEndpointOverlay(BaseModel):
 
     @field_validator("endpoint_urls", mode="before")
     @classmethod
-    def _validate_endpoint_urls(cls, value: Any) -> dict[str, str]:
+    def _validate_endpoint_urls(cls, value: object) -> dict[str, str]:
         if not isinstance(value, dict) or not value:
             raise ValueError(
                 "endpoint_urls must be a non-empty mapping of slot id to base URL"
@@ -210,10 +210,10 @@ def _searched_locations(environ: Mapping[str, str]) -> list[str]:
 
 
 def resolve_overlay_endpoints(
-    endpoints: list[dict[str, Any]],
+    endpoints: list[dict[str, object]],
     environ: Mapping[str, str],
     store: Mapping[str, str] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Fill host/port/endpoint_url for slots flagged ``endpoint_from_overlay``.
 
     Returns copies of the endpoint dicts. Every dict with
@@ -232,7 +232,7 @@ def resolve_overlay_endpoints(
     locations = _searched_locations(environ)
     searched = ", ".join(locations) or "<none>"
 
-    result: list[dict[str, Any]] = []
+    result: list[dict[str, object]] = []
     for endpoint in endpoints:
         if not endpoint.get("endpoint_from_overlay"):
             result.append(dict(endpoint))

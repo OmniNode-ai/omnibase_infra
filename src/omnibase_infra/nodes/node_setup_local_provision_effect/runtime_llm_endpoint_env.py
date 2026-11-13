@@ -137,7 +137,7 @@ def _rebound_document(
     for backend in document["backends"]:
         if (
             not isinstance(backend, dict)
-            or backend.get("backend_id") != binding.backend_id
+            or backend.get("backend_id") != binding.backend
         ):
             continue
         old_url = backend.get("endpoint_url")
@@ -148,7 +148,7 @@ def _rebound_document(
             or not parsed.hostname
         ):
             raise LlmEndpointEnvError(
-                f"{relative}: backend {binding.backend_id!r} endpoint_url {old_url!r} "
+                f"{relative}: backend {binding.backend!r} endpoint_url {old_url!r} "
                 "must be an http(s) URL with a host"
             )
         new_url = f"{base_url}{parsed.path}" + (
@@ -183,7 +183,7 @@ def _rewrite_lane_overlay(
         _write_if_changed(target / relative, data)
     if len(urls) > 1:
         raise LlmEndpointEnvError(
-            f"backend {binding.backend_id!r} has differing endpoint URLs across "
+            f"backend {binding.backend!r} has differing endpoint URLs across "
             f"lane overlay files: {sorted(urls)}"
         )
     return next(iter(urls), None)

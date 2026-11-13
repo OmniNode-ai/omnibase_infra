@@ -330,7 +330,7 @@ def test_seam_the_real_contract_binds_the_slot_the_overlay_names() -> None:
     slot = slots[SLOT_ID]
     assert slot["url_env_var"] == "LLM_EMBEDDING_URL"
     assert slot["lane_overlay_binding"] == {
-        "backend_id": BACKEND_ID,
+        "backend": BACKEND_ID,
         "env_var": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
     }
     assert slot["endpoint_url"] is None

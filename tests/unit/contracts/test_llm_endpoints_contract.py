@@ -237,8 +237,8 @@ class TestLlmEndpointsContract:
                 binding = slot.get("lane_overlay_binding")
                 if binding is not None:
                     assert isinstance(binding, dict)
-                    assert binding.get("backend_id"), (
-                        f"slot {slot['slot_id']!r} lane_overlay_binding.backend_id must be non-empty"
+                    assert binding.get("backend"), (
+                        f"slot {slot['slot_id']!r} lane_overlay_binding.backend must be non-empty"
                     )
                     assert binding.get("env_var"), (
                         f"slot {slot['slot_id']!r} lane_overlay_binding.env_var must be non-empty"
@@ -252,7 +252,7 @@ class TestLlmEndpointsContract:
                 assert binding is not None, (
                     "embeddings-201 must have lane_overlay_binding"
                 )
-                assert binding["backend_id"] == "local-embedding"
+                assert binding["backend"] == "local-embedding"
                 assert binding["env_var"] == "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"
                 assert slot["host"] is None
                 assert slot["port"] is None

@@ -11,7 +11,7 @@ lets shrink, carries the overlay resolution and the skip option without growing.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import yaml
 
@@ -30,7 +30,7 @@ def load_env_file(path: Path) -> dict[str, str]:
     return env
 
 
-def contract_env_vars(endpoints: list[dict[str, Any]]) -> tuple[str, ...]:
+def contract_env_vars(endpoints: list[dict[str, object]]) -> tuple[str, ...]:
     """Return the env vars the contract itself assigns to endpoint slots.
 
     OMN-16442: this set is DERIVED, never hardcoded. A slot released from its
@@ -49,17 +49,17 @@ def contract_env_vars(endpoints: list[dict[str, Any]]) -> tuple[str, ...]:
     return tuple(env_vars)
 
 
-def load_endpoints(path: Path) -> list[dict[str, Any]]:
+def load_endpoints(path: Path) -> list[dict[str, object]]:
     data = yaml.safe_load(path.read_text())
     if not isinstance(data, dict) or not isinstance(data.get("endpoints"), list):
         msg = f"{path} must contain a top-level endpoints list"
         raise ValueError(msg)
-    return cast("list[dict[str, Any]]", data["endpoints"])
+    return cast("list[dict[str, object]]", data["endpoints"])
 
 
 def validate(
     env: dict[str, str],
-    endpoints: list[dict[str, Any]],
+    endpoints: list[dict[str, object]],
     env_vars: tuple[str, ...],
 ) -> list[str]:
     """Return validation errors for configured endpoint env vars."""
