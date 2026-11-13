@@ -73,6 +73,7 @@ from deploy_agent.executor import (
     load_dev_boot_guard,
     read_applied_migration_fingerprint,
     read_checkout_migration_fingerprint,
+    record_overlay_revision,
     resolve_prod_target_service,
     restore_rollback_point,
     select_dev_instance,
@@ -2053,6 +2054,13 @@ class DeployAgent:
                             f"Refusing {cmd.runtime_lane.value} {cmd.scope.value} deploy: "
                             "no healthy, retained rollback point"
                         )
+                    # OMN-24216: record the command's overlays revision before any
+                    # build; a refusal propagates and ends the job here.
+                    if cmd.runtime_lane == EnumRuntimeLane.DEV and cmd.scope in (
+                        Scope.RUNTIME,
+                        Scope.FULL,
+                    ):
+                        record_overlay_revision(cmd.overlay_ref)
                     services_restarted = self.executor.rebuild_scope(
                         cmd.scope,
                         cmd.services,

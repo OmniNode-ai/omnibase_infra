@@ -946,6 +946,9 @@ class ModelRebuildRequested(BaseModel):
     open_pr: str = Field(
         default="", pattern=r"^([a-z][a-z0-9_]*#[1-9][0-9]*@[0-9a-f]{40})?$"
     )
+    # OMN-24216: the 40-hex head of an overlays repository revision the dev lane
+    # mounts as its overlay store root for this deploy.
+    overlay_ref: str = Field(default="", pattern=r"^([0-9a-f]{40})?$")
     # OMN-19270: when the command was first requested -- the moment its
     # trigger published it, carried through every hop that forwards it. The
     # lineage fence supersedes a sibling-triggered command only when the
@@ -975,6 +978,15 @@ class ModelRebuildRequested(BaseModel):
             or not self.open_pr.endswith(f"@{self.git_ref}")
         ):
             msg = "open_pr needs runtime_lane dev, a rollback declaration, git_ref = its head"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def validate_overlay_ref(self) -> ModelRebuildRequested:
+        if self.overlay_ref and (
+            self.runtime_lane != EnumRuntimeLane.DEV or self.rollback is None
+        ):
+            msg = "overlay_ref needs runtime_lane dev and a rollback declaration"
             raise ValueError(msg)
         return self
 

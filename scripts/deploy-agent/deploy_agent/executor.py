@@ -207,6 +207,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/contracts/model_llm_endpoint_contract.py",
         "models/contracts/model_llm_endpoint_overlay.py",
         "nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py",
+        "nodes/node_setup_local_provision_effect/runtime_overlay_revision.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         if module_name in sys.modules:
@@ -1863,6 +1864,14 @@ def _llm_endpoint_env_overlay(
     return rendered
 
 
+def _overlay_revision_env_overlay(env: Mapping[str, str]) -> dict[str, str]:
+    """The dev lane's overlay store root for the recorded revision, or nothing (OMN-24216)."""
+    overlay: dict[str, str] = load_dev_boot_guard(
+        _OVERLAY_REVISION_MODULE
+    ).render_dev_lane(sys.modules[__name__], env)
+    return overlay
+
+
 class _ActiveDeployLane:
     """The lane of the job in flight, or ``None`` between jobs (OMN-19998).
 
@@ -1884,6 +1893,17 @@ def active_deploy_lane(lane: EnumRuntimeLane) -> Iterator[None]:
         yield
     finally:
         _ActiveDeployLane.lane = previous
+
+
+def record_overlay_revision(revision: str) -> None:
+    """Record (or, when empty, clear) the overlays revision this deploy mounts (OMN-24216).
+
+    A refusal propagates: the job ends before any build, like the other
+    pre-build checks.
+    """
+    load_dev_boot_guard(_OVERLAY_REVISION_MODULE).record(
+        sys.modules[__name__], dict(os.environ), revision
+    )
 
 
 def _load_dotenv_file(env_path: Path) -> dict[str, str]:
@@ -1990,6 +2010,9 @@ def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
 #: are private deployment config and no longer live in this repository.
 LANE_OVERLAY_DIR_ENV = "ONEX_LANE_OVERLAY_DIR"
 _LLM_ENV_MODULE = "nodes.node_setup_local_provision_effect.runtime_llm_endpoint_env"
+_OVERLAY_REVISION_MODULE = (
+    "nodes.node_setup_local_provision_effect.runtime_overlay_revision"
+)
 LANE_OVERLAY_RELATIVE_DIR = Path("config") / "lab" / "lane-overlays"
 
 
@@ -2085,6 +2108,8 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env.update(llm_env)
     if rendered_lane_overlay_dir is not None:
         env[LANE_OVERLAY_DIR_ENV] = rendered_lane_overlay_dir
+    # OMN-24216: a recorded overlays revision mounts its rendered store root.
+    env.update(_overlay_revision_env_overlay(env))
     # OMN-18073: refuse before compose interpolation writes a provably-mangled
     # value into every container this deploy creates. Deliberately AFTER the
     # re-read above, so a mangled value arriving from the store is refused on

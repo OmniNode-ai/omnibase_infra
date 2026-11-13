@@ -92,6 +92,16 @@ config:
     lane_overlay_glob: "*.bifrost.yaml"
     description: >-
       Renders the dev lane's embedding address from the llm_endpoints overlay over the operator store, and a rewritten lane overlay copy; no value lives here.
+  overlay_revision_render:
+    clone_env: DEPLOY_AGENT_OVERLAY_HOME_CLONE
+    state_dir_env: DEPLOY_AGENT_STATE_DIR
+    rendered_dir_name: overlay-revisions
+    active_file_name: active-overlay-revision
+    store_root_env: DEV_LANE_OVERLAY_STORE_ROOTS_DIR
+    overlay_dir: overlays
+    read_timeout_seconds: 30
+    description: >-
+      Renders one revision of the overlays repository into the dev agent's state directory so compose can mount it; no value lives here.
   overlay_home_lane_env:
     clone_env: DEPLOY_AGENT_OVERLAY_HOME_CLONE
     ref: origin/main
