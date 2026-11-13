@@ -15,7 +15,10 @@ it imports the standard library, pyyaml and the repo's own models only.
 from __future__ import annotations
 
 import fnmatch
-from collections.abc import Mapping
+import os
+import shlex
+import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import NamedTuple
@@ -285,12 +288,13 @@ def refresh_exports(
     search_root: Path,
     state_dir: Path,
 ) -> str:
-    """Shell exports of the dev lane's LLM endpoint env rendered from the overlay, for the warm refresh.
+    """Shell exports of a lab lane's LLM endpoint env rendered from the overlay, for the warm refresh.
 
-    ``scripts/runtime_build/refresh_dev_lane.sh`` sources the operator env file, which keeps
-    whatever a person last typed for the embedding address (OMN-24081). The warm refresh takes
-    the render the deploy agent takes (``render_dev_lane``) so it never puts the removed
-    address back. The refresh is dev only, so this skips the agent's lane fence. The overlay
+    ``scripts/runtime_build/refresh_dev_lane.sh`` and ``refresh_stability_lane.sh`` source the
+    operator env file, which keeps whatever a person last typed for the embedding address
+    (OMN-24081, OMN-24119). A warm refresh takes the render the deploy agent takes
+    (``render_dev_lane``) so it never puts the removed address back. Each script is
+    hardcoded to its own lane, so this skips the agent's lane fence. The overlay
     home clone is the one under ``search_root`` that carries lane fragments, unless ``environ``
     already names one; the rewritten lane overlay directory lands under ``state_dir`` unless
     ``environ`` names a state directory. An overlay that cannot be rendered is a RuntimeError.
@@ -382,12 +386,36 @@ def validate_env_contract(
             )
 
 
+def main(argv: Sequence[str]) -> int:
+    """Print what a warm refresh sources: the exports, then the line that hands them to the deploy handler.
+
+    ``argv`` is the program name, the search root of the clones and the state directory.
+    ``onex-runtime-deploy`` sources the operator env again, so it takes the same exports in
+    ``ONEX_DEPLOY_LANE_ENV_EXPORTS`` and sources them after it (OMN-24119). A render that
+    cannot be made is the RuntimeError of :func:`refresh_exports`, a non-zero exit and no output.
+    """
+    from deploy_agent import executor  # the agent source tree holds this
+
+    exports = refresh_exports(executor, dict(os.environ), Path(argv[1]), Path(argv[2]))
+    applied = " ".join(line.removeprefix("export ") for line in exports.splitlines())
+    sys.stderr.write(f"LLM endpoint env applied from the overlays: {applied}\n")
+    sys.stdout.write(
+        f"{exports}export ONEX_DEPLOY_LANE_ENV_EXPORTS={shlex.quote(exports)}\n"
+    )
+    return 0
+
+
 __all__ = [
     "LlmEndpointEnvError",
     "RenderedLlmEndpointEnv",
     "declaration",
+    "main",
     "render",
     "refresh_exports",
     "render_dev_lane",
     "validate_env_contract",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
