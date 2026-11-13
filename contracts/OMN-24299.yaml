@@ -64,3 +64,13 @@ dod_evidence:
     binds_ac:
       - AC2
       - AC4
+  - id: dod-omn24299-integration-proof
+    description: AC3 on the shipped fleet file and compose files, loaded through the typed model with an unrelated pool as the failing control.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/ci/test_action_archive_cache_fleet_omn24299.py -q
+        cwd: .
+    binds_ac:
+      - AC3
