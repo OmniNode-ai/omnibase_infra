@@ -7,6 +7,11 @@ interface_change: false
 interfaces_touched: []
 context:
   ac_binding_provenance:
+    dod-omn19958-ac1-accepted-20261113t0945z:
+      - label: AC1
+        criterion_hash: 1051d9fd85949c8475baa14160cc4a641aa71fd5004beba1a9378b193d688a22
+        proposed_by: lane=dod-closeout-bind-2026-11-13T0945Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-13T0945Z-c0
     dod-omn19958-ac2-accepted-20261022t0245z:
       - label: AC2
         criterion_hash: 5191b8f13219d1dc24edabbb1bf02288cefa77cd486eaa8162dce404e483e411
@@ -21,11 +26,16 @@ requirements:
   - id: req-omn-19958-criteria
     statement: The ticket's labelled acceptance criteria.
     acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
       - id: AC2
         statement: 'AC2: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
       - id: AC3
         statement: 'AC3: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
 evidence_requirements:
+  - kind: tests
+    description: "AC1: a rise in the fixture runner's memory.events oom_kill since the previous pass's state file logs OOM_KILL runner=<name> delta=<n> total=<t> in that same pass. Absent before omnibase_infra#4264; fails with that change's product paths reverted."
+    command: uv run pytest tests/unit/observability/runner_health/test_runner_monitor_oom_kill_delta.py::TestCounterRiseIsActionableInOnePass::test_a_rise_logs_oom_kill_with_delta_and_total -q -p no:cacheprovider
   - kind: tests
     description: 'AC2: the monitor pass after an oom_kill rise reports delta 0 and logs no OOM_KILL line for the same runner. Absent before omnibase_infra#4264.'
     command: uv run pytest tests/unit/observability/runner_health/test_runner_monitor_oom_kill_delta.py -q -k "test_the_pass_after_a_kill_reports_delta_zero"
@@ -37,6 +47,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19958-ac1-accepted-20261113t0945z
+    description: "AC1: a rise in the fixture runner's memory.events oom_kill since the previous pass's state file logs OOM_KILL runner=<name> delta=<n> total=<t> in that same pass. Absent before omnibase_infra#4264; fails with that change's product paths reverted."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_monitor_oom_kill_delta.py::TestCounterRiseIsActionableInOnePass::test_a_rise_logs_oom_kill_with_delta_and_total -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
   - id: dod-omn19958-ac2-accepted-20261022t0245z
     description: 'AC2: the monitor pass after an oom_kill rise reports delta 0 and logs no OOM_KILL line for the same runner. Absent before omnibase_infra#4264.'
     source: manual
