@@ -279,6 +279,49 @@ def render_dev_lane(
     return dict(rendered.env), rendered.lane_overlay_dir
 
 
+def refresh_exports(
+    execution: ModuleType,
+    environ: Mapping[str, str],
+    search_root: Path,
+    state_dir: Path,
+) -> str:
+    """Shell exports of the dev lane's LLM endpoint env rendered from the overlay, for the warm refresh.
+
+    ``scripts/runtime_build/refresh_dev_lane.sh`` sources the operator env file, which keeps
+    whatever a person last typed for the embedding address (OMN-24081). The warm refresh takes
+    the render the deploy agent takes (``render_dev_lane``) so it never puts the removed
+    address back. The refresh is dev only, so this skips the agent's lane fence. The overlay
+    home clone is the one under ``search_root`` that carries lane fragments, unless ``environ``
+    already names one; the rewritten lane overlay directory lands under ``state_dir`` unless
+    ``environ`` names a state directory. An overlay that cannot be rendered is a RuntimeError.
+    """
+    from deploy_agent.instance_lanes import (  # the agent source tree holds this
+        discover_lane_overlay_clone,
+        lane_env_shell_exports,
+    )
+
+    env = dict(environ)
+    clone = discover_lane_overlay_clone(search_root)
+    if clone is not None:
+        env.setdefault("DEPLOY_AGENT_OVERLAY_HOME_CLONE", str(clone))
+    env.setdefault(str(declaration(execution)["state_dir_env"]), str(state_dir))
+    try:
+        rendered = render(
+            execution,
+            env,
+            lane_overlay_dir=execution.resolve_lane_overlay_dir(env),
+        )
+    except LlmEndpointEnvError as exc:
+        raise RuntimeError(
+            "the dev lane's LLM endpoint env cannot be rendered from the "
+            f"llm_endpoints overlay: {exc}"
+        ) from exc
+    exports = dict(rendered.env)
+    if rendered.lane_overlay_dir is not None:
+        exports[execution.LANE_OVERLAY_DIR_ENV] = rendered.lane_overlay_dir
+    return lane_env_shell_exports(exports)
+
+
 def validate_env_contract(
     execution: ModuleType, operator_store: Path, explicit_env_file: str | None
 ) -> None:
@@ -344,6 +387,7 @@ __all__ = [
     "RenderedLlmEndpointEnv",
     "declaration",
     "render",
+    "refresh_exports",
     "render_dev_lane",
     "validate_env_contract",
 ]

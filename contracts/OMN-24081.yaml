@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24081
+title: "Dev lane warm refresh takes the embedding address from the overlay"
+summary: "The dev lane's warm refresh script sourced the operator env file, which keeps whatever a person last typed for the embedding address, and it was the one dev path that did not render that address from the llm_endpoints overlay the way the deploy agent does. A warm refresh would have put the removed embedding server's address back into the running dev runtime. The refresh script's existing lane env call now also takes refresh_exports of the dev lane's LLM endpoint env render module (nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py), after the script sources the operator env: LLM_EMBEDDING_URL, BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL and the rewritten lane overlay directory come from the overlay at the overlay clone's origin/main, and an unreadable overlay or a missing embedding slot stops the refresh with LANE_ENV_FRAGMENT_REFUSED before anything is built."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24081-refresh-renders-overlay-address
+    statement: The dev lane warm refresh takes the embedding address and the lane bifrost overlay directory from the llm_endpoints overlay, after the operator env, and refuses when the overlay cannot be rendered.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev lane refresh script exports LLM_EMBEDDING_URL and the rewritten lane overlay directory rendered from the llm_endpoints overlay after it sources the operator settings file, ahead of the build -- falsifier: python -m pytest scripts/deploy-agent/tests/unit -k dev_refresh_llm_endpoint -q fails at the merge base'
+      - id: AC2
+        statement: 'AC2: a refresh whose overlay cannot be read or lacks the embedding slot stops with a named refusal before any build -- falsifier: the error-chain test passes with the refusal removed'
+      - id: AC3
+        statement: 'AC3: integrated: after the dev runtime rebuilds from the merge, its LLM_EMBEDDING_URL names the staying helper address and an embedding call from inside it returns 1024 numbers -- falsifier: the running runtime shows the removed address or the call fails'
+evidence_requirements:
+  - kind: tests
+    description: The refresh render tests pass at the pushed head; they fail at the merge base because refresh_exports does not exist there.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_dev_refresh_llm_endpoint_env_omn24081.py -q -p no:randomly --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24081-ac1
+    description: 'AC1: the refresh render tests pass at the head, the golden test and the shell seam test among them'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_dev_refresh_llm_endpoint_env_omn24081.py -q -p no:randomly --no-cov -k "golden or seam or script"
+        cwd: .
+  - id: dod-omn24081-ac2
+    description: 'AC2: the error-chain tests pass at the head: a missing embedding slot is refused by name and an unnamed overlay clone is refused'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_dev_refresh_llm_endpoint_env_omn24081.py -q -p no:randomly --no-cov -k "error"
+        cwd: .
+  - id: dod-omn24081-ac3-integration-proof
+    description: 'AC3 integrated reading: the running dev runtime carries the overlay address in LLM_EMBEDDING_URL after it rebuilds from the merge, and an embedding call from inside it returns 1024 numbers. Only the local Done gate runs this unbound check; it needs the dev host.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-checks OmniNode-ai/omnibase_infra
+        cwd: .
