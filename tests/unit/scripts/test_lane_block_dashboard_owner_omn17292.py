@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-17292: the lane table generator declares the ``dashboard-owner`` lane.
+"""OMN-17292, OMN-24214: the lane table generator carries no ``dashboard-owner`` rows.
 
-The private lane census declared this lane on 2026-10-22. A census lane with no
-row in the generator's port and boundary maps is reported by
-``undeclared_lanes`` and reds the lab-overlay parity job on every pull request,
-so both rows exist, and they say what the lane may and may not be used for.
+The private lane census retired the ``dashboard-owner`` lane (OMN-24214). A
+generator row for a lane the census no longer declares is reported by
+``orphan_map_entries`` and reds the lab-overlay parity job on every pull
+request, so both rows are gone and a manifest without the lane reports no
+orphan for it.
 """
 
 from __future__ import annotations
@@ -24,25 +25,20 @@ if _SCRIPTS not in sys.path:
 from generate_claude_lane_block import (
     _LANE_BOUNDARY,
     _LANE_PORT_MAP,
-    _PORTS_UNDECLARED,
-    undeclared_lanes,
+    orphan_map_entries,
 )
 
 LANE = "dashboard-owner"
 
 
-def test_the_lane_has_a_port_row_that_says_its_ports_are_undeclared() -> None:
-    # No port block for this lane is recorded in this repository, so the row
-    # must say so rather than render an em-dash that reads as "no ports".
-    assert _LANE_PORT_MAP[LANE] == _PORTS_UNDECLARED
+def test_the_port_map_has_no_row_for_the_retired_lane() -> None:
+    assert LANE not in _LANE_PORT_MAP
 
 
-def test_the_lane_boundary_rules_it_out_as_a_proof_or_grant_source() -> None:
-    boundary = _LANE_BOUNDARY[LANE]
-    assert "NOT a proof lane" in boundary
-    assert "never sourced for stability/prod grants" in boundary
+def test_the_boundary_map_has_no_row_for_the_retired_lane() -> None:
+    assert LANE not in _LANE_BOUNDARY
 
 
-def test_a_manifest_declaring_the_lane_has_no_undeclared_rows() -> None:
-    manifest = {"lanes": {LANE: {"hosts": ["host-b"], "services": []}}}
-    assert undeclared_lanes(manifest) == []
+def test_a_manifest_without_the_lane_has_no_orphan_for_it() -> None:
+    manifest = {"lanes": {"dev": {"hosts": ["host-a"], "services": []}}}
+    assert LANE not in {lane for lane, _ in orphan_map_entries(manifest)}

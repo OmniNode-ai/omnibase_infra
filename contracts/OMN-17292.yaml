@@ -12,10 +12,10 @@ requirements:
       - id: AC1
         statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 188b29aae85680a30347aaa29f04773490c1a752 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - id: req-omn17292-dashboard-owner-lane
-    statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
+    statement: The lane table generator carries no port row or boundary row for the dashboard-owner lane the private lane census retired (OMN-24214), so the lab-overlay parity job reads no orphan map entry.
     acceptance:
       - id: AC2
-        statement: "AC2: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+        statement: "AC2: the generator's port map and boundary map carry no dashboard-owner row, and orphan_map_entries reports no dashboard-owner orphan for a manifest without it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
   - id: req-omn17292-sustained-load-warmup
     statement: The sustained-load benchmark measures steady state, so a one-off stall before the first measured interval cannot red Performance Microbenchmarks and Nightly Summary on dev.
     acceptance:
@@ -35,7 +35,7 @@ evidence_requirements:
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 188b29aae85680a30347aaa29f04773490c1a752.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - kind: tests
-    description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
+    description: The lane table generator carries no dashboard-owner port or boundary row.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
   - kind: tests
     description: The pin refresh edits the omnimarket pin in this contract and nothing else, and the old whole-file template fails the same reading.
@@ -74,7 +74,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn-17292-ac2-dashboard-owner-lane
-    description: The lane table generator declares the dashboard-owner lane's port and boundary rows; the merge base has neither.
+    description: The lane table generator carries no dashboard-owner port or boundary row; the merge base carries both.
     source: manual
     checks:
       - check_type: test_passes
