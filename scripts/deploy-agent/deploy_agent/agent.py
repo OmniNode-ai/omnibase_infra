@@ -1110,6 +1110,25 @@ class DeployAgent:
             on_before_reexec=_before_reexec,
         )
 
+    def _self_update_guarded(
+        self, boundary: EnumSelfUpdateBoundary, where: str
+    ) -> None:
+        """Self-update at one boundary; a failure is logged and the agent stays put."""
+        try:
+            self.executor.self_update(
+                boundary=boundary,
+                skip=self._skip_self_update,
+                on_before_reexec=self._await_settle_before_reexec,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(  # noqa: TRY400
+                "Self-update at the %s boundary failed, "
+                "staying on the current image: %s "
+                "friction_type=self_update_boundary_failed",
+                where,
+                e,
+            )
+
     def _self_update_post_terminal(self) -> None:
         """Self-update boundary after a job reaches a terminal, published state.
 
@@ -1118,19 +1137,7 @@ class DeployAgent:
         the deploy completes on the version it started on, and the update fires
         here, at the next boundary.
         """
-        try:
-            self.executor.self_update(
-                boundary=EnumSelfUpdateBoundary.POST_TERMINAL,
-                skip=self._skip_self_update,
-                on_before_reexec=self._await_settle_before_reexec,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(  # noqa: TRY400
-                "Self-update at the post-terminal boundary failed, "
-                "staying on the current image: %s "
-                "friction_type=self_update_boundary_failed",
-                e,
-            )
+        self._self_update_guarded(EnumSelfUpdateBoundary.POST_TERMINAL, "post-terminal")
 
     def _maybe_self_update_idle(self) -> None:
         """Self-update boundary on the poll loop's idle branch (OMN-18200).
@@ -1183,19 +1190,7 @@ class DeployAgent:
             )
             return
 
-        try:
-            self.executor.self_update(
-                boundary=EnumSelfUpdateBoundary.IDLE_HEARTBEAT,
-                skip=self._skip_self_update,
-                on_before_reexec=self._await_settle_before_reexec,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(  # noqa: TRY400
-                "Self-update at the idle boundary failed, "
-                "staying on the current image: %s "
-                "friction_type=self_update_boundary_failed",
-                e,
-            )
+        self._self_update_guarded(EnumSelfUpdateBoundary.IDLE_HEARTBEAT, "idle")
 
     def _branch_install_argv(self, command: str) -> list[str]:
         """The handler's argv; a merge probe gets each declared repository's clone and running ref."""
@@ -1986,6 +1981,13 @@ class DeployAgent:
                     Scope.RUNTIME,
                     Scope.FULL,
                 ):
+                    # OMN-24216: mount the command's overlays revision, or clear it; a
+                    # refusal ends the job before any build.
+                    load_dev_boot_guard(
+                        "nodes.node_setup_local_provision_effect.runtime_overlay_revision"
+                    ).apply(
+                        sys.modules[__name__], STATE_DIR, os.environ, cmd.overlay_ref
+                    )
                     dev_guard = DevBootGuard(self.executor, STATE_DIR)
                     dev_guard.prepare(cmd.model_dump(mode="json"))
 

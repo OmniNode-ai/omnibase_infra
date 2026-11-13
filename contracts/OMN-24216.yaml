@@ -1,0 +1,88 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24216
+title: The dev deploy agent mounts a declared overlays repository revision as the runtime's overlay store root for one deploy
+summary: The signed rebuild command carries an optional overlay_ref (the 40-hex head of an overlays repository revision). For a dev-lane command with a rollback declaration the agent renders that revision's overlays folder into its state directory and names it as the dev compose environment's overlay store root before any build; a command without the field clears it, which is the rollback.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - infrastructure
+requirements:
+  - id: req-omn24216-compose-env
+    statement: The dev job names a rendered overlays revision as the overlay store root only for a command that declares one.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a rebuild command with no settings revision builds the development compose environment exactly as before, with no store-root override -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py -k control fails when the environment names an override for a command that declares no revision"
+      - id: AC3
+        statement: "AC3: with a revision declared the agent writes that revision of the settings folder into its job directory and the compose environment names it as the store root, and a revision the host copy lacks ends the job before any build -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_overlay_revision_omn24216.py scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py -k 'golden or error' fails when the environment still names the main-branch copy"
+  - id: req-omn24216-command-model
+    statement: The signed command model accepts overlay_ref only on the dev lane with a rollback declaration.
+    acceptance:
+      - id: AC2
+        statement: "AC2: a development-lane rebuild command that declares a settings revision and a rollback is accepted, and any other lane or a missing rollback is refused -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py -k refuses fails when a stability-lane command carrying the revision is accepted"
+      - id: AC4
+        statement: "AC4: the branch deploy command node puts the revision into the signed command it publishes, and the agent's command model accepts that envelope -- falsifier: the seam test pair (omnimarket tests/nodes/node_branch_deploy_command_effect/test_overlay_ref_seam_omn24216.py and the agent test_overlay_ref_declaration_omn24216.py) fails when either side renames the field"
+  - id: req-omn24216-integrated
+    statement: The hot-load setting branch head runs on the development runtime through this path.
+    acceptance:
+      - id: AC5
+        statement: "AC5: integrated: after deploying the hot-load setting branch head to the development runtime by this path, the runtime's settings mount names the revision's folder and the log line for the hot-load gate reads mode on-demand -- falsifier: the gate line reads off or the mount names the main-branch copy"
+evidence_requirements:
+  - kind: tests
+    description: The command model, compose environment and render tests of this change.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py scripts/deploy-agent/tests/unit/test_overlay_revision_omn24216.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24216-ac1-no-override-without-revision
+    description: With no revision declared the dev job builds with no store-root override; the control test fails when the environment sets one anyway.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py -q -n 0 --no-cov -k control
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24216-ac2-command-model
+    description: The signed command model accepts overlay_ref on the dev lane with a rollback and refuses it on the stability lane, without a rollback, and when malformed.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py -q -n 0 --no-cov -k "defaults or accepts or refuses or malformed or extra"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24216-ac3-render-and-mount
+    description: A declared revision is rendered from the overlays clone into the state directory, the build environment names the rendered folder, a revision the clone lacks ends the job before any build, and the next job without a revision clears it.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_overlay_revision_omn24216.py scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24216-ac4-command-field-seam
+    description: Hosted-runner deploy probe reads the agent's command model from GitHub at the checked-out commit and requires the overlay_ref field, so a checkout without the change fails it. The omnimarket side of the seam is held by its own test.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/events.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'overlay_ref: str = Field' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24216-ac5-integrated
+    description: Hosted-runner deploy probe reads the agent from GitHub at the checked-out commit and requires the job's overlay revision step, so a checkout without the change fails it. The running reading (gate log line and the container's overlay mount on the development host) is cited in the pull request comment.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/agent.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'runtime_overlay_revision' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
