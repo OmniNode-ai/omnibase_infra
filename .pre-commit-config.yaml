@@ -30,6 +30,15 @@
 # manual hook has no registered job, when the job is gone or not gated by CI
 # Summary, or when the job no longer runs the hook's command.
 repos:
+  # OMN-24065: generic validators omnibase_core merged (core 2290 to 2294), run here by hook id.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: dev-20261111183916-a85cb916d4c1
+    hooks:
+      - id: declared-timeout-reaches-call
+      - id: no-time-bound-truncation
+      - id: no-naive-timestamp
+      - id: no-id-from-stamp
+      - id: no-fixed-tmp-atomic-write
   - repo: local
     hooks:
       - id: lane-entry-point-census-fixture
