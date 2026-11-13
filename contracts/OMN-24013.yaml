@@ -1,0 +1,72 @@
+schema_version: 1.0.0
+ticket_id: OMN-24013
+title: The deploy agent publishes a start event at every dev runtime start, a roll manifest naming the command and its issuer, and an incident event with the failed container's log
+summary: >-
+  Five whys plan roots R1 and R2 on the dev runtime dropouts of 2026-11-10: the dev runtime was recreated with no recorded issuer, and the boot guard's recovery destroyed the failed container with only three filtered patterns of its log kept. The boot guard, which the deploy agent builds for every dev runtime or full roll, now publishes through new src modules (the agent files are untouched except one call line): a typed ModelDevRuntimeStarted (the five-field shape node_dev_roll_verify_compute pins) when a roll's runtime container starts, also when the roll failed, and for the guard's recovery recreate (cause other); a ModelDevRollManifest carrying the command id and its requested_by issuer when the roll is accepted; and a ModelDevRollIncident carrying the command's issuer, the health probes and each failing container's captured log (bounded by an environment-declared byte cap) when the guard recovers a failed roll. The guard keeps the full log in a per-incident artifact before recovery; an events failure never blocks recovery. A branch install reapply that restarts a container publishes a start event with cause branch_install_reapply: the agent runs runtime_dev_branch_install_reapply, which runs the branch install handler unchanged and announces the restart. The consumer, node_dev_roll_failure_capture_effect, is in omnimarket under the same ticket.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - topics
+  - public_api
+requirements:
+  - id: req-omn24013-agent-events
+    statement: The deploy agent publishes the start, manifest and incident events with the command id and its issuer.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the deploy agent publishes a typed start event (the five-field shape the start-count node pins) at every dev runtime start, a roll manifest carrying the command id and its issuer at every dev roll it accepts, and an incident event carrying the health probes and the captured container log on a failed roll -- falsifier: a failed fixture roll publishes no incident event, or a recreate publishes no start event"
+      - id: AC3
+        statement: "AC3: the start event, manifest and incident shapes are pinned against the start-count node's contract and the capture node's models in a seam test on each side -- falsifier: renaming a field on either side leaves the seam test green"
+  - id: req-omn24013-integrated
+    statement: The events are read from the running dev deploy agent.
+    acceptance:
+      - id: AC4
+        statement: "AC4: integrated: after the next dev roll with both changes running, the start events, the manifest naming the command and its issuer, and the roll terminal are read on the dev bus lane -- falsifier: a dev roll finishes after both are running and the dev bus lane carries no start event for it"
+evidence_requirements:
+  - kind: tests
+    description: The guard capture, the event models and publishers and the agent wiring pass at the pushed head; the capture and wiring tests fail on the parent commit.
+    command: uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_incident_capture_omn24013.py tests/unit/handlers/test_handler_dev_roll_events_omn24013.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24013-ac1
+    description: >-
+      A failed roll writes an incident whose log_captures hold the unhealthy runtime container's full log kept to the byte cap, with its byte counts, digest and artifact path, hands it to the sink with the log text, and a sink that raises still ends in the recovery error; the agent publishes a manifest naming requested_by, a start event after a roll whose runtime container started inside the roll (also when the roll failed), and an incident naming the issuer. On the parent commit the new tests fail (no log_captures, no sink, no events).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_incident_capture_omn24013.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24013-ac3
+    description: >-
+      The events test pins ModelDevRuntimeStarted to exactly event_id, job_id, runtime_lane, started_at and cause and its causes to roll_recreate, branch_install_reapply and other, the shape node_dev_roll_verify_compute spells in its own seam test; the omnimarket capture node spells the incident and manifest fields in its seam test.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_roll_events_omn24013.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24013-ac4
+    description: >-
+      The tests behind the integrated reading pass at the head; the reading itself (start events of the next dev roll on the dev bus lane) needs the agent on h201 to load this revision and is the pull request's Lab line; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_incident_capture_omn24013.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24013-integration-proof
+    description: >-
+      Live probe of the dev deploy agent, whose health URL the lab environment supplies as DEPLOY_AGENT_HEALTH_URL: read the revision the running agent loaded from its health endpoint and require that revision to define publish_dev_runtime_started. Fails while the agent runs a revision without the change. Reachable only from the lab network. It binds no criterion; the hosted proof is dod-omn24013-ac1.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'sha=$(curl -sf --max-time 10 "${DEPLOY_AGENT_HEALTH_URL:?set to the dev deploy agent health URL}" | python3 -c "import json,sys; print(json.load(sys.stdin)[\"loaded_code_sha\"])") && git grep -q "def publish_dev_runtime_started" "$sha" -- scripts/deploy-agent/deploy_agent/publisher.py'
+        cwd: .

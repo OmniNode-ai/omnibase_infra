@@ -71,9 +71,7 @@ __all__ = [
 # Mirrors ``_require_projection_binding_privileges``: PostgreSQL needs SELECT
 # alongside INSERT/UPDATE because the projection adapter issues
 # ``INSERT ... ON CONFLICT DO UPDATE``.
-READ_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
-    {EnumDatabasePrivilege.SELECT}
-)
+READ_PRIVILEGES = frozenset({EnumDatabasePrivilege.SELECT})
 WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
     {
         EnumDatabasePrivilege.SELECT,
@@ -167,6 +165,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("delegation_workflow_state", "090_create_delegation_workflow_state.sql"),
         ("session_phase_state", "102_create_session_phase_state.sql"),
         ("pr_landing_workflow_state", "108_create_pr_landing_workflow_state.sql"),
+        ("floor_fill_state", "113_create_floor_fill_state.sql"),
         ("code_eval_trial_state", "114_create_code_eval_trial_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )

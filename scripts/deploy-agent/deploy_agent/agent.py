@@ -338,10 +338,13 @@ BRANCH_INSTALL_CHECK_INTERVAL_SECONDS = 120
 BRANCH_INSTALL_LOCK_TIMEOUT_SECONDS = 120.0
 BRANCH_INSTALL_CHECK_TIMEOUT_SECONDS = 180
 BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS = 900
-#: The handler the declared installs are read, checked and applied by. It is run
-#: from the deploy-source clone's ``src`` (the same tree the job just built), so a
-#: change to it needs no release of the omnibase_infra package the agent venv holds.
-BRANCH_INSTALL_HANDLER = "omnibase_infra.handlers.handler_dev_lane_branch_install"
+#: The entry the declared installs are read, checked and applied through, run by file
+#: path like the agent's other host effects: it runs the branch install handler
+#: unchanged and publishes the dev runtime start event when the apply restarted a
+#: container (OMN-24013). It is run from the deploy-source clone's ``src`` (the same
+#: tree the job just built), so a change to it needs no release of the omnibase_infra
+#: package the agent venv holds.
+BRANCH_INSTALL_ENTRY = f"{REPO_DIR}/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_branch_install_reapply.py"
 BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 
 #: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
@@ -1198,8 +1201,7 @@ class DeployAgent:
         """The handler's argv; a merge probe gets each declared repository's clone and running ref."""
         argv = [
             sys.executable,
-            "-m",
-            BRANCH_INSTALL_HANDLER,
+            BRANCH_INSTALL_ENTRY,
             command,
             "--state-dir",
             str(STATE_DIR),
@@ -1975,7 +1977,7 @@ class DeployAgent:
                     )
 
                 # Preflight
-                self.executor.preflight(on_phase_update=on_phase_update)
+                load_dev_boot_guard().run_preflight(self.executor, cmd, on_phase_update)
 
                 # OMN-21279: retain the previous generation's compose settings
                 # before git_pull replaces them. The guard has no non-dev path.
@@ -1985,7 +1987,7 @@ class DeployAgent:
                     Scope.FULL,
                 ):
                     dev_guard = DevBootGuard(self.executor, STATE_DIR)
-                    dev_guard.prepare()
+                    dev_guard.prepare(cmd.model_dump(mode="json"))
 
                 # Git pull -- OMN-18124: under the lane's host lock, the same
                 # per-compose-project lock refresh_dev_lane.sh takes. The

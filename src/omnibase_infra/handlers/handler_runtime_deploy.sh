@@ -97,6 +97,11 @@ set -a
 source "${REPO_ROOT_FOR_ENV}/docker/runtime-policy.env"
 # shellcheck source=/dev/null
 source "${OMNIBASE_OPERATOR_ENV_FILE}"
+# OMN-24119: the exports a refresh script rendered from the overlays (the embedding address
+# and the lane overlay directory) go after the operator env, which keeps a person's older
+# values; with none passed this sources nothing.
+# shellcheck source=/dev/null
+source <(printf '%s' "${ONEX_DEPLOY_LANE_ENV_EXPORTS:-}")
 set +a
 if [[ -n "${OPERATOR_OMNI_HOME}" ]]; then
     export OMNI_HOME="${OPERATOR_OMNI_HOME}"
@@ -106,8 +111,7 @@ if [[ -n "${OPERATOR_HEALTH_CHECK_URL}" ]]; then
 else
     unset HEALTH_CHECK_URL
 fi
-unset OPERATOR_OMNI_HOME
-unset OPERATOR_HEALTH_CHECK_URL
+unset OPERATOR_OMNI_HOME OPERATOR_HEALTH_CHECK_URL
 
 # shellcheck source=./runtime_build/sibling_clone_manifest.sh
 source "${SCRIPT_DIR_FOR_ENV}/runtime_build/sibling_clone_manifest.sh"

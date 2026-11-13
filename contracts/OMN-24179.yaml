@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-24179
+title: Memory limit on the dev image builder
+summary: >-
+  Child of OMN-24153. The dedicated BuildKit builder the dev deploy agent builds the runtime image on (deploy/buildkit/builders.yaml, builder lane) had no memory limit; one build was measured growing past 17 GB of cgroup memory and 96 percent of the host's swap-out fell in roll windows. The declaration now sets memory and memory-swap of the docker-container driver to 12g, equal so the builder has no swap. The deploy agent re-creates a builder only when it is absent, does not boot or runs another driver or BuildKit version, so the declared name carries the limit (onex-lane-buildkit-mem12g): the agent finds no builder under that name and creates it from the declaration through the existing ensure_builder path, limit included. The builder under the previous name is left idle for the host owner. No Python changes: every file under deploy_agent is in the canonical-file-shape baseline and may only shrink.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24179-limit
+    statement: The lane builder is declared with a memory limit that reaches the container the agent creates.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the lane builder declaration carries a memory limit and the builder is re-created when the running limit differs from it -- falsifier: pytest scripts/deploy-agent/tests/unit/test_lane_builder_memory_cap.py -q fails against the declaration without the limit"
+      - id: AC2
+        statement: "AC2: the running builder container's memory limit on the main lab host equals the declaration -- falsifier: docker inspect of the builder container reads 0 instead of the declared bytes"
+  - id: req-omn24179-integrated
+    statement: Rebuilds on the running agent stay under the limit and stop pushing the host into swap.
+    acceptance:
+      - id: AC3
+        statement: "AC3: integrated: in the running runtime on the main lab host, over the next three rebuilds the builder container's memory peak stays at or under the declared limit and the host swap-in rate during a rebuild is lower than the 5043 pages per second read before the change -- falsifier: vmstat during a rebuild still reads swap-in above that number or a build ends killed by its limit"
+evidence_requirements:
+  - kind: tests
+    description: The memory cap tests pass at the pushed head and fail when builders.yaml is taken from the base commit.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_builder_memory_cap.py scripts/deploy-agent/tests/unit/test_lane_builder_omn19211.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24179-ac1
+    description: >-
+      The declaration reads memory 12g and memory-swap 12g under the lane builder, the create command carries both, and a host that holds only the previous builder gets the capped one created without the previous one being removed. Against the base builders.yaml five of the seven tests fail. The re-creation on a changed limit is by the changed name, not by reading the running limit (that needs Python in a baselined file); the criterion's first half is met by the declaration and its second half by the name.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_builder_memory_cap.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24179-ac2
+    description: >-
+      The tests behind the declaration pass at the head; the reading of the running builder container's limit needs the agent to have run its next rebuild from the merged declaration on the main lab host and is the pull request's follow-up Lab comment; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_builder_memory_cap.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24179-ac3
+    description: >-
+      The tests behind the declaration pass at the head; the three-rebuild reading of the builder's memory peak and the host swap-in rate needs rebuilds on the main lab host and is read there; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_builder_memory_cap.py -q --no-cov -p no:cacheprovider
+        cwd: .

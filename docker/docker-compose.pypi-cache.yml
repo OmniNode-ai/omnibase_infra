@@ -35,7 +35,7 @@ services:
     # devpi-server is a plain Python application with no SIGCHLD reaper, and the
     # HEALTHCHECK below forks `sh` + `curl` every 30s; those exec'd processes
     # re-parent to PID 1 and, without an init, are never collected. Measured on
-    # 192.168.86.201 2026-09-19: 936 defunct curls under the container's PID 1
+    # 2026-09-19: 936 defunct curls under the container's PID 1
     # against the pids_limit of 1024, so the healthcheck could no longer fork
     # (`/bin/sh: 1: Cannot fork`) and had been failing for 3384 consecutive
     # checks — since 2026-09-18T12:14Z. A restart clears the count but not the
@@ -53,7 +53,10 @@ services:
       # Named volume persists the wheel cache across container restarts so a
       # recreate does not cold-refetch the warmed corpus.
       - pypi-cache-data:/devpi
-    mem_limit: 2g
+    # OMN-19998 measured on 2026-11-13: the container ran at its 2g limit (cgroup peak 2049 MB, swap peak 2048 MB
+    # equal to its swap cap, 18210 limit hits in 21 h, 51.8 GB of anon pages read back from swap). 4g clears the measured working
+    # set of about 2.7 GB resident plus swapped with headroom; the host holds more than 60 GB available.
+    mem_limit: 4g
     pids_limit: 1024
     healthcheck:
       # root/pypi/+simple/ returns 200 only once devpi is serving the pull-through

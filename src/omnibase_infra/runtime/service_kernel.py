@@ -832,6 +832,12 @@ def _build_runtime_handler_dependencies(
             {
                 "HandlerPostgresRuntimeManifestInsert": {"pool": postgres_pool},
                 "HandlerBaselinesBatchCompute": {"pool": postgres_pool},
+                # OMN-19998: node_runtime_error_triage_effect declares db_pool
+                # required and its handler defaults it to None, so a map that
+                # omitted it wired the handler with no pool and every runtime
+                # error was logged "db_pool not configured" and dropped (1,291
+                # in 20 minutes on the dev lane).
+                "HandlerRuntimeErrorTriage": {"db_pool": postgres_pool},
             }
         )
 
@@ -1519,11 +1525,10 @@ def resolve_embedded_runtime_config(
             HandlerWorkspaceRuntimeConfigMaterializer,
         )
 
-        config_root = (
-            HandlerWorkspaceConfigRootResolve()
-            .handle(ModelWorkspaceConfigRootRequest(workspace_root=workspace_root))
-            .config_root
-        )
+        root_resolver = HandlerWorkspaceConfigRootResolve()
+        config_root = root_resolver.handle(
+            ModelWorkspaceConfigRootRequest(workspace_root=workspace_root)
+        ).config_root
         copy = HandlerWorkspaceRuntimeConfigMaterializer().read(workspace_root)
         if copy is not None:
             config = load_runtime_config(
@@ -1796,7 +1801,6 @@ async def bootstrap() -> int:
     wiring_health_checker: WiringHealthChecker | None = None
     wiring_health_task: asyncio.Task[None] | None = None
     not_ready_reconciliation_task: asyncio.Task[None] | None = None
-    triage_unsub: Callable[[], Awaitable[None]] | None = None
     build_loop_db_handler = None  # HandlerDb | None, assigned inside try block
     baselines_task: asyncio.Task[None] | None = None
     _baselines_pool = None  # asyncpg.Pool | None, assigned inside try block
@@ -5160,81 +5164,6 @@ async def bootstrap() -> int:
             resolve_runtime_profile_name(),
         )
 
-        # 9.7. Start runtime error triage consumer (OMN-5655)
-        # Subscribes to runtime-error events and routes them to the
-        # HandlerRuntimeErrorTriage for first-match-wins triage processing.
-        # (triage_unsub pre-declared before try block)
-        if postgres_pool is not None and has_subscribe:
-            try:
-                from omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage import (
-                    HandlerRuntimeErrorTriage,
-                )
-                from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-                    load_published_events_map,
-                )
-
-                triage_handler = HandlerRuntimeErrorTriage(db_pool=postgres_pool)
-                # The escalation topic comes from the node contract, never a literal.
-                triage_published_events = load_published_events_map(
-                    Path(inspect.getfile(HandlerRuntimeErrorTriage)).parents[1]
-                    / "contract.yaml",
-                    logger,
-                )
-
-                triage_topic_resolver = create_topic_resolver()
-                runtime_error_topic = triage_topic_resolver.resolve(
-                    SUFFIX_RUNTIME_ERROR,
-                    correlation_id=correlation_id,
-                )
-                triage_node_identity = node_selection.kernel_identity(
-                    environment, config.name, "runtime-error-triage", "v1"
-                )
-
-                async def _triage_on_message(
-                    message: ModelEventMessage,
-                ) -> None:
-                    """Deserialize runtime error event and dispatch to triage handler."""
-                    import json as _json
-
-                    from omnibase_infra.models.health.model_runtime_error_event import (
-                        ModelRuntimeErrorEvent,
-                    )
-
-                    try:
-                        payload = _json.loads(message.value)
-                        event = ModelRuntimeErrorEvent.model_validate(payload)
-                        triage_output = await triage_handler.handle(event)
-                        await publish_triage_escalations(
-                            event_bus=event_bus,
-                            output=triage_output,
-                            topics_by_event=triage_published_events,
-                        )
-                    except Exception:  # noqa: BLE001 — boundary: consumer must not crash
-                        logger.warning(
-                            "Failed to process runtime error triage event",
-                            exc_info=True,
-                        )
-
-                triage_unsub = await event_bus.subscribe(
-                    topic=runtime_error_topic,
-                    node_identity=triage_node_identity,
-                    on_message=_triage_on_message,
-                    purpose=EnumConsumerGroupPurpose.CONSUME,
-                    required_for_readiness=False,
-                )
-
-                logger.info(
-                    "Runtime error triage consumer started (topic=%s, correlation_id=%s)",
-                    runtime_error_topic,
-                    correlation_id,
-                )
-            except Exception:  # noqa: BLE001 — boundary: triage is non-critical
-                logger.warning(
-                    "Failed to start runtime error triage consumer (correlation_id=%s)",
-                    correlation_id,
-                    exc_info=True,
-                )
-
         # Calculate total bootstrap time
         bootstrap_duration = time.time() - bootstrap_start_time
 
@@ -5503,22 +5432,6 @@ async def bootstrap() -> int:
         contract_unsub_deregistered = None
         contract_unsub_heartbeat = None
 
-        # Unsubscribe runtime error triage consumer (OMN-5655)
-        if triage_unsub is not None:
-            try:
-                await triage_unsub()
-                logger.debug(
-                    "Runtime error triage consumer stopped (correlation_id=%s)",
-                    correlation_id,
-                )
-            except Exception as unsub_error:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Failed to stop runtime error triage consumer: %s (correlation_id=%s)",
-                    sanitize_error_message(unsub_error),
-                    correlation_id,
-                )
-            triage_unsub = None
-
         if build_loop_db_handler is not None:
             try:
                 await build_loop_db_handler.shutdown()
@@ -5785,17 +5698,6 @@ async def bootstrap() -> int:
                         sanitize_error_message(cleanup_error),
                         correlation_id,
                     )
-
-        # Cleanup runtime error triage consumer (OMN-5655)
-        if triage_unsub is not None:
-            try:
-                await triage_unsub()
-            except Exception as cleanup_error:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Failed to stop runtime error triage consumer during cleanup: %s (correlation_id=%s)",
-                    sanitize_error_message(cleanup_error),
-                    correlation_id,
-                )
 
         if build_loop_db_handler is not None:
             try:

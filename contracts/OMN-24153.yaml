@@ -1,0 +1,70 @@
+schema_version: 1.0.0
+ticket_id: OMN-24153
+title: PyPI cache memory limit 4 GiB
+summary: >-
+  Child of OMN-19998. The PyPI pull-through cache container on the main lab host (omninode-pypi-cache) is declared with a 2g memory limit. Read-only measurement on 2026-11-13: its cgroup peaked at 2049 MB against the 2048 MB limit, its swap peaked at 2048 MB equal to its swap cap, it hit its limit 18210 times in 21 hours, and 51.8 GB of its pages were read back from swap in that time; in a nine-minute dev runtime update window it accounted for 862 of 1707 MB of cgroup swap-in. The declaration now gives it 4g. No installer applies this standalone stack: the running container keeps its old limit until it is recreated from the merged file.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24153-limit
+    statement: The cache declaration holds a memory limit that covers its measured working set.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the pull-through cache declaration gives the container at least 4 GiB -- falsifier: pytest tests/unit/infra/test_pypi_cache_memory_limit.py -q fails against the 2g declaration"
+      - id: AC2
+        statement: "AC2: the running container limit on the main lab host equals the declaration -- falsifier: docker inspect omninode-pypi-cache memory limit reads 2147483648 instead of 4294967296"
+  - id: req-omn24153-integrated
+    statement: The running cache stops hitting its limit.
+    acceptance:
+      - id: AC3
+        statement: "AC3: integrated: in the running runtime on the main lab host the cache's limit-hit counter stops rising for one hour after the restart -- falsifier: the max line of the cache container's memory events keeps increasing"
+evidence_requirements:
+  - kind: tests
+    description: The compose memory-limit test passes at the pushed head and fails when the compose file is taken from the base commit.
+    command: uv run --frozen pytest tests/unit/infra/test_pypi_cache_memory_limit.py tests/unit/infra/test_pypi_cache_init_reaper_omn18846.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24153-ac1
+    description: >-
+      The compose declaration reads mem_limit 4g and the test rejects any value under 4 GiB; against the base commit's 2g file the test fails with the measured numbers in its message.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_pypi_cache_memory_limit.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24153-ac2
+    description: >-
+      The tests behind the declaration pass at the head; the reading of the running container's limit needs the container recreated from the merged file on the main lab host and is the pull request's Lab line; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_pypi_cache_memory_limit.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24153-ac3
+    description: >-
+      The tests behind the declaration pass at the head; the hour-long reading of the limit-hit counter (max line of the container's memory events) needs the recreated container and is read on the main lab host; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_pypi_cache_memory_limit.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24153-integration-proof
+    description: >-
+      Live probe of the main lab host, whose address the lab environment supplies as PYPI_CACHE_HOST: read the running container's memory limit and require 4294967296. Fails while the container runs with the old limit. Reachable only from the lab network. It binds no criterion; the hosted proof is dod-omn24153-ac1.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'ssh -o BatchMode=yes "${PYPI_CACHE_HOST:?set to the main lab host address}" docker inspect --format "{{.HostConfig.Memory}}" omninode-pypi-cache | grep -qx 4294967296'
+        cwd: .

@@ -275,7 +275,7 @@ override-dependencies = [
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261111183916-a85cb916d4c1" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261113013358-a09066caf945" }
 
 
 [tool.ruff]
@@ -487,6 +487,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "cost_estimator_build: exercises the real estimator build settings and host effect",
+    "llm_endpoint_env_render: exercises the real render of the dev lane embedding address from the llm_endpoints overlay",
     "live_contact(artifact): CI-tooling test consuming a recorded real API response or replay via recorded_response (OMN-18648)",
     "unit: Unit tests that test individual components in isolation",
     "integration: Integration tests that test multiple components together",
@@ -665,6 +666,7 @@ node_deploy_runners = "omnibase_infra.nodes.node_deploy_runners"
 node_dev_boot_guard_effect = "omnibase_infra.nodes.node_dev_boot_guard_effect"
 node_dev_lane_code_ref_pin_effect = "omnibase_infra.nodes.node_dev_lane_code_ref_pin_effect"
 node_dev_lane_pin_compose_guard_effect = "omnibase_infra.nodes.node_dev_lane_pin_compose_guard_effect"
+node_dev_roll_events_effect = "omnibase_infra.nodes.node_dev_roll_events_effect"
 node_developer_principal_plan_compute = "omnibase_infra.nodes.node_developer_principal_plan_compute"
 node_dlq_depth_evaluate_compute = "omnibase_infra.nodes.node_dlq_depth_evaluate_compute"
 node_dlq_depth_monitor_effect = "omnibase_infra.nodes.node_dlq_depth_monitor_effect"
@@ -752,6 +754,7 @@ node_setup_local_provision_effect = "omnibase_infra.nodes.node_setup_local_provi
 node_setup_orchestrator = "omnibase_infra.nodes.node_setup_orchestrator"
 node_setup_preflight_effect = "omnibase_infra.nodes.node_setup_preflight_effect"
 node_setup_validate_effect = "omnibase_infra.nodes.node_setup_validate_effect"
+node_sibling_clone_pin_effect = "omnibase_infra.nodes.node_sibling_clone_pin_effect"
 node_sibling_sha_pin_ratchet_compute = "omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute"
 node_slack_alerter_effect = "omnibase_infra.nodes.node_slack_alerter_effect"
 node_standalone_compose_recreate_effect = "omnibase_infra.nodes.node_standalone_compose_recreate_effect"

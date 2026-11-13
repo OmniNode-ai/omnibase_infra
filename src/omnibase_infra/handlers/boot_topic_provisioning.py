@@ -97,6 +97,14 @@ async def provision_unattached_publish_topics(
     and that declares publish topics has them ensured, with at most
     *max_concurrent* contracts in flight. Returns ``{contract: topics ensured}``;
     with no *provisioner* nothing is created and ``{}`` is returned.
+
+    *interleaved_contract_names* is every contract the provision -> ready ->
+    attach interleave owns, attached at boot or deferred to its first request
+    (OMN-18087, OMN-23953): a deferred contract's whole topic set, publish topics
+    included, is created when its first request starts it, so creating the topics
+    here would create them for a contract that may never load. Only a contract
+    nothing will ever interleave (publish-only, plugin-managed, no live
+    dispatcher) is provisioned by this pass.
     """
     if provisioner is None:
         return {}

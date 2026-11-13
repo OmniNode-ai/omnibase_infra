@@ -78,7 +78,6 @@ import json
 import re
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -101,6 +100,12 @@ DEFAULT_PACKAGE_REPO_DIRS: dict[str, str] = {
 # itself is ``source = { editable = "." }`` with no rev of its own).
 _SOURCE_LINE_RE = re.compile(r"^source = \{(?P<body>.*)\}\s*$", re.MULTILINE)
 _GIT_REV_RE = re.compile(r"[?&]rev=(?P<rev>[0-9a-fA-F]{7,40})")
+# The commit after ``#`` of a git source: the only pin a ``?tag=`` source carries.
+_GIT_COMMIT_RE = re.compile(r"#(?P<commit>[0-9a-fA-F]{40})")
+_PIN_NODE_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "src/omnibase_infra/nodes/node_sibling_clone_pin_effect"
+)
 
 
 class ModelLockPin(BaseModel):
@@ -114,6 +119,10 @@ class ModelLockPin(BaseModel):
         default=None,
         description="Locked git rev (full/short SHA) or None for registry pins",
     )
+    git_commit: str | None = Field(
+        default=None,
+        description="Commit after `#` of a git source; proves a git-derived version",
+    )
 
 
 class ModelActualPin(BaseModel):
@@ -124,6 +133,7 @@ class ModelActualPin(BaseModel):
     package: str = Field(..., description="uv.lock distribution name")
     version: str = Field(..., description="Version from the clone's pyproject.toml")
     git_sha: str = Field(..., description="HEAD commit SHA of the canonical clone")
+    version_derived: bool = Field(default=False, description="Version came from git")
 
 
 class ModelPinComparison(BaseModel):
@@ -170,6 +180,10 @@ class ModelPinComparison(BaseModel):
         description="Non-fatal advisory (e.g. the clone-ahead descendant note)",
     )
     mismatch_reason: str = Field(default="", description="Empty when matches is True")
+    version_derived: bool = Field(
+        default=False,
+        description="The clone's version comes from git, so only the commit is compared",
+    )
 
 
 def _classify_drift(expected_version: str, actual_version: str) -> str:
@@ -219,43 +233,18 @@ def _is_clone_strictly_ahead(
     # cannot prove ancestry and must stay fatal.
     # OMN-14900: safe.directory scoping so a uid-mismatched invoker (deploy
     # runner) is never rejected with "detected dubious ownership".
-    cat = subprocess.run(
-        [
-            "git",
-            "-c",
-            f"safe.directory={repo_root}",
-            "-C",
-            str(repo_root),
-            "cat-file",
-            "-e",
-            f"{locked}^{{commit}}",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if cat.returncode != 0:
-        return False
+    def git_ok(*args: str) -> bool:
+        cmd = ["git", "-c", f"safe.directory={repo_root}", "-C", str(repo_root), *args]
+        return (
+            subprocess.run(cmd, capture_output=True, text=True, check=False).returncode
+            == 0
+        )
 
     # exit 0 => locked is an ancestor of head (clone ahead); exit 1 => it is not
     # (clone behind / unrelated). Any other exit code is an error -> not ahead.
-    ancestry = subprocess.run(
-        [
-            "git",
-            "-c",
-            f"safe.directory={repo_root}",
-            "-C",
-            str(repo_root),
-            "merge-base",
-            "--is-ancestor",
-            locked,
-            head,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
+    return git_ok("cat-file", "-e", f"{locked}^{{commit}}") and git_ok(
+        "merge-base", "--is-ancestor", locked, head
     )
-    return ancestry.returncode == 0
 
 
 def parse_lock_pins(lock_text: str, packages: list[str]) -> dict[str, ModelLockPin]:
@@ -288,13 +277,19 @@ def parse_lock_pins(lock_text: str, packages: list[str]) -> dict[str, ModelLockP
         # Only the package's OWN source line may contribute a git rev. Editable
         # ("." path) and registry (PyPI) sources have no rev.
         git_rev: str | None = None
+        git_commit: str | None = None
         source_match = _SOURCE_LINE_RE.search(block)
         if source_match is not None:
             rev_match = _GIT_REV_RE.search(source_match.group("body"))
             if rev_match is not None:
                 git_rev = rev_match.group("rev")
+            commit_match = _GIT_COMMIT_RE.search(source_match.group("body"))
+            if commit_match is not None:
+                git_commit = commit_match.group("commit")
 
-        found[name] = ModelLockPin(package=name, version=version, git_rev=git_rev)
+        found[name] = ModelLockPin(
+            package=name, version=version, git_rev=git_rev, git_commit=git_commit
+        )
 
     missing = requested - set(found)
     if missing:
@@ -306,39 +301,21 @@ def parse_lock_pins(lock_text: str, packages: list[str]) -> dict[str, ModelLockP
 
 
 def resolve_actual_pin(package: str, repo_root: Path) -> ModelActualPin:
-    """Read the canonical clone's version (pyproject) + HEAD SHA.
+    """Read the canonical clone's version (static or git-derived) + HEAD SHA.
 
-    No defaults: a missing pyproject, a missing version, or an unreadable git
-    HEAD is a hard error (exit 2 at the CLI boundary).
+    Answered by the sibling-clone pin node's CLI. No defaults: a missing pyproject,
+    a missing version or an unreadable git HEAD is a hard error (exit 2 at the CLI).
     """
-    pyproject_path = repo_root / "pyproject.toml"
-    if not pyproject_path.is_file():
-        raise FileNotFoundError(
-            f"missing pyproject.toml for {package}: {pyproject_path}"
-        )
-    data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-    version = data.get("project", {}).get("version")
-    if not version:
-        raise ValueError(f"no project.version in {pyproject_path}")
-
-    head_sha = subprocess.run(
-        [
-            "git",
-            "-c",
-            f"safe.directory={repo_root}",
-            "-C",
-            str(repo_root),
-            "rev-parse",
-            "HEAD",
-        ],
-        check=True,
+    cli = _PIN_NODE_DIR / "runtime_sibling_clone_pin.py"
+    proc = subprocess.run(
+        [sys.executable, str(cli), "--package", package, "--repo-root", str(repo_root)],
         capture_output=True,
         text=True,
-    ).stdout.strip()
-    if not head_sha:
-        raise ValueError(f"could not resolve git HEAD for {repo_root}")
-
-    return ModelActualPin(package=package, version=version, git_sha=head_sha)
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ValueError(proc.stderr.strip() or f"pin node exited {proc.returncode}")
+    return ModelActualPin.model_validate_json(proc.stdout)
 
 
 def compare_pins(
@@ -379,8 +356,19 @@ def compare_pins(
     """
     reasons: list[str] = []
 
-    drift_direction = _classify_drift(expected.version, actual.version)
-    version_matches = expected.version == actual.version
+    derived = actual.version_derived
+    # A git-derived version is a function of the commit: it is not compared, and
+    # the lock's commit proves the pin (a lock naming none cannot).
+    locked_rev = expected.git_rev or (expected.git_commit if derived else None)
+    if derived and locked_rev is None:
+        reasons.append(
+            f"git-derived version cannot be verified: the lock pin for "
+            f"{expected.package} names no commit"
+        )
+    drift_direction = (
+        "none" if derived else _classify_drift(expected.version, actual.version)
+    )
+    version_matches = derived or expected.version == actual.version
     forward_drift_allowed = False
 
     clone_ahead = False
@@ -405,8 +393,8 @@ def compare_pins(
                 f"{actual.version!r}"
             )
 
-    if expected.git_rev is not None:
-        exp = expected.git_rev.lower()
+    if locked_rev is not None:
+        exp = locked_rev.lower()
         act = actual.git_sha.lower()
         sha_matches = act.startswith(exp) or exp.startswith(act)
         if not sha_matches:
@@ -421,11 +409,11 @@ def compare_pins(
                 note = (
                     f"clone-ahead (OMN-13403): version {actual.version} matches the "
                     f"lock; clone HEAD {actual.git_sha} is a descendant of locked "
-                    f"{expected.git_rev}. Recorded, non-fatal."
+                    f"{locked_rev}. Recorded, non-fatal."
                 )
             else:
                 reasons.append(
-                    f"git SHA drift: lock pins {expected.git_rev} but clone HEAD is "
+                    f"git SHA drift: lock pins {locked_rev} but clone HEAD is "
                     f"{actual.git_sha}"
                 )
 
@@ -442,6 +430,7 @@ def compare_pins(
         forward_drift_allowed=forward_drift_allowed,
         note=note,
         mismatch_reason="; ".join(reasons),
+        version_derived=derived,
     )
 
 
