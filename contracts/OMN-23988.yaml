@@ -48,6 +48,8 @@ dod_evidence:
   - id: dod-omn23988-deploy-readback
     description: Deploy-scope readback that a hosted runner can run; it goes red while docker/Dockerfile.runtime still names OMNIBASE_COMPAT, and needs docker on the runner.
     source: manual
+    binds_ac:
+      - AC4
     checks:
       - check_type: command
         check_value: docker --version && ! grep -q OMNIBASE_COMPAT docker/Dockerfile.runtime
@@ -56,8 +58,6 @@ dod_evidence:
     description: After the change is on dev and the dev runtime has rebuilt, the running dev runtime image has no omnibase_compat module. Hosted CI cannot reach the dev runtime, so only the local Done gate runs this unbound item.
     source: manual
     execution_scope: local_done_gate
-    binds_ac:
-      - AC4
     checks:
       - check_type: command
         check_value: docker ps --filter label=com.omninode.build_source --format '{{.Image}}' | head -1 | xargs -I{} docker run --rm --entrypoint /app/.venv/bin/python {} -c "import importlib.util as u; raise SystemExit(u.find_spec('omnibase_compat') is not None)"
