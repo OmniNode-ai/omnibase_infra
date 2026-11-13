@@ -94,7 +94,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: b0e2846684f2662865b082cdda3a3c0d26e9024f # .github/sibling-pins.yaml
+          ref: 942df56fc13e0f69d08170b2d80674a1e0581013 # .github/sibling-pins.yaml
           path: sweep-home/omnimarket
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           sparse-checkout: |
