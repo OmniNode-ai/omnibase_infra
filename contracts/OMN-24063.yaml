@@ -1,0 +1,53 @@
+schema_version: 1.0.0
+ticket_id: OMN-24063
+title: Move the platform package to the core release that carries the task kind field
+summary: 'omnibase_infra moves its omnibase-core dev merge tag to dev-20261113013358-a09066caf945 (omnibase_core#2316, which adds the optional task_type field to the inference intent) with the files that must agree with it: uv.lock, the pin tests, the recorded lineage fixture, the handshake checkout ref and the runner image lock. omnimarket then moves both of its pins to the same tag, because omnimarket reads the core tag its infra pin names and the delegation call effect reads the intent task type.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24063-core-pin
+    statement: The omnibase-core dev merge tag in pyproject.toml, uv.lock and every exact-tag follower name the same revision.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra names core dev tag dev-20261113013358-a09066caf945 in pyproject.toml and uv.lock, and the pin test names the same tag, commit and version -- falsifier: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov fails on origin/dev''s pyproject.toml after the test constants move'
+      - id: AC2
+        statement: 'AC2: the runner image identity and the handshake checkout ref follow the pin -- falsifier: uv run pytest tests/ci/test_runner_image_identity.py -q -n 0 --no-cov'
+      - id: AC3
+        statement: 'AC3: integrated: omnimarket''s dev pin and omnibase_infra''s locked core tag are the same tag, read in the dev runtime image labels after a roll -- falsifier: the running image revision''s lock names a core tag other than dev-20261113013358-a09066caf945'
+evidence_requirements:
+  - kind: tests
+    description: The focused pin tests pass at the pushed head.
+    command: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov -p no:cacheprovider -k test_core_tag_alone_range_and_lock_agree
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24063-ac1
+    description: 'AC1: omnibase_infra names core dev tag dev-20261113013358-a09066caf945 in pyproject.toml and uv.lock, and the pin test names the same tag, commit and version -- falsifier: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov fails on origin/dev''s pyproject.toml after the test constants move'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov -p no:cacheprovider -k test_core_tag_alone_range_and_lock_agree
+        cwd: .
+  - id: dod-omn24063-ac2
+    description: 'AC2: the runner image identity and the handshake checkout ref follow the pin -- falsifier: uv run pytest tests/ci/test_runner_image_identity.py -q -n 0 --no-cov'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_identity.py::test_recorded_identity_matches_recomputed_identity -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24063-ac3
+    description: 'AC3: integrated: omnimarket''s dev pin and omnibase_infra''s locked core tag are the same tag, read in the dev runtime image labels after a roll -- falsifier: the running image revision''s lock names a core tag other than dev-20261113013358-a09066caf945'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov -p no:cacheprovider -k test_recorded_core_validator_response_matches_the_pin
+        cwd: .
