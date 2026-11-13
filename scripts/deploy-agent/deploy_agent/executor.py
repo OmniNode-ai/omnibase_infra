@@ -183,6 +183,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
+        "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
         "models/model_onex_api_image_import_request.py",
@@ -5845,7 +5846,6 @@ class DeployExecutor:
         approximately so. ``["*"]`` with a ``profile`` asks for every service
         that profile would start.
         """
-        config = lane_config_for(lane)
         cmd = [*_compose_argv(lane)]
         # OMN-18143: `up` enables the profile of a service named on its
         # command line; `config --hash` does not. Naming `cost-estimator-web`
