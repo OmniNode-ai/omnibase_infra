@@ -12,6 +12,7 @@ build step runs.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -20,11 +21,14 @@ from uuid import uuid4
 import pytest
 from deploy_agent import executor as executor_mod
 from deploy_agent.events import (
+    BuildSource,
     EnumRuntimeLane,
     ModelRebuildRequested,
     ModelRollbackDeclaration,
+    Scope,
 )
 from deploy_agent.executor import load_dev_boot_guard
+from deploy_agent.trigger import build_rebuild_command, command_to_signed_envelope
 from pydantic import ValidationError
 
 from tests.unit.test_auto_rollback import _agent
@@ -178,3 +182,40 @@ def test_error_a_revision_the_host_copy_lacks_ends_the_job_before_any_build(
     assert seen == []
     executor.rebuild_scope.assert_not_called()
     executor.git_pull.assert_not_called()
+
+
+def test_seam_the_signers_command_reaches_the_jobs_store_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overlays_clone: str
+) -> None:
+    """Trigger flag -> signed envelope -> command model -> agent render, on the wire form.
+
+    Fails when either end renames the field: the signer's ``overlay_ref`` keyword, the
+    model's field, or the job's read of it.
+    """
+    built = build_rebuild_command(
+        git_ref="a" * 40,
+        runtime_lane=EnumRuntimeLane.DEV,
+        scope=Scope.RUNTIME,
+        build_source=BuildSource.WORKSPACE,
+        requested_by="test/omn24216",
+        correlation_id=uuid4(),
+        services=[],
+        rollback=ROLLBACK,
+        overlay_ref=overlays_clone,
+    )
+    envelope = command_to_signed_envelope(built, "0" * 64)
+    wire = json.loads(json.dumps(envelope, separators=(",", ":")))
+    cmd = ModelRebuildRequested.model_validate(
+        {k: v for k, v in wire.items() if k != "_signature"}
+    )
+    record, seen, _ = _run_job(tmp_path, monkeypatch, cmd)
+    declared = _declared()
+    expected = (
+        tmp_path
+        / "agent-state"
+        / declared["rendered_dir_name"]
+        / overlays_clone
+        / declared["overlay_dir"]
+    )
+    assert record.status == "success"
+    assert seen == [str(expected)]

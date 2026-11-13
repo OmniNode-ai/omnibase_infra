@@ -21,6 +21,11 @@ requirements:
         statement: "AC2: a development-lane rebuild command that declares a settings revision and a rollback is accepted, and any other lane or a missing rollback is refused -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py -k refuses fails when a stability-lane command carrying the revision is accepted"
       - id: AC4
         statement: "AC4: the branch deploy command node puts the revision into the signed command it publishes, and the agent's command model accepts that envelope -- falsifier: the seam test pair (omnimarket tests/nodes/node_branch_deploy_command_effect/test_overlay_ref_seam_omn24216.py and the agent test_overlay_ref_declaration_omn24216.py) fails when either side renames the field"
+  - id: req-omn24216-signer
+    statement: The declared signer sends overlay_ref, with its rollback declaration, and refuses it anywhere the command model refuses it.
+    acceptance:
+      - id: AC6
+        statement: "AC6: the manual trigger's --overlay-ref flag puts the 40-hex revision into the signed dev rebuild command with its rollback declaration, and refuses a non-dev lane, a missing rollback declaration and a malformed revision before signing -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_trigger_overlay_ref_omn24216.py fails when the flag is absent from the built command"
   - id: req-omn24216-integrated
     statement: The hot-load setting branch head runs on the development runtime through this path.
     acceptance:
@@ -85,6 +90,15 @@ dod_evidence:
           set -eu;
           doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/agent.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
           grep -q 'runtime_overlay_revision' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24216-ac6-signer-flag
+    description: The manual trigger's dry run carries overlay_ref and the rollback declaration into a command the agent's model accepts; a non-dev lane, a missing rollback declaration and a malformed revision refuse before signing; the signed command built by the trigger reaches the agent job's rendered store root.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_trigger_overlay_ref_omn24216.py scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py -q -n 0 --no-cov -k "trigger or golden or error"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24216-ac3-store-root-seam
     description: The variable the node contract names as the store root is the one both dev compose files mount at the overlay store root, and an environment the agent built for a real rendered revision reaches the mount source; without a revision the mount keeps its host-copy default.
