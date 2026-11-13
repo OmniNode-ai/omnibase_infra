@@ -1,0 +1,61 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24206
+title: omnibase_infra opens contract and plugin pin bumps only when asked
+summary: >-
+  RULING 2026-11-09T21:54:25Z (lane=orchestrator-31d9, OMN-23386). Downstream pins move only when the downstream needs something new. omnimarket-contract-pin-refresh.yml loses its six-hourly schedule trigger and plugin-pin-cascade.yml loses its release-time repository_dispatch trigger; both keep workflow_dispatch, so each opens a pin pull request only when a change asks for one.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24206-no-automatic-pin-producers
+    statement: Neither a schedule nor a release event starts a contract pin or plugin pin pull request on its own; both stay reachable by workflow_dispatch.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the marketplace contract pin refresh workflow has workflow_dispatch as its only trigger -- falsifier: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py -q -p no:cacheprovider -k contract_pin_refresh fails at the merge base where the six-hourly schedule exists"
+      - id: AC2
+        statement: "AC2: the plugin pin cascade workflow has workflow_dispatch as its only trigger -- falsifier: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py -q -p no:cacheprovider -k plugin_pin_cascade fails at the merge base where the release dispatch trigger exists"
+      - id: AC3
+        statement: "AC3: the integrated read: after the merge the next scheduled hour and the next package release open no pin pull request in the running repository -- falsifier: a bot pull request on a contract pin or plugin pin branch is opened by a schedule or release dispatch event after the merge"
+evidence_requirements:
+  - kind: tests
+    description: The workflow trigger tests pass at the head and fail at the merge base.
+    command: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py tests/ci/test_omnimarket_contract_pin.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24206-ac1-contract-pin-refresh-manual-only
+    description: omnimarket-contract-pin-refresh.yml triggers only on workflow_dispatch. At the merge base it also carries the six-hourly schedule, so this test is red there.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py -k contract_pin_refresh -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24206-ac2-plugin-pin-cascade-manual-only
+    description: plugin-pin-cascade.yml triggers only on workflow_dispatch. At the merge base it also carries the plugin-release repository_dispatch trigger, so this test is red there.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py -k plugin_pin_cascade -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24206-ac3-no-automatic-trigger-on-dev
+    description: Neither workflow file carries a schedule key or a repository_dispatch key, read as text. The integrated read of the workflow run lists on the default branch after merge is made by the lane and named in the pull request.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: "! grep -E '^[[:space:]]*(schedule|repository_dispatch):' .github/workflows/omnimarket-contract-pin-refresh.yml .github/workflows/plugin-pin-cascade.yml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-deploy
+    description: Both workflow files parse and their trigger shapes are asserted by the tests above; this hosted-runner check needs no deployed services and no deploy is triggered.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
