@@ -93,6 +93,10 @@ def dev_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     monkeypatch.setenv(ENV_STATE_DIR, str(state))
     monkeypatch.setenv("LLM_EMBEDDING_URL", STALE_ADDRESS)
     monkeypatch.delenv("BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL", raising=False)
+    # Only the overlay home these tests build may hold the overlay; the host's own roots and
+    # workspace clone must not.
+    monkeypatch.delenv("ONEX_SKILL_OVERLAY_ROOTS", raising=False)
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
     monkeypatch.setattr(executor_mod._LaneOverlayClone, "path", None)
     monkeypatch.setattr(executor_mod, "operator_store_overlay", dict)
     monkeypatch.setattr(executor_mod, "_load_runtime_policy_env", dict)
