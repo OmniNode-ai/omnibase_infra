@@ -18,7 +18,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: "The marker test and the marker-to-validator seam test pass at the pushed head."
-    command: "uv run --frozen pytest tests/scripts/test_dispatch_venv_build_marker_omn19998.py tests/scripts/test_dispatch_venv_build_marker_seam_omn19998.py -q -p no:cacheprovider"
+    command: "uv run --frozen pytest tests/scripts/test_dispatch_venv_build_marker_omn19998.py tests/scripts/test_dispatch_venv_build_marker_seam_omn19998.py tests/integration/test_dispatch_venv_build_marker_chain_omn19998.py -q -p no:cacheprovider"
 dod_evidence:
   - id: dod-omn24290-ac1-marker-stamp
     description: "AC1: promote-floor writes the marker and the lock copy, and a failed pass writes nothing; the six tests fail against the merge base engine, where stamp_build_lock does not exist."
