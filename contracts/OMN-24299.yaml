@@ -44,6 +44,7 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC2
+      - AC4
   - id: dod-omn24299-compose
     description: AC3 runner declarations and deploy wiring.
     source: manual
@@ -62,3 +63,4 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC2
+      - AC4
