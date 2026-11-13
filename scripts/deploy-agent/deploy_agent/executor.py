@@ -163,10 +163,7 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 
 
 def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
-    """Load host-effect modules from the standalone agent's own checkout.
-
-    Modules already imported in this process are kept as-is and never re-executed.
-    """
+    """Load host-effect modules from the standalone agent's own checkout."""
     prefix = "omnibase_infra." if "." in effect else "omnibase_infra.handlers."
     name = prefix + effect
     if name in sys.modules:
@@ -213,6 +210,8 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         if module_name in sys.modules:
+            # Re-executing an already imported module would give its classes a second
+            # identity, so an exception raised by one copy fails isinstance on the other.
             continue
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
         if spec is None or spec.loader is None:
@@ -1859,7 +1858,7 @@ def _llm_endpoint_env_overlay(
 ) -> tuple[dict[str, str], str | None]:
     """The dev lane's LLM endpoint env rendered from the llm_endpoints overlay (OMN-24025)."""
     rendered: tuple[dict[str, str], str | None] = load_dev_boot_guard(
-        _LLM_ENDPOINT_ENV_MODULE
+        _LLM_ENV_MODULE
     ).render_dev_lane(sys.modules[__name__], env)
     return rendered
 
@@ -1990,9 +1989,7 @@ def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
 #: ``${ONEX_LANE_OVERLAY_DIR}/${COMPOSE_PROJECT_NAME}.bifrost.yaml``. The overlays
 #: are private deployment config and no longer live in this repository.
 LANE_OVERLAY_DIR_ENV = "ONEX_LANE_OVERLAY_DIR"
-_LLM_ENDPOINT_ENV_MODULE = (
-    "nodes.node_setup_local_provision_effect.runtime_llm_endpoint_env"
-)
+_LLM_ENV_MODULE = "nodes.node_setup_local_provision_effect.runtime_llm_endpoint_env"
 LANE_OVERLAY_RELATIVE_DIR = Path("config") / "lab" / "lane-overlays"
 
 
@@ -3569,7 +3566,7 @@ class DeployExecutor:
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
         operator_store = operator_env_file() or Path.home() / ".omnibase" / ".env"
-        load_dev_boot_guard(_LLM_ENDPOINT_ENV_MODULE).validate_env_contract(
+        load_dev_boot_guard(_LLM_ENV_MODULE).validate_env_contract(
             sys.modules[__name__], operator_store, os.environ.get("OMNIBASE_ENV_FILE")
         )
 

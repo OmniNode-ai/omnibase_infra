@@ -54,7 +54,7 @@ def test_load_dev_boot_guard_keeps_already_imported_modules(
     remembered = model_module.ModelDevLaneCodeRefPin
     monkeypatch.delitem(sys.modules, LLM_ENDPOINT_ENV_MODULE, raising=False)
 
-    module = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENDPOINT_ENV_MODULE)
+    module = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENV_MODULE)
 
     assert sys.modules[MODEL_MODULE].ModelDevLaneCodeRefPin is remembered
     assert module is sys.modules[LLM_ENDPOINT_ENV_MODULE]
