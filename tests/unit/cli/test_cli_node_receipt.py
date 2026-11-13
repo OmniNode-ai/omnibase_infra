@@ -231,7 +231,16 @@ class TestReceiptModeSuccess:
     ) -> None:
         result, state_root = _invoke_receipt(tmp_path, monkeypatch)
         assert result.exit_code == 0
-        combined = result.stdout + result.stderr
+        # Core's run-close report on stderr (the degraded in-memory bus status
+        # line and the identity line) is intended core output, not a leaked
+        # runtime log stream; drop those lines before the leak assertions.
+        stderr = "\n".join(
+            line
+            for line in result.stderr.splitlines()
+            if not line.startswith("RuntimeLocal DEGRADED BUS")
+            and not line.startswith("identity: ")
+        )
+        combined = result.stdout + stderr
         assert "RuntimeLocal" not in combined
         assert "INFO" not in combined
         # The runtime stream went to the run_id-suffixed capture file instead.

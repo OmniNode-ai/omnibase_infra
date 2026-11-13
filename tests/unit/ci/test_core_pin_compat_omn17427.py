@@ -29,6 +29,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.version import Version
 
 from scripts.ci.check_sibling_compatible_range import violations
 
@@ -48,36 +49,36 @@ _CORE = "omnibase-core"
 _SPEC = re.compile(r"^\s*omnibase[-_]core\s*(?P<op>==|>=)\s*(?P<version>\d+(?:\.\d+)*)")
 
 
-def _version_tuple(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in version.split("."))
+def _version(version: str) -> Version:
+    return Version(version)
 
 
-def _core_bound(requirements: list[str]) -> tuple[str, tuple[int, ...]]:
+def _core_bound(requirements: list[str]) -> tuple[str, Version]:
     """Return ``(operator, version)`` of the one omnibase-core entry in the list."""
     found = [m for m in map(_SPEC.match, requirements) if m is not None]
     assert len(found) == 1, f"expected exactly one {_CORE} entry, got {requirements}"
-    return found[0].group("op"), _version_tuple(found[0].group("version"))
+    return found[0].group("op"), _version(found[0].group("version"))
 
 
-def required_floor(requirements: list[str]) -> tuple[int, ...]:
+def required_floor(requirements: list[str]) -> Version:
     """The lowest omnibase-core a package accepts: the version of its ``>=`` entry."""
     op, version = _core_bound(requirements)
     assert op == ">=", f"{_CORE} requirement is not a >= floor: {requirements}"
     return version
 
 
-def pinned_version(overrides: list[str]) -> tuple[int, ...]:
+def pinned_version(overrides: list[str]) -> Version:
     """The omnibase-core version a repository pins: its ``==`` override."""
     op, version = _core_bound(overrides)
     assert op == "==", f"{_CORE} override is not an exact pin: {overrides}"
     return version
 
 
-def refusals(pin: tuple[int, ...], downstream: dict[str, tuple[int, ...]]) -> list[str]:
+def refusals(pin: Version, downstream: dict[str, Version]) -> list[str]:
     """Name every downstream whose required floor is newer than ``pin``."""
-    shown = ".".join(map(str, pin))
+    shown = str(pin)
     return [
-        f"{name} requires {_CORE}>={'.'.join(map(str, floor))}, newer than pin {shown}"
+        f"{name} requires {_CORE}>={floor}, newer than pin {shown}"
         for name, floor in downstream.items()
         if floor > pin
     ]
@@ -87,18 +88,18 @@ def _load(path: Path) -> dict:
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
-def _downstream_floors() -> dict[str, tuple[int, ...]]:
-    floors: dict[str, tuple[int, ...]] = {}
+def _downstream_floors() -> dict[str, Version]:
+    floors: dict[str, Version] = {}
     for name in DOWNSTREAM_REQUIREMENT_FIXTURES:
         data = _load(FIXTURES / name)
         floors[name] = required_floor(data["project"]["dependencies"])
     return floors
 
 
-def _lock_core_version(lock_text: str) -> tuple[int, ...]:
+def _lock_core_version(lock_text: str) -> Version:
     packages = [p for p in tomllib.loads(lock_text)["package"] if p["name"] == _CORE]
     assert len(packages) == 1, f"uv.lock holds {len(packages)} {_CORE} entries"
-    return _version_tuple(packages[0]["version"])
+    return _version(packages[0]["version"])
 
 
 def test_recorded_incident_pair_is_refused() -> None:
@@ -110,8 +111,8 @@ def test_recorded_incident_pair_is_refused() -> None:
         )
     }
 
-    assert pin == (0, 47, 44)
-    assert downstream[INCIDENT_DOWNSTREAM.name] == (0, 47, 46)
+    assert pin == Version("0.47.44")
+    assert downstream[INCIDENT_DOWNSTREAM.name] == Version("0.47.46")
     assert refusals(pin, downstream) == [
         "omnimarket_v0.4.316_core_requirement.toml requires omnibase-core>=0.47.46, "
         "newer than pin 0.47.44"
@@ -123,12 +124,18 @@ def test_recorded_incident_lock_entry_matches_its_pin() -> None:
     recorded = _load(INCIDENT_PIN)
     pin = pinned_version(recorded["tool"]["uv"]["override-dependencies"])
     locked = [p for p in recorded["package"] if p["name"] == _CORE]
-    assert [_version_tuple(p["version"]) for p in locked] == [pin]
+    assert [_version(p["version"]) for p in locked] == [pin]
 
 
 def test_equal_or_older_downstream_floor_is_accepted() -> None:
     """Negative control: a floor at or below the pin is not refused."""
-    assert refusals((0, 47, 46), {"at-pin": (0, 47, 46), "below": (0, 47, 44)}) == []
+    assert (
+        refusals(
+            Version("0.47.46"),
+            {"at-pin": Version("0.47.46"), "below": Version("0.47.44")},
+        )
+        == []
+    )
 
 
 def test_repo_pin_is_not_older_than_any_recorded_downstream_floor() -> None:
