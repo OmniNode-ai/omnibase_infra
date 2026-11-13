@@ -50,6 +50,19 @@ def _failure(ref: str, code: str, detail: str) -> ModelActionArchiveCacheFailure
     return ModelActionArchiveCacheFailure(ref=ref, reason_code=code, detail=detail)
 
 
+def _refusal(detail: str) -> ModelActionArchiveCacheFillResult:
+    return ModelActionArchiveCacheFillResult(
+        success=False,
+        staging_root="",
+        failed=(_failure("", "CONFIG_ABSENT", detail),),
+        error_message=detail,
+    )
+
+
+def _is_filled(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
 class HandlerActionArchiveCacheFill:
     """Read workflow sources, resolve refs, write one archive per resolved sha."""
 
@@ -67,15 +80,15 @@ class HandlerActionArchiveCacheFill:
         try:
             fleet = load_runner_fleet_config(Path(request.config_path))
         except FileNotFoundError:
-            return self._refusal(f"config not found: {request.config_path}")
+            return _refusal(f"config not found: {request.config_path}")
         cfg = fleet.action_archive_cache
         if cfg is None:
-            return self._refusal("action_archive_cache block absent")
+            return _refusal("action_archive_cache block absent")
         if not cfg.active:
-            return self._refusal("action_archive_cache is not active")
+            return _refusal("action_archive_cache is not active")
 
         if fleet.git_mirror is None:
-            return self._refusal(
+            return _refusal(
                 "git_mirror block absent: it names the repositories scanned"
             )
         staging = Path(cfg.staging_root).expanduser()
@@ -89,7 +102,7 @@ class HandlerActionArchiveCacheFill:
         for (owner, repo, ref), written in wanted.items():
             key = f"{owner}/{repo}@{ref}"
             target_dir = staging / f"{owner}_{repo}"
-            if _HEX40_RE.match(ref) and self._is_filled(target_dir / f"{ref}.tar.gz"):
+            if _HEX40_RE.match(ref) and _is_filled(target_dir / f"{ref}.tar.gz"):
                 present.append(key)
                 continue
             if owner == cfg.local_owner:
@@ -115,13 +128,21 @@ class HandlerActionArchiveCacheFill:
                 )
                 continue
             target = target_dir / f"{sha}.tar.gz"
-            if self._is_filled(target):
+            if _is_filled(target):
                 present.append(f"{owner}/{repo}@{sha}")
             elif request.dry_run:
                 filled.append(f"{owner}/{repo}@{sha}")
             else:
                 error = self._write_archive(
-                    source, owner, repo, sha, target, cfg.fetch_timeout_seconds
+                    [
+                        "archive",
+                        "--format=tar.gz",
+                        f"--prefix={owner}-{repo}-{sha[:7]}/",
+                        sha,
+                    ],
+                    source,
+                    target,
+                    cfg.fetch_timeout_seconds,
                 )
                 if error:
                     failures.append(_failure(written, "ARCHIVE_FAILED", error))
@@ -136,19 +157,6 @@ class HandlerActionArchiveCacheFill:
             failed=tuple(failures),
             error_message="; ".join(f"{f.reason_code} {f.ref}" for f in failures),
         )
-
-    @staticmethod
-    def _refusal(detail: str) -> ModelActionArchiveCacheFillResult:
-        return ModelActionArchiveCacheFillResult(
-            success=False,
-            staging_root="",
-            failed=(_failure("", "CONFIG_ABSENT", detail),),
-            error_message=detail,
-        )
-
-    @staticmethod
-    def _is_filled(path: Path) -> bool:
-        return path.is_file() and path.stat().st_size > 0
 
     @staticmethod
     def _git(
@@ -270,13 +278,7 @@ class HandlerActionArchiveCacheFill:
         return None
 
     def _write_archive(
-        self,
-        source: Path,
-        owner: str,
-        repo: str,
-        sha: str,
-        target: Path,
-        timeout: int,
+        self, git_args: list[str], source: Path, target: Path, timeout: int
     ) -> str | None:
         """Write the archive atomically; the error text, or None on success."""
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -284,15 +286,7 @@ class HandlerActionArchiveCacheFill:
         try:
             with partial.open("wb") as out:
                 done = subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        str(source),
-                        "archive",
-                        "--format=tar.gz",
-                        f"--prefix={owner}-{repo}-{sha[:7]}/",
-                        sha,
-                    ],
+                    ["git", "-C", str(source), *git_args],
                     stdout=out,
                     stderr=subprocess.PIPE,
                     check=False,
