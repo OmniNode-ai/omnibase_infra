@@ -1,0 +1,70 @@
+schema_version: 1.0.0
+ticket_id: OMN-24186
+title: CI runner pool on h202 gets no disk paging
+summary: >-
+  Child of OMN-19998. The CI runner pool slice on h202 declared MemorySwapMax=2G. Read-only measurement 2026-11-13: slice memory.peak 20491 MB against MemoryHigh 20480 MB, swap peak 2048 MB equal to its cap, memory.events high 314255, swap events max 323830 and fail 323840 in 22 hours, slice swap-in 6531559 of the host's 14348433 pages since boot (45 percent), swap-out 9479792 of 30216307 (31 percent). The declaration now says MemorySwapMax=0 as the hp053 pool does. The pool deploy script installs the slice on h202 and reads it back; the running slice keeps 2G until it does.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24186-limit
+    statement: The pool slice declaration holds MemorySwapMax=0.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the h202 CI pool slice file declares MemorySwapMax=0 and a test pins it -- falsifier: pytest tests/ci/test_h202_pool_slice_swap_omn24186.py -q fails against the 2G declaration"
+      - id: AC2
+        statement: "AC2: the live omnirunners.slice on h202 reports MemorySwapMax 0 after the pool deployment installs it -- falsifier: systemctl show omnirunners.slice -p MemorySwapMax on h202 prints 2147483648"
+  - id: req-omn24186-integrated
+    statement: The running pool slice stops paging to the host swap file.
+    acceptance:
+      - id: AC3
+        statement: "AC3: integrated: in the running runtime on h202 the omnirunners.slice swap-out counter (memory.stat pswpout) stays flat for 24 hours after install and the host swap-in 10-minute mean falls -- falsifier: the pswpout counter of omnirunners.slice keeps rising"
+evidence_requirements:
+  - kind: tests
+    description: The slice swap test passes at the pushed head and fails when the slice file is taken from the base commit.
+    command: uv run --frozen pytest tests/ci/test_h202_pool_slice_swap_omn24186.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24186-ac1
+    description: >-
+      The slice declaration reads MemorySwapMax=0 and the test rejects any value other than 0; against the base commit's 2G file the test fails with the measured numbers in its message.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_h202_pool_slice_swap_omn24186.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24186-ac2
+    description: >-
+      The tests behind the declaration pass at the head; the reading of the running slice's limit needs the pool deployment to install the slice on h202 and is the pull request's Lab line; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_h202_pool_slice_swap_omn24186.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24186-ac3
+    description: >-
+      The tests behind the declaration pass at the head; the 24-hour reading of the pswpout counter and the host swap-in 10-minute mean needs the installed slice on h202 and is read on h202; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_h202_pool_slice_swap_omn24186.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24186-integration-proof
+    description: >-
+      Live probe of h202, whose address the lab environment supplies as H202_HOST: read the running slice's MemorySwapMax and require 0. Fails while the slice runs with the old 2G limit. Reachable only from the lab network. It binds no criterion; the hosted proof is dod-omn24186-ac1.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'ssh -o BatchMode=yes "${H202_HOST:?set to the second lab host address}" systemctl show omnirunners.slice -p MemorySwapMax | grep -qx MemorySwapMax=0'
+        cwd: .
