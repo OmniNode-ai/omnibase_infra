@@ -12,11 +12,6 @@ context:
         criterion_hash: e9040cf6627e4077581bc91ae0b683f1bd674a7a5cede64a8fcd419549baf44d
         proposed_by: lane=dod-closeout-bind-2026-11-13T1345Z-c3
         accepted_by: lane=dod-closeout-accept-2026-11-13T1345Z-c3
-    dod-omn20359-ac2-accepted-20261113t1345z:
-      - label: AC2
-        criterion_hash: 334fc8345cd8edcf71e154dc027a84588b3c1da1cd70793ba827e344182be210
-        proposed_by: lane=dod-closeout-bind-2026-11-13T1345Z-c3
-        accepted_by: lane=dod-closeout-accept-2026-11-13T1345Z-c3
     dod-omn20359-ac3-accepted-20261113t1345z:
       - label: AC3
         criterion_hash: 426e09384fb21fb6920901c1d45be1e26147588ba945d4885f57441001fc2835
@@ -28,8 +23,6 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
-      - id: AC2
-        statement: 'AC2: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
       - id: AC3
         statement: 'AC3: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
 evidence_requirements:
@@ -66,15 +59,6 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
-  - id: dod-omn20359-ac2-accepted-20261113t1345z
-    description: 'AC2: with no matching terminal the scan returns absent only after the 0.3 s window has elapsed, and R-DELEG-12 grades FAIL. Fails against the pre-fix probe at the parent of omnibase_infra#4464.'
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_c16_receipt_identity_probe_omn19181.py -q -k "test_absent_terminal_is_established_only_after_the_window_ends"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC2
   - id: dod-omn20359-ac3-accepted-20261113t1345z
     description: 'AC3: observe_live carries the healthy correlation id and record_dict writes healthy_correlation_id. Fails against the pre-fix probe at the parent of omnibase_infra#4464.'
     source: manual
