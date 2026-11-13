@@ -1977,7 +1977,7 @@ class DeployAgent:
                     )
 
                 # Preflight
-                self.executor.preflight(on_phase_update=on_phase_update)
+                load_dev_boot_guard().run_preflight(self.executor, cmd, on_phase_update)
 
                 # OMN-21279: retain the previous generation's compose settings
                 # before git_pull replaces them. The guard has no non-dev path.
