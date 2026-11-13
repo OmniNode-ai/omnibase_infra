@@ -357,13 +357,57 @@ def test_runtime_started_at_is_none_when_no_containers(tmp_path: Path) -> None:
 def test_a_log_holding_a_credential_is_redacted_and_never_reads_complete(
     tmp_path: Path,
 ) -> None:
-    host = _Host(log_text="connect redis://user:hunter2@host:6379 failed\n" * 3)
+    token = "sk-" + "a" * 24
+    log_text = (
+        "runtime boot sequence started\n"
+        f"attach upstream with {token}\n"
+        "runtime boot sequence halted on health probe failure\n"
+    )
+    host = _Host(log_text=log_text)
     incident, _ = _fail_roll(host, tmp_path, log_byte_cap=1024)
 
     record = _capture(incident)
+    kept = Path(record["artifact_path"]).read_text(encoding="utf-8")
+    assert "runtime boot sequence started" in kept
+    assert "runtime boot sequence halted on health probe failure" in kept
+    assert token not in kept
     assert record["redacted"] is True
     assert record["complete"] is False
-    assert "hunter2" not in Path(record["artifact_path"]).read_text(encoding="utf-8")
+    assert record["bytes_kept"] > 39
+
+
+def test_a_prose_log_without_credential_shapes_is_kept_whole(tmp_path: Path) -> None:
+    """The words alone must not cost the log: this is the text the whole-text
+    sanitizer turned into ``[REDACTED - potentially sensitive data]``."""
+    log_text = (
+        "the auth token expired before the probe ran\n"
+        "the password was rejected by the database\n"
+    )
+    host = _Host(log_text=log_text)
+    incident, _ = _fail_roll(host, tmp_path, log_byte_cap=1024)
+
+    record = _capture(incident)
+    assert record["redacted"] is False
+    assert record["complete"] is True
+    assert Path(record["artifact_path"]).read_text(encoding="utf-8") == log_text
+
+
+def test_an_unwritable_artifact_still_redacts_the_kept_log(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    token = "sk-" + "a" * 24
+    log_text = f"boot line one\nattach upstream with {token}\nboot line three\n"
+
+    def raise_write_text(self: Path, *args: Any, **kwargs: Any) -> None:
+        raise OSError("no write")
+
+    monkeypatch.setattr(Path, "write_text", raise_write_text)
+    host = _Host(log_text=log_text)
+    incident, _ = _fail_roll(host, tmp_path, log_byte_cap=1024)
+
+    record = _capture(incident)
+    assert record["error"]
+    assert token not in json.dumps(incident)
 
 
 # The roll events (manifest, start, incident) announced by the guard.
