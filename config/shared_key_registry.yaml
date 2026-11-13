@@ -79,7 +79,8 @@ shared:
     #                          .201:8000, RTX 5090, max_model_len 122880.
     #                          SINGLE-SLOT: one running generation at a time.
     #   LLM_EMBEDDING_URL    — "text-embedding-qwen3" (Qwen/Qwen3-Embedding-0.6B,
-    #                          vLLM) on .201:8002, ctx 8192, 1024-DIMENSIONAL
+    #                          vLLM); its address is the llm_endpoints overlay's
+    #                          embeddings-201 value, ctx 8192, 1024-DIMENSIONAL
     #                          output (hard placement constraint), OMN-13664.
     #   LLM_DEEPSEEK_R1_URL  — retired slot; no endpoint is registered.
     #   LLM_GLM_URL          — Z.AI/GLM cloud-tier OpenAI-compatible endpoint
