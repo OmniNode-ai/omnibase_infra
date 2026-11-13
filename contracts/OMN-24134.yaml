@@ -1,0 +1,73 @@
+schema_version: 1.0.0
+ticket_id: OMN-24134
+title: The dispatch venv and its proven floor move together under one staging lock
+summary: 'The dispatch-venv reconciler no longer fails when a live peer holds the staging lock: it declines with exit 4 and touches nothing. The staging lock and the floor advance moved out of the shell script into node_venv_atomic_install (the shell may not grow), so the proven floor is advanced in the same staged pass that moves the venv, only when a floor already exists and never under --check or --proven. The onex wrapper asks the node whether the staging lock is held by a live peer and waits its existing bounded time for it, instead of refusing with exit 3 while a floor advance is seconds away.'
+is_seam_ticket: true
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24134-venv-and-floor-together
+    statement: The dispatch venv and the proven floor never disagree for a reader outside the staging lock, and a second writer skips instead of failing.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a reconcile run that finds a live peer holding the dispatch-venv staging lock exits 4 (declined) and touches neither the staging path nor the lock -- falsifier: uv run pytest tests/scripts/test_reconcile_staging_lock_omn17427.py -q -n 0 --no-cov fails against origin/dev''s scripts/reconcile-workspace-venvs.sh (exit 2, not 4)'
+      - id: AC2
+        statement: 'AC2: the proven floor advances in the same staged pass that moves the dispatch venv, only when a floor already exists and never under --check or --proven -- falsifier: uv run pytest tests/scripts/test_reconcile_floor_promotion_omn16932.py -q -n 0 --no-cov fails against origin/dev''s scripts/reconcile-workspace-venvs.sh'
+      - id: AC3
+        statement: 'AC3: a launch through scripts/onex while a live holder keeps the staging lock waits within its bound and then places, and a dead holder is never waited on -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_staging_lock_omn16932.py -q -n 0 --no-cov fails against origin/dev''s scripts/onex'
+      - id: AC4
+        statement: 'AC4: integrated: after install on the Mac, twenty lane launches in a row through the placement node return no exit 3, read in the running dispatch venv''s wrapper receipts -- falsifier: any of the twenty launches exits 3 with a floor refusal'
+evidence_requirements:
+  - kind: tests
+    description: The staging lock, floor promotion and wrapper tests, the node engine and its typed golden and error chains pass at the pushed head.
+    command: uv run pytest tests/scripts/test_reconcile_staging_lock_omn17427.py tests/scripts/test_reconcile_floor_promotion_omn16932.py tests/scripts/test_onex_wrapper_staging_lock_omn16932.py tests/scripts/test_dispatch_venv_promotion_omn16932.py tests/integration/test_dispatch_venv_promotion_chain_omn16932.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24134-ac1
+    description: 'AC1: a live peer holding the staging lock makes a second reconcile run exit 4 and leave the lock and staging path untouched; the pre-image script exits 2 (the injected break).'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_reconcile_staging_lock_omn17427.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24134-ac2
+    description: 'AC2: the floor advances with the venv in one staged pass and the real wrapper then runs the entrypoint; no floor means no first floor is created; --proven never moves the floor; a floor that cannot be advanced fails the run.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_reconcile_floor_promotion_omn16932.py tests/scripts/test_dispatch_venv_promotion_omn16932.py tests/integration/test_dispatch_venv_promotion_chain_omn16932.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24134-ac3
+    description: 'AC3: the wrapper waits for a live staging-lock holder and places when the floor is advanced, refuses past its budget, and does not wait on a dead holder.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_onex_wrapper_staging_lock_omn16932.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24134-ac4
+    description: 'AC4: source readback at the evaluated commit that the wrapper asks the node about the staging lock; the live reading of twenty launches on the Mac is taken after the branch install.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'grep -F "staging-lock-held" scripts/onex >/dev/null'
+        cwd: .
+  - id: dod-omn24134-dev-runtime-carries-the-node
+    description: After the deploy agent rolls dev from this change, the running omninode-runtime container carries the staging-lock and floor engine of node_venv_atomic_install. Red before the roll, when the container image lacks the module.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" "docker exec omninode-runtime /app/.venv/bin/python -c 'import importlib.util as u; assert u.find_spec(\"omnibase_infra.handlers.venv_atomic_install.dispatch_venv_promotion\")'"
+        cwd: .
