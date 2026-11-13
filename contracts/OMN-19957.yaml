@@ -7,6 +7,11 @@ interface_change: false
 interfaces_touched: []
 context:
   ac_binding_provenance:
+    dod-omn19957-ac7-accepted-20261113t0945z:
+      - label: AC7
+        criterion_hash: 96e600fd1d6d8e8f631f4525cb13e97c7368c072cd64b5c8839bf01c13550db8
+        proposed_by: lane=dod-closeout-bind-2026-11-13T0945Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-13T0945Z-c0
     dod-omn19957-ac1-accepted-20261022t0245z:
       - label: AC1
         criterion_hash: 9faf85fbf9f0a5816b48182b185f8702e57db6cfb8057ad29cf238d322b8e513
@@ -18,10 +23,15 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC7
+        statement: 'AC7: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
 evidence_requirements:
   - kind: tests
     description: 'AC1: the base compose declares a 536870912-byte memory limit for context-audit-consumer and omninode-contract-resolver. Fails against the 256M limit at the parent of omnibase_infra#4268.'
     command: uv run pytest tests/ci/test_compose_service_memory_limits.py -q -k "test_base_compose_declares_512_mib_limit"
+  - kind: tests
+    description: "AC7: docker compose config rendered for every lane overlay the test parametrizes, stacked on the base, reports deploy.resources.limits.memory 536870912 for context-audit-consumer and omninode-contract-resolver. Needs the docker compose CLI; a skip is not a pass. Fails on every lane stack at the parent of omnibase_infra#4268 (268435456)."
+    command: uv run pytest tests/ci/test_compose_service_memory_limits.py::test_rendered_lane_stack_carries_512_mib -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -36,3 +46,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn19957-ac7-accepted-20261113t0945z
+    description: "AC7: docker compose config rendered for every lane overlay the test parametrizes, stacked on the base, reports deploy.resources.limits.memory 536870912 for context-audit-consumer and omninode-contract-resolver. Needs the docker compose CLI; a skip is not a pass. Fails on every lane stack at the parent of omnibase_infra#4268 (268435456)."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_compose_service_memory_limits.py::test_rendered_lane_stack_carries_512_mib -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
