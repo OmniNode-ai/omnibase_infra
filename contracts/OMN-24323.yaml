@@ -20,7 +20,7 @@ requirements:
 evidence_requirements:
   - kind: "tests"
     description: "The grant tests pass at the head; on the merge base no profile grants the table."
-    command: "uv run pytest tests/unit/topology/test_experiment_results_grants_omn24323.py tests/unit/topology/test_application_database_table_grants.py -q"
+    command: "uv run pytest tests/integration/topology/test_experiment_results_grants_omn24323.py tests/unit/topology/test_application_database_table_grants.py -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -31,7 +31,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/unit/topology/test_experiment_results_grants_omn24323.py tests/unit/topology/test_application_database_table_grants.py -q"
+        check_value: "uv run --frozen pytest tests/integration/topology/test_experiment_results_grants_omn24323.py tests/unit/topology/test_application_database_table_grants.py -q"
         cwd: "."
     binds_ac: ["AC1"]
   - id: "dod-omn24323-ac2-vendored-migrations"
@@ -39,7 +39,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/unit/topology/test_experiment_results_grants_omn24323.py -k vendored -q"
+        check_value: "uv run --frozen pytest tests/integration/topology/test_experiment_results_grants_omn24323.py -k vendored -q"
         cwd: "."
     binds_ac: ["AC2"]
   - id: "dod-omn24323-ac3-control"
@@ -47,7 +47,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/unit/topology/test_experiment_results_grants_omn24323.py -k control -q"
+        check_value: "uv run --frozen pytest tests/integration/topology/test_experiment_results_grants_omn24323.py -k control -q"
         cwd: "."
     binds_ac: ["AC3"]
   - id: "dod-omn24323-hosted-proxy-ac4"
@@ -55,7 +55,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/unit/topology/test_experiment_results_grants_omn24323.py -q"
+        check_value: "uv run --frozen pytest tests/integration/topology/test_experiment_results_grants_omn24323.py -q"
         cwd: "."
     binds_ac: ["AC4"]
   - id: "dod-omn24323-integration-proof-lab"
@@ -64,5 +64,5 @@ dod_evidence:
     execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
-        check_value: 'env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-24323 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topology/test_experiment_results_grants_omn24323.py tests/unit/topology/test_application_database_table_grants.py -q --no-cov -n 0 -p no:randomly'
+        check_value: 'env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-24323 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/topology/test_experiment_results_grants_omn24323.py tests/unit/topology/test_application_database_table_grants.py -q --no-cov -n 0 -p no:randomly'
         cwd: "."

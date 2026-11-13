@@ -20,7 +20,7 @@ from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.application_database import SUPPORTED_TOPOLOGY_PROFILES
 from omnibase_infra.validation.omninode_internal_live_acl import declared_acl
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 _RUNTIME = "tenant_projection_writer"
 _TABLES = ("experiment_arm_results",)
