@@ -510,7 +510,8 @@ build)
            echo "build rc=0"; echo "slot-migration FAILED"; echo "up rc=9"
          else echo "build rc=9 slot provisioning failed"; fi ;;
       11|12) echo "build rc=0"; echo "up rc=$src" ;;
-      *) echo "build rc=$src" ;;
+      # OMN-20413: any other exit (10 is a failed or timed-out workspace build) used to reach the receipt as a bare "build rc=<n>"; the lane script's own REFUSED/FAILED line and the end of its log now ride on that line and under it.
+      *) echo "build rc=$src $(grep -h 'REFUSED/FAILED' "$W/build.log" | tail -1 | cut -c1-300)"; tail -15 "$W/build.log" | cut -c1-300 ;;
     esac
     [ "$src" = 0 ] || exit 1
     exit 0

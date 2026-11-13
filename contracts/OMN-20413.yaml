@@ -46,6 +46,11 @@ requirements:
     acceptance:
       - id: AC8
         statement: 'AC8: run in bash against a stub docker, the cross-build step passes after a QEMU crash followed by a clean build, fails after a QEMU crash on both attempts, fails after one attempt on a failure without the QEMU signature, and builds linux/amd64 and linux/arm64 on every attempt -- falsifier: uv run pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q'
+  - id: req-omn20413-prepr-build-rc-detail
+    statement: The pre-PR pool prover's build phase names the slot script's REFUSED/FAILED reason on the build rc line and prints the end of its log for every non-zero exit it does not already explain, so a lab-proof-receipt stack_built FAIL such as rc=10 is diagnosable.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: the build rc arm run in bash against a build.log prints "build rc=10" followed by the reason line and the log tail -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_build_rc_detail_omn20413.py -q fails on dev, where the arm prints a bare build rc'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -68,6 +73,9 @@ evidence_requirements:
   - kind: tests
     description: The cross-build step's run script is executed in bash with a stub docker that plays a QEMU crash, a clean build and a non-QEMU failure.
     command: uv run pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q
+  - kind: tests
+    description: The build phase's non-zero exit arm is run in bash against a failing build log.
+    command: uv run pytest tests/unit/scripts/test_prepr_pool_build_rc_detail_omn20413.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -145,3 +153,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
+  - id: dod-omn20413-ac9-prepr-build-rc-detail
+    description: AC9 tests run the build rc arm of prepr_pool_prove.sh in bash against a failing build log; they fail at the merge base, where the arm prints a bare build rc.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_prepr_pool_build_rc_detail_omn20413.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9
