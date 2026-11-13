@@ -212,7 +212,6 @@ edges:
   - omnibase_infra.runtime.service_kernel -> omnibase_infra.nodes.node_gateway_attach_effect.services.store_gateway_session_memory:StoreGatewaySessionMemory
   - 'omnibase_infra.runtime.service_kernel -> omnibase_infra.nodes.node_gateway_attach_effect:'
   - omnibase_infra.runtime.service_kernel -> omnibase_infra.nodes.node_registration_orchestrator.plugin:ServiceRegistration
-  - omnibase_infra.runtime.service_kernel -> omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage:HandlerRuntimeErrorTriage
   - omnibase_infra.runtime.service_kernel -> omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation:HandlerSavingsCorrelation
   - omnibase_infra.runtime.service_kernel -> omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation:decode_event_message
   - omnibase_infra.runtime.service_kernel -> omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_correlation_batch_command:ModelSavingsCorrelationBatchCommand
