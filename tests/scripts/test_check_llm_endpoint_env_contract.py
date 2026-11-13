@@ -274,7 +274,7 @@ def test_guard_refuses_when_embedding_slot_missing_from_overlay(
 def test_derived_env_var_set_excludes_released_variables() -> None:
     """The checked set is exactly the contract's assigned ``url_env_var`` values."""
     module = _load_module()
-    endpoints = module._load_endpoints(_CONTRACT)
+    endpoints = module.load_endpoints(_CONTRACT)
 
     derived = module.contract_env_vars(endpoints)
 
@@ -329,3 +329,73 @@ def test_explicit_env_var_still_reports_an_unassigned_variable(
     assert "LLM_CODER_FAST_URL is not assigned to a canonical endpoint slot" in (
         result.stderr
     )
+
+
+@pytest.mark.unit
+def test_skip_env_var_leaves_the_stores_superseded_value_unchecked(
+    tmp_path: Path,
+) -> None:
+    """OMN-24025: a name the caller renders itself is not checked in the store.
+
+    The dev lane's deploy agent renders ``LLM_EMBEDDING_URL`` from the overlay over
+    the store, so the store's stale value never reaches compose. The control is the
+    same file without the option, which the guard refuses.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"LLM_EMBEDDING_URL={_REMOVED_EMBEDDING_URL}\n")
+    overlay_root = _write_overlay(
+        tmp_path / "overlay-root", {"embeddings-201": _SYNTHETIC_EMBEDDING_URL}
+    )
+
+    control = _run_check(env_file, overlay_root=overlay_root)
+    skipped = _run_check(
+        env_file, "--skip-env-var", "LLM_EMBEDDING_URL", overlay_root=overlay_root
+    )
+
+    assert control.returncode == 1
+    assert "LLM_EMBEDDING_URL" in control.stderr
+    assert skipped.returncode == 0, skipped.stderr
+
+
+@pytest.mark.unit
+def test_skip_env_var_wins_over_an_explicit_env_var(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"LLM_EMBEDDING_URL={_REMOVED_EMBEDDING_URL}\n")
+    overlay_root = _write_overlay(
+        tmp_path / "overlay-root", {"embeddings-201": _SYNTHETIC_EMBEDDING_URL}
+    )
+
+    result = _run_check(
+        env_file,
+        "--env-var",
+        "LLM_EMBEDDING_URL",
+        "--skip-env-var",
+        "LLM_EMBEDDING_URL",
+        overlay_root=overlay_root,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_skip_env_var_still_checks_every_other_name(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"LLM_EMBEDDING_URL={_REMOVED_EMBEDDING_URL}",
+                "LLM_CODER_URL=http://192.0.2.99:8000",
+            ]
+        )
+    )
+    overlay_root = _write_overlay(
+        tmp_path / "overlay-root", {"embeddings-201": _SYNTHETIC_EMBEDDING_URL}
+    )
+
+    result = _run_check(
+        env_file, "--skip-env-var", "LLM_EMBEDDING_URL", overlay_root=overlay_root
+    )
+
+    assert result.returncode == 1
+    assert "LLM_CODER_URL" in result.stderr
+    assert "LLM_EMBEDDING_URL" not in result.stderr

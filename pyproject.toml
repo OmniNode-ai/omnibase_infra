@@ -487,6 +487,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "cost_estimator_build: exercises the real estimator build settings and host effect",
+    "llm_endpoint_env_render: exercises the real render of the dev lane embedding address from the llm_endpoints overlay",
     "live_contact(artifact): CI-tooling test consuming a recorded real API response or replay via recorded_response (OMN-18648)",
     "unit: Unit tests that test individual components in isolation",
     "integration: Integration tests that test multiple components together",

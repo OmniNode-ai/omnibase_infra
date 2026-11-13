@@ -11,13 +11,17 @@ host or private address.
 
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.models.contracts.model_llm_endpoint_overlay import (
+    OVERLAY_HOME_REF,
     OVERLAY_ID,
     ModelLlmEndpointOverlay,
     resolve_overlay_endpoints,
@@ -69,8 +73,42 @@ def _flagged_slot(
     return slot
 
 
+def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=scrub_git_location_env(os.environ),
+    )
+
+
+def _make_git_repo(
+    tmp_path: Path,
+    overlay_urls: dict[str, str] | None = None,
+) -> Path:
+    """A git repo with the overlay committed on origin/main."""
+    repo = tmp_path / "clone"
+    repo.mkdir(parents=True)
+    _git("init", cwd=repo)
+    _git("config", "user.name", "test", cwd=repo)
+    _git("config", "user.email", "test@example.com", cwd=repo)
+    if overlay_urls is not None:
+        overlay_dir = repo / "overlays" / OVERLAY_ID
+        overlay_dir.mkdir(parents=True)
+        (overlay_dir / "overlay.yaml").write_text(
+            yaml.safe_dump({"schema_version": 1, "endpoint_urls": overlay_urls}),
+            encoding="utf-8",
+        )
+        _git("add", ".", cwd=repo)
+        _git("commit", "-m", "add overlay", cwd=repo)
+    _git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=repo)
+    return repo
+
+
 # ---------------------------------------------------------------------------
-# roots / read
+# roots / clones
 # ---------------------------------------------------------------------------
 
 
@@ -81,19 +119,116 @@ def test_roots_list_the_named_overlay_roots_in_order(tmp_path: Path) -> None:
     assert roots == [first, second]
 
 
-def test_roots_include_the_overlays_clones_when_named(tmp_path: Path) -> None:
+def test_roots_do_not_include_clones(tmp_path: Path) -> None:
     named = tmp_path / "named"
     clone = tmp_path / "deploy-agent-home"
     workspace = tmp_path / "workspace" / "config"
     roots = ModelLlmEndpointOverlay.roots(
-        _environ(named, DEPLOY_AGENT_OVERLAY_HOME_CLONE=str(clone)),
+        _environ(named, DEPLOY_AGENT_OVERLAY_HOME_CLONE=str(clone))
     )
-    assert clone / "overlays" in roots
+    assert roots == [named]
 
     clone_roots = ModelLlmEndpointOverlay.roots(
-        _environ(ONEX_WORKSPACE_CONFIG_ROOT=str(workspace)),
+        _environ(ONEX_WORKSPACE_CONFIG_ROOT=str(workspace))
     )
-    assert clone_roots == [workspace.parent / "overlays" / "overlays"]
+    assert clone_roots == []
+
+
+def test_clones_order_and_unset(tmp_path: Path) -> None:
+    clone = tmp_path / "deploy-agent-home"
+    workspace = tmp_path / "workspace" / "config"
+
+    both = ModelLlmEndpointOverlay.clones(
+        _environ(
+            DEPLOY_AGENT_OVERLAY_HOME_CLONE=str(clone),
+            ONEX_WORKSPACE_CONFIG_ROOT=str(workspace),
+        )
+    )
+    assert both == [clone, workspace.parent / "overlays"]
+
+    only_clone = ModelLlmEndpointOverlay.clones(
+        _environ(DEPLOY_AGENT_OVERLAY_HOME_CLONE=str(clone))
+    )
+    assert only_clone == [clone]
+
+    only_workspace = ModelLlmEndpointOverlay.clones(
+        _environ(ONEX_WORKSPACE_CONFIG_ROOT=str(workspace))
+    )
+    assert only_workspace == [workspace.parent / "overlays"]
+
+    none = ModelLlmEndpointOverlay.clones({})
+    assert none == []
+
+
+# ---------------------------------------------------------------------------
+# read_clone
+# ---------------------------------------------------------------------------
+
+
+def test_read_clone_reads_the_ref_not_the_working_tree(
+    tmp_path: Path,
+) -> None:
+    repo = _make_git_repo(tmp_path, {"embeddings-201": _SYNTHETIC_ADDRESS})
+    overlay_path = repo / "overlays" / OVERLAY_ID / "overlay.yaml"
+    overlay_path.write_text(
+        yaml.safe_dump(
+            {"schema_version": 1, "endpoint_urls": {"embeddings-201": _REMOVED_ADDRESS}}
+        ),
+        encoding="utf-8",
+    )
+    overlay = ModelLlmEndpointOverlay.read_clone(repo)
+    assert overlay is not None
+    assert overlay.endpoint_urls["embeddings-201"] == _SYNTHETIC_ADDRESS
+
+
+def test_read_clone_returns_none_when_the_ref_holds_no_overlay(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "clone"
+    repo.mkdir()
+    _git("init", cwd=repo)
+    _git("config", "user.name", "test", cwd=repo)
+    _git("config", "user.email", "test@example.com", cwd=repo)
+    (repo / "placeholder.txt").write_text("x", encoding="utf-8")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-m", "placeholder", cwd=repo)
+    _git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=repo)
+    assert ModelLlmEndpointOverlay.read_clone(repo) is None
+
+
+def test_read_clone_refuses_a_missing_ref(tmp_path: Path) -> None:
+    repo = _make_git_repo(tmp_path, {"embeddings-201": _SYNTHETIC_ADDRESS})
+    with pytest.raises(ValueError, match="holds no"):
+        ModelLlmEndpointOverlay.read_clone(repo, ref="origin/nonexistent")
+
+
+def test_read_clone_refuses_a_non_directory_clone(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not a directory"):
+        ModelLlmEndpointOverlay.read_clone(tmp_path / "does-not-exist")
+
+
+def test_read_clone_refuses_an_invalid_overlay_at_the_ref(
+    tmp_path: Path,
+) -> None:
+    repo = _make_git_repo(tmp_path, None)
+    overlay_dir = repo / "overlays" / OVERLAY_ID
+    overlay_dir.mkdir(parents=True)
+    (overlay_dir / "overlay.yaml").write_text(
+        yaml.safe_dump(
+            {"schema_version": 1, "endpoint_urls": {"embeddings-201": "not-a-url"}}
+        ),
+        encoding="utf-8",
+    )
+    _git("add", ".", cwd=repo)
+    _git("commit", "-m", "bad overlay", cwd=repo)
+    _git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=repo)
+    with pytest.raises(ValueError, match="invalid llm_endpoints overlay"):
+        ModelLlmEndpointOverlay.read_clone(repo)
+
+
+# ---------------------------------------------------------------------------
+# roots / read
+# ---------------------------------------------------------------------------
 
 
 def test_read_returns_none_when_no_root_holds_the_file(tmp_path: Path) -> None:
@@ -123,6 +258,16 @@ def test_read_a_root_without_the_overlay_is_skipped(tmp_path: Path) -> None:
     empty.mkdir()
     held = _write_overlay(tmp_path / "held", {"embeddings-201": _SYNTHETIC_ADDRESS})
     overlay = ModelLlmEndpointOverlay.read(_environ(empty, held))
+    assert overlay is not None
+    assert overlay.endpoint_urls["embeddings-201"] == _SYNTHETIC_ADDRESS
+
+
+def test_read_uses_named_roots_before_clones(tmp_path: Path) -> None:
+    root = _write_overlay(tmp_path / "root", {"embeddings-201": _SYNTHETIC_ADDRESS})
+    repo = _make_git_repo(tmp_path / "repo", {"embeddings-201": _REMOVED_ADDRESS})
+    overlay = ModelLlmEndpointOverlay.read(
+        _environ(root, DEPLOY_AGENT_OVERLAY_HOME_CLONE=str(repo))
+    )
     assert overlay is not None
     assert overlay.endpoint_urls["embeddings-201"] == _SYNTHETIC_ADDRESS
 
@@ -175,7 +320,9 @@ def test_read_refuses_an_invalid_overlay_file(
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_fills_host_port_and_url_for_a_flagged_slot(tmp_path: Path) -> None:
+def test_resolve_fills_host_port_and_url_for_a_flagged_slot(
+    tmp_path: Path,
+) -> None:
     root = _write_overlay(tmp_path, {"embeddings-201": _SYNTHETIC_ADDRESS})
     flagged = _flagged_slot()
     unflagged: dict[str, Any] = {
@@ -229,7 +376,9 @@ def test_resolve_raises_naming_the_slot_when_it_is_missing_from_the_overlay(
     assert "not in the llm_endpoints overlay" in message
 
 
-def test_resolve_strips_a_trailing_slash_from_the_overlay_url(tmp_path: Path) -> None:
+def test_resolve_strips_a_trailing_slash_from_the_overlay_url(
+    tmp_path: Path,
+) -> None:
     root = _write_overlay(tmp_path, {"embeddings-201": "http://192.0.2.10:8100/"})
     resolved = resolve_overlay_endpoints([_flagged_slot()], _environ(root))
     assert resolved[0]["endpoint_url"] == _SYNTHETIC_ADDRESS
@@ -262,3 +411,19 @@ def test_resolve_refuses_when_the_store_names_a_value_and_no_overlay_holds_the_s
             _environ(tmp_path / "empty"),
             {"LLM_EXAMPLE_URL": "http://192.0.2.10:9"},
         )
+
+
+# ---------------------------------------------------------------------------
+# SEAM: the ref must equal the node contract's ref
+# ---------------------------------------------------------------------------
+
+
+def test_overlay_home_ref_equals_the_node_contract_ref() -> None:
+    contract_path = (
+        Path(__file__).resolve().parents[4]
+        / "src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml"
+    )
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    overlay_home = contract["config"]["overlay_home_lane_env"]
+    assert overlay_home["ref"] == OVERLAY_HOME_REF
+    assert overlay_home["overlay_path"] == "overlays/runtime_lane_env/overlay.yaml"

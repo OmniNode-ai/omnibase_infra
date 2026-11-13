@@ -9,11 +9,15 @@ It is read at run time from the private overlays repository:
 skipped, so no overlay anywhere means the flagged slot cannot be resolved.
 An overlay file that exists but does not validate is a loud refusal, never a
 quiet skip.
+
+The overlay home's clone is read at a git ref (``OVERLAY_HOME_REF``), never
+its working tree, the same way the runtime lane env overlay reader does.
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -22,10 +26,30 @@ from urllib.parse import urlparse
 import yaml
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 OVERLAY_ID = "llm_endpoints"
+OVERLAY_HOME_RELPATH = f"overlays/{OVERLAY_ID}/overlay.yaml"
+
+#: The ref and the git read bound of the overlay home's clone are the node contract's own
+#: declaration, the one the runtime_lane_env overlay reader takes, so both readers share them.
+_NODE_CONTRACT = (
+    Path(__file__).resolve().parents[2]
+    / "nodes/node_setup_local_provision_effect/contract.yaml"
+)
+_OVERLAY_HOME = yaml.safe_load(_NODE_CONTRACT.read_text(encoding="utf-8"))["config"][
+    "overlay_home_lane_env"
+]
+OVERLAY_HOME_REF = str(_OVERLAY_HOME["ref"])
+OVERLAY_HOME_GIT_TIMEOUT_SECONDS = int(_OVERLAY_HOME["read_timeout_seconds"])
 
 __all__ = [
     "OVERLAY_ID",
+    "OVERLAY_HOME_GIT_TIMEOUT_SECONDS",
+    "OVERLAY_HOME_RELPATH",
+    "OVERLAY_HOME_REF",
     "ModelLlmEndpointOverlay",
     "resolve_overlay_endpoints",
 ]
@@ -71,54 +95,118 @@ class ModelLlmEndpointOverlay(BaseModel):
 
     @classmethod
     def roots(cls, environ: Mapping[str, str]) -> list[Path]:
-        """Overlay roots in precedence order: named roots, then clones.
+        """The named overlay roots, in precedence order.
 
-        The ``ONEX_SKILL_OVERLAY_ROOTS`` entries (os.pathsep split), then the
-        overlays clone beside the deploy-agent home, then the overlays clone
-        beside the workspace config root.
+        The ``ONEX_SKILL_OVERLAY_ROOTS`` entries (os.pathsep split).
         """
-        roots: list[Path] = [
+        return [
             Path(entry)
             for entry in environ.get("ONEX_SKILL_OVERLAY_ROOTS", "").split(os.pathsep)
             if entry
         ]
+
+    @classmethod
+    def clones(cls, environ: Mapping[str, str]) -> list[Path]:
+        """The overlay home's clones, in precedence order.
+
+        The deploy agent's overlay home clone when named, then the overlays
+        clone beside the workspace config root when named.
+        """
+        clones: list[Path] = []
         clone = environ.get("DEPLOY_AGENT_OVERLAY_HOME_CLONE", "")
         if clone:
-            roots.append(Path(clone) / "overlays")
+            clones.append(Path(clone))
         workspace = environ.get("ONEX_WORKSPACE_CONFIG_ROOT", "")
         if workspace:
-            roots.append(Path(workspace).parent / "overlays" / "overlays")
-        return roots
+            clones.append(Path(workspace).parent / "overlays")
+        return clones
+
+    @classmethod
+    def read_clone(
+        cls, clone: Path, ref: str = OVERLAY_HOME_REF
+    ) -> ModelLlmEndpointOverlay | None:
+        """The overlay at ``ref`` in ``clone``, or None when the ref holds none.
+
+        A clone that is missing, is not a git clone, or holds no ``ref``
+        raises ValueError naming the clone and ref, because a clone that
+        cannot be read is not an overlay that holds nothing.
+        """
+        if not clone.is_dir():
+            raise ValueError(
+                f"{clone} is not a directory; cannot read the llm_endpoints "
+                f"overlay at {ref}"
+            )
+
+        def git(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["git", "-C", str(clone), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=OVERLAY_HOME_GIT_TIMEOUT_SECONDS,
+                env=scrub_git_location_env(),
+            )
+
+        if git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
+            raise ValueError(
+                f"{clone} holds no {ref}; the llm_endpoints overlay cannot be "
+                "read, and a clone that cannot be read is not the same as an "
+                "overlay that holds nothing"
+            )
+        if git("cat-file", "-e", f"{ref}:{OVERLAY_HOME_RELPATH}").returncode != 0:
+            return None
+        shown = git("show", f"{ref}:{OVERLAY_HOME_RELPATH}")
+        if shown.returncode != 0:
+            raise ValueError(
+                f"git show {ref}:{OVERLAY_HOME_RELPATH} in {clone} exited "
+                f"{shown.returncode}: {shown.stderr.strip()[:240]}"
+            )
+        return _parse_overlay(shown.stdout, f"{clone}@{ref}:{OVERLAY_HOME_RELPATH}")
 
     @classmethod
     def read(cls, environ: Mapping[str, str]) -> ModelLlmEndpointOverlay | None:
-        """The first overlay file any root holds, or None when none does.
+        """The first overlay any root or clone holds, or None when none does.
 
-        A root holding no ``<root>/llm_endpoints/overlay.yaml`` is skipped. A
-        file that exists but does not validate is a loud refusal (ValueError),
-        never a quiet skip.
+        Named roots are tried first; a root holding no overlay file is
+        skipped. Then every clone is tried with ``read_clone``; a clone that
+        is named but unreadable raises ValueError, it is not skipped. A file
+        that exists but does not validate is a loud refusal, never a quiet
+        skip.
         """
         for root in cls.roots(environ):
             path = root / OVERLAY_ID / "overlay.yaml"
             if not path.is_file():
                 continue
-            try:
-                data = yaml.safe_load(path.read_text(encoding="utf-8"))
-            except Exception as exc:
-                raise ValueError(
-                    f"invalid llm_endpoints overlay file {path}: {exc}"
-                ) from exc
-            if not isinstance(data, dict):
-                raise ValueError(
-                    f"invalid llm_endpoints overlay file {path}: top level must be a mapping"
-                )
-            try:
-                return cls.model_validate(cast("dict[str, Any]", data))
-            except Exception as exc:
-                raise ValueError(
-                    f"invalid llm_endpoints overlay file {path}: {exc}"
-                ) from exc
+            return _parse_overlay(path.read_text(encoding="utf-8"), str(path))
+        for clone in cls.clones(environ):
+            overlay = cls.read_clone(clone)
+            if overlay is not None:
+                return overlay
         return None
+
+
+def _parse_overlay(text: str, source: str) -> ModelLlmEndpointOverlay:
+    """One overlay document, validated whole; any problem is a ValueError."""
+    try:
+        data = yaml.safe_load(text)
+    except Exception as exc:
+        raise ValueError(f"invalid llm_endpoints overlay file {source}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"invalid llm_endpoints overlay file {source}: top level must be a mapping"
+        )
+    try:
+        return ModelLlmEndpointOverlay.model_validate(cast("dict[str, Any]", data))
+    except Exception as exc:
+        raise ValueError(f"invalid llm_endpoints overlay file {source}: {exc}") from exc
+
+
+def _searched_locations(environ: Mapping[str, str]) -> list[str]:
+    """The roots and clones, as strings, for a refusal message."""
+    locations = [str(root) for root in ModelLlmEndpointOverlay.roots(environ)]
+    for clone in ModelLlmEndpointOverlay.clones(environ):
+        locations.append(f"{clone}@{OVERLAY_HOME_REF}")
+    return locations
 
 
 def resolve_overlay_endpoints(
@@ -129,18 +217,20 @@ def resolve_overlay_endpoints(
     """Fill host/port/endpoint_url for slots flagged ``endpoint_from_overlay``.
 
     Returns copies of the endpoint dicts. Every dict with
-    ``endpoint_from_overlay`` true gets host, port and endpoint_url filled from
-    the overlay's ``endpoint_urls[slot_id]``; dicts without the flag are
+    ``endpoint_from_overlay`` true gets host, port and endpoint_url filled
+    from the overlay's ``endpoint_urls[slot_id]``; dicts without the flag are
     returned unchanged. Raises ``ValueError`` naming the slot id (and the
-    roots searched) when no overlay file exists or the slot is not in it.
+    roots and clones searched) when no overlay file exists or the slot is not
+    in it.
 
     ``store`` is the settings store being checked: a flagged slot whose
-    ``url_env_var`` that store leaves empty or unset is returned unresolved (no
-    value is checked against it, so no address is needed). With no ``store``
-    every flagged slot is resolved.
+    ``url_env_var`` that store leaves empty or unset is returned unresolved
+    (no value is checked against it, so no address is needed). With no
+    ``store`` every flagged slot is resolved.
     """
-    roots = ModelLlmEndpointOverlay.roots(environ)
     overlay = ModelLlmEndpointOverlay.read(environ)
+    locations = _searched_locations(environ)
+    searched = ", ".join(locations) or "<none>"
 
     result: list[dict[str, Any]] = []
     for endpoint in endpoints:
@@ -154,14 +244,13 @@ def resolve_overlay_endpoints(
             continue
         if overlay is None:
             raise ValueError(
-                f"overlay slot {slot_id!r}: no llm_endpoints overlay file found; "
-                f"searched roots: {', '.join(str(root) for root in roots) or '<none>'}"
+                f"overlay slot {slot_id!r}: no llm_endpoints overlay file "
+                f"found; searched roots: {searched}"
             )
         if slot_id not in overlay.endpoint_urls:
             raise ValueError(
                 f"overlay slot {slot_id!r} is not in the llm_endpoints overlay "
-                f"endpoint_urls; searched roots: "
-                f"{', '.join(str(root) for root in roots) or '<none>'}"
+                f"endpoint_urls; searched roots: {searched}"
             )
         url = overlay.endpoint_urls[slot_id]
         parsed = urlparse(url)

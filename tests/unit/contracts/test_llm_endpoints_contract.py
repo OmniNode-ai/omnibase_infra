@@ -231,6 +231,33 @@ class TestLlmEndpointsContract:
                 f"Entry {ep['slot_id']!r} role {ep['role']!r} outside taxonomy"
             )
 
+    def test_lane_overlay_binding_on_overlay_slots(self) -> None:
+        for slot in _load_endpoints():
+            if slot.get("endpoint_from_overlay"):
+                binding = slot.get("lane_overlay_binding")
+                if binding is not None:
+                    assert isinstance(binding, dict)
+                    assert binding.get("backend_id"), (
+                        f"slot {slot['slot_id']!r} lane_overlay_binding.backend_id must be non-empty"
+                    )
+                    assert binding.get("env_var"), (
+                        f"slot {slot['slot_id']!r} lane_overlay_binding.env_var must be non-empty"
+                    )
+
+    def test_embeddings_201_has_lane_overlay_binding(self) -> None:
+        for slot in _load_endpoints():
+            if slot["slot_id"] == "embeddings-201":
+                assert slot["endpoint_from_overlay"] is True
+                binding = slot.get("lane_overlay_binding")
+                assert binding is not None, (
+                    "embeddings-201 must have lane_overlay_binding"
+                )
+                assert binding["backend_id"] == "local-embedding"
+                assert binding["env_var"] == "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"
+                assert slot["host"] is None
+                assert slot["port"] is None
+                assert slot["endpoint_url"] is None
+
     def test_reasoning_moe_35b_is_disabled_after_endpoint_loss(self) -> None:
         """OMN-16442 (supersedes the OMN-9292 running-slot field pins).
 

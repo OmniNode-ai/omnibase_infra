@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-24017
 title: "Move the platform endpoint list's embedding entry to the second graphics card's server"
-summary: "The embedding server on the big graphics card shared it with the 27B chat model and pushed it into CUDA out of memory on 2026-11-12; the operator ordered it removed. The endpoint list, the environment template and the shared key registry note named that server. The endpoint list no longer carries the embedding address: its embeddings entry is marked as read from the llm_endpoints overlay (private overlays repository), whose value names the embedding server on the second graphics card (same model, same 1024 dimensions). The deploy guard resolves the address from the overlay and refuses a settings store naming any other address, including the removed one. This change is paired with the machine settings store line on the dev host: merged alone, the deploy guard refuses the next dev deploy, so it stays a draft until that line names the new address."
+summary: "The embedding server on the big graphics card shared it with the 27B chat model and pushed it into CUDA out of memory on 2026-11-12; the operator ordered it removed. The endpoint list, the environment template and the shared key registry note named that server. The endpoint list no longer carries the embedding address: its embeddings entry is marked as read from the llm_endpoints overlay (private overlays repository), whose value names the embedding server on the second graphics card (same model, same 1024 dimensions). The deploy guard resolves the address from the overlay and refuses a settings store naming any other address, including the removed one. The dev lane's deploy agent renders the embedding address from that overlay over the host settings store (and rewrites the lane bifrost overlay's local-embedding endpoint the same way), so a normal dev deploy moves the address and no hand edit of the store is needed. A dev deploy whose overlay cannot be read is refused, so this change stays a draft until the overlay is on main of the overlays repository."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -15,6 +15,13 @@ requirements:
         statement: 'AC2: the deploy guard accepts a settings store naming the new embedding address and refuses one naming the removed address -- falsifier: python -m pytest tests/scripts/test_check_llm_endpoint_env_contract.py -q -k embedding fails at the merge base'
       - id: AC3
         statement: 'AC3: integrated: with the host settings store line changed to the new address, the dev lane next deploy passes the guard and one embedding request to the endpoint list embedding entry returns 1024 numbers -- falsifier: the guard refuses the deploy or the request fails or returns another length'
+  - id: req-omn24017-deploy-renders-overlay-address
+    statement: The dev lane deploy agent renders the embedding address and the lane bifrost overlay endpoint from the overlay at its origin/main, over the host settings store.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the dev-fenced compose environment takes LLM_EMBEDDING_URL, the rewritten lane overlay directory and BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL from the overlay at the clone origin/main and not the clone working tree, an agent not fenced to the dev lane keeps the store value, and an unreadable overlay or a missing slot refuses the deploy -- falsifier: python -m pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_render_omn24025.py -q fails at the merge base'
+      - id: AC5
+        statement: 'AC5: integrated: a dev deploy of this head on the dev host passes the guard with the settings store still naming the removed address, and the running dev runtime carries the overlay address in LLM_EMBEDDING_URL -- falsifier: the guard refuses the deploy or the running container still reads the removed address'
 evidence_requirements:
   - kind: tests
     description: The endpoint-list and deploy-guard tests pass at the pushed head; the refusal tests fail at the merge base.
@@ -53,6 +60,23 @@ dod_evidence:
         cwd: .
   - id: dod-omn24017-ac3-integration-proof
     description: 'AC3 integrated reading: the host settings store line on the dev host names the new address and the guard accepts it. Only the local Done gate runs this unbound check; it needs the dev host.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-checks OmniNode-ai/omnibase_infra
+        cwd: .
+  - id: dod-omn24017-ac4
+    description: 'AC4: the dev-fenced compose environment and the render module tests pass at the head'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_render_omn24025.py -q -p no:randomly --no-cov
+        cwd: .
+  - id: dod-omn24017-ac5-integration-proof
+    description: 'AC5 integrated reading: a dev deploy of this head passes the guard with the store unchanged and the running container carries the overlay address. Only the local Done gate runs this unbound check; it needs the dev host.'
     source: manual
     execution_scope: local_done_gate
     checks:

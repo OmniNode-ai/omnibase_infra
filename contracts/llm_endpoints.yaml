@@ -22,6 +22,9 @@
 #   endpoint_from_overlay  address read from the llm_endpoints overlay at run time;
 #                          when true, host/port/endpoint_url must be null
 #                          (the public contract carries no address for the slot)
+#   lane_overlay_binding   the lane bifrost overlay backend this slot's address is
+#                          bound to (backend_id), and the env var that carries that
+#                          backend's complete endpoint url (env_var)
 #
 # url_env_var and role_env_alias may be null on running slots (e.g. Docker-internal
 # embeddings with no external env-var exposure, or slots where the role alias has
@@ -140,6 +143,9 @@ endpoints:
     port: null
     endpoint_url: null
     endpoint_from_overlay: true
+    lane_overlay_binding:
+      backend_id: local-embedding
+      env_var: BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL
     url_env_var: LLM_EMBEDDING_URL
     role_env_alias: null
     model_hf_id: Qwen/Qwen3-Embedding-0.6B

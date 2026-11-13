@@ -200,6 +200,12 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_cost_estimator_build.py",
         "nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py",
         "nodes/node_setup_local_provision_effect/runtime_lane_env_overlay.py",
+        "models/contracts/enum_llm_endpoint_status.py",
+        "models/contracts/model_llm_endpoint_lane_overlay_binding.py",
+        "models/contracts/model_llm_endpoint_entry.py",
+        "models/contracts/model_llm_endpoint_contract.py",
+        "models/contracts/model_llm_endpoint_overlay.py",
+        "nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
@@ -1842,6 +1848,16 @@ def _lane_env_overlay() -> dict[str, str]:
     return overlay
 
 
+def _llm_endpoint_env_overlay(
+    env: Mapping[str, str],
+) -> tuple[dict[str, str], str | None]:
+    """The dev lane's LLM endpoint env rendered from the llm_endpoints overlay (OMN-24025)."""
+    rendered: tuple[dict[str, str], str | None] = load_dev_boot_guard(
+        _LLM_ENDPOINT_ENV_MODULE
+    ).render_dev_lane(sys.modules[__name__], env)
+    return rendered
+
+
 class _ActiveDeployLane:
     """The lane of the job in flight, or ``None`` between jobs (OMN-19998).
 
@@ -1968,6 +1984,9 @@ def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
 #: ``${ONEX_LANE_OVERLAY_DIR}/${COMPOSE_PROJECT_NAME}.bifrost.yaml``. The overlays
 #: are private deployment config and no longer live in this repository.
 LANE_OVERLAY_DIR_ENV = "ONEX_LANE_OVERLAY_DIR"
+_LLM_ENDPOINT_ENV_MODULE = (
+    "nodes.node_setup_local_provision_effect.runtime_llm_endpoint_env"
+)
 LANE_OVERLAY_RELATIVE_DIR = Path("config") / "lab" / "lane-overlays"
 
 
@@ -2057,6 +2076,12 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # value the operator store holds for them; a key it leaves out keeps
     # whatever the store says, or stays unset.
     env.update(_lane_env_overlay())
+    # OMN-24025: the rendered LLM endpoint env wins over the operator store, like the lane
+    # fragment, and the compose mount reads the rewritten lane overlay directory.
+    llm_env, rendered_lane_overlay_dir = _llm_endpoint_env_overlay(env)
+    env.update(llm_env)
+    if rendered_lane_overlay_dir is not None:
+        env[LANE_OVERLAY_DIR_ENV] = rendered_lane_overlay_dir
     # OMN-18073: refuse before compose interpolation writes a provably-mangled
     # value into every container this deploy creates. Deliberately AFTER the
     # re-read above, so a mangled value arriving from the store is refused on
@@ -3537,54 +3562,10 @@ class DeployExecutor:
 
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
-        script = f"{REPO_DIR}/scripts/check_llm_endpoint_env_contract.py"
-        venv_python = f"{REPO_DIR}/.venv/bin/python"
-        base_cmd = (
-            [venv_python, script]
-            if Path(venv_python).is_file()
-            else ["uv", "run", "--project", REPO_DIR, "python", script]
-        )
-
-        env_files: list[Path] = []
-        explicit_env_file = os.environ.get("OMNIBASE_ENV_FILE")
-        # OMN-19507: the store this agent was launched against, when the unit
-        # declares one, is the file its lane's compose reads. On .201 that is
-        # ~/.omnibase/.env itself; on another lab host (dev-200 on .200) the
-        # unit names the lane's own store, and ~/.omnibase/.env there is a
-        # workstation file the lane never reads, whose drift must not refuse
-        # the lane's deploy.
         operator_store = operator_env_file() or Path.home() / ".omnibase" / ".env"
-        fallback_candidates = [
-            operator_store,
-            Path(REPO_DIR) / ".env",
-        ]
-        candidates = (
-            [Path(explicit_env_file), *fallback_candidates]
-            if explicit_env_file
-            else fallback_candidates
+        load_dev_boot_guard(_LLM_ENDPOINT_ENV_MODULE).validate_env_contract(
+            sys.modules[__name__], operator_store, os.environ.get("OMNIBASE_ENV_FILE")
         )
-        for candidate in candidates:
-            if candidate.is_file() and candidate not in env_files:
-                env_files.append(candidate)
-        if explicit_env_file and not any(
-            f == Path(explicit_env_file) for f in env_files
-        ):
-            raise RuntimeError(
-                f"LLM endpoint env contract check failed: OMNIBASE_ENV_FILE does not exist: {explicit_env_file}"
-            )
-
-        commands = [base_cmd]
-        commands.extend([*base_cmd, "--env-file", str(path)] for path in env_files)
-        for cmd in commands:
-            result = _run(cmd, timeout=PHASE_TIMEOUTS[Phase.PREFLIGHT])
-            if result.returncode != 0:
-                source = "process environment"
-                if "--env-file" in cmd:
-                    source = cmd[cmd.index("--env-file") + 1]
-                raise RuntimeError(
-                    "LLM endpoint env contract check failed for "
-                    f"{source}: {result.stderr.strip() or result.stdout.strip()}"
-                )
 
     def self_update(
         self,

@@ -12,6 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from omnibase_infra.models.contracts.enum_llm_endpoint_status import (
     EnumLlmEndpointStatus,
 )
+from omnibase_infra.models.contracts.model_llm_endpoint_lane_overlay_binding import (
+    ModelLlmEndpointLaneOverlayBinding,
+)
 
 
 class ModelLlmEndpointEntry(BaseModel):
@@ -43,6 +46,14 @@ class ModelLlmEndpointEntry(BaseModel):
         description=(
             "Address is read from the llm_endpoints overlay at run time; "
             "the public contract carries no address for this slot."
+        ),
+    )
+    lane_overlay_binding: ModelLlmEndpointLaneOverlayBinding | None = Field(
+        default=None,
+        description=(
+            "The lane bifrost overlay backend this slot's address is bound to, "
+            "and the env var that carries that backend's complete endpoint url. "
+            "Only set when endpoint_from_overlay is true."
         ),
     )
     url_env_var: str | None = Field(
@@ -201,6 +212,10 @@ class ModelLlmEndpointEntry(BaseModel):
                 raise ValueError("endpoint_url host must match host")
             if self.port is not None and parsed.port != self.port:
                 raise ValueError("endpoint_url port must match port")
+        if self.lane_overlay_binding is not None and not self.endpoint_from_overlay:
+            raise ValueError(
+                "lane_overlay_binding requires endpoint_from_overlay to be true"
+            )
         return self
 
 
