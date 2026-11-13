@@ -198,6 +198,9 @@ def promote_floor(
     spec = importlib.util.spec_from_file_location(
         "reconcile_verify_movement", verify_path
     )
+    if spec is None or spec.loader is None:
+        _say(f"FAILED: cannot load {verify_path}")
+        return EXIT_FAILED
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -269,13 +272,13 @@ def promote_floor(
 def run_promotion_command(
     command: str,
     *,
-    path=None,
-    pid=None,
-    venv=None,
-    uv_lock=None,
-    workspace_root=None,
-    floor=None,
-    changed=False,
+    path: Path | None = None,
+    pid: int | None = None,
+    venv: Path | None = None,
+    uv_lock: Path | None = None,
+    workspace_root: Path | None = None,
+    floor: Path | None = None,
+    changed: bool = False,
 ) -> int:
     if command == "staging_lock_acquire":
         if path is None or pid is None:
