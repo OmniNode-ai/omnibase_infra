@@ -40,6 +40,14 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/scripts/test_install_node_skill_package_uv_checkout_prune.py -q -k dry_run_or_failed
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24308-cli-integration
+    description: 'The real command line of the atomic install, the engine it loads and the real uv cache dir run together: finalize prunes the recorded checkout and rollback and a failed stage prune nothing.'
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_venv_atomic_install_git_checkout_prune_omn24308.py -q -m integration
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24308-ac3
     description: 'hosted proxy for AC3: the prune and the existing install script tests pass here; the h101 readings are posted as a pull request comment naming the head.'
     source: manual
