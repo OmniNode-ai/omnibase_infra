@@ -87,7 +87,7 @@ def test_a_launch_during_a_staging_move_waits_and_then_places(ws: _Workspace) ->
 def test_a_dead_staging_holder_is_not_waited_on(ws: _Workspace) -> None:
     """A staging lock naming a pid that has exited on this host is a corpse:
     the wrapper must refuse at once (exit 3), never printing a wait message."""
-    mover = subprocess.Popen([sys.executable, "-c", "pass"])
+    mover = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
     mover.wait()
     ws.write_floor(STALE)
     _take_staging_lock(ws, mover.pid, _THIS_HOST)

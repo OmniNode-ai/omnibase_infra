@@ -52,6 +52,7 @@ def test_live_holder_declines(tmp_path, capsys):
         [sys.executable, "-c", "import time; time.sleep(30)"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     try:
         lock = tmp_path / "staging.lock"
@@ -83,6 +84,7 @@ def test_dead_holder_reclaimed(tmp_path):
         [sys.executable, "-c", "pass"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     proc.wait()
     lock = tmp_path / "staging.lock"
@@ -125,6 +127,7 @@ def test_held_live_and_dead(tmp_path):
         [sys.executable, "-c", "import time; time.sleep(30)"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     try:
         _write_record(lock, proc.pid, socket.gethostname())
