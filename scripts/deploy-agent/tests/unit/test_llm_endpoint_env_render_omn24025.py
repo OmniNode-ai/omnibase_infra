@@ -168,6 +168,56 @@ def test_a_symlinked_lane_overlay_is_rendered_as_the_file_it_points_at(
     assert rendered.env["BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"] == expected_url
 
 
+def test_seam_the_rendered_lane_overlay_loads_in_the_bifrost_overlay_model(
+    world: dict[str, Any],
+) -> None:
+    """The container's renderer loads this file with ``ModelBifrostLaneOverlay``: so must a test."""
+    from omnibase_infra.runtime.render_bifrost_delegation_contract import (
+        _load_lane_overlay,
+    )
+
+    def backend(backend_id: str, url: str) -> dict[str, Any]:
+        return {
+            "backend_id": backend_id,
+            "endpoint_url": url,
+            "served_model_id": "model-a",
+            "parameter_count": "1B",
+            "context_window": 8192,
+            "max_tokens": 128,
+            "timeout_ms": 1000,
+        }
+
+    (world["lane_dir"] / "dev.bifrost.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "bifrost_lane_overlay.v3",
+                "lane": "dev",
+                "locale": "lab",
+                "backends": [
+                    backend(
+                        "local-coder", "http://192.0.2.10:8000/v1/chat/completions"
+                    ),
+                    backend(BACKEND_ID, f"{STALE_ADDRESS}{EMBEDDING_PATH}"),
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    rendered = Path(_render(world["environ"], world["lane_dir"]).lane_overlay_dir)
+
+    before = _load_lane_overlay(world["lane_dir"] / "dev.bifrost.yaml")
+    after = _load_lane_overlay(rendered / "dev.bifrost.yaml")
+    changed = [
+        b.backend_key
+        for b, a in zip(before.backends, after.backends, strict=True)
+        if b != a
+    ]
+    assert changed == [BACKEND_ID]
+    assert after.backends[1].endpoint_url == f"{OVERLAY_ADDRESS}{EMBEDDING_PATH}"
+
+
 def test_a_second_render_leaves_the_rendered_files_untouched(
     world: dict[str, Any],
 ) -> None:
