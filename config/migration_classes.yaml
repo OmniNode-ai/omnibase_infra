@@ -123,6 +123,7 @@ migrations:
   forward/111_widen_runtime_error_triage_active_unique_to_escalated.sql: forward-only # UNIQUE INDEX on an existing table; DROP
   forward/113_create_floor_fill_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/114_create_code_eval_trial_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
+  forward/115_grant_role_omnibase_infra_state_io_omn19998.sql: expand-only
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN

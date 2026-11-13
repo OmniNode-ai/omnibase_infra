@@ -198,20 +198,18 @@ def _validate_entry(
     if not role:
         findings.append(
             Finding(
-                slot_id=label,
-                rule="missing_role",
-                message=f"Endpoint '{label}' is missing required field: role",
+                label,
+                "missing_role",
+                f"Endpoint '{label}' is missing required field: role",
             )
         )
     elif role not in VALID_ROLES:
         findings.append(
             Finding(
-                slot_id=label,
-                rule="invalid_role",
-                message=(
-                    f"Endpoint '{label}' has invalid role '{role}'. "
-                    f"Valid roles: {', '.join(sorted(VALID_ROLES))}"
-                ),
+                label,
+                "invalid_role",
+                f"Endpoint '{label}' has invalid role '{role}'. "
+                f"Valid roles: {', '.join(sorted(VALID_ROLES))}",
             )
         )
 
@@ -219,20 +217,18 @@ def _validate_entry(
     if not status:
         findings.append(
             Finding(
-                slot_id=label,
-                rule="missing_status",
-                message=f"Endpoint '{label}' is missing required field: status",
+                label,
+                "missing_status",
+                f"Endpoint '{label}' is missing required field: status",
             )
         )
     elif status not in VALID_STATUSES:
         findings.append(
             Finding(
-                slot_id=label,
-                rule="invalid_status",
-                message=(
-                    f"Endpoint '{label}' has invalid status '{status}'. "
-                    f"Valid statuses: {', '.join(sorted(VALID_STATUSES))}"
-                ),
+                label,
+                "invalid_status",
+                f"Endpoint '{label}' has invalid status '{status}'. "
+                f"Valid statuses: {', '.join(sorted(VALID_STATUSES))}",
             )
         )
 
@@ -241,8 +237,11 @@ def _validate_entry(
 
     # Status-specific nullability checks
     if status == "running":
+        # an endpoint_from_overlay slot's address is the overlay's (OMN-24017)
         for field in RUNNING_REQUIRED_FIELDS:
-            if entry.get(field) is None:
+            if entry.get(field) is None and (
+                field == "model_hf_id" or not entry.get("endpoint_from_overlay")
+            ):
                 findings.append(
                     Finding(
                         slot_id=label,
