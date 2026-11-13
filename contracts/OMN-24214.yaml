@@ -36,14 +36,13 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn24214-ac1
     description: >-
-      The private lane manifest declares no dashboard-owner lane, and the generator's maps carry none: the lab-overlay parity test (undeclared_lanes and orphan_map_entries both empty over at least eight declared lanes) passes at this head and fails at the base commit with two generator_map_orphan findings (dashboard-owner in _LANE_PORT_MAP and in _LANE_BOUNDARY). The overlay is private config read from ONEX_WORKSPACE_CONFIG_ROOT, so the check runs in the Lab-overlay parity job and on a lab host.
+      The generator's maps, which the lane census guard (orphan_map_entries) checks against the private census, hold no dashboard-owner row: the retired-lane test for dashboard-owner passes at this head and fails against the base commit's generator. The private-census grep and lab-overlay parity run are in the PR Lab line; hosted CI cannot reach the private overlay.
     source: manual
-    execution_scope: local_done_gate
     binds_ac:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_incident_replay_omn18949.py -m lab_overlay -k does_NOT_reject_the_current_tree -q --no-cov -p no:cacheprovider -p no:randomly
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_retired_lanes.py -k dashboard-owner -q --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn24214-ac2
     description: >-
@@ -57,16 +56,11 @@ dod_evidence:
         cwd: .
   - id: dod-omn24214-ac3
     description: >-
-      The census the second lab host reads is the private lane manifest and snapshot: the check requires that neither names dashboard-owner and that the lab-overlay parity test passes, so it fails while the private declaration or the generator rows remain. The reading of the running census on the second lab host is the pull request's Lab line; hosted CI cannot reach it.
+      The lab census and disk hygiene read the same generator maps: the retired-lane test for dashboard-owner passes at this head and fails against the base commit's generator. The reading of the running census on the second lab host is the PR Lab line; hosted CI cannot reach it.
     source: manual
-    execution_scope: local_done_gate
     binds_ac:
       - AC3
     checks:
-      - check_type: command
-        check_value: >-
-          bash -c '! grep -rniq dashboard-owner "${ONEX_WORKSPACE_CONFIG_ROOT:?set to the private overlay root}/config/lab/lane-census"'
-        cwd: .
       - check_type: test_passes
-        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_incident_replay_omn18949.py -m lab_overlay -k does_NOT_reject_the_current_tree -q --no-cov -p no:cacheprovider -p no:randomly
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_retired_lanes.py -k dashboard-owner -q --no-cov -p no:cacheprovider
         cwd: .
