@@ -618,24 +618,29 @@ run_preflight_required_env() {
 # reader refuses (a key outside its schema's allowlist, an empty value, two
 # clones that both carry fragments) stops the refresh here, before anything is
 # built.
-LANE_ENV_EXPORTS=""
+# OMN-24081: the same call renders the dev lane's embedding address and the lane bifrost
+# overlay it binds from the llm_endpoints overlay, over the operator env sourced above, so a
+# warm refresh never puts back an address a person once typed into that file; an overlay that
+# cannot be rendered stops the refresh here too. STATE_DIR is where the rewritten lane overlay
+# directory is written.
+STATE_DIR="${HOME}/.omnibase/state/dev_lane_refresh"
 if ! LANE_ENV_EXPORTS="$(PYTHONPATH="${REPO_ROOT}/scripts/deploy-agent${PYTHONPATH:+:${PYTHONPATH}}" \
-        run_python -c 'import sys
+        run_python -c 'import os
+import sys
 from pathlib import Path
+from deploy_agent import executor
 from deploy_agent.instance_lanes import default_instance_lane_env_exports
-sys.stdout.write(default_instance_lane_env_exports(sys.argv[1], Path(sys.argv[2])))' \
-        "${REPO_ROOT}" "${OMNI_HOME}")"; then
-    err "LANE_ENV_FRAGMENT_REFUSED: the lane env fragment could not be applied"
+llm = executor.load_dev_boot_guard(executor._LLM_ENV_MODULE)
+sys.stdout.write(default_instance_lane_env_exports(sys.argv[1], Path(sys.argv[2])) + llm.refresh_exports(executor, dict(os.environ), Path(sys.argv[2]), Path(sys.argv[3])))' \
+        "${REPO_ROOT}" "${OMNI_HOME}" "${STATE_DIR}")"; then
+    err "LANE_ENV_FRAGMENT_REFUSED: the lane env fragment or the LLM endpoint env could not be applied"
     err "  (reason above); nothing was built or restarted."
     exit 64
 fi
-if [[ -n "${LANE_ENV_EXPORTS}" ]]; then
-    # shellcheck source=/dev/null
-    source <(printf '%s' "${LANE_ENV_EXPORTS}")
-    log "lane env fragment applied: $(printf '%s' "${LANE_ENV_EXPORTS}" | sed -e 's/^export //' | tr '\n' ' ')"
-else
-    log "lane env fragment: none"
-fi
+# shellcheck source=/dev/null
+source <(printf '%s' "${LANE_ENV_EXPORTS}")
+export ONEX_DEPLOY_LANE_ENV_EXPORTS="${LANE_ENV_EXPORTS}"
+log "lane env applied from the overlays: $(printf '%s' "${LANE_ENV_EXPORTS}" | sed -e 's/^export //' | tr '\n' ' ')"
 
 INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
 
@@ -722,7 +727,6 @@ if [[ "${MODE}" == "print-rollback-cmd" ]]; then
     exit 0
 fi
 
-STATE_DIR="${HOME}/.omnibase/state/dev_lane_refresh"
 HISTORY_DIR="${STATE_DIR}/history"
 mkdir -p "${HISTORY_DIR}"
 UTC_NOW="$(date -u +%Y%m%dT%H%M%SZ)"
