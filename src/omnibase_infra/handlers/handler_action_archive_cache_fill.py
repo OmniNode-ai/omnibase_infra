@@ -41,6 +41,7 @@ from omnibase_infra.observability.runner_health.model_runner_fleet_config import
 
 _USES_RE = re.compile(r"""uses:\s*['"]?([^'"\s#]+)""")
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
+_REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _WORKFLOW_DIRS = (".github/workflows/", ".github/actions/")
 _REUSABLE_WORKFLOW_MARKER = "/.github/workflows/"
 
@@ -218,7 +219,9 @@ class HandlerActionArchiveCacheFill:
         if _REUSABLE_WORKFLOW_MARKER in f"/{path}":
             return None
         segments = path.split("/")
-        if len(segments) < 2 or not segments[0] or not segments[1] or not ref:
+        if len(segments) < 2 or not segments[0] or not segments[1]:
+            return None
+        if not _REF_RE.match(ref):
             return None
         return segments[0], segments[1], ref
 

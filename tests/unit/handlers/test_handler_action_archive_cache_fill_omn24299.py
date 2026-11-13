@@ -141,6 +141,7 @@ jobs:
       - uses: docker://x
       - uses: OmniNode-ai/x/.github/workflows/y.yml@abc
       - uses: OmniNode-ai/localaction@main
+      - uses: OmniNode-ai/localaction/.github/actions/y@<sha>
 """
     # The pinned form of actions/checkout: the sha of the commit v4 points at.
     sha = _git("rev-parse", "v4^{commit}", cwd=checkout_bare)

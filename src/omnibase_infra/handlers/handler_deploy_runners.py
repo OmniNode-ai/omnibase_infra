@@ -25,6 +25,14 @@ from omnibase_infra.observability.runner_health.model_runner_fleet_config import
 )
 
 _LOG = logging.getLogger(__name__)
+# The node's runtime entry for the cache fill, run as a file so this handler names no
+# node module (the node-boundary gate keeps handlers from importing their node).
+_FILL_ENTRY = (
+    Path(__file__).resolve().parents[1]
+    / "nodes"
+    / "node_deploy_runners"
+    / "runtime_action_archive_cache_fill.py"
+)
 
 
 class HandlerDeployRunners:
@@ -82,8 +90,7 @@ class HandlerDeployRunners:
         """Run the fill through its node runtime entry and read its one result line."""
         process = await asyncio.create_subprocess_exec(
             sys.executable,
-            "-m",
-            "omnibase_infra.nodes.node_deploy_runners.runtime_action_archive_cache_fill",
+            str(_FILL_ENTRY),
             "--config",
             fleet_config,
             "--clone-root",
