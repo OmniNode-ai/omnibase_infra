@@ -1068,13 +1068,13 @@ services:
       # this variable, and the runtime boots with every other node wired. On
       # 2026-10-09 the same absence crash-looped runtime-effects (14 restarts)
       # because the node read its overlay while the runtime was wiring it.
-      # A second overlay root, appended after the frozen one: the host's clone of the
-      # overlays repository (its overlays/ folder), read-only. A document the frozen
-      # root holds still wins; one it lacks resolves here. The default is relative to
-      # this docker/ directory, i.e. <registry root>/overlays/overlays beside the
-      # omnibase_infra checkout, the clone the canonical-clone sync keeps current;
-      # DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
-      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays:/etc/onex/skill-overlays-store
+      # The store root (the host's clone of the overlays repository, its overlays/
+      # folder) comes FIRST, so its copy of a document wins; the frozen root comes
+      # second and still serves a document the store lacks (OMN-24077). The default
+      # is relative to this docker/ directory, i.e. <registry root>/overlays/overlays
+      # beside the omnibase_infra checkout, the clone the canonical-clone sync keeps
+      # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-store:/etc/onex/skill-overlays
       #
       # -- Context-source tenant (OMN-21099) -------------------------------------
       # node_context_compaction_orchestrator (compaction_runtime.tenant_id) and
@@ -1105,12 +1105,12 @@ services:
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
       # Read-only: the container reads overlays and can never rewrite one.
       - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
-      # The host's clone of the overlays repository (its overlays/ folder), read-only,
-      # appended after the frozen root so a document the frozen root holds still wins
-      # and one it lacks resolves here. The default is relative to this docker/ directory,
-      # i.e. <registry root>/overlays/overlays beside the omnibase_infra checkout, the
-      # clone the canonical-clone sync keeps current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR
-      # overrides it.
+      # The store root (the host's clone of the overlays repository, its overlays/
+      # folder) comes FIRST, so its copy of a document wins; the frozen root comes
+      # second and still serves a document the store lacks (OMN-24077). The default
+      # is relative to this docker/ directory, i.e. <registry root>/overlays/overlays
+      # beside the omnibase_infra checkout, the clone the canonical-clone sync keeps
+      # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
       # Read-only: the omniclaude clone the skills mount already comes from (OMN-22691): the
       # skills directory is <clone>/plugins/onex/skills, so the clone root is three directories

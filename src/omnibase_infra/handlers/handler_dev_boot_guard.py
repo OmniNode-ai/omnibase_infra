@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import re
+import sys
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -26,7 +27,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import JsonValue, RootModel
+from pydantic import BaseModel, JsonValue, RootModel
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.coding_agent.model_subprocess_outcome import (
@@ -44,6 +45,9 @@ from omnibase_infra.utils.util_error_sanitization import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_dev_preflight_runner import (
+        ProtocolDevPreflightRunner,
+    )
     from omnibase_infra.protocols.protocol_dev_roll_events import ProtocolDevRollEvents
 
 logger = logging.getLogger(__name__)
@@ -86,6 +90,31 @@ def _load_roll_events(execution: ModuleType) -> ProtocolDevRollEvents:
         "ProtocolDevRollEvents",
         _roll_events_module(execution).build_events(execution),
     )
+
+
+def run_preflight(
+    executor: ProtocolDevPreflightRunner,
+    command: BaseModel,
+    on_phase_update: Callable[[StrEnum, StrEnum], None],
+) -> None:
+    """Run the deploy preflight; a dev roll that fails it is announced, then the error goes on.
+
+    The preflight runs before the boot guard is prepared, so nothing else announces a
+    dev roll that fails there: the roll events publish its manifest and an incident
+    naming the issuer and the failed phase (OMN-24048). Evidence only: announcing never
+    raises and never replaces the preflight's own error.
+    """
+    try:
+        executor.preflight(on_phase_update=on_phase_update)
+    except Exception as error:
+        execution = sys.modules["deploy_agent.executor"]
+        _roll_events_module(execution).announce_preflight_failure(
+            execution,
+            command.model_dump(mode="json"),
+            str(error),
+            execution.Phase.PREFLIGHT.value,
+        )
+        raise
 
 
 def _checked(
