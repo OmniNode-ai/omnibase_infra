@@ -30,8 +30,14 @@ builders:
     image: moby/buildkit:v0.34.1
     buildkitd_config: deploy/buildkit/buildkitd.toml
     # network=host so the host's docker.io mirror on localhost:5000 answers.
+    # Measured 2026-11-13 on the main lab host: the lane builder container had no
+    # memory limit and its cgroup peaked at 8288 MB within 3.5 minutes of a roll,
+    # with 1454 MB of it already swapped. Swap equal to the limit keeps the
+    # container off swap; a build over the limit ends as BUILD_ERRORED.
     driver_opts:
       network: host
+      memory: "10g"
+      memory-swap: "10g"
     bootstrap_timeout_seconds: 600
   # CI image builds on the shared runners. The name is the one
   # docker-build.yml has pinned since OMN-16406, so no orphan is created.

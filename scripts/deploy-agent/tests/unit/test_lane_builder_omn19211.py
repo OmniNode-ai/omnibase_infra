@@ -71,6 +71,11 @@ class _FakeDocker:
         self, argv: Sequence[str], timeout: int
     ) -> subprocess.CompletedProcess[str]:
         self.calls.append(tuple(argv))
+        if argv[1] == "inspect":
+            # docker-level inspect: the memory-limit probe (OMN-24179)
+            return subprocess.CompletedProcess(argv, 0, "0 0", "")
+        if argv[1] == "update":
+            return subprocess.CompletedProcess(argv, 0, "", "")
         verb = argv[2]
         if verb == "inspect" and "--bootstrap" in argv:
             ok = self.exists and self.boots

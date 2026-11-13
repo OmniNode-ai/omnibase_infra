@@ -615,6 +615,79 @@ def _exists(spec: ModelBuilderSpec, run: CommandRunner) -> bool:
     ).returncode == 0
 
 
+def _size_to_bytes(text: str) -> int:
+    """Parse a declared size (digits followed by optional b/k/m/g, powers of 1024)."""
+    m = re.fullmatch(r"(\d+)([bkg])?", text.strip().lower())
+    if m is None:
+        raise LaneBuilderError(f"unparseable size {text!r}")
+    return int(m.group(1)) * 1024 ** {"b": 0, "k": 1, "m": 2, "g": 3}[m.group(2) or "b"]
+
+
+def builder_container_name(spec: ModelBuilderSpec) -> str:
+    """The docker-container builder's container name for a declared builder."""
+    return f"buildx_buildkit_{spec.name}0"
+
+
+def _declared_memory(spec: ModelBuilderSpec) -> tuple[int, int] | None:
+    """The declared (memory, memory-swap) bytes, or None when no memory is declared."""
+    memory = spec.driver_opts.get("memory")
+    if memory is None:
+        return None
+    memory_bytes = _size_to_bytes(memory)
+    swap = spec.driver_opts.get("memory-swap", memory)
+    return memory_bytes, _size_to_bytes(swap)
+
+
+def _enforce_memory_limit(spec: ModelBuilderSpec, run: CommandRunner) -> None:
+    """Align the running builder container's memory limit with its declaration.
+
+    A limit difference is fixed with ``docker update``; the builder, its state
+    volume and its cache are kept, so a limit difference never ``buildx rm``.
+    """
+    declared = _declared_memory(spec)
+    if declared is None:
+        return
+    memory_bytes, memory_swap_bytes = declared
+    container = builder_container_name(spec)
+    result = run(
+        [
+            "docker",
+            "inspect",
+            "--format",
+            "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}",
+            container,
+        ],
+        spec.bootstrap_timeout_seconds,
+    )
+    if result.returncode != 0:
+        raise LaneBuilderError(
+            f"could not inspect memory limit of {container}: {result.stderr.strip()}"
+        )
+    current = result.stdout.split()
+    if (
+        len(current) == 2
+        and int(current[0]) == memory_bytes
+        and int(current[1]) == memory_swap_bytes
+    ):
+        return
+    updated = run(
+        [
+            "docker",
+            "update",
+            "--memory",
+            str(memory_bytes),
+            "--memory-swap",
+            str(memory_swap_bytes),
+            container,
+        ],
+        spec.bootstrap_timeout_seconds,
+    )
+    if updated.returncode != 0:
+        raise LaneBuilderError(
+            f"could not update memory limit of {container}: {updated.stderr.strip()}"
+        )
+
+
 def ensure_builder(
     spec: ModelBuilderSpec,
     *,
@@ -631,6 +704,7 @@ def ensure_builder(
     builder.
     """
     if _is_ready(spec, run):
+        _enforce_memory_limit(spec, run)
         return
     if _exists(spec, run):
         logger.warning(
@@ -656,6 +730,7 @@ def ensure_builder(
             f"builder {spec.name} was created but is not ready as declared "
             f"(driver {spec.driver}, BuildKit {spec.image_version})"
         )
+    _enforce_memory_limit(spec, run)
 
 
 def lane_builder_env(
