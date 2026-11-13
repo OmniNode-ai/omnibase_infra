@@ -85,6 +85,13 @@ config:
       password_env: ESTIMATOR_GATE_PASSWORD
     description: >-
       Invoked synchronously by the host deploy agent while its lane lock is held, within its existing rebuild command consumer. No second consumer, runtime dependency or prod admission. The web repository owns its merge publisher.
+  llm_endpoint_env_render:
+    contract_path: contracts/llm_endpoints.yaml
+    state_dir_env: DEPLOY_AGENT_STATE_DIR
+    rendered_dir_name: rendered-lane-overlays
+    lane_overlay_glob: "*.bifrost.yaml"
+    description: >-
+      Renders the dev lane's embedding address from the llm_endpoints overlay over the operator store, and a rewritten lane overlay copy; no value lives here.
   overlay_home_lane_env:
     clone_env: DEPLOY_AGENT_OVERLAY_HOME_CLONE
     ref: origin/main

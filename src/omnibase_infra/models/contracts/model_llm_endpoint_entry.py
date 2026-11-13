@@ -12,6 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from omnibase_infra.models.contracts.enum_llm_endpoint_status import (
     EnumLlmEndpointStatus,
 )
+from omnibase_infra.models.contracts.model_llm_endpoint_lane_overlay_binding import (
+    ModelLlmEndpointLaneOverlayBinding,
+)
 
 
 class ModelLlmEndpointEntry(BaseModel):
@@ -28,15 +31,30 @@ class ModelLlmEndpointEntry(BaseModel):
     slot_id: str = Field(..., description="Slot identifier.")  # ONEX_EXCLUDE: pattern_validator - slot_id is a human-readable natural key, not a UUID  # fmt: skip
     host: str | None = Field(
         default=None,
-        description="IP address; non-null when status=running.",
+        description="IP address; non-null when status=running unless endpoint_from_overlay.",
     )
     port: int | None = Field(
         default=None,
-        description="Integer port; non-null when status=running.",
+        description="Integer port; non-null when status=running unless endpoint_from_overlay.",
     )
     endpoint_url: str | None = Field(
         default=None,
-        description="Resolved URL convenience field; non-null when status=running.",
+        description="Resolved URL convenience field; non-null when status=running unless endpoint_from_overlay.",
+    )
+    endpoint_from_overlay: bool = Field(
+        default=False,
+        description=(
+            "Address is read from the llm_endpoints overlay at run time; "
+            "the public contract carries no address for this slot."
+        ),
+    )
+    lane_overlay_binding: ModelLlmEndpointLaneOverlayBinding | None = Field(
+        default=None,
+        description=(
+            "The lane bifrost overlay backend this slot's address is bound to, "
+            "and the env var that carries that backend's complete endpoint url. "
+            "Only set when endpoint_from_overlay is true."
+        ),
     )
     url_env_var: str | None = Field(
         default=None,
@@ -156,6 +174,22 @@ class ModelLlmEndpointEntry(BaseModel):
 
     @model_validator(mode="after")
     def _validate_running_required_fields(self) -> ModelLlmEndpointEntry:
+        if self.endpoint_from_overlay:
+            carried = [
+                name
+                for name, value in (
+                    ("host", self.host),
+                    ("port", self.port),
+                    ("endpoint_url", self.endpoint_url),
+                )
+                if value is not None
+            ]
+            if carried:
+                raise ValueError(
+                    "endpoint_from_overlay slots must not carry an address "
+                    f"(host, port, endpoint_url must all be None); "
+                    f"carries: {', '.join(carried)}"
+                )
         if self.status == EnumLlmEndpointStatus.RUNNING:
             missing = [
                 name
@@ -166,6 +200,7 @@ class ModelLlmEndpointEntry(BaseModel):
                     ("model_hf_id", self.model_hf_id),
                 )
                 if value is None
+                and (not self.endpoint_from_overlay or name == "model_hf_id")
             ]
             if missing:
                 raise ValueError(
@@ -177,6 +212,10 @@ class ModelLlmEndpointEntry(BaseModel):
                 raise ValueError("endpoint_url host must match host")
             if self.port is not None and parsed.port != self.port:
                 raise ValueError("endpoint_url port must match port")
+        if self.lane_overlay_binding is not None and not self.endpoint_from_overlay:
+            raise ValueError(
+                "lane_overlay_binding requires endpoint_from_overlay to be true"
+            )
         return self
 
 

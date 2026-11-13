@@ -50,6 +50,23 @@ def _stub_cost_estimator_build_settings(
 
 
 @pytest.fixture(autouse=True)
+def _stub_llm_endpoint_env_render(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unrelated deploy tests render no embedding address from the llm_endpoints overlay (OMN-24025).
+
+    A dev-fenced compose environment refuses without that overlay, and these tests
+    carry none. The render's own suite opts out with the ``llm_endpoint_env_render``
+    marker and drives the real step.
+    """
+    if request.node.get_closest_marker("llm_endpoint_env_render") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod, "_llm_endpoint_env_overlay", lambda env: ({}, None)
+    )
+
+
+@pytest.fixture(autouse=True)
 def _stub_dev_boot_guard(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
