@@ -1728,7 +1728,7 @@ jobs:
       - name: Verify dev-merge tag lineage (OMN-17427)
         # SPI and compat still hold release pins; enforce every iteration rule for core.
         run: |
-          uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261030041443-a5b07b5aeafc" \
+          uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261113013358-a09066caf945" \
             python -m omnibase_core.nodes.node_dev_tag_lineage_effect.runtime_dev_tag_lineage \
             pyproject.toml --package omnibase-core
 

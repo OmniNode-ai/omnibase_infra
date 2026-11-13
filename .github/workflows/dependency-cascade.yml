@@ -281,7 +281,7 @@ jobs:
       - name: Create branch and upgrade lockfile
         if: steps.token_check.outputs.has_token == 'true'
         env:
-          CORE_LINEAGE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261030041443-a5b07b5aeafc"
+          CORE_LINEAGE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261113013358-a09066caf945"
           CORE_LINEAGE_RULES: "tag_absent,tag_suffix_mismatch,tag_off_branch,declared_version_mismatch,lock_mismatch,lineage_unresolved"
         run: |
           git checkout -b "${{ steps.vars.outputs.branch }}"
