@@ -150,8 +150,12 @@ class HandlerDeployRunners:
             return tuple(warnings)
         root = row.action_archive_host_root
         try:
+            # Owned by the deploy user (so rsync can write it) and read-only to the
+            # runner containers, which mount it ro; sudo as the TMPDIR directories do.
             await self._remote(
-                request.host, f"mkdir -p -- {shlex.quote(root)}", timeout
+                request.host,
+                f'set -eu; sudo -n install -d -o "$(id -un)" -m 0755 -- {shlex.quote(root)}',
+                timeout,
             )
             await self._rsync(filled.staging_root, request.host, root, timeout)
         except (OSError, TimeoutError):

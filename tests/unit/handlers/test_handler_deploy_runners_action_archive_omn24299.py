@@ -88,7 +88,10 @@ async def test_golden_fills_then_creates_the_root_then_copies(tmp_path: Path) ->
 
     assert warnings == ()
     assert [c[0] for c in handler.calls] == ["ssh", "rsync"]
-    assert handler.calls[0][1:] == (HOST, f"mkdir -p -- {HOST_ROOT}")
+    assert handler.calls[0][1:] == (
+        HOST,
+        f'set -eu; sudo -n install -d -o "$(id -un)" -m 0755 -- {HOST_ROOT}',
+    )
     assert handler.calls[1] == ("rsync", str(fx["staging_root"]), HOST, HOST_ROOT)
     assert len(list(fx["staging_root"].rglob("*.tar.gz"))) == 4
 
