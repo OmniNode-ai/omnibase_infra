@@ -15,7 +15,12 @@
 --   state node cannot write floor_fill_state (0 rows).
 --
 -- WHAT THIS FILE DOES
---   It GRANTs exactly the privileges the topology declares, and re-asserts
+--   It GRANTs the topology-declared privileges on the four of those tables that
+--   carry a public ownership declaration (code_eval_trial_state,
+--   floor_fill_state, pr_landing_workflow_state, session_phase_state).
+--   delegation_workflow_state and infra_routing_decisions have none under
+--   public, so the application database SQL gate refuses a target on them;
+--   they are left out until their ownership is declared. It re-asserts
 --   them through a post-condition that fails the migration unless every
 --   privilege is actually held. It widens nothing beyond the declaration: no
 --   DELETE, no wildcard.
@@ -37,13 +42,11 @@ DECLARE
     priv text;
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'role_omnibase_infra') THEN
-        GRANT SELECT, INSERT, UPDATE ON TABLE public.code_eval_trial_state, public.delegation_workflow_state, public.floor_fill_state, public.infra_routing_decisions, public.pr_landing_workflow_state, public.session_phase_state TO role_omnibase_infra;
+        GRANT SELECT, INSERT, UPDATE ON TABLE public.code_eval_trial_state, public.floor_fill_state, public.pr_landing_workflow_state, public.session_phase_state TO role_omnibase_infra;
 
         FOREACH tbl IN ARRAY ARRAY[
             'code_eval_trial_state',
-            'delegation_workflow_state',
             'floor_fill_state',
-            'infra_routing_decisions',
             'pr_landing_workflow_state',
             'session_phase_state'
         ] LOOP

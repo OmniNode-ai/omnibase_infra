@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-24037
 title: "The runtime database role is granted the floor fill state table and the other state tables the topology declares for it"
-summary: "Forward migration 115 grants role_omnibase_infra SELECT, INSERT and UPDATE on the six omnibase_infra state_io tables the topology instances declare for it (code_eval_trial_state, delegation_workflow_state, floor_fill_state, infra_routing_decisions, pr_landing_workflow_state, session_phase_state). The declaration existed but no migration issued the grant, and the tables are created by the postgres superuser, so on the warm dev volume the runtime role held nothing on floor_fill_state and the floor fill state node could not write its row. The grant is guarded on the role existing and fails the migration unless has_table_privilege reads true for every privilege."
+summary: "Forward migration 115 grants role_omnibase_infra SELECT, INSERT and UPDATE on four omnibase_infra state_io tables the topology instances declare for it and that carry a public ownership declaration (code_eval_trial_state, floor_fill_state, pr_landing_workflow_state, session_phase_state). The declaration existed but no migration issued the grant, and the tables are created by the postgres superuser, so on the warm dev volume the runtime role held nothing on floor_fill_state and the floor fill state node could not write its row. The grant is guarded on the role existing and fails the migration unless has_table_privilege reads true for every privilege."
 is_seam_ticket: true
 interface_change: false
 interfaces_touched: []

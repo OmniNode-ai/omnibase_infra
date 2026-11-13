@@ -8,7 +8,7 @@ rows through ``StateStoreAdapter`` as the runtime login role
 ``role_omnibase_infra``. The tables are created by the postgres superuser, so on
 a warm dev volume the runtime account holds nothing and the floor fill state
 node cannot write ``floor_fill_state``. Migration 115 GRANTs exactly the
-privileges the topology declares (SELECT, INSERT, UPDATE on the six public
+privileges the topology declares (SELECT, INSERT, UPDATE on the public
 state tables) and re-asserts them through a post-condition that fails the
 migration unless every privilege is actually held.
 
@@ -68,15 +68,13 @@ FLOOR_FILL_MIGRATION = (
 ROLE = "role_omnibase_infra"
 TABLE = "floor_fill_state"
 KEY = "scope"
-# The six state_io tables the topology declares the grant for. The grant proof
+# The state_io tables with a public ownership declaration that the grant covers. The grant proof
 # only needs the relations to exist so ``has_table_privilege`` can answer; the
 # five non-floor tables are created as one-column stubs, and floor_fill_state is
 # created by its real migration so the adapter can actually drive it.
 STATE_TABLES = (
     "code_eval_trial_state",
-    "delegation_workflow_state",
     "floor_fill_state",
-    "infra_routing_decisions",
     "pr_landing_workflow_state",
     "session_phase_state",
 )
@@ -134,13 +132,13 @@ def _grant_dsns(*, create_role: bool) -> Iterator[str]:
 
 @pytest.fixture
 def grant_dsn() -> Iterator[str]:
-    """A DSN to a database with the six state tables and the runtime role."""
+    """A DSN to a database with the state tables and the runtime role."""
     yield from _grant_dsns(create_role=True)
 
 
 @pytest.fixture
 def grant_dsn_without_role() -> Iterator[str]:
-    """The same database with the six state tables and NO runtime role."""
+    """The same database with the state tables and NO runtime role."""
     yield from _grant_dsns(create_role=False)
 
 
