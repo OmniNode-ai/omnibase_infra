@@ -21,7 +21,14 @@ builders:
   # Lane image builds: the deploy agent's `docker compose build`. Selected per
   # agent instance by the unit's DEPLOY_AGENT_LANE_BUILDER=lane.
   lane:
-    name: onex-lane-buildkit
+    # OMN-24179. The name carries the declared memory limit. ensure_builder
+    # (deploy_agent.build_budget) recreates a builder only when it is absent,
+    # does not boot, or runs another driver or BuildKit version; it does not
+    # read a running builder's limit. So changing the limit below means
+    # changing this name too: the agent then finds no such builder and creates
+    # it from this declaration, limit included. The builder under the previous
+    # name is left behind, idle, for the host owner to remove.
+    name: onex-lane-buildkit-mem12g
     driver: docker-container
     # Pinned. v0.34.0 is the first release that recovers from a database that
     # fails to open (moby/buildkit#7137), writes a BoltDB freelist at graceful
@@ -30,8 +37,16 @@ builders:
     image: moby/buildkit:v0.34.1
     buildkitd_config: deploy/buildkit/buildkitd.toml
     # network=host so the host's docker.io mirror on localhost:5000 answers.
+    # memory and memory-swap are the docker-container driver's container
+    # limits. Equal values leave the container no swap: a dev runtime image
+    # build was measured growing past 17 GB of cgroup memory with no cap, and
+    # 96 percent of the host's swap-out fell in roll windows. A build that
+    # needs more than this is killed by its limit and fails with a named
+    # build error; it no longer pushes the host into swap. Change it here only.
     driver_opts:
       network: host
+      memory: 12g
+      memory-swap: 12g
     bootstrap_timeout_seconds: 600
   # CI image builds on the shared runners. The name is the one
   # docker-build.yml has pinned since OMN-16406, so no orphan is created.
