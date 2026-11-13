@@ -127,4 +127,7 @@ if [[ "${DEPLOY_AGENT_ALLOWED_LANES:-}" == "dev" && "${ONEX_LEDGER_WRITE_VIA:-}"
     export ONEX_LEDGER_BUS_APPEND_COMMAND
 fi
 
-exec "$DEPLOY_AGENT_PYTHON" -m deploy_agent "$@"
+# OMN-22792: the unit's declared house model keys (DEPLOY_AGENT_HOUSE_KEYS) are resolved
+# from the secret store by omnimarket's house-model-key CLI (the registry root's dispatch venv),
+# which then execs the agent with them in its environment; no value is printed or written.
+exec ${DEPLOY_AGENT_HOUSE_KEYS:+"$UNIT_DRIFT_REGISTRY_ROOT/.onex-dispatch-venv/bin/python" -m omnimarket.nodes.node_secret_store_effect.runtime_house_model_key_cli --exec-names "$DEPLOY_AGENT_HOUSE_KEYS" --} "$DEPLOY_AGENT_PYTHON" -m deploy_agent "$@"
