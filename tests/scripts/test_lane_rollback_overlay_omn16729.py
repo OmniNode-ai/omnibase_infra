@@ -85,6 +85,14 @@ def _print_rollback_cmd(tmp_path: Path) -> list[str]:
     # This is a print-only fixture; its deployment command is never executed.
     env["DEPLOY_RUNTIME"] = "true"
     env.pop("OMNIBASE_INFRA_COMPOSE_PROJECT", None)
+    # The refresh renders the embedding address from the llm_endpoints overlay and
+    # refuses without one (OMN-24081): a synthetic root, a documentation-range address.
+    overlay_root = tmp_path / "overlay-root"
+    (overlay_root / "llm_endpoints").mkdir(parents=True)
+    (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
+        "schema_version: 1\nendpoint_urls:\n  embeddings-201: http://192.0.2.50:8100\n"
+    )
+    env["ONEX_SKILL_OVERLAY_ROOTS"] = str(overlay_root)
     # The script requires docker/git/curl/jq on PATH before it will print.
     result = subprocess.run(
         ["bash", str(REFRESH_DEV), "--print-rollback-cmd"],

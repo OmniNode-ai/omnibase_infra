@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, JsonValue, RootModel
@@ -57,6 +57,55 @@ DOCKER_READ_SECONDS = 10
 REPORT_SECONDS = 20
 # A full container log (json-file rotation holds up to 30 MB) is read before recovery.
 LOG_READ_SECONDS = 60
+
+# OMN-24127: the kept copy of a failed container's log loses credential-shaped
+# spans only. The whole-text sanitizer (sanitize_error_string) replaced an 8 MB
+# real boot log with its 39-byte notice because the log held one of its sensitive
+# words, so the kept log held no cause. The regexes below are the ones
+# cli_delegate._redact_refusal_text uses for the same reason.
+# The deploy agent runs this module against the published omnibase_infra, which
+# may predate the shared helper, so the credential value shapes are held here
+# (same list as util_dlq_credential_redaction.CREDENTIAL_VALUE_PATTERNS).
+_REDACTION_MARKER: Final[str] = "[REDACTED]"
+_CREDENTIAL_VALUE_SHAPES: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"onxk_[A-Za-z0-9_-]{20,}"),
+    re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"AIza[A-Za-z0-9_-]{35,}"),
+    re.compile(
+        r"(?<![A-Za-z0-9_.-])[A-Fa-f0-9]{32}\.[A-Za-z0-9_-]{16,}"
+        r"(?![A-Za-z0-9_.-])"
+    ),
+    re.compile(r"(?i:\bbearer)\s+[A-Za-z0-9._~+/-]{16,}=*"),
+)
+_PEM_KEY_MATERIAL: Final[re.Pattern[str]] = re.compile(
+    r"-----BEGIN[^-]*-----.*?(?:-----END[^-]*-----|$)", re.DOTALL
+)
+_URL_USERINFO: Final[re.Pattern[str]] = re.compile(
+    r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s@]+@"
+)
+_SECRET_PAIR: Final[re.Pattern[str]] = re.compile(
+    r"(?P<key>(?:pass(?:word|wd)?|secret|(?:api[_-]?|access[_-]?|auth[_-]?)?"
+    r"(?:key|token))\s*=\s*)(?P<value>[^\s,;]+)",
+    re.IGNORECASE,
+)
+
+
+def redact_credential_spans(text: str) -> str:
+    """Replace only the credential-shaped spans of ``text`` and keep every other line.
+
+    Applied in order: the shared credential value shapes (an ``sk-`` key, a JWT,
+    a Bearer value, ...), PEM key material, URL userinfo (keeping scheme and
+    host), and the value of a ``key=value`` pair whose key names a secret
+    (keeping the key). No truncation: an incident log stays whole and only the
+    credential spans shrink.
+    """
+    redacted = text
+    for shape in _CREDENTIAL_VALUE_SHAPES:
+        redacted = shape.sub(_REDACTION_MARKER, redacted)
+    redacted = _PEM_KEY_MATERIAL.sub("[REDACTED key material]", redacted)
+    redacted = _URL_USERINFO.sub(r"\g<scheme>[REDACTED]@", redacted)
+    return _SECRET_PAIR.sub(r"\g<key>[REDACTED]", redacted)
 
 
 class DevBootFailedError(RuntimeError):
@@ -916,12 +965,9 @@ class HandlerDevBootGuard:
                         raw_text = encoded[-self.log_byte_cap :].decode(
                             "utf-8", errors="replace"
                         )
-                        # Logs can hold secrets: the sanitizer replaces the whole
-                        # text when it finds a credential pattern, and is told not
-                        # to truncate (its default cuts an error string to 500).
-                        kept_text = sanitize_error_string(
-                            raw_text, max_length=len(raw_text) + 64
-                        )
+                        # Logs can hold secrets; only credential-shaped spans are
+                        # replaced and every other line is kept.
+                        kept_text = redact_credential_spans(raw_text)
                         kept_bytes = kept_text.encode("utf-8")
                         artifact_path = (
                             self.root / f"incident-{job}-{reading['service']}.log"
