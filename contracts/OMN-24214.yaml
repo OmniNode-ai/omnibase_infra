@@ -5,9 +5,7 @@ summary: >-
   Child of OMN-24186. The lane table generator carried a port row and a boundary row for the dashboard owner's lab lane (OMN-17292). The private lane census no longer declares that lane (companion pull request in the private lab-settings repository, same ticket), and the generator's census guard (orphan_map_entries) refuses a map row for a lane the census does not declare, so the rows are removed here and the retired-lane test now holds the lane name. The test that held the rows is deleted.
 is_seam_ticket: true
 interface_change: false
-interfaces_touched:
-  - generate_claude_lane_block._LANE_PORT_MAP
-  - generate_claude_lane_block._LANE_BOUNDARY
+interfaces_touched: []
 requirements:
   - id: req-omn24214-rows
     statement: The lane table generator has no row for the retired dashboard owner lane.
