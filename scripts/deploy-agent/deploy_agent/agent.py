@@ -118,6 +118,7 @@ from deploy_agent.idle_converge import (
     read_running_image,
     read_running_ref,
     restore_command,
+    select_dev_ran_tag,
     stability_follow_command,
 )
 from deploy_agent.idle_converge import (
@@ -1425,34 +1426,38 @@ class DeployAgent:
     def _maybe_stability_follow(
         self, now: datetime
     ) -> ModelStabilityFollowDecision | None:
-        """Rebuild the stability lane onto the tag dev runs (OMN-19998).
-
-        Only on a lab dev agent whose fence admits the stability lane
-        (``lane_policy.follows_stability``); see
-        ``idle_converge.decide_stability_follow`` for the rule. The rebuild is
-        an ordinary job through ``_execute_command``, under the same
-        single-flight, lane lock and load gate, with its own job record and
-        terminal event named ``agent/stability-follow-tag``: the stability
-        lane's own receipt.
-        """
+        # Rebuild the stability lane onto the dev tag the dev lane ran with a
+        # passing deploy record (OMN-19998, OMN-21485). Only on a lab dev agent
+        # whose fence admits the stability lane (``lane_policy.follows_stability``);
+        # see ``idle_converge.decide_stability_follow`` for the rule. The rebuild
+        # is an ordinary job through ``_execute_command``, under the same
+        # single-flight, lane lock and load gate, with its own job record and
+        # terminal event named ``agent/stability-follow-tag``: the stability
+        # lane's own receipt.
         if not follows_stability(self._allowed_lanes):
             return None
         decisions: list[ModelStabilityFollowDecision] = []
         for repository in DEV_TAG_FOLLOWED_REPOSITORIES:
             tags = self._idle_read_dev_tags(repository)
-            newest = tags[-1] if tags else None
-            dev_ref = self._idle_read_running_ref(repository)
+            # OMN-21485: dev's own deploy record and the tag dev ran decide; the
+            # partial binds the repository so containment reads the same seam
+            # the heartbeat uses.
+            dev_tag = select_dev_ran_tag(
+                tags or [],
+                self._idle_read_running_ref(repository),
+                functools.partial(self._idle_running_contains, repository),
+            )
             stability_ref = self._stability_read_running_ref(repository)
             decision = decide_stability_follow(
                 ModelStabilityFollowInputs(
                     tags=tuple(tags) if tags is not None else None,
-                    dev_running_ref=dev_ref,
-                    dev_contains_newest=self._contains_newest(
-                        repository, newest, dev_ref
+                    dev_ran_tag_sha=dev_tag.sha if dev_tag else None,
+                    dev_receipt=self.job_store.latest_terminal_status(
+                        EnumRuntimeLane.DEV.value
                     ),
                     stability_running_ref=stability_ref,
-                    stability_contains_newest=self._contains_newest(
-                        repository, newest, stability_ref
+                    stability_contains_tag=self._contains_newest(
+                        repository, dev_tag, stability_ref
                     ),
                     job_active=self.job_store.has_active_job(),
                     frozen_reason=getattr(
@@ -1475,9 +1480,10 @@ class DeployAgent:
             return decision
         if not self._idle_converge_gate_open():
             return decision
-        assert decision.newest_tag_sha is not None  # FOLLOW names the tag
-        self._stability_follow_attempted.add(decision.newest_tag_sha)
-        cmd = stability_follow_command()
+        assert decision.followed_tag is not None  # FOLLOW names the tag
+        assert decision.followed_tag_sha is not None
+        cmd = stability_follow_command(decision.followed_tag, repository)
+        self._stability_follow_attempted.add(decision.followed_tag_sha)
         logger.info(
             "stability follow: running %s as %s: %s",
             cmd.correlation_id,
@@ -2065,6 +2071,7 @@ class DeployAgent:
                         lane=cmd.runtime_lane,
                         image_digest=cmd.image_digest,
                         declared_pr=cmd.open_pr,
+                        sibling_tags=cmd.sibling_tags,
                     )
 
                     if dev_guard is not None:
