@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FRICTION = "friction_type=dev_event_publish_failed"
+PREFLIGHT_NO_RECOVERY = "no recovery: the roll failed before any change to the runtime"
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -169,3 +170,42 @@ class DevRollEventsPublisher:
             and "runtime_kept_revision" not in guard_incident
         ):
             self.started(job_id, datetime.now(UTC), EnumDevStartCause.OTHER)
+
+    def preflight_failure(
+        self,
+        command: Mapping[str, object],
+        *,
+        error: str,
+        phase: str,
+        project: str,
+    ) -> None:
+        """Publish the manifest then one incident naming the issuer and the failed phase."""
+        try:
+            self.manifest(command)
+            job_id = str(command.get("correlation_id", ""))
+            self._publish(
+                self._topics["dev_roll_incident"],
+                f"dev-roll-incident/{job_id}",
+                lambda: ModelDevRollIncident.model_validate(
+                    {
+                        "event_id": uuid4(),
+                        "job_id": job_id,
+                        "issuer": command["requested_by"],
+                        "commit": str(command["git_ref"]),
+                        "error": error,
+                        "project": project,
+                        "at": datetime.now(UTC),
+                        "restored_revision": "",
+                        "recovery_verified": False,
+                        "recovery_skipped_healthy": None,
+                        "recovery_error": PREFLIGHT_NO_RECOVERY,
+                        "health_probes": [],
+                        "log_captures": [],
+                        "failed_phase": phase,
+                    }
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "dev preflight incident could not be published %s", FRICTION
+            )
