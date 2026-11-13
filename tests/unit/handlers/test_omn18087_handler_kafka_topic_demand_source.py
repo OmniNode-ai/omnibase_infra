@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Iterator
 
 import pytest
@@ -432,3 +433,53 @@ async def test_boot_set_of_unprovisioned_topics_starts_no_reader(
     assert in_use == {ABSENT}
     assert FakeConsumer.instances == []
     await stop()
+
+
+async def test_the_measure_line_counts_retained_missing_and_idle(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    broker.update({BUSY: (0, 5), IDLE: (3, 3)})
+
+    async def on_first(topic: str) -> None:
+        return None
+
+    caplog.set_level(logging.INFO, module.__name__)
+    _in_use, stop = await _source().watch_idle_topics({BUSY, IDLE, ABSENT}, on_first)
+    try:
+        lines = [
+            record.message
+            for record in caplog.records
+            if record.message.startswith("Boot subscription demand measure")
+        ]
+        assert lines == [
+            "Boot subscription demand measure: 3 topic(s) measured; 1 hold retained "
+            "records, 1 are missing from the broker, 0 exist but are unreadable, "
+            "1 are idle and watched (OMN-24223)"
+        ]
+    finally:
+        await stop()
+
+
+async def test_the_measure_line_counts_a_boot_set_with_no_provisioned_topic(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def on_first(topic: str) -> None:
+        return None
+
+    caplog.set_level(logging.INFO, module.__name__)
+    _in_use, stop = await _source().watch_idle_topics({ABSENT}, on_first)
+    try:
+        lines = [
+            record.message
+            for record in caplog.records
+            if record.message.startswith("Boot subscription demand measure")
+        ]
+        assert lines == [
+            "Boot subscription demand measure: 1 topic(s) measured; 0 hold retained "
+            "records, 1 are missing from the broker, 0 exist but are unreadable, "
+            "0 are idle and watched (OMN-24223)"
+        ]
+    finally:
+        await stop()

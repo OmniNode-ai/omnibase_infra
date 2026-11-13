@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-24223
+title: Start-up log counts the workflows switched on only because their queue is missing
+summary: 'At start-up the demand source measures every subscribe topic of the boot set and keeps a contract on the boot path when a topic holds retained records or cannot be read, a topic that is not yet provisioned included. Nothing said how many contracts were kept only because their topic is missing, so the next piece of the on-demand work (what to do about a missing topic) could not be chosen from a reading. The measure now logs one line, "Boot subscription demand measure", with the counts of topics holding retained records, topics missing from the broker, topics that exist but cannot be read, and topics that are idle and watched. No decision and no return value changes; the line is read on the development runtime after the next roll and is AC3.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-demand-measure-line
+    statement: The demand source's boot measure logs the counts of its topics by state, so the share of contracts kept at boot only for a missing topic is a reading.
+    acceptance:
+      - id: AC1
+        statement: The measure logs one line with the counts of retained, missing, unreadable and idle-watched topics, on the fake broker.
+      - id: AC2
+        statement: The same line carries the counts of a real broker (one retained topic, one idle topic, one uncreated topic; and a boot set of one uncreated topic).
+      - id: AC3
+        statement: After the next development roll, the runtime's start-up log holds the line with the counts of the running broker.
+evidence_requirements:
+  - kind: tests
+    description: The unit tests read the line on the fake broker; the integration tests read it against a throwaway Redpanda broker.
+    command: uv run --frozen pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/integration/handlers/test_demand_measure_line_real_broker_omn24223.py -q -n 0 --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-demand-measure-ac1-ac2
+    description: The tests fail when the log call is removed (the injected break, four failures) and pass with it, on the fake broker and on a real Redpanda broker.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/integration/handlers/test_demand_measure_line_real_broker_omn24223.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-demand-measure-merged-source-ac3
+    description: Hermetic source readback at the evaluated commit that the measure logs the line, absent at the merge base. The live reading on the development runtime is taken after the deploy.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'src=$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_kafka_topic_demand_source.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d); printf %s "$src" | grep -F "Boot subscription demand measure" >/dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra

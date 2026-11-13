@@ -42,6 +42,26 @@ async def _nothing_to_stop() -> None:
     return None
 
 
+def _log_demand_measure(
+    *,
+    total: int,
+    with_records: int,
+    missing: int,
+    unreadable: int,
+    idle_watched: int,
+) -> None:
+    logger.info(
+        "Boot subscription demand measure: %d topic(s) measured; %d hold retained "
+        "records, %d are missing from the broker, %d exist but are unreadable, "
+        "%d are idle and watched (OMN-24223)",
+        total,
+        with_records,
+        missing,
+        unreadable,
+        idle_watched,
+    )
+
+
 async def _start_one(start: Callable[[str], Awaitable[None]], topic: str) -> None:
     try:
         await start(topic)
@@ -106,6 +126,7 @@ class HandlerKafkaTopicDemandSource:
             if not entry.get("error_code")
             for partition in entry["partitions"]
         ]
+        missing = sum(1 for physical in logical_of if physical not in existing)
         if not partitions:
             # Nothing to measure or watch: the boot set is empty (a runtime
             # profile that owns no auto-wired contract) or none of its topics
@@ -115,6 +136,13 @@ class HandlerKafkaTopicDemandSource:
             # CancelledError out of this call, past the boundary above, and ends
             # the kernel (tenant-projection-writer restart loop on the laptop
             # profile, run 40881579955).
+            _log_demand_measure(
+                total=len(logical_of),
+                with_records=0,
+                missing=missing,
+                unreadable=len(logical_of) - missing,
+                idle_watched=0,
+            )
             return frozenset(logical_of.values()), _nothing_to_stop
         consumer = create_offset_consumer(self._config)
         await consumer.start()
@@ -144,6 +172,14 @@ class HandlerKafkaTopicDemandSource:
             if physical in with_records or physical not in readable
         )
         watched = [tp for tp in measured if tp.topic not in with_records]
+        _log_demand_measure(
+            total=len(logical_of),
+            with_records=len(with_records),
+            missing=missing,
+            unreadable=sum(1 for physical in logical_of if physical not in readable)
+            - missing,
+            idle_watched=len({tp.topic for tp in watched}),
+        )
         if not watched:
             await consumer.stop()
             return in_use, _nothing_to_stop
