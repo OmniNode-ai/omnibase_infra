@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24037
+title: "The runtime database role is granted the floor fill state table and the other state tables the topology declares for it"
+summary: "Forward migration 115 grants role_omnibase_infra SELECT, INSERT and UPDATE on four omnibase_infra state_io tables the topology instances declare for it and that carry a public ownership declaration (code_eval_trial_state, floor_fill_state, pr_landing_workflow_state, session_phase_state). The declaration existed but no migration issued the grant, and the tables are created by the postgres superuser, so on the warm dev volume the runtime role held nothing on floor_fill_state and the floor fill state node could not write its row. The grant is guarded on the role existing and fails the migration unless has_table_privilege reads true for every privilege."
+is_seam_ticket: true
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24037-runtime-role-grant
+    statement: The migration stream that the deploy already runs issues the grant the topology declares for role_omnibase_infra on the state_io tables, with no hand grant on the dev database, and the real StateStoreAdapter can seed, CAS-update and load floor_fill_state as that role.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a forward migration grants the runtime database role (role_omnibase_infra) select, insert and update on floor_fill_state and the other tables the topology declares for it in the omnibase_infra database -- falsifier: uv run --frozen pytest tests/unit/db/test_migration_115_grant_role_omnibase_infra_state_io_omn19998.py -q --no-cov fails when the migration file is removed'
+      - id: AC2
+        statement: 'AC2: applied to a real Postgres with the role present, the role lacks insert on floor_fill_state before the migration and holds select, insert and update after it, and applied twice changes nothing -- falsifier: uv run --frozen pytest tests/integration/migrations/test_115_grant_role_omnibase_infra_state_io_omn19998.py -q --no-cov fails when the GRANT statement is removed'
+      - id: AC3
+        statement: 'AC3: integrated: after the dev runtime rolls to the merged head, the floor fill state node writes one row into floor_fill_state on dev, read in the running runtime -- falsifier: select count(*) from floor_fill_state on dev still reads 0 after the roll'
+evidence_requirements:
+  - kind: tests
+    description: The migration shape tests pass at the head and fail at the base commit; the real-Postgres proof (role refused before, adapter seed, CAS and load as the role after) passes at the head and fails with the GRANT statement removed.
+    command: uv run --frozen pytest tests/unit/db/test_migration_115_grant_role_omnibase_infra_state_io_omn19998.py tests/integration/migrations/test_115_grant_role_omnibase_infra_state_io_omn19998.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24037-ac1
+    description: 'AC1: the migration grants exactly the declared tables and privileges to the runtime role, with no DELETE and no wildcard'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/db/test_migration_115_grant_role_omnibase_infra_state_io_omn19998.py -q --no-cov
+        cwd: .
+  - id: dod-omn24037-ac2
+    description: 'AC2: on a real Postgres the role is refused by the adapter before the migration and seeds, CAS-updates and loads after it; the second apply leaves the ACL unchanged'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_115_grant_role_omnibase_infra_state_io_omn19998.py -q --no-cov
+        cwd: .
+  - id: dod-omn24037-ac3
+    description: 'AC3: integrated: the hosted-runner proof is the real-Postgres adapter proof run as the runtime role; the reading of one floor_fill_state row on dev follows the dev roll'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_115_grant_role_omnibase_infra_state_io_omn19998.py -q --no-cov -k ac3
+        cwd: .
