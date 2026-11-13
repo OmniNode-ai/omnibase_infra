@@ -65,7 +65,15 @@ class HandlerVenvAtomicInstall:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = self._run(request)
-        status = "ok" if code == 0 else "refused" if code == _REFUSED else "failed"
+        status = (
+            "ok"
+            if code == 0
+            else "refused"
+            if code == _REFUSED
+            else "declined"
+            if code == 4
+            else "failed"
+        )
         return ModelVenvAtomicInstallResult(
             status=status, exit_code=code, output=out.getvalue() + err.getvalue()
         )
@@ -77,6 +85,24 @@ class HandlerVenvAtomicInstall:
             return int(verify.verify_nodes() or verify.verify_cli())
         if request.command == "installed_commit":
             return int(_load("skill_install_verify").installed_market_commit())
+        if request.command in (
+            "staging_lock_acquire",
+            "staging_lock_release",
+            "staging_lock_held",
+            "promote_floor",
+        ):
+            return int(
+                _load("dispatch_venv_promotion").run_promotion_command(
+                    request.command,
+                    path=request.lock_path,
+                    pid=request.holder_pid,
+                    venv=request.venv,
+                    uv_lock=request.uv_lock,
+                    workspace_root=request.workspace_root,
+                    floor=request.floor_path,
+                    changed=request.changed,
+                )
+            )
         engine = _load("atomic_venv_install")
         return int(
             engine.run_command(
