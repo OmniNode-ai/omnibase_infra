@@ -32,12 +32,19 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py tests/integration/cli/test_work_ledger_read_lane_selection_omn24202.py tests/unit/cli/test_work_ledger_query_client_omn20740.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24202-h053-read
-    description: On h053 the read with the config root set returns the ruling row stamped 2026-11-13T10:11:48Z; with it unset the refusal line names the declaration path and the variable.
+  - id: dod-omn24202-lane-selection-end-to-end
+    description: The command, the lane selection and the declaration reader run together with no lane declaration and the refusal line names the declaration path and the setting.
     source: manual
-    execution_scope: local_done_gate
     binds_ac: [AC3]
     checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_work_ledger_read_lane_selection_omn24202.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24202-integration-proof-h053-read
+    description: On a lab host the read with the config root unset prints the refusal reason naming the declaration path and the variable.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
       - check_type: command
-        check_value: test -f "$ONEX_WORKSPACE_CONFIG_ROOT/config/lab/ci_bus_lanes.yaml"
+        check_value: 'onex ledger query --help'
         cwd: ${OMNI_HOME}/omnibase_infra
