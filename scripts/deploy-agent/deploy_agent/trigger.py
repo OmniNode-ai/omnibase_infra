@@ -7,7 +7,7 @@ THE COMMAND IS BUILT FROM THE CONTRACT, NOT BESIDE IT (OMN-16442)
 
 The old shell script hand-wrote the command JSON beside the model and drifted
 from it, so no command it published was ever accepted. How it broke, and the
-measured journal line, is in docs/decisions/deploy_agent_trigger_from_contract.md.
+measured journal line, is in docs/decisions/deploy_agent_trigger_from_contract.yaml.
 
 The fix is structural rather than a field edit: this module constructs a
 ``ModelRebuildRequested`` and serialises **it**. A field added to, removed
