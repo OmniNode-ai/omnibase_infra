@@ -5,7 +5,7 @@ summary: The signed rebuild command carries an optional overlay_ref (the 40-hex 
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:
-  - infrastructure
+  - envelopes
 requirements:
   - id: req-omn24216-compose-env
     statement: The dev job names a rendered overlays revision as the overlay store root only for a command that declares one.
@@ -85,4 +85,13 @@ dod_evidence:
           set -eu;
           doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/agent.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
           grep -q 'runtime_overlay_revision' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24216-ac3-store-root-seam
+    description: The variable the node contract names as the store root is the one both dev compose files mount at the overlay store root, and an environment the agent built for a real rendered revision reaches the mount source; without a revision the mount keeps its host-copy default.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/infra/test_overlay_revision_store_root_omn24216.py -q -n 0 --no-cov -m integration
         cwd: ${OMNI_HOME}/omnibase_infra
