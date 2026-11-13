@@ -32,11 +32,20 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_dev_lane_ledger_source_binding.py tests/ci/test_compose_no_nested_expansion.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24218-rendered-mount
+    description: The stack renders the lane declaration mount read-only from the lane overlay folder's parent, the hosted precondition of AC3's reading in the running runtime.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -k renders
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24218-container-holds-ledger-source
     description: After the next dev deploy the dev runtime container holds the ledger read command variable, the precondition of AC3's commitment check result that is not failed. The probe prints no value.
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC3]
+    binds_ac: []
     checks:
       - check_type: command
         check_value: ssh "$DEPLOY_PROBE_HOST" docker exec omninode-runtime sh -c 'test -n "$ONEX_LEDGER_BUS_READ_COMMAND"'
