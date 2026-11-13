@@ -5662,7 +5662,9 @@ class DeployExecutor:
                 omni_home,
                 git_ref,
                 load_tracking_remote_ref_from_env(),
-                sibling_tags=self.sibling_tags,
+                # Passed only when a command named tags, so the default staging
+                # call keeps the shape every caller and fake of it already has.
+                **({"sibling_tags": self.sibling_tags} if self.sibling_tags else {}),
             )
             if self.sibling_source_refs:
                 logger.info(
