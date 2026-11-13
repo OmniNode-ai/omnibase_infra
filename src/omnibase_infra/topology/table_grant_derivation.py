@@ -321,9 +321,16 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
     ),
-    # OMN-23055, OMN-23341, OMN-23858: vendored_table_bridges.yaml.
+    # OMN-23055, OMN-23341, OMN-23858, OMN-21933, OMN-24323: vendored_table_bridges.yaml
+    # (optional schema and access per entry; the defaults are omninode_internal and read_write).
     *(
-        _vendored_read_write(f"{b['prefix']}{t}", b["node"], b["create"])
+        _vendored_read_write(
+            f"{b['prefix']}{t}",
+            b["node"],
+            b["create"],
+            schema=b.get("schema", "omninode_internal"),
+            access=b.get("access", "read_write"),
+        )
         for b in yaml.safe_load(_BRIDGES.read_text(encoding="utf-8"))
         for t in b["tables"]
     ),
@@ -456,21 +463,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "node_gateway_link_health_write_effect",
         "0001_create_gateway_link_health.sql",
         node="infra_direct_sql:node_gateway_link_health_write_effect",
-    ),
-    # OMN-21933: infra vendors skill_executions (node_projection_skill_lifecycle
-    # 0001-0002) ahead of the omnimarket node contract that declares it. The
-    # omnimarket node writes through the tenant_projection binding and its
-    # auto-wiring refuses a principal with no declared privilege, so this grant
-    # must exist before the source contract can merge. 0002 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when the
-    # node_projection_skill_lifecycle contract merges and the omnimarket pin
-    # advances past it; the OMN-18863 expiry module names this bridge.
-    _vendored_read_write(
-        "skill_executions",
-        "node_projection_skill_lifecycle",
-        "0001_create_skill_executions.sql",
-        schema="public",
-        access="write",
     ),
     # OMN-21947: infra vendors the work-ledger history-import migrations (0007
     # creates ledger_line_citation, 0008 grants the runtime SELECT, INSERT,

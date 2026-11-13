@@ -587,6 +587,12 @@ FENCED_LOCAL_IDENTITY_RLS_IDS = (
 FENCED_SKILL_LIFECYCLE_RLS_IDS = (
     "node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql",
 )
+# OMN-24323: only the FORCE RLS step on experiment_arm_results waits for an
+# operator release; the create (0000) and the writer grant (0001) apply on every
+# lane. This fence addition carries no lane release.
+FENCED_EXPERIMENT_RESULT_RLS_IDS = (
+    "node:node_projection_experiment_result:0002_force_rls_experiment_arm_results.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -608,6 +614,7 @@ EXPECTED_FENCE = (
     + FENCED_LOCAL_ALERTS_RLS_IDS
     + FENCED_LOCAL_IDENTITY_RLS_IDS
     + FENCED_SKILL_LIFECYCLE_RLS_IDS
+    + FENCED_EXPERIMENT_RESULT_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -985,13 +992,14 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         + FENCED_LOCAL_ALERTS_RLS_IDS
         + FENCED_LOCAL_IDENTITY_RLS_IDS
         + FENCED_SKILL_LIFECYCLE_RLS_IDS
+        + FENCED_EXPERIMENT_RESULT_RLS_IDS
     ), (
         "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
         "OMN-20154 provider_quota_state, OMN-19793 eval-run, OMN-20242 "
         "delegation_dispositions, OMN-20613 budget_applied_events, OMN-19987 "
         "run_trace, OMN-19988 local_environment, OMN-20169 capability-map, "
-        "OMN-19991 local_alerts, OMN-19986 local_identity and OMN-21933 "
-        "skill_executions RLS holds are not the expected ids"
+        "OMN-19991 local_alerts, OMN-19986 local_identity, OMN-21933 "
+        "skill_executions and OMN-24323 experiment_arm_results RLS holds are not the expected ids"
     )
 
 
