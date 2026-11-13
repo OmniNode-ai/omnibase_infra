@@ -18,7 +18,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The refusal tests pass at the head and fail on the base model.
-    command: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py tests/unit/cli/test_work_ledger_query_client_omn20740.py -q
+    command: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py tests/integration/cli/test_work_ledger_read_lane_selection_omn24202.py tests/unit/cli/test_work_ledger_query_client_omn20740.py -q
 emergency_bypass:
   enabled: false
   justification: ""
@@ -30,7 +30,7 @@ dod_evidence:
     binds_ac: [AC1, AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py tests/unit/cli/test_work_ledger_query_client_omn20740.py -q
+        check_value: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py tests/integration/cli/test_work_ledger_read_lane_selection_omn24202.py tests/unit/cli/test_work_ledger_query_client_omn20740.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24202-h053-read
     description: On h053 the read with the config root set returns the ruling row stamped 2026-11-13T10:11:48Z; with it unset the refusal line names the declaration path and the variable.
