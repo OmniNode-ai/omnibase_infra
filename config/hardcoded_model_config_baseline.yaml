@@ -57,9 +57,6 @@ entries:
     family: G
     content_sha1: 02c6504809a91bd45dcc6706f756a41ab5961fa0
   - path: .github/workflows/ci.yml
-    family: G
-    content_sha1: 391ef6e84a36bcc4e1e00e62f358e8bc9bea99c2
-  - path: .github/workflows/ci.yml
     family: O
     content_sha1: 04216c912e3554324d8b25f255175391f7d61833
   - path: .github/workflows/ci.yml

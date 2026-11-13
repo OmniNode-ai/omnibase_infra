@@ -142,6 +142,11 @@ def test_ci_enforces_all_core_rules_and_keeps_cascade_identity_selection() -> No
         1
     ].split("- name:", 1)[0]
     assert "--package omnibase-core" in step
+    # The validator is the core this repository pins, read from pyproject.toml: a validator
+    # older than the pin cannot read a core that takes its version from git.
+    assert 'tomllib.load(open("pyproject.toml", "rb"))' in step
+    assert '"omnibase-core @ git+${CORE_REF}"' in step
+    assert "dev-2026" not in step
     assert "--rules" not in step
     assert "CORE_LINEAGE_RULES" not in step
     cascade = (ROOT / ".github/workflows/dependency-cascade.yml").read_text()
