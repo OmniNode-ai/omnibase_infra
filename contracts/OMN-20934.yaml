@@ -77,3 +77,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn-20934-ac2-generator-carries-no-retired-dashboard-owner-row
+    description: The lane block generator's port and boundary maps carry no row for the dashboard-owner lane the private census retired, so the Lab-overlay parity job reads no orphan map entry. The rewritten test fails at the merge base, where both rows exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
