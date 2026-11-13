@@ -39,14 +39,10 @@ from omnibase_infra.models.model_dev_boot_point import ModelDevBootPoint
 from omnibase_infra.models.model_dev_boot_report_config import ModelDevBootReportConfig
 from omnibase_infra.models.model_dev_boot_request import ModelDevBootRequest
 from omnibase_infra.models.model_dev_boot_result import ModelDevBootResult
-from omnibase_infra.utils.util_dlq_credential_redaction import (
-    redact_credential_value_patterns,
-)
 from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
     sanitize_error_string,
 )
-from omnibase_infra.utils.util_log_credential_redaction import LOG_REDACTION_MARKER
 
 if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_dev_preflight_runner import (
@@ -67,6 +63,21 @@ LOG_READ_SECONDS = 60
 # real boot log with its 39-byte notice because the log held one of its sensitive
 # words, so the kept log held no cause. The regexes below are the ones
 # cli_delegate._redact_refusal_text uses for the same reason.
+# The deploy agent runs this module against the published omnibase_infra, which
+# may predate the shared helper, so the credential value shapes are held here
+# (same list as util_dlq_credential_redaction.CREDENTIAL_VALUE_PATTERNS).
+_REDACTION_MARKER: Final[str] = "[REDACTED]"
+_CREDENTIAL_VALUE_SHAPES: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"onxk_[A-Za-z0-9_-]{20,}"),
+    re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"AIza[A-Za-z0-9_-]{35,}"),
+    re.compile(
+        r"(?<![A-Za-z0-9_.-])[A-Fa-f0-9]{32}\.[A-Za-z0-9_-]{16,}"
+        r"(?![A-Za-z0-9_.-])"
+    ),
+    re.compile(r"(?i:\bbearer)\s+[A-Za-z0-9._~+/-]{16,}=*"),
+)
 _PEM_KEY_MATERIAL: Final[re.Pattern[str]] = re.compile(
     r"-----BEGIN[^-]*-----.*?(?:-----END[^-]*-----|$)", re.DOTALL
 )
@@ -89,7 +100,9 @@ def redact_credential_spans(text: str) -> str:
     (keeping the key). No truncation: an incident log stays whole and only the
     credential spans shrink.
     """
-    redacted = redact_credential_value_patterns(text, LOG_REDACTION_MARKER)
+    redacted = text
+    for shape in _CREDENTIAL_VALUE_SHAPES:
+        redacted = shape.sub(_REDACTION_MARKER, redacted)
     redacted = _PEM_KEY_MATERIAL.sub("[REDACTED key material]", redacted)
     redacted = _URL_USERINFO.sub(r"\g<scheme>[REDACTED]@", redacted)
     return _SECRET_PAIR.sub(r"\g<key>[REDACTED]", redacted)

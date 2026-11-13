@@ -5,8 +5,7 @@ summary: >-
   Child of OMN-24071. The dev boot guard (merged in omnibase_infra#5919) keeps the last bytes of each not-healthy container's log in a per-incident artifact file. It cleaned the log with sanitize_error_string, which replaces the whole text with a 39-byte notice whenever the text contains any of its sensitive words (token, password, auth, redis:// and others); a real 8 MB boot log was kept as those 39 bytes, so the capture held no cause. The guard now uses redact_credential_spans, new in the guard module: it replaces only credential-shaped spans (the shared credential value shapes, PEM key material, URL userinfo, the value of a key=value pair whose key names a secret) and keeps every other line. The incident record keeps its shape: redacted is true when any span was replaced, complete is false then, and the byte counts and digest describe the kept text.
 is_seam_ticket: true
 interface_change: false
-interfaces_touched:
-  - public_api
+interfaces_touched: []
 requirements:
   - id: req-omn24127-span-redaction
     statement: The kept log of a failed dev update keeps its readable lines and loses only credential-shaped spans.
