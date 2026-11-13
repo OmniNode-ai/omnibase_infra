@@ -41,10 +41,6 @@ dod_evidence:
     execution_scope: local_done_gate
     binds_ac:
       - AC1
-    ac_bindings:
-      - label: AC1
-        criterion_hash: 4c918c9224bc1988820599dfc57d7edb6d8aff4ce23bd1d884f1fc4830808275
-        proposed_by: lane=fix-5944-6802
     checks:
       - check_type: test_passes
         check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_incident_replay_omn18949.py -m lab_overlay -k does_NOT_reject_the_current_tree -q --no-cov -p no:cacheprovider -p no:randomly
@@ -66,10 +62,6 @@ dod_evidence:
     execution_scope: local_done_gate
     binds_ac:
       - AC3
-    ac_bindings:
-      - label: AC3
-        criterion_hash: 884acdfd46783d858a1062706599bdc2821d3d6e1bb5b8bde9fb6a535b107f0e
-        proposed_by: lane=fix-5944-6802
     checks:
       - check_type: command
         check_value: >-
