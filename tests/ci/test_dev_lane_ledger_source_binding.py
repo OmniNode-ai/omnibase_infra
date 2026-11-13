@@ -17,9 +17,12 @@ from them. The running container is read on the lab after the deploy agent conve
 from __future__ import annotations
 
 import posixpath
+import shlex
 
+import click
 import pytest
 
+from omnibase_infra.cli.cli_ledger import ledger_query
 from tests.ci._compose_render_omn21099 import (
     DEV_LANE_OVERLAY,
     DEV_LANE_STACK,
@@ -123,3 +126,50 @@ def test_runtime_effects_renders_the_mount_source() -> None:
         "/srv/workspace/config/lab"
     ]
     assert mounts[0]["read_only"] is True
+
+
+def _command_after_env_prefix(value: str) -> list[str]:
+    tokens = shlex.split(value)
+    assert tokens[0] == "env"
+    i = 1
+    while i < len(tokens) and "=" in tokens[i] and tokens[i].split("=", 1)[0].isupper():
+        i += 1
+    return tokens[i:]
+
+
+def test_the_read_command_is_one_the_ledger_cli_accepts() -> None:
+    tokens = _command_after_env_prefix(LEDGER_ENV["ONEX_LEDGER_BUS_READ_COMMAND"])
+    assert tokens == ["onex", "ledger", "query", "--bus-lane", "dev", "--stdin"]
+    ctx = ledger_query.make_context("query", tokens[3:])
+    assert ctx.params["read_stdin"] is True
+    assert ctx.params["bus_lane"] == "dev"
+
+
+def test_the_append_command_names_dev_and_the_registry_root_the_read_command_names() -> (
+    None
+):
+    tokens = _command_after_env_prefix(LEDGER_ENV["ONEX_LEDGER_BUS_APPEND_COMMAND"])
+    assert tokens == [
+        "python",
+        "-m",
+        "omnimarket.work_ledger_bus.cli",
+        "append",
+        "--bus-lane",
+        "dev",
+        "--omnibase-path",
+        "/app",
+    ]
+    read_tokens = shlex.split(LEDGER_ENV["ONEX_LEDGER_BUS_READ_COMMAND"])
+    read_prefix = [t for t in read_tokens if t.startswith("OMNIBASE_PATH=")]
+    assert read_prefix == ["OMNIBASE_PATH=/app"]
+    assert tokens[-1] == "/app"
+
+
+def test_control_a_renamed_read_option_is_refused_by_the_cli() -> None:
+    with pytest.raises(click.NoSuchOption):
+        ledger_query.make_context("query", ["--bus-lane", "dev", "--from-stdin"])
+
+
+def test_control_a_read_command_for_another_lane_is_refused_by_the_cli() -> None:
+    with pytest.raises(click.BadParameter):
+        ledger_query.make_context("query", ["--bus-lane", "stability", "--stdin"])
