@@ -219,3 +219,18 @@ def test_promote_floor_unchanged_no_dist_info(tmp_path, capsys):
     )
     assert rc == ENGINE.EXIT_OK
     assert "WARNING" in capsys.readouterr().out
+
+
+def test_engine_imports_nothing_newer_than_the_macos_system_python() -> None:
+    """The wrapper and the reconciler run the engine with a bare `python3`, which a
+    launchd PATH resolves to the macOS system 3.9: `datetime.UTC` (3.11) fails there."""
+    import ast
+
+    tree = ast.parse(_ENGINE.read_text(encoding="utf-8"), feature_version=(3, 9))
+    names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "datetime"
+        for alias in node.names
+    }
+    assert "UTC" not in names

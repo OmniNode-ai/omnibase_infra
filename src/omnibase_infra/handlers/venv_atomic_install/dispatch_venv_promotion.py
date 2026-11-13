@@ -21,7 +21,7 @@ import os
 import socket
 import subprocess
 import sys
-from datetime import UTC, datetime, timezone
+import time
 from pathlib import Path
 
 EXIT_OK = 0
@@ -34,7 +34,9 @@ def _say(message: str) -> None:
 
 
 def _utc_now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # `time`, not `datetime.UTC`: the wrapper and the reconciler run this file with a bare
+    # `python3`, which is the macOS system 3.9 under a launchd PATH.
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def _record(pid: int, host: str, at: str) -> str:
