@@ -1,0 +1,74 @@
+schema_version: 1.0.0
+ticket_id: OMN-24048
+title: A dev roll that fails its first check publishes a manifest and an incident naming the issuer and the failed phase
+summary: >-
+  Child of OMN-24013. The deploy agent runs the dev roll's preflight before the dev boot guard is prepared, so a dev roll that failed in preflight published no manifest and no incident: the boot guard, which announces both, did not exist yet. The agent's one preflight line (replaced by one line, so the code line count of the baselined agent file is unchanged) now calls run_preflight in the dev boot guard handler module, which runs the executor's preflight and, when it raises for a dev command, calls announce_preflight_failure in the dev roll events composition root and then re-raises the preflight's own error. That publishes the roll manifest (command id as job id, requested_by as issuer) and one ModelDevRollIncident carrying the issuer, the error, the new optional failed_phase field (preflight) and a recovery_error stating that no recovery ran because the runtime was untouched. A failure to publish is logged and never changes the roll's outcome or replaces its error; a non-dev lane publishes nothing. The consumer, node_dev_roll_failure_capture_effect in omnimarket, reads the incident through a tolerant model that ignores unknown keys, so the new field needs no consumer change to be accepted; carrying it into the terminal is a follow-up pull request.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - topics
+  - public_api
+requirements:
+  - id: req-omn24048-preflight-incident
+    statement: A dev roll that fails in preflight publishes its manifest and an incident naming the issuer and the failed phase.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a dev roll that fails in the deploy agent's preflight publishes a roll manifest and one incident event carrying the command id, the issuer and the failed phase, and the roll still ends failed without delay -- falsifier: a fixture dev roll whose preflight raises publishes no incident event, or the incident names no issuer or no phase"
+      - id: AC2
+        statement: "AC2: the incident shape with its new failed phase field is pinned in a seam test on the deploy agent side and read as a typed terminal by the capture node on the other side -- falsifier: renaming the failed phase field on either side leaves the seam tests green"
+      - id: AC3
+        statement: "AC3: a preflight failure on a non-dev lane and a failing event sender publish nothing and never change the roll's outcome -- falsifier: a stability lane preflight failure publishes an incident, or a raising sender changes the job status"
+  - id: req-omn24048-integrated
+    statement: The preflight incident is read from the running dev deploy agent.
+    acceptance:
+      - id: AC4
+        statement: "AC4: integrated: after the deploy agent with this change is running on the dev runtime host, a dev roll that fails its preflight (or a recorded fixture roll) shows the manifest and the incident with issuer and failed phase on the dev bus lane -- falsifier: a dev roll fails in preflight after the change is running and the dev bus lane carries no incident event for it"
+evidence_requirements:
+  - kind: tests
+    description: The preflight incident wiring and the publisher method pass at the pushed head; the wiring tests fail on the parent commit (no announce_preflight_failure, no failed_phase field).
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_preflight_incident_omn24013.py tests/unit/handlers/test_handler_dev_roll_events_omn24013.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24048-ac1
+    description: >-
+      A DEV command whose executor preflight raises ends failed and publishes exactly the manifest then the incident, the incident carrying the issuer, the job id, the error text, recovery_verified false and failed_phase preflight. On the parent commit nothing is published (the tests fail).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_preflight_incident_omn24013.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24048-ac2
+    description: >-
+      The events test pins ModelDevRollIncident to the fifteen fields (the fourteen the omnimarket capture node spells in its seam test plus failed_phase) and the publisher's preflight_failure to the manifest then the incident; the capture node side is the follow-up omnimarket pull request.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_roll_events_omn24013.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24048-ac3
+    description: >-
+      A STABILITY_TEST lane preflight failure publishes nothing, and a sender that raises still leaves the job failed with the preflight error as its only error.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_preflight_incident_omn24013.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24048-ac4
+    description: >-
+      The tests behind the integrated reading pass at the head; the reading itself (the next dev roll's manifest and incident on the dev bus lane) needs the deploy agent on the dev runtime host to load this revision and is the pull request's Lab line; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_preflight_incident_omn24013.py -q --no-cov -p no:cacheprovider
+        cwd: .
