@@ -163,7 +163,10 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 
 
 def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
-    """Load host-effect modules from the standalone agent's own checkout."""
+    """Load host-effect modules from the standalone agent's own checkout.
+
+    Modules already imported in this process are kept as-is and never re-executed.
+    """
     prefix = "omnibase_infra." if "." in effect else "omnibase_infra.handlers."
     name = prefix + effect
     if name in sys.modules:
@@ -209,6 +212,8 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
+        if module_name in sys.modules:
+            continue
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Cannot load dev boot effect: {relative}")
