@@ -37,7 +37,7 @@ from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.service_kernel import _build_runtime_handler_dependencies
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 _CONTRACT = Path(str(_triage_pkg.__file__)).parent / "contract.yaml"
 _EVENT_TYPE = "omnibase-infra.runtime-error"
