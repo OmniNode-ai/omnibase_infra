@@ -68,3 +68,30 @@ class TestRedactCredentialSpans:
 
     def test_empty_string_returns_empty_string(self) -> None:
         assert redact_credential_spans("") == ""
+
+
+@pytest.mark.unit
+def test_guard_value_shapes_equal_the_shared_credential_value_patterns() -> None:
+    """Seam: the guard holds its own copy of the credential value shapes.
+
+    The deploy agent runs the guard against a published omnibase_infra that can
+    predate ``util_dlq_credential_redaction``, so the guard cannot import the
+    shared list. A shape added, dropped or changed on either side fails here, so
+    the kept boot log is cleaned of the same shapes the rest of the system treats
+    as credentials.
+    """
+    from omnibase_infra.handlers import handler_dev_boot_guard as guard
+    from omnibase_infra.utils.util_dlq_credential_redaction import (
+        CREDENTIAL_VALUE_PATTERNS,
+    )
+
+    assert [(p.pattern, p.flags) for p in guard._CREDENTIAL_VALUE_SHAPES] == [
+        (p.pattern, p.flags) for p in CREDENTIAL_VALUE_PATTERNS
+    ]
+
+
+@pytest.mark.unit
+def test_guard_marker_equals_the_shared_log_redaction_marker() -> None:
+    from omnibase_infra.handlers import handler_dev_boot_guard as guard
+
+    assert guard._REDACTION_MARKER == LOG_REDACTION_MARKER
