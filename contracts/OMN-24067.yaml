@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24067
+title: "Give the runtime error triage step its database connection on the dev system"
+summary: "node_runtime_error_triage_effect declares db_pool as a required dependency and HandlerRuntimeErrorTriage takes it as a constructor parameter defaulting to None. The runtime's handler dependency map (_build_runtime_handler_dependencies) supplied the pool to two other handlers and never to this one, so the auto-wired triage handler was built with no pool and every runtime error it received was logged 'db_pool not configured, suppressing event' and dropped (1,291 in 20 minutes on the dev runtime). The map now carries the pool when the runtime has one, and the kernel's own hand-started triage consumer of the same topic does not start when the contract-wired node has the pool, so each error is read once."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24067-triage-pool
+    statement: The runtime supplies the declared database pool to the runtime error triage handler, and leaves it absent when the runtime has none.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the runtime handler dependency map supplies db_pool to HandlerRuntimeErrorTriage, wires every required constructor dependency the contract declares, and leaves the entry absent when there is no pool -- falsifier: uv run pytest tests/unit/runtime/test_omn19998_triage_pool_wired.py -q -n 0 --no-cov fails without the map entry'
+      - id: AC2
+        statement: 'AC2: integrated: on the running dev runtime, the log shows zero db_pool not configured warnings over twenty minutes after the roll and incident rows are written -- falsifier: the docker log count of that warning on the dev runtime container is non-zero'
+evidence_requirements:
+  - kind: tests
+    description: The triage pool wiring tests pass at the pushed head.
+    command: uv run pytest tests/unit/runtime/test_omn19998_triage_pool_wired.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24067-ac1
+    description: 'AC1: the wiring tests pass at the head and fail at the merge base because the map has no entry for the triage handler'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_omn19998_triage_pool_wired.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_omn19998_triage_pool_wired_dispatch.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24067-ac2
+    description: 'hosted proxy for AC2: the wiring tests pass; the reading of the dev runtime log after the roll is named in the pull request and read after the merge'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_omn19998_triage_pool_wired.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24067-deploy-triage-pool-on-dev
+    description: 'Post-deploy probe: the dev branch carries the runtime dependency map entry that gives the triage handler its pool, so the rebuilt runtime reads each runtime error through the contract-wired node. It reads dev, which holds the entry only after this change merges, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion (AC1 is bound by the wiring tests).'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=dev --jq .content | base64 -d | grep -qF 'node_runtime_error_triage_effect declares db_pool'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
