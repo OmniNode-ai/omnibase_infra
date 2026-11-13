@@ -152,6 +152,22 @@ def test_golden_without_a_lane_overlay_dir_renders_only_the_slot_env(
     assert rendered.lane_overlay_dir is None
 
 
+def test_a_symlinked_lane_overlay_is_rendered_as_the_file_it_points_at(
+    world: dict[str, Any],
+) -> None:
+    """The dev project mounts ``<project>.bifrost.yaml``, a link to the lane's own file."""
+    link = world["lane_dir"] / "project.bifrost.yaml"
+    link.symlink_to("dev.bifrost.yaml")
+
+    rendered = _render(world["environ"], world["lane_dir"])
+
+    target = Path(rendered.lane_overlay_dir)
+    expected_url = f"{OVERLAY_ADDRESS}{EMBEDDING_PATH}"
+    assert _backend_url(target, "project.bifrost.yaml")[BACKEND_ID] == expected_url
+    assert _backend_url(target)[BACKEND_ID] == expected_url
+    assert rendered.env["BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"] == expected_url
+
+
 def test_a_second_render_leaves_the_rendered_files_untouched(
     world: dict[str, Any],
 ) -> None:
