@@ -2,25 +2,53 @@ schema_version: 1.0.0
 ticket_id: OMN-24214
 title: Retire the duplicate dashboard owner lab lane declaration
 summary: >-
-  Child of OMN-24186. The lane table generator carried a port row and a boundary row for the dashboard owner's lab lane (OMN-17292). The private lane census no longer declares that lane (companion pull request in the private lab-settings repository, same ticket), and the generator's census guard (orphan_map_entries) refuses a map row for a lane the census does not declare, so the rows are removed here and the retired-lane test now holds the lane name. The test that held the rows is deleted.
-is_seam_ticket: true
+  Child of OMN-24186. The lane table generator carried a port row and a boundary row for the dashboard owner's lab lane (OMN-17292). The private lane census no longer declares that lane (companion pull request in the private lab-settings repository, same ticket), and the generator's census guard (orphan_map_entries) refuses a map row for a lane the census does not declare, so the rows are removed here and the retired-lane test now holds the lane name. The test that held the rows is deleted. The contract follows the ticket's three live criteria: AC1 (the private census declares no such lane) and AC3 (the census read on the second lab host) are bound to the lab-overlay parity test and to a read of the private census, both of which fail at the base commit; AC2 keeps its generator test.
+is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn24214-census
+    statement: The private lane census declares no dashboard owner lane, and the lane table generator agrees with it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the private lab-settings repository declares no dashboard-owner lane (lane file, census entry, census listing rows) and its facts test is deleted -- falsifier: a grep for dashboard-owner over that repository's config and tests still matches"
   - id: req-omn24214-rows
     statement: The lane table generator has no row for the retired dashboard owner lane.
     acceptance:
       - id: AC2
         statement: "AC2: the lane table generator in omnibase_infra has no dashboard-owner port or boundary row and its test is deleted -- falsifier: grep -n dashboard-owner scripts/generate_claude_lane_block.py still matches"
+  - id: req-omn24214-integrated
+    statement: The census read on the second lab host no longer lists the lane as declared.
+    acceptance:
+      - id: AC3
+        statement: "AC3: integrated: the lane census read on the second lab host after the change lists no dashboard-owner declared project and the lab disk hygiene node no longer protects it -- falsifier: that census output still names the dashboard-owner project as a declared lane"
 evidence_requirements:
   - kind: tests
     description: The retired-lane test passes at the pushed head and fails when the generator is taken from the base commit.
     command: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_retired_lanes.py -q --no-cov -p no:cacheprovider
+  - kind: tests
+    description: The lab-overlay parity test reads the private lane manifest against the generator's maps and fails at the base commit, where the maps still carry the two dashboard-owner rows.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_incident_replay_omn18949.py -m lab_overlay -k does_NOT_reject_the_current_tree -q --no-cov -p no:cacheprovider -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: dod-omn24214-ac1
+    description: >-
+      The private lane manifest declares no dashboard-owner lane, and the generator's maps carry none: the lab-overlay parity test (undeclared_lanes and orphan_map_entries both empty over at least eight declared lanes) passes at this head and fails at the base commit with two generator_map_orphan findings (dashboard-owner in _LANE_PORT_MAP and in _LANE_BOUNDARY). The overlay is private config read from ONEX_WORKSPACE_CONFIG_ROOT, so the check runs in the Lab-overlay parity job and on a lab host.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC1
+    ac_bindings:
+      - label: AC1
+        criterion_hash: 4c918c9224bc1988820599dfc57d7edb6d8aff4ce23bd1d884f1fc4830808275
+        proposed_by: lane=fix-5944-6802
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_incident_replay_omn18949.py -m lab_overlay -k does_NOT_reject_the_current_tree -q --no-cov -p no:cacheprovider -p no:randomly
+        cwd: .
   - id: dod-omn24214-ac2
     description: >-
       The generator's maps hold no row for the lane and the retired-lane test rejects one; against the base commit's generator the test fails (1 failed, 3 passed).
@@ -30,4 +58,23 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_retired_lanes.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24214-ac3
+    description: >-
+      The census the second lab host reads is the private lane manifest and snapshot: the check requires that neither names dashboard-owner and that the lab-overlay parity test passes, so it fails while the private declaration or the generator rows remain. The reading of the running census on the second lab host is the pull request's Lab line; hosted CI cannot reach it.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC3
+    ac_bindings:
+      - label: AC3
+        criterion_hash: 884acdfd46783d858a1062706599bdc2821d3d6e1bb5b8bde9fb6a535b107f0e
+        proposed_by: lane=fix-5944-6802
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c '! grep -rniq dashboard-owner "${ONEX_WORKSPACE_CONFIG_ROOT:?set to the private overlay root}/config/lab/lane-census"'
+        cwd: .
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_incident_replay_omn18949.py -m lab_overlay -k does_NOT_reject_the_current_tree -q --no-cov -p no:cacheprovider -p no:randomly
         cwd: .
