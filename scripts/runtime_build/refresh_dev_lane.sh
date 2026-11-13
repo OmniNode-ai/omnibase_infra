@@ -624,7 +624,6 @@ run_preflight_required_env() {
 # cannot be rendered stops the refresh here too. STATE_DIR is where the rewritten lane overlay
 # directory is written.
 STATE_DIR="${HOME}/.omnibase/state/dev_lane_refresh"
-LANE_ENV_EXPORTS=""
 if ! LANE_ENV_EXPORTS="$(PYTHONPATH="${REPO_ROOT}/scripts/deploy-agent${PYTHONPATH:+:${PYTHONPATH}}" \
         run_python -c 'import os
 import sys
@@ -640,6 +639,7 @@ sys.stdout.write(default_instance_lane_env_exports(sys.argv[1], Path(sys.argv[2]
 fi
 # shellcheck source=/dev/null
 source <(printf '%s' "${LANE_ENV_EXPORTS}")
+export ONEX_DEPLOY_LANE_ENV_EXPORTS="${LANE_ENV_EXPORTS}"
 log "lane env applied from the overlays: $(printf '%s' "${LANE_ENV_EXPORTS}" | sed -e 's/^export //' | tr '\n' ' ')"
 
 INFRA_CLONE="${OMNI_HOME}/omnibase_infra"

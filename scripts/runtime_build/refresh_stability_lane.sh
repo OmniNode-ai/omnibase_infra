@@ -343,8 +343,6 @@ declare -A CORE_CONTAINERS=(
 # ref: SIBLING_LANE_REFRESH_REPOS from sibling_clone_manifest.sh, the single
 # place a sibling set is spelled (OMN-19072). Same membership as the literal
 # list it replaced; omnibase_spi is excluded there, by name, with its reason.
-# shellcheck source=./sibling_clone_manifest.sh
-source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
 readonly ALL_TRACKED_REPOS=("${SIBLING_LANE_REFRESH_REPOS[@]}")
 
 # --- defaults ---------------------------------------------------------------
@@ -513,11 +511,22 @@ done
 
 # --- state / receipt paths ---------------------------------------------------
 STATE_DIR="${HOME}/.omnibase/state/stability_lane_refresh"
-HISTORY_DIR="${STATE_DIR}/history"
-mkdir -p "${HISTORY_DIR}"
+HISTORY_DIR="${STATE_DIR}/history"; mkdir -p "${HISTORY_DIR}"
 UTC_NOW="$(date -u +%Y%m%dT%H%M%SZ)"
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/refresh-stability-lane.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
+
+# --- LLM endpoint env from the overlays (OMN-24119) --------------------------
+# The operator env sourced above keeps whatever a person last typed for the embedding
+# address (the removed server's, on the lab host), and onex-runtime-deploy sources it
+# again. The address and the lane bifrost overlay it binds come from the llm_endpoints
+# overlay, the render the dev refresh takes (OMN-24081). The module prints the exports and
+# the ONEX_DEPLOY_LANE_ENV_EXPORTS line that has onex-runtime-deploy source them after the
+# operator env, so they survive. An overlay that cannot be rendered stops the refresh
+# here, before anything is read from the lane, built or restarted.
+LANE_ENV_EXPORTS="$(PYTHONPATH="${REPO_ROOT}/scripts/deploy-agent${PYTHONPATH:+:${PYTHONPATH}}" run_python "${REPO_ROOT}/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py" "${OMNI_HOME}" "${STATE_DIR}")" || { err "LANE_ENV_FRAGMENT_REFUSED: the LLM endpoint env could not be rendered from the llm_endpoints overlay (reason above); nothing was built or restarted."; exit 64; }
+# shellcheck source=/dev/null
+source <(printf '%s' "${LANE_ENV_EXPORTS}")
 
 # --- lane lock (OMN-16729) --------------------------------------------------
 # Taken before ANY live read of lane state, because the collision this closes
