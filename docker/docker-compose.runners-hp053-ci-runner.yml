@@ -140,6 +140,9 @@ x-runner-base: &runner-base
     # so uv hardlinks wheel contents into a venv instead of copying them. See the header.
     UV_CACHE_DIR: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/.uv-cache
     TMPDIR: ${RUNNER_USER_HOME:-/home/runner}/tmp
+    # OMN-19998: the image's baked Actions tool cache (CPython preloaded), on a named volume per runner
+    # so it is filled from the image on first start and survives a recreate. Same path as the Dockerfile's OMNI_TOOLCACHE_DIR.
+    AGENT_TOOLSDIRECTORY: /opt/hostedtoolcache
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ./runners:/opt/onex-runner-hooks:ro
@@ -176,6 +179,7 @@ services:
       - *lab-host-table
       - *runner-host-zoneinfo
       - hp053-ci-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+      - hp053-ci-runner-1-toolcache:/opt/hostedtoolcache
   hp053-ci-runner-2:
     !!merge <<: *runner-base
     container_name: hp053-ci-runner-2
@@ -192,6 +196,7 @@ services:
       - *lab-host-table
       - *runner-host-zoneinfo
       - hp053-ci-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+      - hp053-ci-runner-2-toolcache:/opt/hostedtoolcache
   hp053-ci-runner-3:
     !!merge <<: *runner-base
     container_name: hp053-ci-runner-3
@@ -208,6 +213,7 @@ services:
       - *lab-host-table
       - *runner-host-zoneinfo
       - hp053-ci-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+      - hp053-ci-runner-3-toolcache:/opt/hostedtoolcache
   hp053-ci-runner-4:
     !!merge <<: *runner-base
     container_name: hp053-ci-runner-4
@@ -224,6 +230,7 @@ services:
       - *lab-host-table
       - *runner-host-zoneinfo
       - hp053-ci-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+      - hp053-ci-runner-4-toolcache:/opt/hostedtoolcache
   hp053-ci-runner-5:
     !!merge <<: *runner-base
     container_name: hp053-ci-runner-5
@@ -240,6 +247,7 @@ services:
       - *lab-host-table
       - *runner-host-zoneinfo
       - hp053-ci-runner-5-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
+      - hp053-ci-runner-5-toolcache:/opt/hostedtoolcache
 volumes:
   hp053-ci-runner-1-creds:
     name: hp053-ci-runner-1-creds
@@ -251,3 +259,13 @@ volumes:
     name: hp053-ci-runner-4-creds
   hp053-ci-runner-5-creds:
     name: hp053-ci-runner-5-creds
+  hp053-ci-runner-1-toolcache:
+    name: hp053-ci-runner-1-toolcache
+  hp053-ci-runner-2-toolcache:
+    name: hp053-ci-runner-2-toolcache
+  hp053-ci-runner-3-toolcache:
+    name: hp053-ci-runner-3-toolcache
+  hp053-ci-runner-4-toolcache:
+    name: hp053-ci-runner-4-toolcache
+  hp053-ci-runner-5-toolcache:
+    name: hp053-ci-runner-5-toolcache
