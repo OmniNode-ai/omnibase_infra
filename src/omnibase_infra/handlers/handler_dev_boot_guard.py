@@ -45,10 +45,10 @@ from omnibase_infra.utils.util_error_sanitization import (
 )
 
 if TYPE_CHECKING:
-    from omnibase_infra.protocols.protocol_dev_roll_events import (
+    from omnibase_infra.protocols.protocol_dev_preflight_runner import (
         ProtocolDevPreflightRunner,
-        ProtocolDevRollEvents,
     )
+    from omnibase_infra.protocols.protocol_dev_roll_events import ProtocolDevRollEvents
 
 logger = logging.getLogger(__name__)
 DEV_BOOT_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")

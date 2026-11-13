@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: MIT
 """The events seam the dev boot guard announces a roll through."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import datetime
-from enum import StrEnum
 from typing import Protocol
 
 from pydantic import JsonValue
@@ -28,12 +27,4 @@ class ProtocolDevRollEvents(Protocol):
         error: str,
         phase: str,
         project: str,
-    ) -> None: ...
-
-
-class ProtocolDevPreflightRunner(Protocol):
-    """What the dev roll's preflight step needs of the deploy executor."""
-
-    def preflight(
-        self, on_phase_update: Callable[[StrEnum, StrEnum], None]
     ) -> None: ...
