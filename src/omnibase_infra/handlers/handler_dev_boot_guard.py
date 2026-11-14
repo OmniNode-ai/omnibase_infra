@@ -452,9 +452,8 @@ def retire_lane_services[LaneT: BaseModel](
     phases = {phase_by_service[s] for s in retired if s in phase_by_service}
     return config.model_copy(
         update={
-            "disabled_services": frozenset(current["disabled_services"])
-            | frozenset(retired),
-            "disabled_phases": frozenset(current["disabled_phases"]) | phases,
+            "disabled_services": frozenset(current["disabled_services"]).union(retired),
+            "disabled_phases": frozenset(current["disabled_phases"]).union(phases),
         }
     )
 
