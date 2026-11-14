@@ -24,7 +24,7 @@
 -- ALTER TABLE: registration_projections — add runtime parent column
 -- =============================================================================
 
-ALTER TABLE registration_projections
+ALTER TABLE public.registration_projections
     ADD COLUMN IF NOT EXISTS runtime_entity_id UUID;
 
 -- =============================================================================
@@ -33,5 +33,5 @@ ALTER TABLE registration_projections
 
 -- Partial index for runtime parent lookups: only rows with a runtime parent.
 CREATE INDEX IF NOT EXISTS idx_registration_runtime_entity_id
-    ON registration_projections (runtime_entity_id)
+    ON public.registration_projections (runtime_entity_id)
     WHERE runtime_entity_id IS NOT NULL;

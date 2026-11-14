@@ -31,7 +31,7 @@
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'registration_state') THEN
-        CREATE TYPE registration_state AS ENUM (
+        CREATE TYPE public.registration_state AS ENUM (
             'pending_registration',
             'accepted',
             'awaiting_ack',
@@ -48,13 +48,13 @@ END$$;
 -- MAIN TABLE
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS registration_projections (
+CREATE TABLE IF NOT EXISTS public.registration_projections (
     -- Identity (composite primary key)
     entity_id UUID NOT NULL,
     domain VARCHAR(128) NOT NULL DEFAULT 'registration',
 
     -- FSM State
-    current_state registration_state NOT NULL,
+    current_state public.registration_state NOT NULL,
 
     -- Node Information (snapshot at registration time)
     node_type VARCHAR(64) NOT NULL,
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS registration_projections (
 
 -- Convergence for tables created before migration 117 (OMN-24495): re-running
 -- this file on an existing table adds the runtime parent column. Idempotent.
-ALTER TABLE registration_projections ADD COLUMN IF NOT EXISTS runtime_entity_id UUID;
+ALTER TABLE public.registration_projections ADD COLUMN IF NOT EXISTS runtime_entity_id UUID;
 
 -- =============================================================================
 -- INDEXES FOR ORCHESTRATION QUERIES
@@ -131,7 +131,7 @@ ALTER TABLE registration_projections ADD COLUMN IF NOT EXISTS runtime_entity_id 
 --                AND ack_timeout_emitted_at IS NULL
 --                AND current_state = 'awaiting_ack'
 CREATE INDEX IF NOT EXISTS idx_registration_ack_deadline
-    ON registration_projections (ack_deadline)
+    ON public.registration_projections (ack_deadline)
     WHERE ack_deadline IS NOT NULL;
 
 -- Index for liveness deadline scanning (C2: orchestrator queries for overdue liveness)
@@ -141,31 +141,31 @@ CREATE INDEX IF NOT EXISTS idx_registration_ack_deadline
 --                AND liveness_timeout_emitted_at IS NULL
 --                AND current_state = 'active'
 CREATE INDEX IF NOT EXISTS idx_registration_liveness_deadline
-    ON registration_projections (liveness_deadline)
+    ON public.registration_projections (liveness_deadline)
     WHERE liveness_deadline IS NOT NULL;
 
 -- Index for state filtering (common orchestrator query pattern)
 -- Query pattern: SELECT * FROM registration_projections WHERE current_state = 'active'
 CREATE INDEX IF NOT EXISTS idx_registration_current_state
-    ON registration_projections (current_state);
+    ON public.registration_projections (current_state);
 
 -- Index for state + domain filtering (multi-domain queries)
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE domain = :domain AND current_state = :state
 CREATE INDEX IF NOT EXISTS idx_registration_domain_state
-    ON registration_projections (domain, current_state);
+    ON public.registration_projections (domain, current_state);
 
 -- Index for idempotency checks (fast lookup by event_id)
 -- Query pattern: SELECT 1 FROM registration_projections
 --                WHERE last_applied_event_id = :event_id
 CREATE INDEX IF NOT EXISTS idx_registration_last_event_id
-    ON registration_projections (last_applied_event_id);
+    ON public.registration_projections (last_applied_event_id);
 
 -- Index for capability queries (GIN index on JSONB)
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE capabilities @> '{"postgres": true}'
 CREATE INDEX IF NOT EXISTS idx_registration_capabilities
-    ON registration_projections USING GIN (capabilities);
+    ON public.registration_projections USING GIN (capabilities);
 
 -- =============================================================================
 -- GIN INDEXES FOR CAPABILITY ARRAY QUERIES (OMN-1134)
@@ -175,84 +175,84 @@ CREATE INDEX IF NOT EXISTS idx_registration_capabilities
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE capability_tags @> ARRAY['postgres.storage']
 CREATE INDEX IF NOT EXISTS idx_registration_capability_tags
-    ON registration_projections USING GIN (capability_tags);
+    ON public.registration_projections USING GIN (capability_tags);
 
 -- GIN index for intent_types array queries
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE intent_types @> ARRAY['postgres.upsert']
 CREATE INDEX IF NOT EXISTS idx_registration_intent_types
-    ON registration_projections USING GIN (intent_types);
+    ON public.registration_projections USING GIN (intent_types);
 
 -- GIN index for protocols array queries
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE protocols @> ARRAY['ProtocolDatabaseAdapter']
 CREATE INDEX IF NOT EXISTS idx_registration_protocols
-    ON registration_projections USING GIN (protocols);
+    ON public.registration_projections USING GIN (protocols);
 
 -- B-tree index for contract_type + state queries
 -- Query pattern: SELECT * FROM registration_projections
 --                WHERE contract_type = 'effect' AND current_state = 'active'
 CREATE INDEX IF NOT EXISTS idx_registration_contract_type_state
-    ON registration_projections (contract_type, current_state);
+    ON public.registration_projections (contract_type, current_state);
 
 -- Composite index for deadline + emission marker scans
 -- Optimizes the most common timeout check query
 CREATE INDEX IF NOT EXISTS idx_registration_ack_timeout_scan
-    ON registration_projections (ack_deadline, ack_timeout_emitted_at)
+    ON public.registration_projections (ack_deadline, ack_timeout_emitted_at)
     WHERE ack_deadline IS NOT NULL AND ack_timeout_emitted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_registration_liveness_timeout_scan
-    ON registration_projections (current_state, liveness_deadline, liveness_timeout_emitted_at)
+    ON public.registration_projections (current_state, liveness_deadline, liveness_timeout_emitted_at)
     WHERE current_state = 'active' AND liveness_deadline IS NOT NULL AND liveness_timeout_emitted_at IS NULL;
 
 -- Index for runtime parent lookups (OMN-24495)
 -- Partial index: only rows with non-null runtime_entity_id
 CREATE INDEX IF NOT EXISTS idx_registration_runtime_entity_id
-    ON registration_projections (runtime_entity_id)
+    ON public.registration_projections (runtime_entity_id)
     WHERE runtime_entity_id IS NOT NULL;
 
 -- =============================================================================
 -- TABLE AND COLUMN COMMENTS
 -- =============================================================================
 
-COMMENT ON TABLE registration_projections IS
+COMMENT ON TABLE public.registration_projections IS
     'Materialized registration state for orchestrator queries (OMN-944/F1). '
     'Stores current FSM state, timeout deadlines, and idempotency tracking fields.';
 
-COMMENT ON COLUMN registration_projections.entity_id IS
+COMMENT ON COLUMN public.registration_projections.entity_id IS
     'Node UUID - partition key for per-entity ordering. Combined with domain forms primary key.';
 
-COMMENT ON COLUMN registration_projections.domain IS
+COMMENT ON COLUMN public.registration_projections.domain IS
     'Domain namespace for multi-domain support. Default: "registration".';
 
-COMMENT ON COLUMN registration_projections.current_state IS
+COMMENT ON COLUMN public.registration_projections.current_state IS
     'Current FSM state. Used by orchestrators to determine workflow progression.';
 
-COMMENT ON COLUMN registration_projections.ack_deadline IS
+COMMENT ON COLUMN public.registration_projections.ack_deadline IS
     'Deadline for node acknowledgment. Orchestrator emits timeout event when passed.';
 
-COMMENT ON COLUMN registration_projections.liveness_deadline IS
+COMMENT ON COLUMN public.registration_projections.liveness_deadline IS
     'Deadline for next heartbeat. Orchestrator emits liveness expired event when passed.';
 
-COMMENT ON COLUMN registration_projections.last_heartbeat_at IS
+COMMENT ON COLUMN public.registration_projections.last_heartbeat_at IS
     'Timestamp of last received heartbeat from the node. Updated on each HeartbeatReceived event.';
 
-COMMENT ON COLUMN registration_projections.ack_timeout_emitted_at IS
+COMMENT ON COLUMN public.registration_projections.ack_timeout_emitted_at IS
     'Marker indicating ack timeout event was already emitted. Prevents duplicates during replay.';
 
-COMMENT ON COLUMN registration_projections.liveness_timeout_emitted_at IS
+COMMENT ON COLUMN public.registration_projections.liveness_timeout_emitted_at IS
     'Marker indicating liveness timeout event was already emitted. Prevents duplicates during replay.';
 
-COMMENT ON COLUMN registration_projections.last_applied_event_id IS
+COMMENT ON COLUMN public.registration_projections.last_applied_event_id IS
     'message_id of last applied event - used for idempotency checks.';
 
-COMMENT ON COLUMN registration_projections.last_applied_offset IS
+COMMENT ON COLUMN public.registration_projections.last_applied_offset IS
     'Kafka offset of last applied event - canonical ordering for replay correctness.';
 
-COMMENT ON COLUMN registration_projections.last_applied_sequence IS
+COMMENT ON COLUMN public.registration_projections.last_applied_sequence IS
     'Sequence number for non-Kafka transports (optional). Used when offset is not applicable.';
 
-COMMENT ON COLUMN registration_projections.last_applied_partition IS
+COMMENT ON COLUMN public.registration_projections.last_applied_partition IS
     'Kafka partition of last applied event. Used with offset for global ordering.';
 
 -- =============================================================================
