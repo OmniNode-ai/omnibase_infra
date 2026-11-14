@@ -367,6 +367,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - branch_deploy_state
               - code_eval_trial_state
               - delegation_workflow_state
               - floor_fill_state

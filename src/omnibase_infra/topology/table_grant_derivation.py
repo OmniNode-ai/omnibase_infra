@@ -73,11 +73,7 @@ __all__ = [
 # ``INSERT ... ON CONFLICT DO UPDATE``.
 READ_PRIVILEGES = frozenset({EnumDatabasePrivilege.SELECT})
 WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
-    {
-        EnumDatabasePrivilege.SELECT,
-        EnumDatabasePrivilege.INSERT,
-        EnumDatabasePrivilege.UPDATE,
-    }
+    {*READ_PRIVILEGES, EnumDatabasePrivilege.INSERT, EnumDatabasePrivilege.UPDATE}
 )
 # A retention prune's ``DELETE ... WHERE <column> < ...`` reads the rows it
 # removes, so DELETE rides with SELECT and nothing else: no INSERT or UPDATE,
@@ -167,6 +163,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("pr_landing_workflow_state", "108_create_pr_landing_workflow_state.sql"),
         ("floor_fill_state", "113_create_floor_fill_state.sql"),
         ("code_eval_trial_state", "114_create_code_eval_trial_state.sql"),
+        ("branch_deploy_state", "116_create_branch_deploy_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )
 )
