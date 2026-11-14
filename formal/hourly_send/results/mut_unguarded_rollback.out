@@ -1,0 +1,158 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 87 and seed -6183862544045881634 with 2 workers on 32 cores with 1820MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-42-generic amd64, Eclipse Adoptium 17.0.21 x86_64, MSBDiskFPSet, DiskStateQueue).
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module HourlySend
+Starting... (2026-11-14 05:38:05)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-14 05:38:05.
+Error: Invariant NoKeyDoubleSend is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ readable = TRUE
+/\ cur = (t1 :> nil @@ t2 :> nil)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 0
+/\ pc = (t1 :> "idle" @@ t2 :> "idle")
+/\ tok = (t1 :> 0 @@ t2 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<>>
+/\ w2pc = "idle"
+
+State 2: <Advance line 101, col 5 to line 103, col 84 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> nil @@ t2 :> nil)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 1
+/\ pc = (t1 :> "idle" @@ t2 :> "idle")
+/\ tok = (t1 :> 0 @@ t2 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<>>
+/\ w2pc = "idle"
+
+State 3: <Claim line 119, col 5 to line 126, col 60 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1 @@ t2 :> nil)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 1
+/\ pc = (t1 :> "claimed" @@ t2 :> "idle")
+/\ tok = (t1 :> 1 @@ t2 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> [by |-> t1, at |-> 1] @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<>>
+/\ w2pc = "idle"
+
+State 4: <Advance line 101, col 5 to line 103, col 84 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1 @@ t2 :> nil)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 2
+/\ pc = (t1 :> "claimed" @@ t2 :> "idle")
+/\ tok = (t1 :> 1 @@ t2 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> [by |-> t1, at |-> 1] @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<>>
+/\ w2pc = "idle"
+
+State 5: <Advance line 101, col 5 to line 103, col 84 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1 @@ t2 :> nil)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 3
+/\ pc = (t1 :> "claimed" @@ t2 :> "idle")
+/\ tok = (t1 :> 1 @@ t2 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> [by |-> t1, at |-> 1] @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<>>
+/\ w2pc = "idle"
+
+State 6: <Claim line 119, col 5 to line 126, col 60 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1 @@ t2 :> k1)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 3
+/\ pc = (t1 :> "claimed" @@ t2 :> "claimed")
+/\ tok = (t1 :> 1 @@ t2 :> 3)
+/\ faulted = FALSE
+/\ rec = (k1 :> [by |-> t2, at |-> 3] @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<>>
+/\ w2pc = "idle"
+
+State 7: <Send line 179, col 5 to line 186, col 63 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1 @@ t2 :> k1)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 3
+/\ pc = (t1 :> "claimed" @@ t2 :> "idle")
+/\ tok = (t1 :> 1 @@ t2 :> 3)
+/\ faulted = FALSE
+/\ rec = (k1 :> [by |-> t2, at |-> 3] @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<[by |-> t2, key |-> k1, st |-> 3]>>
+/\ w2pc = "idle"
+
+State 8: <Refuse line 201, col 5 to line 211, col 70 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1 @@ t2 :> k1)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 3
+/\ pc = (t1 :> "idle" @@ t2 :> "idle")
+/\ tok = (t1 :> 1 @@ t2 :> 3)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<[by |-> t2, key |-> k1, st |-> 3]>>
+/\ w2pc = "idle"
+
+State 9: <Claim line 119, col 5 to line 126, col 60 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1 @@ t2 :> k1)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 3
+/\ pc = (t1 :> "idle" @@ t2 :> "claimed")
+/\ tok = (t1 :> 1 @@ t2 :> 3)
+/\ faulted = FALSE
+/\ rec = (k1 :> [by |-> t2, at |-> 3] @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<[by |-> t2, key |-> k1, st |-> 3]>>
+/\ w2pc = "idle"
+
+State 10: <Send line 179, col 5 to line 186, col 63 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1 @@ t2 :> k1)
+/\ snap = ( t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) @@
+  t2 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil) )
+/\ now = 3
+/\ pc = (t1 :> "idle" @@ t2 :> "idle")
+/\ tok = (t1 :> 1 @@ t2 :> 3)
+/\ faulted = FALSE
+/\ rec = (k1 :> [by |-> t2, at |-> 3] @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<[by |-> t2, key |-> k1, st |-> 3], [by |-> t2, key |-> k1, st |-> 3]>>
+/\ w2pc = "idle"
+
+61288 states generated, 34798 distinct states found, 21115 states left on queue.
+The depth of the complete state graph search is 10.
+The average outdegree of the complete state graph is 3 (minimum is 0, the maximum 7 and the 95th percentile is 6).
+Finished in 00s at (2026-11-14 05:38:05)
+exit=12
