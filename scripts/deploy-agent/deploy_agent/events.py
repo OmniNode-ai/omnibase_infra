@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
-from typing import Final, Literal
+from typing import Annotated, Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
@@ -946,6 +946,14 @@ class ModelRebuildRequested(BaseModel):
     open_pr: str = Field(
         default="", pattern=r"^([a-z][a-z0-9_]*#[1-9][0-9]*@[0-9a-f]{40})?$"
     )
+    # OMN-21485: sibling repository -> the dev tag a lab build stages in place of
+    # its newest one (DEPLOY_SIBLING_REFS in stage_workspace.sh). The stability
+    # follow names the exact tag its decision compared against; the key and tag
+    # shapes are fixed so the value cannot add a ref or an option to the staging.
+    sibling_tags: dict[
+        Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")],
+        Annotated[str, Field(pattern=r"^dev-[0-9]{14}-[0-9a-f]{12}$")],
+    ] = Field(default_factory=dict)
     # OMN-19270: when the command was first requested -- the moment its
     # trigger published it, carried through every hop that forwards it. The
     # lineage fence supersedes a sibling-triggered command only when the
@@ -1001,15 +1009,13 @@ class ModelRebuildRequested(BaseModel):
         return self
 
 
+# Why a job never ran its first phase (OMN-18124).
+#
+# Lane contention is distinct from a build failure: the lane was not touched,
+# and whoever holds it retries the command later. Wire ``status`` stays
+# ``failed`` for omnimarket EnumRedeployStatus (success|failed); the reason
+# rides in its own field, absent to consumers that ignore extra fields.
 class EnumJobNotStarted(StrEnum):
-    """Why a job never ran its first phase (OMN-18124).
-
-    Lane contention is distinct from a build failure: the lane was not touched,
-    and whoever holds it retries the command later. Wire ``status`` stays
-    ``failed`` for omnimarket EnumRedeployStatus (success|failed); the reason
-    rides in its own field, absent to consumers that ignore extra fields.
-    """
-
     LANE_LOCK_CONTENDED = "lane_lock_contended"
 
 

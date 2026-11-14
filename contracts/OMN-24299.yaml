@@ -55,11 +55,11 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-omn24299-deploy-probe
-    description: 'Deploy probe: the branch carries the fill handler, read from the repository through gh. This is a presence probe, not the runtime proof; AC4 is read in the running runtime (a job log on a recreated runner) and recorded in the pull request Lab comment, because hosted CI cannot reach the lab.'
+    description: 'Deploy probe: the branch carries the fill handler. This is a presence probe over the checked-out source, absent at the merge base, not the runtime proof; AC4 is read in the running runtime (a job log on a recreated runner) and recorded in the pull request Lab comment, because hosted CI cannot reach the lab.'
     source: manual
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_action_archive_cache_fill.py?ref=omn-19998-ci-actions-cache" --jq .content | base64 -d | grep -c 'class HandlerActionArchiveCacheFill' >/dev/null
+        check_value: grep -c 'class HandlerActionArchiveCacheFill' src/omnibase_infra/handlers/handler_action_archive_cache_fill.py
         cwd: .
     binds_ac:
       - AC2
@@ -72,5 +72,3 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/ci/test_action_archive_cache_fleet_omn24299.py -q
         cwd: .
-    binds_ac:
-      - AC3

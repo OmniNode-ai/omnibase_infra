@@ -44,6 +44,22 @@ services:
       ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-store:/etc/onex/skill-overlays
       ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
       ONEX_TICKET_GUARD_PATH: /etc/onex/ticket-guard/plugins/onex/hooks/lib/ticket_creation_guard.py
+      #
+      # -- Ledger source (OMN-24218) ---------------------------------------------
+      # node_commitment_check_scheduled_effect reads and appends the ledger through
+      # commands these variables name (ledger_read and ledger_append of the runner's
+      # overlay), and node_work_state_projection_scheduled_effect reads it the same
+      # way. Unset, every tick failed "the commitment ledger source is not bound in
+      # the runtime" and the schedule verdict read the job failed. The read is the
+      # ledger query command over the bus (the container's own SCRAM login carries
+      # the identity); the append is the bus append command. Each command carries
+      # the workspace config root and registry root as its own `env` prefix, so no
+      # other reader in the container sees a config root it never had. The root
+      # holds only config/lab, mounted read-only below, where the lane declaration
+      # the broker address is resolved from lives.
+      ONEX_LEDGER_BUS_READ_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config OMNIBASE_PATH=/app onex ledger query --bus-lane dev --stdin
+      ONEX_LEDGER_BUS_APPEND_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config python -m omnimarket.work_ledger_bus.cli append --bus-lane dev --omnibase-path /app
+      ONEX_LEDGER_HOST_NAME: ${DEV_LANE_LEDGER_HOST_NAME:-dev-runtime}
     # The effects health port keeps answering, now from main (plan T8: port
     # 8086 answers from main).
     ports:
@@ -73,6 +89,10 @@ services:
       # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro
+      # The lane declaration folder (OMN-24218): ONEX_LANE_OVERLAY_DIR is the lane
+      # overlay folder under the workspace config root's config/lab, which the infra
+      # compose already requires, so its parent is config/lab. Read-only.
+      - ${ONEX_LANE_OVERLAY_DIR}/..:/etc/onex/workspace-config/config/lab:ro
       - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.codex/auth.json:ro
       - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.claude:ro
   # The retired carrier starts under no profile a lane bring-up requests, as

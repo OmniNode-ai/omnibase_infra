@@ -68,6 +68,11 @@ _UNOWNED_TABLES = {
     "public.infra_routing_decisions",
 }
 
+# OMN-24118: created and granted by its own migration, 115 is already applied.
+_GRANTED_BY_OWN_MIGRATION = {
+    "public.branch_deploy_state": "116_create_branch_deploy_state.sql"
+}
+
 
 @pytest.mark.parametrize("instance", SHIPPED_INSTANCES)
 @pytest.mark.unit
@@ -88,13 +93,22 @@ def test_the_grant_names_exactly_the_tables_the_topology_declares(
 
     # No public ownership declaration exists for these two, so the application
     # database SQL gate refuses a GRANT target on them.
-    assert tables == declared_tables - _UNOWNED_TABLES
+    declared_by_115 = declared_tables - _UNOWNED_TABLES - set(_GRANTED_BY_OWN_MIGRATION)
+    assert tables == declared_by_115
     assert privileges == {"SELECT", "INSERT", "UPDATE"}
     assert privileges == declared_privileges
 
     # Positive control: floor_fill_state is in the declared set and the set has at least 6 tables.
     assert "public.floor_fill_state" in declared_tables
-    assert len(declared_tables - _UNOWNED_TABLES) >= 4
+    assert len(declared_by_115) >= 4
+
+    for table, migration_file in _GRANTED_BY_OWN_MIGRATION.items():
+        assert table in declared_tables
+        migration_text = (FORWARD_DIR / migration_file).read_text(encoding="utf-8")
+        assert (
+            f"GRANT SELECT, INSERT, UPDATE ON TABLE {table} TO role_omnibase_infra"
+            in migration_text
+        )
 
 
 @pytest.mark.unit
