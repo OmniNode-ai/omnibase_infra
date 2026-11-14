@@ -109,7 +109,6 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_activations": "omnimarket OMN-21115 (node_context_install_confirm_trigger_effect)",
     "compaction_current_context": "omnimarket OMN-21090 (node_projection_compaction_current_context)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
-    "skill_executions": "omnimarket OMN-21933 (node_projection_skill_lifecycle)",
     "ledger_line_citation": "omnimarket OMN-21947 (node_projection_work_ledger)",
     **dict.fromkeys(
         (
