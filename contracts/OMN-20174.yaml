@@ -16,9 +16,14 @@ requirements:
     acceptance:
       - id: AC2
         statement: 'AC2: uv.lock resolves pyasn1 at 0.6.5 or later -- falsifier: a pyasn1 entry in uv.lock below 0.6.5, as at the merge base where it is 0.6.4'
+  - id: req-omn20174-dnspython-fixed
+    statement: The lockfile resolves dnspython at 2.9.2 or later, so the lockfile CVE scan no longer reports GHSA-vvf4-9x63-8xvv.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: uv.lock resolves dnspython at 2.9.2 or later -- falsifier: a dnspython entry in uv.lock below 2.9.2, as at the merge base where it is 2.9.0'
 evidence_requirements:
   - kind: tests
-    description: Read uv.lock and refuse msgpack below 1.2.3 and dnspython below 2.9.0.
+    description: Read uv.lock and refuse msgpack below 1.2.3 and dnspython below 2.9.2.
     command: uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_omn20174.py -q
   - kind: tests
     description: Read uv.lock and refuse pyasn1 below 0.6.5.
@@ -49,3 +54,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn20174-ac3-dnspython-pin
+    description: The dnspython entry in uv.lock is at 2.9.2 or later. Fails at the merge base, where the entry is 2.9.0, and passes at the head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_omn20174.py -q -k 'test_fixed_versions_locked and dnspython'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

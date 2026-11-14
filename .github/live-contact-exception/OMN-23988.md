@@ -1,0 +1,1 @@
+Live-contact exception: the change to .github/workflows/docker-build.yml only removes the import of the retired omnibase_compat package from the foundation import smoke command; it adds no step and contacts no service, and the first pull_request run of the docker-build job on this head runs the shortened smoke command against the built image.

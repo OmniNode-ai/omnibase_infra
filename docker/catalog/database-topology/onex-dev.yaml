@@ -419,6 +419,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - branch_deploy_state
               - code_eval_trial_state
               - delegation_workflow_state
               - floor_fill_state
@@ -489,5 +490,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: bf792f81d437a5d7c6fde65e15bbb5e4748012b37581f2074363abb1588e6948
+  sha256: 74ddc1f2aed66a262fca3d8d865c39b6fce50c688a67a840ddc96a4c89b4adbe
 topology_instance: onex-dev

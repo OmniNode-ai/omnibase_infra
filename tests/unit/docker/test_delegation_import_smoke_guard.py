@@ -27,14 +27,9 @@ _WORKFLOW_PATH = _PROJECT_ROOT / ".github" / "workflows" / "docker-build.yml"
 
 # Foundation import asserted by the guard (OMN-12658). OMN-21279: the image
 # carries no omnimarket, so the guard no longer imports a market handler.
-# OMN-20074: the Dockerfile smoke no longer imports omnibase_compat (retired).
-# The docker-build CI step still does: that workflow builds in release mode,
-# which installs compat from a tarball, and editing the workflow needs a
-# live-contact exception in the PR body, which the PR owner must carry. The
-# follow-up that drops release-mode compat changes both together.
-_FOUNDATION_IMPORT = (
-    "import omnibase_compat; import omnibase_core; import omnibase_infra"
-)
+# OMN-20074 / OMN-23988: omnibase_compat is retired; neither the Dockerfile
+# smoke nor the docker-build CI step imports it.
+_FOUNDATION_IMPORT = "import omnibase_core; import omnibase_infra"
 _LOCK_PATH = _PROJECT_ROOT / "uv.lock"
 _SMOKE_MARKER = "foundation import smoke OK"
 _FIRST_PARTY_MODULE = re.compile(r"\bomnibase_[a-z0-9_]+\b")

@@ -8,15 +8,19 @@
 # directory grants omninode_runtime SELECT, INSERT, UPDATE. A relation is
 # <prefix><table>. Each bridge expires when the omnimarket node contract
 # reaches the pin (tests/ci/test_supplemental_declaration_expiry_omn18863.py).
+# opts: optional schema (default omninode_internal) and access (default
+# read_write) for the declaration.
 - ticket: OMN-23055 # the store opens its own connection, so no db_io binding
   node: node_gate_store_effect
   create: 0000_create_gate_store.sql
   prefix: gate_store_
+  opts: {}
   tables: [state, reservations, safety, steps]
 - ticket: OMN-23341
   node: node_projection_goal_trace
   create: 0000_create_goal_trace_events.sql
   prefix: ""
+  opts: {}
   tables: [goal_trace_events, goal_traces]
 # OMN-21933: infra vendors skill_executions (node_projection_skill_lifecycle 0001-0002)
 # ahead of the omnimarket node contract. The node writes through the
@@ -26,8 +30,7 @@
   node: node_projection_skill_lifecycle
   create: 0001_create_skill_executions.sql
   prefix: ""
-  schema: public
-  access: write
+  opts: {schema: public, access: write}
   tables: [skill_executions]
 # OMN-24323: infra vendors experiment_arm_results (node_projection_experiment_result
 # 0000-0002) ahead of the omnimarket node contract. The node writes through the
@@ -37,5 +40,5 @@
   node: node_projection_experiment_result
   create: 0000_create_experiment_arm_results.sql
   prefix: ""
-  schema: public
+  opts: {schema: public}
   tables: [experiment_arm_results]

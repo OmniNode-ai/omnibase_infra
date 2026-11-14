@@ -217,8 +217,9 @@ def test_build_args_carry_the_rt1_resolved_shas_not_the_canonical_heads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """OMN-20263: RT-1 now checks the pins out in worktrees of its own, so the
-    canonical clone's HEAD is not the staged commit. OMNIMARKET_REF and
-    OMNIBASE_COMPAT_REF must be the SHAs RT-1 resolved, not the clone HEADs."""
+    canonical clone's HEAD is not the staged commit. OMNIMARKET_REF must be the
+    SHA RT-1 resolved, not the clone HEAD. OMNIBASE_COMPAT_REF is no longer
+    passed (omnibase_compat is retired)."""
     resolved = {
         "omnibase_core": "1111111111111111111111111111111111111111",
         "omnibase_compat": "2222222222222222222222222222222222222222",
@@ -260,5 +261,9 @@ def test_build_args_carry_the_rt1_resolved_shas_not_the_canonical_heads(
 
     build = next(cmd for cmd in commands if "build" in cmd)
     assert f"OMNIMARKET_REF={resolved['omnimarket']}" in build
-    assert f"OMNIBASE_COMPAT_REF={resolved['omnibase_compat']}" in build
+    compat_args = [t for t in build if t.startswith("OMNIBASE_COMPAT_REF=")]
+    assert not compat_args, (
+        "OMNIBASE_COMPAT_REF must not be passed: omnibase_compat is retired; "
+        f"got {compat_args}"
+    )
     assert f"OMNIMARKET_REF={canonical_heads['omnimarket']}" not in build

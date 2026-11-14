@@ -403,7 +403,11 @@ def services_for_scope(
     return base
 
 
-class ModelHealthCheck(BaseModel):
+class _StrictFrozenModel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class ModelHealthCheck(_StrictFrozenModel):
     """One post-deploy check and, when it did not pass, why (OMN-18640 AC8).
 
     ``detail`` is empty for a pass and is REQUIRED reading for a fail. Before
@@ -414,7 +418,6 @@ class ModelHealthCheck(BaseModel):
     and the deploy that most needs them is the one that is now refused.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
     service: str
     endpoint: str
     status: Literal["pass", "fail"]
@@ -422,7 +425,7 @@ class ModelHealthCheck(BaseModel):
     detail: str = ""
 
 
-class ModelContainerResidue(BaseModel):
+class ModelContainerResidue(_StrictFrozenModel):
     """One service left in a non-running state by a deploy phase (OMN-18057).
 
     The 2026-09-08 runtime-phase kill left ``runtime-effects``,
@@ -433,7 +436,6 @@ class ModelContainerResidue(BaseModel):
     facts about the lane.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
     service: str
     state: str
     exit_code: int | None = None
@@ -474,7 +476,7 @@ class EnumRecreateOutcome(StrEnum):
     KILLED_HARD_UPPER_BOUND = "killed_hard_upper_bound"
 
 
-class ModelRecreateSupervision(BaseModel):
+class ModelRecreateSupervision(_StrictFrozenModel):
     """What the deps-phase ceiling did, and what it was measured against.
 
     Carried on the terminal event beside ``container_residue`` so a WAIT and a
@@ -485,7 +487,6 @@ class ModelRecreateSupervision(BaseModel):
     ceiling was unknowingly charging against the recreate.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
     phase: str
     outcome: EnumRecreateOutcome
     ceiling_seconds: int
@@ -557,7 +558,7 @@ class EnumVerifyRecreateOutcome(StrEnum):
     NOT_RECREATED_ANSWERING = "not_recreated_answering"
 
 
-class ModelComposeInvocation(BaseModel):
+class ModelComposeInvocation(_StrictFrozenModel):
     """One ``docker compose`` command this deploy issued, as argv (OMN-18640).
 
     The agent logs a phase, a ceiling and an outcome; it has never logged the
@@ -575,12 +576,11 @@ class ModelComposeInvocation(BaseModel):
     is readable by every process on the host.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
     phase: Phase
     argv: tuple[str, ...]
 
 
-class ModelDepsConvergenceFinding(BaseModel):
+class ModelDepsConvergenceFinding(_StrictFrozenModel):
     """One core dependency's declaration, compared against what is running.
 
     OMN-18640. The deps leg converges rather than force-recreates, so it
@@ -613,7 +613,6 @@ class ModelDepsConvergenceFinding(BaseModel):
     in the fleet emits a deps-only scope for a deliberate refresh to route to.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
     service: str
     lane: EnumRuntimeLane
     compose_project: str
@@ -645,7 +644,7 @@ class ModelDepsConvergenceFinding(BaseModel):
         )
 
 
-class ModelVerifyRecreate(BaseModel):
+class ModelVerifyRecreate(_StrictFrozenModel):
     """One runtime container this deploy recreated because its health failed.
 
     Carried on the terminal event beside ``container_residue`` and
@@ -660,7 +659,6 @@ class ModelVerifyRecreate(BaseModel):
     after the fact rather than only assertable in a review.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
     service: str
     lane: EnumRuntimeLane
     compose_project: str
@@ -699,7 +697,7 @@ class EnumOneShotRerunReason(StrEnum):
     NEVER_RAN = "never_ran"
 
 
-class ModelOneShotRerun(BaseModel):
+class ModelOneShotRerun(_StrictFrozenModel):
     """One control-plane one-shot a runtime rebuild re-ran, and how it ended (OMN-19911).
 
     A runtime rebuild starts its services with ``up -d --no-deps``, and compose
@@ -715,7 +713,6 @@ class ModelOneShotRerun(BaseModel):
     exited 0.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
     service: str
     lane: EnumRuntimeLane
     compose_project: str
@@ -801,7 +798,7 @@ class EnumLineageVerdict(StrEnum):
         )
 
 
-class ModelLineageDecision(BaseModel):
+class ModelLineageDecision(_StrictFrozenModel):
     """One command's lineage verdict, the refs it was reached from, and what builds.
 
     Durable on the job record (``JobState.lineage``) as well as in the journal,
@@ -811,8 +808,6 @@ class ModelLineageDecision(BaseModel):
     # job build, and why that one. ``resolved_ref`` is set when the command named
     # a symbolic ref, which is resolved at accept time and built at that exact
     # sha, so the record and the build cannot disagree.
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     verdict: EnumLineageVerdict
     requested_ref: str
@@ -830,7 +825,7 @@ class ModelLineageDecision(BaseModel):
         )
 
 
-class ModelRollbackDeclaration(BaseModel):
+class ModelRollbackDeclaration(_StrictFrozenModel):
     """A signed declaration that a command deliberately moves a lane off its lineage."""
 
     # OMN-19270. The agent refuses a command whose ``git_ref`` is a strict
@@ -846,8 +841,6 @@ class ModelRollbackDeclaration(BaseModel):
     # backwards. The declaration travels inside the signed command body, so it
     # cannot be added to a command in transit.
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
     actor: str = Field(min_length=1)
     reason: str = Field(min_length=1)
 
@@ -860,7 +853,7 @@ class ModelRollbackDeclaration(BaseModel):
         return self
 
 
-class ModelDevLaneDrift(BaseModel):
+class ModelDevLaneDrift(_StrictFrozenModel):
     """A dev lane behind a followed repository's dev head (OMN-21146).
 
     Published to :data:`TOPIC_DEV_LANE_DRIFT` when the lane has lagged the head
@@ -870,8 +863,6 @@ class ModelDevLaneDrift(BaseModel):
     first saw the lane behind; an agent restart starts it again, so the lag is
     never overstated.
     """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     instance: str
     repository: str
@@ -887,7 +878,7 @@ class ModelDevLaneDrift(BaseModel):
     overdue: bool
 
 
-class ModelDevTagHeartbeat(BaseModel):
+class ModelDevTagHeartbeat(_StrictFrozenModel):
     """A lab instance's reading against a repository's newest ``dev-*`` tag (OMN-19998).
 
     Published to :data:`TOPIC_DEV_TAG_HEARTBEAT` on every
@@ -898,8 +889,6 @@ class ModelDevTagHeartbeat(BaseModel):
     ``alarm_after_seconds`` old. A ref this read could not take is ``None``,
     and an unread reading never raises the alarm.
     """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     instance: str
     repository: str
@@ -915,8 +904,7 @@ class ModelDevTagHeartbeat(BaseModel):
     alarm: bool
 
 
-class ModelRebuildRequested(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class ModelRebuildRequested(_StrictFrozenModel):
     correlation_id: UUID
     requested_by: str
     scope: Scope
@@ -964,6 +952,7 @@ class ModelRebuildRequested(BaseModel):
     # earlier than the build it is compared with; a command without a
     # producer-stamped time therefore builds, as it did before.
     requested_at: datetime | None = None
+    overlay_ref: str = Field(default="", pattern=r"^([0-9a-f]{40})?$")
 
     @model_validator(mode="after")
     def validate_requested_at_is_aware(self) -> ModelRebuildRequested:
@@ -984,6 +973,14 @@ class ModelRebuildRequested(BaseModel):
         ):
             msg = "open_pr needs runtime_lane dev, a rollback declaration, git_ref = its head"
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def validate_overlay_ref(self) -> ModelRebuildRequested:
+        if self.overlay_ref and (
+            self.runtime_lane != EnumRuntimeLane.DEV or not self.rollback
+        ):
+            raise ValueError("overlay_ref needs runtime_lane dev and a rollback")
         return self
 
     @model_validator(mode="after")
@@ -1058,7 +1055,7 @@ class EnumRejectionReason(StrEnum):
     FROZEN = "frozen"
 
 
-class ModelRejectionNotice(BaseModel):
+class ModelRejectionNotice(_StrictFrozenModel):
     """What the consumer resolved about a command it refused (OMN-17079).
 
     The consumer decides SIX of the eight rejection reasons, and before this model it
@@ -1085,8 +1082,6 @@ class ModelRejectionNotice(BaseModel):
     durable evidence instead.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
     reason: EnumRejectionReason
     #: The refused command's correlation id, or ``None`` when the record was refused
     #: before one could be parsed from it.
@@ -1095,7 +1090,7 @@ class ModelRejectionNotice(BaseModel):
     scope: Scope | None
 
 
-class ModelRebuildRejected(BaseModel):
+class ModelRebuildRejected(_StrictFrozenModel):
     """The terminal event for a command this agent will not run (OMN-18143).
 
     The wire shape is unchanged for every reason that predates this model: the
@@ -1104,8 +1099,6 @@ class ModelRebuildRejected(BaseModel):
     a consumer that predates this change parses it unchanged. The same
     discipline ``ModelLabPassCheck.to_dict`` applies to its ``outcome`` key.
     """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     correlation_id: UUID
     reason: EnumRejectionReason
@@ -1206,7 +1199,29 @@ class EnumOnexApiDeliveryResult(StrEnum):
             return cls.UNRECOGNISED
 
 
-class ModelOnexApiDelivery(BaseModel):
+class _DropsOwnComputedFields(_StrictFrozenModel):
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_own_computed_fields(cls, data: object) -> object:
+        """Accept this model's own serialised form back (OMN-18572).
+
+        ``is_failure`` is a computed field, so it is present in every
+        ``model_dump`` of this model and absent from every hand-built mapping.
+        ``JobState`` persists this record to disk and re-validates it on load,
+        and under ``extra="forbid"`` that round trip fails on the model's own
+        output -- which would turn a durable verdict into a job record that
+        cannot be read back at all.
+
+        It is DROPPED rather than accepted: a derived value must be re-derived
+        from the fields it derives from, or a caller could hand back a
+        contradictory one and this model would carry it.
+        """
+        if isinstance(data, dict) and "is_failure" in data:
+            data = {k: v for k, v in data.items() if k != "is_failure"}
+        return data
+
+
+class ModelOnexApiDelivery(_DropsOwnComputedFields):
     """What the onex-api pin delivery did for one job (OMN-18572).
 
     ``onex-api`` on the compose dev lane is tag-referenced: the lane runs
@@ -1229,8 +1244,6 @@ class ModelOnexApiDelivery(BaseModel):
     asked for the wrong lineage.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
     result: EnumOnexApiDeliveryResult
     #: The verdict exactly as its source spelled it, so an ``UNRECOGNISED``
     #: mapping loses nothing and a known one is checkable against the source.
@@ -1244,26 +1257,6 @@ class ModelOnexApiDelivery(BaseModel):
     pin_after: str | None = None
     tag_advanced: bool = False
     recreated: bool = False
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_own_computed_fields(cls, data: object) -> object:
-        """Accept this model's own serialised form back (OMN-18572).
-
-        ``is_failure`` is a computed field, so it is present in every
-        ``model_dump`` of this model and absent from every hand-built mapping.
-        ``JobState`` persists this record to disk and re-validates it on load,
-        and under ``extra="forbid"`` that round trip fails on the model's own
-        output -- which would turn a durable verdict into a job record that
-        cannot be read back at all.
-
-        It is DROPPED rather than accepted: a derived value must be re-derived
-        from the fields it derives from, or a caller could hand back a
-        contradictory one and this model would carry it.
-        """
-        if isinstance(data, dict) and "is_failure" in data:
-            data = {k: v for k, v in data.items() if k != "is_failure"}
-        return data
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -1326,10 +1319,8 @@ class EnumLaneMirrorOutcome(StrEnum):
     FAILED = "failed"
 
 
-class ModelLaneMirrorForwarder(BaseModel):
+class ModelLaneMirrorForwarder(_StrictFrozenModel):
     """One enabled forwarder's state after the step brought it up."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     profile: str
     service: str
@@ -1344,7 +1335,7 @@ class ModelLaneMirrorForwarder(BaseModel):
     ready: bool
 
 
-class ModelLaneMirrorReceipt(BaseModel):
+class ModelLaneMirrorReceipt(_DropsOwnComputedFields):
     """What the lane-mirror step did on one deploy (OMN-20867).
 
     The forwarders that mirror a source lane's topics onto this lane (the
@@ -1356,8 +1347,6 @@ class ModelLaneMirrorReceipt(BaseModel):
     reported per forwarder instead, and ``is_failure`` makes a failure legible
     at a glance in the terminal event.
     """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     outcome: EnumLaneMirrorOutcome
     detail: str
@@ -1372,14 +1361,6 @@ class ModelLaneMirrorReceipt(BaseModel):
     forwarders: tuple[ModelLaneMirrorForwarder, ...] = ()
     compose_argv: tuple[str, ...] = ()
 
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_own_computed_fields(cls, data: object) -> object:
-        """Accept this model's own serialised form back (see ModelOnexApiDelivery)."""
-        if isinstance(data, dict) and "is_failure" in data:
-            data = {k: v for k, v in data.items() if k != "is_failure"}
-        return data
-
     # No ``@property`` under ``@computed_field``: pydantic wraps the method
     # itself (see ``ModelRebuildCompleted.status``).
     @computed_field
@@ -1387,8 +1368,7 @@ class ModelLaneMirrorReceipt(BaseModel):
         return self.outcome is EnumLaneMirrorOutcome.FAILED
 
 
-class ModelRebuildCompleted(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class ModelRebuildCompleted(_StrictFrozenModel):
     correlation_id: UUID
     requested_git_ref: str
     git_sha: str
