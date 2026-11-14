@@ -230,6 +230,9 @@ hosts:
     runner_name_prefix: hp053-ci-runner
     expected_count: 5
     classes: [action, action-multiarch]
+    # OMN-24299 -- read-only mounted into this host's runner containers at
+    # container_path above.
+    action_archive_host_root: /var/lib/onex/action-archives
     # OMN-22123 -- the reserved merge-queue pool. A merge_group job of a private repository asks for the label
     # `omnibase-ci-mq`; the runners that carried it lived on another lab host that is in repair and the fleet declared none, so each job
     # waited 14 to 60 minutes. Four runners on h053, labelled `omnibase-ci-mq` alone (no `omnibase-ci`, no
@@ -387,6 +390,24 @@ tool_cache:
   snapshot_root: ~/.omnibase/runners/toolcache-seed
   seed_script: docker/runners/toolcache-seed.sh
   recreate_procedure: knowledge_base:runbooks/c2-git-mirror-egress-rollout.md
+# OMN-24299 — action-archive cache for the self-hosted runners. The runner's
+# ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE makes a step using `owner/repo@<sha>`
+# copy <cache>/<owner>_<repo>/<sha>.tar.gz instead of downloading from GitHub,
+# and download as before when the archive is absent (fail-open). staging_root
+# is the deploy-host directory the fill writes and rsyncs to each runner
+# host's action_archive_host_root; container_path is the read-only path every
+# runner container sees. The workflows scanned for `uses:` references are those
+# of the canonical clones of git_mirror.repos above (one declared list of the CI
+# repositories, not a second one).
+action_archive_cache:
+  active: true
+  staging_root: ~/.omnibase/runners/action-archive-cache
+  container_path: /opt/onex-action-archives
+  # local_owner's action repos are read from the canonical clone of the same
+  # repo name; third-party repos are fetched once per ref from the model's
+  # remote_url_template, with its fetch_timeout_seconds.
+  local_owner: OmniNode-ai
+  refresh_interval_seconds: 3600
 # OMN-15736 — local caching DNS resolver (unbound) endpoint. Scaling
 # precondition #1 (capacity probe: [mergesweep-0808-capacity]). STATUS:
 # pending-activation / INERT — the cache service

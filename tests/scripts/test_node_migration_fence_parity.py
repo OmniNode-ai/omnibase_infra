@@ -749,6 +749,10 @@ DEV_LANE_VALUE = "dev"
 # puts the tenant boundary on delegation_judge_verdict_events, the last
 # TENANT-classified relation the dev lane left without one. Its 2026-09-08
 # refusal was a writer defect, fixed by OMN-17627, not a property of the SQL.
+# OMN-24341: node_projection_skill_lifecycle 0002 joined this arm. The skill lifecycle
+# writer inserts skill_executions.tenant_id, which that migration adds; fenced, every
+# write is refused. It stays in the BASELINE fence like the others; the release rests on
+# the OPERATOR-CONSENT row of 2026-09-14T12:11:31Z (tenant row-level security, lab first).
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
     "node:node_projection_delegation:"
@@ -757,6 +761,8 @@ LANE_RELEASED_IDS = (
     "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
     "node:node_projection_delegation:"
     "0041_delegation_budget_state_rls_tenant_isolation.sql",
+    "node:node_projection_skill_lifecycle:"
+    "0002_grant_tenant_projection_writer_skill_executions.sql",
 )
 
 BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
@@ -1260,6 +1266,8 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
         "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
         "node:node_projection_delegation:"
         "0041_delegation_budget_state_rls_tenant_isolation.sql",
+        "node:node_projection_skill_lifecycle:"
+        "0002_grant_tenant_projection_writer_skill_executions.sql",
     }, "the dev-lane release carries ids no operator ruling names"
 
 
