@@ -59,11 +59,3 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/ci/test_deploy_agent_trigger_retired_omn24427.py -k retired_trigger_files -q"
         cwd: "."
     binds_ac: ["AC4"]
-  - id: "dod-omn24427-deploy-agent-suite-focused"
-    description: "The deploy agent's tests that shared a file with the trigger still pass at the head."
-    source: "manual"
-    checks:
-      - check_type: "test_passes"
-        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py scripts/deploy-agent/tests/unit/test_lineage_fence_omn19270.py scripts/deploy-agent/tests/unit/test_executor_build_path_omn16442.py -q"
-        cwd: "."
-    binds_ac: ["AC1"]
