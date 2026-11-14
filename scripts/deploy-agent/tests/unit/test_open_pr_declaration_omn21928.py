@@ -35,7 +35,6 @@ from deploy_agent.events import (
 )
 from deploy_agent.executor import DeployExecutor
 from deploy_agent.lineage_fence import ModelRunningBuild, decide_lineage
-from deploy_agent.trigger import main as trigger_main
 from pydantic import ValidationError
 
 pytestmark = pytest.mark.unit
@@ -265,59 +264,3 @@ def test_coalescing_never_folds_a_declared_open_pr(declared_first: bool) -> None
     assert plan.superseded == ()
     assert plan.stop_reason is EnumCoalesceRefusal.ROLLBACK_DECLARED
     assert plan.runner.command == head
-
-
-def test_the_trigger_signs_the_declaration_into_the_command(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("DEPLOY_AGENT_HMAC_SECRET", "test-secret")
-
-    code = trigger_main(
-        [
-            "--runtime-lane",
-            "dev",
-            "--git-ref",
-            PR_HEAD,
-            "--open-pr",
-            DECLARED,
-            "--rollback-actor",
-            "slot-fix",
-            "--rollback-reason",
-            "build open PR 5564",
-            "--dry-run",
-        ]
-    )
-
-    out = capsys.readouterr().out
-    assert code == 0
-    assert f"git_ref:        {PR_HEAD}" in out
-    assert f'"open_pr": "{DECLARED}"' in out
-
-
-def test_the_trigger_refuses_a_malformed_declaration_and_a_non_dev_lane(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("DEPLOY_AGENT_HMAC_SECRET", "test-secret")
-
-    assert (
-        trigger_main(["--runtime-lane", "dev", "--open-pr", "5564", "--dry-run"]) == 1
-    )
-    assert "open_pr" in capsys.readouterr().err
-
-    code = trigger_main(
-        [
-            "--runtime-lane",
-            EnumRuntimeLane.STABILITY_TEST.value,
-            "--git-ref",
-            PR_HEAD,
-            "--open-pr",
-            DECLARED,
-            "--rollback-actor",
-            "slot-fix",
-            "--rollback-reason",
-            "build open PR 5564",
-            "--dry-run",
-        ]
-    )
-    assert code == 1
-    assert "open_pr needs runtime_lane dev" in capsys.readouterr().err

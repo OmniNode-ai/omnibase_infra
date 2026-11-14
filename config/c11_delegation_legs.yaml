@@ -1,0 +1,19 @@
+# OMN-23177 (scenario R9): what the C11 delegation legs expect.
+#
+# Declared here, in the grader's own config, never read off an observation: a
+# leg grades against these values and a disagreement is the finding.
+corpus_path: config/c11_envelope_corpus.json
+# The refusal each corpus envelope owes, and the corpus the grader demands. The
+# committed corpus file may not widen or narrow either.
+refusal_failure_code: ONEX_CORE_345_ENVELOPE_VALIDATION_FAILED
+corpus_ids: [E1, E2, E3, E4, E5, E6, E11]
+# A fixed policy refusal on rung 1 ends the run: this many attempts, none after.
+policy_refusal_attempts: 1
+# The two rungs of the probe ladder, by the backend id a receipt's attempt names.
+ladder:
+  rung_1: c11-probe-rung-1
+  rung_2: c11-probe-rung-2
+# The planted secret. A literal on purpose, so a failing run can be searched for
+# in every log; never valid as a credential anywhere.
+canary_value: onx_c11_canary_omn23177_7f3a9c1e5b2d
+canary_surfaces: [answer, receipt, events]
