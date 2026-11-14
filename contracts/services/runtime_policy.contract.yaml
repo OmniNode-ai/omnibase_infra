@@ -350,6 +350,12 @@ profiles:
           # deadline; discovered 1225th of 1243 contracts it joined 197 s and
           # 318 s after the container started on 2026-11-10, so a request sent
           # during a roll waited unconsumed and was answered 151 s to 211 s late.
+          # The six lab command nodes (start-path census, host role baseline,
+          # both plugin revision nodes, delegated code edit, delegation
+          # routing order) are asked by `onex run-node` with a 30 s to 60 s
+          # wait; on 2026-11-14 their consumers joined 141 s to 284 s after
+          # the container start, so a send made during a roll waited unconsumed
+          # past the sender's wait (OMN-24426).
           priority_contracts:
             - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
@@ -357,6 +363,12 @@ profiles:
             - projection_claude_hook_events
             - projection_hook_ledger
             - work_ledger_query_effect
+            - node_start_path_census_compute
+            - node_host_role_baseline_compute
+            - node_host_drift_plugin_revision_compute
+            - node_host_drift_plugin_revision_orchestrator
+            - node_delegated_code_edit_orchestrator
+            - node_delegation_routing_order_compute
           memory_limit: 3072M
         # OMN-22930 (T8): the BYOK credential READ that only the separate
         # effects service resolved (OMN-20533) now happens in main, because the
