@@ -38,6 +38,25 @@ _POLL_TIMEOUT_MS = 1000
 _OFFSET_CHUNK = 100
 
 
+def _log_demand_measure(
+    *, topics: int, retained: int, unreadable: int, idle: int
+) -> None:
+    """Log the split's counts in one line (OMN-24223).
+
+    ``retained + unreadable`` is the number of topics in use; ``idle`` is the
+    number watched until their first record. The line starts with the words the
+    boot log is searched for; the failure line below shares only that stem.
+    """
+    logger.info(
+        "Boot subscription demand measure: topics=%d retained=%d unreadable=%d "
+        "idle_watched=%d (OMN-24223)",
+        topics,
+        retained,
+        unreadable,
+        idle,
+    )
+
+
 async def _nothing_to_stop() -> None:
     return None
 
@@ -115,6 +134,12 @@ class HandlerKafkaTopicDemandSource:
             # CancelledError out of this call, past the boundary above, and ends
             # the kernel (tenant-projection-writer restart loop on the laptop
             # profile, run 40881579955).
+            _log_demand_measure(
+                topics=len(logical_of),
+                retained=0,
+                unreadable=len(logical_of),
+                idle=0,
+            )
             return frozenset(logical_of.values()), _nothing_to_stop
         consumer = create_offset_consumer(self._config)
         await consumer.start()
@@ -144,6 +169,12 @@ class HandlerKafkaTopicDemandSource:
             if physical in with_records or physical not in readable
         )
         watched = [tp for tp in measured if tp.topic not in with_records]
+        _log_demand_measure(
+            topics=len(logical_of),
+            retained=len(with_records & logical_of.keys()),
+            unreadable=len(logical_of.keys() - readable),
+            idle=len({tp.topic for tp in watched}),
+        )
         if not watched:
             await consumer.stop()
             return in_use, _nothing_to_stop

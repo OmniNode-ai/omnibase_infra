@@ -1,0 +1,60 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24223
+title: "Start-up log counts the workflows switched on only because their queue is missing"
+summary: "The boot subscription demand measure writes one log line with the number of topics that hold retained records, the number that are missing or unreadable and the number that are idle and watched. It adds a log line and changes no decision."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24223-demand-measure-counts-logged
+    statement: The start-up measure of the demand split logs its three counts in one line that starts with the words Boot subscription demand measure, and the counts equal the split's own answer.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the start-up measure of the demand split logs, in one line, how many topics hold retained records, how many are missing or unreadable and how many are idle and watched -- falsifier: the new unit test passes with the log line removed'
+      - id: AC2
+        statement: 'AC2: the counts equal the split''s own answer (topics in use equal retained plus unreadable) on the in-memory fake broker and on a real broker -- falsifier: the real-broker test reads a count that differs from the topics the broker holds'
+      - id: AC3
+        statement: 'AC3: integrated: after the next dev roll the runtime''s start-up log shows the line with the counts of the running broker -- falsifier: the dev runtime log of that boot holds no line starting "Boot subscription demand measure"'
+evidence_requirements:
+  - kind: tests
+    description: The unit tests read the logged line on the fake broker and fail when the log call is removed.
+    command: uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24223-line-logged
+    description: The demand source logs one measure line with retained, unreadable and idle-watched counts, and the three new tests fail when the log call is removed.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py -q -p no:cacheprovider -k measure
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24223-counts-match-fake-broker
+    description: On the in-memory fake broker the logged counts equal the split's own answer, including a boot set with no provisioned topic and a lane-namespaced boot set.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24223-counts-match-real-broker
+    description: On a real broker the logged counts equal the topics the broker holds, one with a retained record, one empty and one missing. Needs KAFKA_BOOTSTRAP_SERVERS.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/event_bus/test_omn18087_topic_demand_source_integration.py -q -p no:cacheprovider -k measure
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24223-dev-boot-log-holds-line
+    description: After the next dev roll the dev runtime's log holds the measure line with the counts of the running broker.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: 'ssh "$DEPLOY_PROBE_HOST" ''docker logs omninode-runtime 2>&1 | grep -c "Boot subscription demand measure: topics="'''
+        cwd: ${OMNI_HOME}/omnibase_infra

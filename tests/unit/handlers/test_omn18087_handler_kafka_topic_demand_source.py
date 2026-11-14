@@ -432,3 +432,83 @@ async def test_boot_set_of_unprovisioned_topics_starts_no_reader(
     assert in_use == {ABSENT}
     assert FakeConsumer.instances == []
     await stop()
+
+
+MEASURE_PREFIX = "Boot subscription demand measure: "
+
+
+def _measure_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith(MEASURE_PREFIX)
+    ]
+
+
+async def test_measure_logs_one_line_with_the_split_counts(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OMN-24223: retained, unreadable and idle-watched topics, in one line."""
+    broker.update({BUSY: (0, 5), IDLE: (3, 3)})
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError("no record arrived")
+
+    with caplog.at_level("INFO", logger=module.logger.name):
+        in_use, stop = await _source().watch_idle_topics({BUSY, IDLE, ABSENT}, on_first)
+    try:
+        lines = _measure_lines(caplog)
+        assert lines == [
+            f"{MEASURE_PREFIX}topics=3 retained=1 unreadable=1 idle_watched=1 "
+            "(OMN-24223)"
+        ]
+        # The counts are the split's own answer: in use = retained + unreadable.
+        assert len(in_use) == 1 + 1
+    finally:
+        await stop()
+
+
+async def test_measure_counts_every_topic_unreadable_when_none_exists(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A boot set with no provisioned topic is all unreadable and all in use."""
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError("nothing is watched")
+
+    with caplog.at_level("INFO", logger=module.logger.name):
+        in_use, stop = await _source().watch_idle_topics({ABSENT, IDLE}, on_first)
+    try:
+        assert _measure_lines(caplog) == [
+            f"{MEASURE_PREFIX}topics=2 retained=0 unreadable=2 idle_watched=0 "
+            "(OMN-24223)"
+        ]
+        assert in_use == {ABSENT, IDLE}
+    finally:
+        await stop()
+
+
+async def test_measure_counts_a_namespaced_boot_set_by_contract_topic(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under a lane namespace the counts are still one per contract topic."""
+    monkeypatch.setenv("KAFKA_TOPIC_NAMESPACE", "prepr9")
+    broker.update({f"prepr9.{BUSY}": (0, 2), f"prepr9.{IDLE}": (4, 4)})
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError("no record arrived")
+
+    with caplog.at_level("INFO", logger=module.logger.name):
+        in_use, stop = await _source().watch_idle_topics({BUSY, IDLE}, on_first)
+    try:
+        assert _measure_lines(caplog) == [
+            f"{MEASURE_PREFIX}topics=2 retained=1 unreadable=0 idle_watched=1 "
+            "(OMN-24223)"
+        ]
+        assert in_use == {BUSY}
+    finally:
+        await stop()
