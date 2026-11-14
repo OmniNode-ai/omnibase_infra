@@ -47,12 +47,12 @@ dod_evidence:
       - AC2
   - id: dod-omn23841-ac3-published-matches-notes
     description: >-
-      The newest omnibase-core version PyPI serves has a release heading with that version in the core root README on origin/dev. This holds today for the static-version releases and is the check the next nightly cut after core's version becomes dynamic must keep passing.
+      The newest omnibase-core version PyPI serves has a release heading with that version in the README that package publishes (info.description). This reads only public PyPI, so the hosted runner can run it, and it fails when the published version differs from the notes heading. It holds today for the static-version releases and is the check the next nightly cut after core's version becomes dynamic must keep passing.
     source: manual
     checks:
       - check_type: command
         check_value: >-
-          uv run python -c "import json, subprocess, urllib.request; version = json.load(urllib.request.urlopen('https://pypi.org/pypi/omnibase-core/json'))['info']['version']; notes = subprocess.run(['git', '-C', 'omnibase_core', 'show', 'origin/dev:README.md'], capture_output=True, text=True, check=True).stdout; assert f'## v{version} (' in notes, version"
-        cwd: ${OMNI_HOME}
+          uv run python -c "import json, urllib.request; info = json.load(urllib.request.urlopen('https://pypi.org/pypi/omnibase-core/json'))['info']; version = info['version']; assert f'## v{version} (' in info['description'], version"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
