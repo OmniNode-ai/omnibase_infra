@@ -22,6 +22,7 @@ import time
 from collections.abc import Callable
 from uuid import UUID
 
+from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.events.contract_registration.model_node_announcement import (
     ModelNodeAnnouncement,
 )
@@ -30,6 +31,14 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumIntrospectionReason,
+    EnumRuntimeHeartbeatRefusalReason,
+)
+from omnibase_infra.errors.error_infra import RuntimeHostError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
+from omnibase_infra.models.model_runtime_heartbeat_refusal import (
+    ModelRuntimeHeartbeatRefusal,
 )
 from omnibase_infra.models.model_runtime_identity import ModelRuntimeIdentity
 from omnibase_infra.models.model_runtime_introspection_startup_request import (
@@ -51,8 +60,137 @@ from omnibase_infra.topics import SUFFIX_NODE_INTROSPECTION
 logger = logging.getLogger(__name__)
 
 
+class RuntimeHeartbeatRequiredError(RuntimeHostError):
+    """A runtime refused to start because its heartbeat could not run (OMN-24496).
+
+    Raised at the refusal points of this handler and carries the refusal as a
+    ``ModelRuntimeHeartbeatRefusal`` on ``.refusal``. The refusal records how
+    many times this process has refused for this reason (``count``), so a
+    crash loop that keeps hitting the same wall is visible in the refusal
+    stream rather than only in log volume.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        refusal: ModelRuntimeHeartbeatRefusal,
+        context: ModelInfraErrorContext | None = None,
+        **extra_context: object,
+    ) -> None:
+        self.refusal = refusal
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.INVALID_STATE,
+            context=context,
+            **extra_context,
+        )
+
+
 class HandlerRuntimeIntrospectionStartup:
-    """Publish the runtime's startup introspection with jitter and throttling."""
+    """Publish the runtime's startup introspection with jitter and throttling.
+
+    The heartbeat is mandatory (OMN-24496): a runtime that cannot build its
+    introspection service or start its heartbeat task refuses to start with a
+    typed :class:`RuntimeHeartbeatRequiredError` instead of being announced
+    without a heartbeat.
+    """
+
+    # Per-reason refusal counters for this process. A runtime that keeps
+    # hitting the same wall in a crash loop increments its reason's counter on
+    # every refused start, so the refusal stream shows the loop. Tests reset
+    # this via :meth:`reset_refusal_counts`.
+    _refusal_counts: dict[EnumRuntimeHeartbeatRefusalReason, int] = {}
+
+    @classmethod
+    def refusal_count(cls, reason: EnumRuntimeHeartbeatRefusalReason) -> int:
+        """Return how many refusals of ``reason`` this process has made."""
+        return cls._refusal_counts.get(reason, 0)
+
+    @classmethod
+    def reset_refusal_counts(cls) -> None:
+        """Clear the per-reason refusal counters (test isolation)."""
+        cls._refusal_counts.clear()
+
+    def refusal_error(
+        self,
+        *,
+        reason: EnumRuntimeHeartbeatRefusalReason,
+        runtime_name: str,
+        detail: str,
+        correlation_id: UUID,
+    ) -> RuntimeHeartbeatRequiredError:
+        """Build the typed refusal for a runtime that cannot heartbeat.
+
+        Increments the per-reason refusal counter, logs the refusal at error
+        level, and returns the error the caller raises (``from exc``).
+
+        Args:
+            reason: Why the runtime cannot heartbeat
+            runtime_name: Name of the runtime being refused
+            detail: Human-readable failure detail behind the refusal
+            correlation_id: Correlation ID of the refused startup attempt
+
+        Returns:
+            The typed refusal error carrying the counted refusal
+        """
+        count = self._refusal_counts.get(reason, 0) + 1
+        self._refusal_counts[reason] = count
+        refusal = ModelRuntimeHeartbeatRefusal(
+            runtime_name=runtime_name,
+            reason=reason,
+            detail=detail,
+            correlation_id=correlation_id,
+            count=count,
+        )
+        logger.error(
+            "Runtime heartbeat is mandatory: refusing to start",
+            extra={"refusal": refusal.model_dump(mode="json")},
+        )
+        return RuntimeHeartbeatRequiredError(
+            f"Runtime heartbeat is mandatory: refusing to start runtime "
+            f"'{runtime_name}' ({reason.value}): {detail}",
+            refusal=refusal,
+        )
+
+    def build_required_service(
+        self,
+        *,
+        runtime_name: str,
+        correlation_id: UUID,
+        build: Callable[[], ProtocolNodeIntrospection],
+    ) -> ProtocolNodeIntrospection:
+        """Build the introspection service, refusing to start without one.
+
+        Args:
+            runtime_name: Name of the runtime the service is built for
+            correlation_id: Correlation ID of the startup attempt
+            build: Zero-argument callable that builds the service
+
+        Returns:
+            The built introspection service
+
+        Raises:
+            RuntimeHeartbeatRequiredError: The runtime name is empty, or the
+                service could not be built
+        """
+        if not runtime_name.strip():
+            raise self.refusal_error(
+                reason=EnumRuntimeHeartbeatRefusalReason.RUNTIME_NAME_EMPTY,
+                runtime_name=runtime_name,
+                detail="runtime_name is empty or whitespace",
+                correlation_id=correlation_id,
+            )
+        try:
+            return build()
+        except Exception as exc:
+            raise self.refusal_error(
+                reason=(
+                    EnumRuntimeHeartbeatRefusalReason.INTROSPECTION_SERVICE_UNBUILDABLE
+                ),
+                runtime_name=runtime_name,
+                detail=f"{type(exc).__name__}: {exc}",
+                correlation_id=correlation_id,
+            ) from exc
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -140,6 +278,12 @@ class HandlerRuntimeIntrospectionStartup:
             )
             return not_published
 
+        # OMN-24496: The heartbeat is mandatory. It starts right after the
+        # runtime's own presence is published and BEFORE any announced node is
+        # published, outside the try above so a refusal propagates: no node is
+        # announced for a runtime whose heartbeat cannot start.
+        await self.start_heartbeat(correlation_id, service=service, config=config)
+
         # Runtime presence has succeeded. Optional announced-node publishing
         # must not erase its throttle timestamp or suppress its heartbeat.
         if request.announcements and event_bus is not None:
@@ -164,20 +308,25 @@ class HandlerRuntimeIntrospectionStartup:
         service: ProtocolNodeIntrospection | None,
         config: ModelRuntimeIntrospectionConfig,
     ) -> None:
-        """Start the heartbeat task for periodic liveness announcements."""
+        """Start the heartbeat task for periodic liveness announcements.
+
+        The heartbeat is mandatory for kernel runtimes (OMN-24496): a failure
+        to start it refuses the runtime's startup. Service ``None`` or
+        introspection disabled by config returns silently — those are not
+        kernel runtimes.
+        """
         if service is None or not config.enabled:
             return
-        # Separate try block: heartbeat failure shouldn't affect throttle tracking
         try:
             await service.start_heartbeat_task()
-        except Exception as e:
-            logger.exception(
-                "Failed to start heartbeat task",
-                extra={
-                    "error": str(e),
-                    "correlation_id": str(correlation_id),
-                },
-            )
+        except Exception as exc:
+            name = getattr(service, "_introspection_node_name", None)
+            raise self.refusal_error(
+                reason=EnumRuntimeHeartbeatRefusalReason.HEARTBEAT_START_FAILED,
+                runtime_name=name if isinstance(name, str) and name else "unknown",
+                detail=f"{type(exc).__name__}: {exc}",
+                correlation_id=correlation_id,
+            ) from exc
 
     async def _publish_announced(
         self,
@@ -224,4 +373,4 @@ class HandlerRuntimeIntrospectionStartup:
             )
 
 
-__all__ = ["HandlerRuntimeIntrospectionStartup"]
+__all__ = ["HandlerRuntimeIntrospectionStartup", "RuntimeHeartbeatRequiredError"]
