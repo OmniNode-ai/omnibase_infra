@@ -50,11 +50,11 @@ dod_evidence:
     binds_ac: [AC2]
   - id: dod-omn24429-ac1-deploy-probe
     description: >-
-      Deploy probe. The layer file at the checked-out commit carries both advertised arguments as required variables and no address, which is what a host applying it reads. The command counts the two required-variable references in the file and fails when either is missing.
+      Deploy probe. The layer file GitHub serves at the checked-out commit carries both advertised arguments as required variables, which is what a host applying it reads. The probe reads the file from GitHub at that commit, counts the two required-variable references and exits nonzero on a tree without them, so it fails at the merge base where the file does not exist.
     source: manual
     checks:
       - check_type: command
-        check_value: "test \"$(grep -cE '^      - \\$\\{STABILITY_TEST_REDPANDA_ADVERTISED_(KAFKA|PANDAPROXY)_ADDR:\\?' docker/docker-compose.stability-host-broker.yml)\" = 2"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.stability-host-broker.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cE '^      - \\$\\{STABILITY_TEST_REDPANDA_ADVERTISED_(KAFKA|PANDAPROXY)_ADDR:\\?' | grep -qx 2"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn24429-ac3-hosted-stand-in
