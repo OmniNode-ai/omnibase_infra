@@ -47,3 +47,20 @@ dod_evidence:
       - check_type: command
         check_value: uv run pytest tests/unit/infra/test_node_inventory_build_wiring_omn18708.py -q -p no:randomly --no-cov
         cwd: .
+  - id: dod-omn24463-ac1-deploy-probe
+    description: 'AC1: a live read of the pushed branch shows the runtime Dockerfile takes the node inventory from the named build context file and no longer declares the NODE_INVENTORY build argument'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: "sh -c 'gh api -H \"Accept: application/vnd.github.raw\" \"repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=omn-19998-deploy-stamp-by-file\" | grep -q \"FROM scratch AS node_inventory\" && ! gh api -H \"Accept: application/vnd.github.raw\" \"repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=omn-19998-deploy-stamp-by-file\" | grep -q \"^ARG NODE_INVENTORY\"'"
+        cwd: .
+  - id: dod-omn24463-integration-proof
+    description: the stamping tests run on a lab host at the pushed head; a full runtime image build on the dev lane needs a rebuild of the dev lane, which this change does not do
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-24463 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/scripts/test_stamp_node_inventory_by_file_omn19998.py -q -n 0 --no-cov
+        cwd: .
