@@ -140,6 +140,10 @@ x-runner-base: &runner-base
     # so uv hardlinks wheel contents into a venv instead of copying them. See the header.
     UV_CACHE_DIR: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/.uv-cache
     TMPDIR: ${RUNNER_USER_HOME:-/home/runner}/tmp
+    # OMN-24299: the runner reads this cache first and downloads an action
+    # archive from GitHub only when it is absent here. Every service mounts
+    # this host's cache directory at that path read-only (OMN-24299).
+    ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE: /opt/onex-action-archives
     # OMN-19998: the image's baked Actions tool cache (CPython preloaded), on a named volume per runner
     # so it is filled from the image on first start and survives a recreate. Same path as the Dockerfile's OMNI_TOOLCACHE_DIR.
     AGENT_TOOLSDIRECTORY: /opt/hostedtoolcache
@@ -149,6 +153,11 @@ x-runner-base: &runner-base
     - *runner-disk-admission-pause
     - *runner-lab-credentials
     - *lab-host-table
+    # OMN-24299: pre-fetched action archives, filled by deploy-runners.sh on
+    # the deploy host and read from /var/lib/onex/action-archives here. The
+    # mount is read-only and nothing on this host writes to it: the job
+    # directories above stay in memory, per the operator ruling in the header.
+    - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
   group_add:
     - "988" # h053 docker group GID (getent group docker on the host, read 2026-11-02)
   healthcheck:
@@ -177,6 +186,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
       - hp053-ci-runner-1-toolcache:/opt/hostedtoolcache
@@ -194,6 +204,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
       - hp053-ci-runner-2-toolcache:/opt/hostedtoolcache
@@ -211,6 +222,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
       - hp053-ci-runner-3-toolcache:/opt/hostedtoolcache
@@ -228,6 +240,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
       - hp053-ci-runner-4-toolcache:/opt/hostedtoolcache
@@ -245,6 +258,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-5-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
       - hp053-ci-runner-5-toolcache:/opt/hostedtoolcache
