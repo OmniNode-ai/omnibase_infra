@@ -187,7 +187,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_work_ledger_latest_bridge_retired_omn17292.py -q -n 0"
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn-17292-integration-proof-skill-executions-retired
+  - id: dod-omn-17292-integration-proof-skill-exec-retired
     description: The pin advance makes the skill_executions supplemental declaration redundant, so it is absent from the declaration tuple while the vendored migrations and the tenant_projection_writer grant survive in every shipped instance.
     source: manual
     execution_scope: local_done_gate

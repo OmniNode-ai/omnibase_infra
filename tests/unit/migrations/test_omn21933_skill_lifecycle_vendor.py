@@ -87,27 +87,6 @@ def test_vendored_migrations_are_byte_identical_to_the_node_copies(
     assert digest == _NODE_COPY_DIGESTS[filename]
 
 
-def test_supplemental_declaration_derives_the_writer_privileges() -> None:
-    declarations = tuple(
-        declaration
-        for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if declaration.table.name == _TABLE
-    )
-    assert len(declarations) == 1
-    for instance in sorted(path.stem for path in _INSTANCES.glob("*.yaml")):
-        derived = derive_table_grants(load_topology_profile(instance), declarations)
-        assert not derived.unmappable
-        assert set(derived.grants) == {"tenant_projection_writer"}
-        (grant,) = derived.grants["tenant_projection_writer"]
-        assert grant.schema == "public"
-        assert grant.objects == (_TABLE,)
-        assert {privilege.value for privilege in grant.privileges} == {
-            "SELECT",
-            "INSERT",
-            "UPDATE",
-        }
-
-
 @pytest.mark.parametrize("instance", sorted(p.stem for p in _INSTANCES.glob("*.yaml")))
 def test_every_topology_instance_grants_the_writer_the_table(instance: str) -> None:
     assert _TABLE in _writer_tables(_INSTANCES / f"{instance}.yaml")
