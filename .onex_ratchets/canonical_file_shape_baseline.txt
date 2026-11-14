@@ -227,7 +227,6 @@ scripts/delete_orphan_branch.py
 scripts/demo-loop-assert.sh
 scripts/demo_registry_contracts.py
 scripts/demo_runtime_verification.py
-scripts/deploy-agent/deploy-agent-trigger.sh
 scripts/deploy-agent/deploy/deploy-agent-launch.sh
 scripts/deploy-agent/deploy/launchd/deploy-agent-launchd.sh
 scripts/deploy-agent/deploy/launchd/render-deploy-agent-plist.sh
@@ -266,7 +265,6 @@ scripts/deploy-agent/deploy_agent/recreate_supervisor.py
 scripts/deploy-agent/deploy_agent/ref_fence.py
 scripts/deploy-agent/deploy_agent/routing.py
 scripts/deploy-agent/deploy_agent/tracking_ref.py
-scripts/deploy-agent/deploy_agent/trigger.py
 scripts/deploy-agent/deploy_agent/unit_drift.py
 scripts/deploy-build-loop-trigger.sh
 scripts/deploy-gateway.sh

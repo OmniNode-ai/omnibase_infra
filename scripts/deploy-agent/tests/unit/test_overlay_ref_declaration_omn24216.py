@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 from deploy_agent import executor as executor_mod
+from deploy_agent.auth import sign_envelope
 from deploy_agent.events import (
     BuildSource,
     EnumRuntimeLane,
@@ -28,7 +29,6 @@ from deploy_agent.events import (
     Scope,
 )
 from deploy_agent.executor import load_dev_boot_guard
-from deploy_agent.trigger import build_rebuild_command, command_to_signed_envelope
 from pydantic import ValidationError
 
 from tests.unit.test_auto_rollback import _agent
@@ -187,23 +187,23 @@ def test_error_a_revision_the_host_copy_lacks_ends_the_job_before_any_build(
 def test_seam_the_signers_command_reaches_the_jobs_store_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overlays_clone: str
 ) -> None:
-    """Trigger flag -> signed envelope -> command model -> agent render, on the wire form.
+    """Signer envelope -> command model -> agent render, on the wire form.
 
-    Fails when either end renames the field: the signer's ``overlay_ref`` keyword, the
-    model's field, or the job's read of it.
+    The envelope below is the wire shape ``node_branch_deploy_command_effect`` (omnimarket)
+    builds and signs: the same keys, the same ``overlay_ref`` name. Fails when either end
+    renames the field: the node's envelope key, the model's field, or the job's read of it.
     """
-    built = build_rebuild_command(
-        git_ref="a" * 40,
-        runtime_lane=EnumRuntimeLane.DEV,
-        scope=Scope.RUNTIME,
-        build_source=BuildSource.WORKSPACE,
-        requested_by="test/omn24216",
-        correlation_id=uuid4(),
-        services=[],
-        rollback=ROLLBACK,
-        overlay_ref=overlays_clone,
-    )
-    envelope = command_to_signed_envelope(built, "0" * 64)
+    built = {
+        "correlation_id": str(uuid4()),
+        "requested_by": "test/omn24216",
+        "scope": Scope.RUNTIME.value,
+        "runtime_lane": EnumRuntimeLane.DEV.value,
+        "build_source": BuildSource.WORKSPACE.value,
+        "git_ref": "a" * 40,
+        "rollback": {"actor": ROLLBACK.actor, "reason": ROLLBACK.reason},
+        "overlay_ref": overlays_clone,
+    }
+    envelope = sign_envelope(built, "0" * 64)
     wire = json.loads(json.dumps(envelope, separators=(",", ":")))
     cmd = ModelRebuildRequested.model_validate(
         {k: v for k, v in wire.items() if k != "_signature"}
