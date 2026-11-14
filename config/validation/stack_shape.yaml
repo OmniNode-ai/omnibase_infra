@@ -220,6 +220,13 @@ allowed_commands:
   - match: exact
     field: command
     services:
+      - redpanda
+    reason: The stability lane's host broker layer (OMN-19998) repeats the lane's redpanda command with the two advertised addresses read from the host's environment; a test pins it to the lane's own command.
+    argv_sha256: 53dfd3f852faa4c96da62868eb19ed77d176326e735e44d40929cac59191489a
+    command_hint: redpanda start
+  - match: exact
+    field: command
+    services:
       - redpanda-partition-cap
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
     argv_sha256: d43f3695f4086aa2e376f977945f7fc983373d3d2ad7b8c66133298951ee85b8
