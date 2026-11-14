@@ -3,10 +3,9 @@ ticket_id: OMN-24509
 title: "The second-host stability broker layer is applied by the refresh and its addresses are stored"
 summary: >-
   The stability lane's compose file list applies the per-host advertised broker layer after the lane's own overlay whenever a host supplies its advertised address, so a client that bootstraps on a second host is handed that host's address. The host's two addresses are stored in the overlays repository for the stability refresh node; a host that supplies none keeps the lane's file list unchanged.
-is_seam_ticket: true
+is_seam_ticket: false
 interface_change: false
-interfaces_touched:
-  - "overlay caps STABILITY_TEST_REDPANDA_ADVERTISED_KAFKA_ADDR and STABILITY_TEST_REDPANDA_ADVERTISED_PANDAPROXY_ADDR to compose_files.sh resolve_compose_file_args"
+interfaces_touched: []
 requirements:
   - id: req-omn24509-layer-applied
     statement: >-
