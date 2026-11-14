@@ -17,7 +17,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The committed table's dev-201 freeze and the existing lane flag tests.
-    command: pytest scripts/deploy-agent/tests/unit/test_dev_lane_freeze_omn24474.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -p no:cacheprovider
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_freeze_omn24474.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ""
@@ -31,8 +31,8 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: pytest scripts/deploy-agent/tests/unit/test_dev_lane_freeze_omn24474.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -p no:cacheprovider
-        cwd: ${OMNI_HOME}/omnibase_infra/scripts/deploy-agent
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_freeze_omn24474.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24474-ac2-integrated
     description: >-
       Deploy check the hosted runner can run: the committed table names the hold. The runtime read (the agent journal refusing a roll as frozen after it picked up this table, and the runtime container id unchanged) is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
