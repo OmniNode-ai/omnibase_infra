@@ -151,10 +151,10 @@ x-runner-base: &runner-base
     - *runner-lab-credentials
     - *lab-host-table
     # OMN-24299: pre-fetched action archives, filled by deploy-runners.sh on
-    # the deploy host and read from /data/scratch/action-archives here. The
+    # the deploy host and read from /var/lib/onex/action-archives here. The
     # mount is read-only and nothing on this host writes to it: the job
     # directories above stay in memory, per the operator ruling in the header.
-    - /data/scratch/action-archives:/opt/onex-action-archives:ro
+    - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
   group_add:
     - "988" # h053 docker group GID (getent group docker on the host, read 2026-11-02)
   healthcheck:
@@ -183,7 +183,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/action-archives:/opt/onex-action-archives:ro
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-1-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-2:
@@ -200,7 +200,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/action-archives:/opt/onex-action-archives:ro
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-2-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-3:
@@ -217,7 +217,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/action-archives:/opt/onex-action-archives:ro
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-3-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-4:
@@ -234,7 +234,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/action-archives:/opt/onex-action-archives:ro
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-4-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
   hp053-ci-runner-5:
@@ -251,7 +251,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
-      - /data/scratch/action-archives:/opt/onex-action-archives:ro
+      - /var/lib/onex/action-archives:/opt/onex-action-archives:ro
       - *runner-host-zoneinfo
       - hp053-ci-runner-5-creds:${RUNNER_USER_HOME:-/home/runner}/.runner-creds
 volumes:

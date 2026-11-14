@@ -232,7 +232,7 @@ hosts:
     classes: [action, action-multiarch]
     # OMN-24299 -- read-only mounted into this host's runner containers at
     # container_path above.
-    action_archive_host_root: /data/scratch/action-archives
+    action_archive_host_root: /var/lib/onex/action-archives
     # OMN-22123 -- the reserved merge-queue pool. A merge_group job of a private repository asks for the label
     # `omnibase-ci-mq`; the runners that carried it lived on another lab host that is in repair and the fleet declared none, so each job
     # waited 14 to 60 minutes. Four runners on h053, labelled `omnibase-ci-mq` alone (no `omnibase-ci`, no

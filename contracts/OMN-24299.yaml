@@ -59,7 +59,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_action_archive_cache_fill.py?ref=omn-19998-ci-actions-cache" --jq .content | base64 -d | grep -q 'class HandlerActionArchiveCacheFill'
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_action_archive_cache_fill.py?ref=omn-19998-ci-actions-cache" --jq .content | base64 -d | grep -c 'class HandlerActionArchiveCacheFill' >/dev/null
         cwd: .
     binds_ac:
       - AC2

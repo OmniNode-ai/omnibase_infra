@@ -112,7 +112,7 @@ def test_the_ci_hosts_declare_an_absolute_action_archive_host_root() -> None:
         for host in config.hosts
         if host.action_archive_host_root is not None
     )
-    assert roots == ["/data/scratch/action-archives"]
+    assert roots == ["/var/lib/onex/action-archives"]
     assert config.primary_host().action_archive_host_root is None
 
     with pytest.raises(ValidationError, match="should match pattern"):
