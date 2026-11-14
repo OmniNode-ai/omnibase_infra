@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import ClientSession
 
+from omnibase_infra.enums import EnumEventBusLostBrokerPolicy
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -29,7 +30,10 @@ def make_bus() -> EventBusRecovering:
     local_bus = EventBusInmemory(max_history=10)
     return EventBusRecovering(
         config=ModelKafkaEventBusConfig(bootstrap_servers="localhost:9092"),
-        recovery=ModelEventBusRecoveryConfig.from_contract(),
+        # This test exercises a runtime declared single-process.
+        recovery=ModelEventBusRecoveryConfig.from_contract().model_copy(
+            update={"lost_broker_policy": EnumEventBusLostBrokerPolicy.LOCAL_FALLBACK}
+        ),
         local_bus=local_bus,
         local_start=local_bus.start,
         local_close=local_bus.close,
