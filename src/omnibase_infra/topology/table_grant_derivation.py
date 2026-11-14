@@ -318,9 +318,9 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
     ),
-    # OMN-23055, OMN-23341, OMN-23858: vendored_table_bridges.yaml.
+    # OMN-23055, OMN-23341, OMN-23858, OMN-24323: vendored_table_bridges.yaml.
     *(
-        _vendored_read_write(f"{b['prefix']}{t}", b["node"], b["create"])
+        _vendored_read_write(f"{b['prefix']}{t}", b["node"], b["create"], **b["opts"])
         for b in yaml.safe_load(_BRIDGES.read_text(encoding="utf-8"))
         for t in b["tables"]
     ),

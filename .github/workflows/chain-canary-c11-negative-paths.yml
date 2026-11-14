@@ -113,6 +113,19 @@ on:
         description: 'Total seconds the lane resolution may wait for a dev-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
         required: false
         default: '2400'
+      check_delegation_legs:
+        description: 'Also grade the committed delegation legs (OMN-23177, scenario R9): envelope corpus, policy refusal, 503 control and canary.'
+        required: false
+        type: boolean
+        default: false
+      plant_canary_in_answer:
+        description: 'With check_delegation_legs: put the canary string in the observed answer, so the legs step must exit non-zero.'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  UV_VERSION: "0.8.3"
 
 concurrency:
   # Four reads and one refused POST: a second run racing this one changes
@@ -186,6 +199,51 @@ jobs:
           echo "probe exit status: ${status}"
           exit "${status}"
 
+      # OMN-23177 (scenario R9): the four delegation legs, graded by the
+      # node_c11_delegation_legs_effect node over the committed observation
+      # file. Dispatch only: the schedule never reaches it, so a leg that cannot
+      # pass turns no hourly run red, and the stdlib-only four-path probe above
+      # keeps its no-install property. This step grades a recorded file, not the
+      # lane; the live driver that records lane observations is a later change.
+      # plant_canary_in_answer proves the canary scan can fail, which is what
+      # gives its green any meaning.
+      - name: Install uv for the delegation legs
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.check_delegation_legs == 'true' }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies for the delegation legs
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.check_delegation_legs == 'true' }}
+        run: uv sync --frozen
+
+      - name: Grade the delegation legs over the committed observations
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.check_delegation_legs == 'true' }}
+        env:
+          PLANT_CANARY: ${{ github.event.inputs.plant_canary_in_answer }}
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: a non-zero grade is the verdict and must still write
+          # its record before the job ends.
+          uv run --frozen python -c "
+          import json, os
+          request = {
+              'config_path': 'config/c11_delegation_legs.yaml',
+              'replay_path': 'tests/fixtures/omn23177/legs_healthy.json',
+              'record_path': 'c11-delegation-legs.json',
+              'plant_canary_in_answer': os.environ.get('PLANT_CANARY') == 'true',
+          }
+          json.dump(request, open('c11-delegation-legs-input.json', 'w', encoding='utf-8'))
+          "
+          uv run --frozen onex node node_c11_delegation_legs_effect \
+            --input c11-delegation-legs-input.json --backend event_bus=inmemory \
+            --state-root .onex_state/c11-delegation-legs
+          status=$?
+          echo "legs exit status: ${status}"
+          exit "${status}"
+
       - name: Assert the C11 record is present and non-empty
         if: always()
         run: |
@@ -200,5 +258,22 @@ jobs:
         with:
           name: c11-negative-paths
           path: c11-negative-paths.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Assert the delegation-legs record is present and non-empty
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.check_delegation_legs == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact c11-delegation-legs \
+            --require c11-delegation-legs.json
+
+      - name: Upload the delegation-legs record
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.check_delegation_legs == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: c11-delegation-legs
+          path: c11-delegation-legs.json
           if-no-files-found: error
           retention-days: 30

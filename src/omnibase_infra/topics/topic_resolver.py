@@ -43,7 +43,6 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.errors.model_infra_error_context import (
@@ -279,6 +278,11 @@ class TopicResolver:
                 bus descriptors are configured, but no descriptor matches the
                 requested trust domain.
         """
+        # OMN-23562: imported here, not at module top. ``omnibase_core.validation``
+        # takes about 0.6 s to import and this module sits under the CLI's start
+        # (via the Kafka transport), which never resolves a topic to print help.
+        from omnibase_core.validation import validate_topic_suffix
+
         result = validate_topic_suffix(topic_suffix)
         if not result.is_valid:
             # Always build structured infra context with a correlation_id.

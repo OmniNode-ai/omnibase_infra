@@ -1,0 +1,61 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23841
+title: The core release cut stops writing the project version line
+summary: >-
+  omnibase_core takes its version from git, so its pyproject.toml carries dynamic = ["version"] and no static version line. The release train read [project].version for the current number, so it refused such a repo every night with version_unreadable. For a manifest that declares its version dynamic, collect_repo_facts now records version_from_git, decide computes the candidate as the next patch of the newest release tag (refusing when there is no tag), and needs_bump stays false, so the cut job's bump step never runs and the release pull request carries only the release notes block. A manifest with a static version keeps the old comparison and bump. AC1 is proven by tests/scripts/test_release_train_version_from_git_omn23841.py. AC2 and AC3 are integration criteria that read the next core release; the checks below read the core release as it stands, and the AC3 integrated proof is the next nightly cut after omnibase_core makes its version dynamic.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23841-core-cut-no-version-line
+    statement: The core release cut computes its version from the newest release tag and writes no version line to the core project file.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the release cut node computes the next core version from the newest release tag and writes no version line to the core project file -- falsifier: a release cut test against a core tree with no static version still writes or requires one"
+      - id: AC2
+        statement: "AC2: the release cut pull request for core is classified as a release cut by the receipt gate and tagged at merge -- falsifier: the cut pull request is refused or the tag step finds no version"
+      - id: AC3
+        statement: "AC3: integrated: the next nightly core release is cut, tagged and published with the version named in its notes, read from the published package -- falsifier: the published version differs from the notes heading"
+evidence_requirements:
+  - kind: tests
+    description: The version-from-git tests and the neighbouring release train suites pass.
+    command: uv run pytest tests/scripts/test_release_train_version_from_git_omn23841.py tests/scripts/test_release_train_nightly.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23841-ac1-no-version-line
+    description: >-
+      A core tree whose pyproject.toml declares dynamic = ["version"] and has a tag at v0.47.61 is cut as 0.47.62 with needs_bump false, a tree with no tag is refused, bump-version refuses and leaves the manifest byte-identical, and a static-version tree still bumps. At the merge base the dynamic tree is refused as version_unreadable, so four of the seven tests fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_version_from_git_omn23841.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn23841-ac2-cut-pr-shape
+    description: >-
+      The cut job writes the release notes through node_release_notes_apply_effect, which puts a README-only repo's block in root README.md with its release-cut contract item and identity test, and it bumps the manifest only when the decision asks for it, which a dynamic-version tree never does. The tag step on the merged cut pull request lives in omnibase_core and is read there once core makes its version dynamic.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/scripts/test_release_train_version_from_git_omn23841.py -q -n 0 -k "readme or cut_job_bumps or dynamic_version_tree_cuts"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn23841-ac3-published-matches-notes
+    description: >-
+      The newest omnibase-core version PyPI serves has a release heading with that version in the README that package publishes (info.description). This reads only public PyPI, so the hosted runner can run it, and it fails when the published version differs from the notes heading. It holds today for the static-version releases and is the check the next nightly cut after core's version becomes dynamic must keep passing. A second check runs the test that the cut candidate follows the newest release tag, the version the notes heading names, which fails at the merge base where a dynamic tree is refused.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run python -c "import json, urllib.request; info = json.load(urllib.request.urlopen('https://pypi.org/pypi/omnibase-core/json'))['info']; version = info['version']; assert f'## v{version} (' in info['description'], version"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_version_from_git_omn23841.py -q -n 0 -k "candidate_follows_the_newest_tag"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

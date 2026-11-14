@@ -478,7 +478,7 @@ def build_router_from_env(deploy_source_dir: str) -> DeployRouter:
 # * idle converge (OMN-19509) does not start (verdict ``frozen``).
 #
 # A promotion is a command published with ``--requested-by promotion/<who>``
-# through the existing trigger CLI (``python -m deploy_agent.trigger``); it runs
+# through ``node_branch_deploy_command_effect`` (omnimarket); it runs
 # as any other job. The freeze expires by itself at ``until``: no flag outlives
 # its declared window, so a forgotten freeze cannot silently pin a lane forever.
 #
