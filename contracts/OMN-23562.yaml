@@ -54,5 +54,5 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/unit/cli/test_cli_startup_lazy_topics_omn23562.py tests/unit/cli/test_cli_delegate_import_cost.py -q'
+        check_value: 'uv run pytest tests/unit/cli/test_cli_startup_lazy_topics_omn23562.py tests/unit/cli/test_cli_delegate_import_cost.py tests/integration/cli/test_topic_constants_runpy_omn23562.py -q'
         cwd: ${OMNI_HOME}/omnibase_infra
