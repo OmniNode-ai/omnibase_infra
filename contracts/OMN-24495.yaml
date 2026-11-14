@@ -6,7 +6,7 @@ summary: >-
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:
-  - models
+  - public_api
 requirements:
   - id: req-omn24495-runtime-entity-id-column
     statement: The registration projection has a nullable runtime_entity_id column that every column listing agrees on and no old row is disturbed.
