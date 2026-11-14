@@ -16,6 +16,7 @@ from deploy_agent.accept_backlog import (
     EnumAcceptBacklogStatus,
     ModelAcceptBacklogVerdict,
 )
+from deploy_agent.auth import loaded_key_check_value
 from deploy_agent.job_state import JobState, JobStore
 from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
@@ -210,6 +211,10 @@ async def _health_handler(request: web.Request) -> web.Response:
             # real finding (the process never reached its startup step), not a
             # formatting quirk, so it is reported rather than defaulted.
             "loaded_code_sha": loaded_code_sha_if_recorded(),
+            # OMN-24397. A one-way check value of the agent's signing key, so a
+            # sender can compare its own key before publishing; null when the
+            # agent has no key. The key itself is never exposed.
+            "hmac_key_check": loaded_key_check_value(),
             "uptime_seconds": int(time.monotonic() - _start_time),
             "active_job": active_job,
             "last_result": last_result,

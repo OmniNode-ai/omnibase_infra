@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24397
+title: "The dev deploy agent health page carries a check value of its signing key"
+summary: "The deploy agent's /health payload carries hmac_key_check, the first 16 hex characters of an HMAC-SHA256 of the label deploy-agent-key-check-v1 under the agent's signing key, or null when the agent has no key. A sender compares it with its own key's check value before it publishes, because the agent throws away a command signed with another key without a job and without a word to the sender (2026-11-14). The key never appears in the payload. The golden vector (key fixture-key, value 6dce9bc99db04417) is pinned here and in omnimarket's node_branch_deploy_command_effect tests (OMN-24396)."
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn24397-health-key-check
+    statement: "The agent's health payload carries a one-way check value of its signing key, equal to the golden value for the vector key, null without a key, and never the key itself."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the agent health payload carries hmac_key_check equal to the golden check value for the key in its environment, and null when no key is set -- falsifier: pytest scripts/deploy-agent/tests/unit/test_health_key_check.py -q"
+      - id: AC2
+        statement: "AC2: the key itself and any prefix of it never appear in the health payload -- falsifier: pytest scripts/deploy-agent/tests/unit/test_health_key_check.py -k never_exposes -q"
+      - id: AC3
+        statement: "AC3: the golden vector in the agent test equals the vector the signing node's test holds, so a change on either side fails a test -- falsifier: pytest scripts/deploy-agent/tests/unit/test_auth_key_check.py -q"
+      - id: AC4
+        statement: "AC4: integrated: the dev agent on h201, after it loads this change, serves hmac_key_check on its health route, read with curl against port 8098 -- falsifier: curl the dev agent health route and read hmac_key_check as a 16 character hex string"
+evidence_requirements:
+  - kind: tests
+    description: "The key check value and health payload tests pass at the head; they fail at the merge base (import error on key_check_value)."
+    command: "uv run --frozen --extra dev --directory scripts/deploy-agent pytest tests/unit/test_auth_key_check.py tests/unit/test_health_key_check.py tests/unit/test_auth_hmac.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24397-health-payload
+    description: "The health payload carries the golden check value for the vector key, null without a key, and never the key or a prefix of it. Red at the merge base (import error on the new names)."
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen --extra dev --directory scripts/deploy-agent pytest tests/unit/test_health_key_check.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24397-golden-vector
+    description: "The check value function reproduces the golden vector that omnimarket's agent_wire.json pins, depends on the label, and the loaded value follows the environment."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen --extra dev --directory scripts/deploy-agent pytest tests/unit/test_auth_key_check.py tests/unit/test_auth_hmac.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24397-running-agent-health
+    description: "Lab observation, not graded by hosted CI: after the agent loads the change, its health route carries a 16 character hex hmac_key_check. The URL is read from the environment of the host that runs the gate."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: "test -n \"$DEPLOY_AGENT_HEALTH_URL\" && curl -fsS \"$DEPLOY_AGENT_HEALTH_URL\" | python3 -c 'import json,re,sys; v=json.load(sys.stdin)[\"hmac_key_check\"]; assert re.fullmatch(r\"[0-9a-f]{16}\", v or \"\")'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24397-integration-proof
+    description: "The key check tests run on a lab host at the pushed head; hosted CI cannot reach the lab, so only the local Done gate runs this unbound check."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-24397 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev --directory scripts/deploy-agent pytest tests/unit/test_auth_key_check.py tests/unit/test_health_key_check.py -q --no-cov"
+        cwd: ${OMNI_HOME}/omnibase_infra

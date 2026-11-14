@@ -17,6 +17,8 @@ _ENV_KEY = "DEPLOY_AGENT_HMAC_SECRET"
 
 SIGNATURE_FIELD = "_signature"
 
+KEY_CHECK_LABEL: bytes = b"deploy-agent-key-check-v1"
+
 
 def canonical_signing_body(envelope: dict[str, Any]) -> bytes:
     """Return the exact bytes the signature is computed over.
@@ -40,6 +42,28 @@ def compute_signature(envelope: dict[str, Any], secret: str) -> str:
     return hmac.new(
         secret.encode(), canonical_signing_body(envelope), hashlib.sha256
     ).hexdigest()
+
+
+def key_check_value(secret: str) -> str:
+    """Return the 16-char lowercase hex one-way check value for ``secret``.
+
+    A sender can compute this from its own key and compare it against the
+    agent's ``/health`` ``hmac_key_check`` before publishing, without ever
+    learning the key itself.
+    """
+    return hmac.new(secret.encode(), KEY_CHECK_LABEL, hashlib.sha256).hexdigest()[:16]
+
+
+def loaded_key_check_value() -> str | None:
+    """Return the check value of the configured key, or None when unset.
+
+    Reads the environment variable named by ``_ENV_KEY`` exactly as
+    ``verify_command`` does (no strip); None only when it is the empty string.
+    """
+    secret = os.environ.get(_ENV_KEY, "")
+    if not secret:
+        return None
+    return key_check_value(secret)
 
 
 def sign_envelope(envelope: dict[str, Any], secret: str) -> dict[str, Any]:
