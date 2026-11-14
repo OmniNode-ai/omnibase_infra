@@ -12,11 +12,9 @@ import pytest
 
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.event_bus.event_bus_kafka import (
-    EventBusKafka,
-    EventBusRecovering,
-)
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.handlers.event_bus_recovering import EventBusRecovering
 from omnibase_infra.models.model_event_bus_recovery_config import (
     ModelEventBusRecoveryConfig,
 )
