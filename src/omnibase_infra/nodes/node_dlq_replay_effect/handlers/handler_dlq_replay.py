@@ -27,8 +27,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import OrderedDict
-from collections.abc import Mapping, Sequence
+from collections import OrderedDict, deque
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -65,6 +65,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_result 
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_result import (
     ModelDlqReplayRunResult,
+)
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_target_replay_bound import (
+    ModelDlqTargetReplayBound,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_gateway_quarantined_dlq_record import (
     ModelGatewayQuarantinedDlqRecord,
@@ -111,7 +114,14 @@ class DlqConsumerDrainState:
     can arrive in different runs.
     """
 
-    __slots__ = ("failed_attempts", "halted", "lock", "replayed_sources")
+    __slots__ = (
+        "clock",
+        "failed_attempts",
+        "halted",
+        "lock",
+        "replayed_sources",
+        "target_replays",
+    )
 
     def __init__(self) -> None:
         self.lock = asyncio.Lock()
@@ -124,6 +134,30 @@ class DlqConsumerDrainState:
         self.replayed_sources: OrderedDict[
             tuple[tuple[str, int, str], str | None], None
         ] = OrderedDict()
+        # OMN-24177: (original topic, target group) -> the times of its recent
+        # replays, oldest first. ``clock`` is a plain attribute so a test can
+        # move time.
+        self.target_replays: dict[tuple[str, str | None], deque[float]] = {}
+        self.clock: Callable[[], float] = time.monotonic
+
+    def admit_replay(
+        self, topic: str, group: str | None, bound: ModelDlqTargetReplayBound
+    ) -> bool:
+        """Count one replay of ``topic`` to ``group``; False when the bound is spent.
+
+        OMN-24177: at most ``bound.max_replays`` replays per (topic, group) in
+        any window of ``bound.window_seconds``. A node that fails every message
+        on a topic keeps producing fresh dead letters, each with a replay count
+        of zero, so the per-record cap never trips; this bounds the pair.
+        """
+        now = self.clock()
+        recent = self.target_replays.setdefault((topic, group), deque())
+        while recent and now - recent[0] >= bound.window_seconds:
+            recent.popleft()
+        if len(recent) >= bound.max_replays:
+            return False
+        recent.append(now)
+        return True
 
     def already_replayed(
         self, source: tuple[str, int, str], group: str | None = None
@@ -1147,6 +1181,26 @@ class HandlerDlqReplay:
                 status=EnumReplayStatus.PENDING,
                 message="DRY RUN - would replay",
                 replay_correlation_id=replay_correlation_id,
+            )
+
+        bound = config.target_replay_bound
+        if bound is not None and not state.admit_replay(
+            message.original_topic, message.consumer_group, bound
+        ):
+            logger.error(
+                "REPLAY BOUND topic=%s group=%s: more than %d replays in "
+                "%.0f s, quarantining (OMN-24177)",
+                message.original_topic,
+                message.consumer_group,
+                bound.max_replays,
+                bound.window_seconds,
+            )
+            return await self._quarantine(
+                message,
+                f"Replay bound: more than {bound.max_replays} replays of "
+                f"{message.original_topic} to group {message.consumer_group} "
+                f"in {bound.window_seconds:g} s; a subscriber that fails every "
+                "record is not retried without end (OMN-24177)",
             )
 
         try:

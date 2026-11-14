@@ -45,6 +45,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_t
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
     ModelDlqMessage,
 )
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_target_replay_bound import (
+    ModelDlqTargetReplayBound,
+)
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_gateway_quarantined_dlq_record import (
     ModelGatewayQuarantinedDlqRecord,
 )
@@ -52,6 +55,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_re
     DlqDrainRecord,
     DlqRecordUnparseableError,
     ModelUnparseableDlqRecord,
+)
+from omnibase_infra.nodes.node_dlq_replay_effect.replay_policy import (
+    load_replay_policy,
 )
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils.util_datetime import is_timezone_aware
@@ -211,6 +217,20 @@ class ModelDlqReplayEngineConfig(BaseModel):
     # that does not answer inside it is treated as "unknown" and the run
     # drains exactly as it did before this field existed.
     backlog_probe_timeout_seconds: float = Field(default=3.0, gt=0.0)
+    # OMN-24177: a record whose original topic is a broadcast topic is never
+    # replayed -- a replay returns to the shared topic, where every consumer
+    # group reads and skips it, and the next tick supersedes it. And every
+    # other replay carries a per-target bound: at most max_replays replays
+    # per (original topic, target consumer group) in any window of
+    # window_seconds, the next record for that pair quarantined instead. Both
+    # values default from the node's contract.yaml replay_policy block
+    # (replay_policy.load_replay_policy, fail closed), never from code.
+    broadcast_topics: tuple[str, ...] = Field(
+        default_factory=lambda: load_replay_policy().broadcast_topics
+    )
+    target_replay_bound: ModelDlqTargetReplayBound | None = Field(
+        default_factory=lambda: load_replay_policy().target_replay_bound
+    )
 
     @field_validator("bootstrap_servers")
     @classmethod
@@ -426,6 +446,16 @@ def should_replay(
             "replaying it would write the record back onto the sink it was "
             "consumed from — the loop that ran at 34 records/s on the .201 dev "
             "lane after the first three fixed points were closed (OMN-18084)",
+        )
+
+    if message.original_topic in config.broadcast_topics:
+        return (
+            False,
+            f"Broadcast topic: {message.original_topic} is declared in the "
+            "replay policy as a topic every consumer group reads, so a replay "
+            "would re-send the record to all of them and the next one "
+            "supersedes it; the record is quarantined, not replayed "
+            "(OMN-24177)",
         )
 
     if _is_boundary_failure_terminal(message.original_value):
@@ -1100,6 +1130,7 @@ __all__ = [
     "DLQQuarantineProducer",
     "DlqGroupBacklogProbe",
     "ModelDlqReplayEngineConfig",
+    "ModelDlqTargetReplayBound",
     "generate_replay_correlation_id",
     "parse_datetime_with_timezone",
     "safe_truncate",

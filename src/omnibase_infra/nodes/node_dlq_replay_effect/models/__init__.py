@@ -20,6 +20,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_result 
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_result import (
     ModelDlqReplayRunResult,
 )
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_target_replay_bound import (
+    ModelDlqTargetReplayBound,
+)
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_gateway_quarantined_dlq_record import (
     ModelGatewayQuarantinedDlqRecord,
 )
@@ -31,5 +34,6 @@ __all__ = [
     "ModelDlqReplayCommand",
     "ModelDlqReplayResult",
     "ModelDlqReplayRunResult",
+    "ModelDlqTargetReplayBound",
     "ModelGatewayQuarantinedDlqRecord",
 ]
