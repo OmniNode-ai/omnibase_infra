@@ -31,41 +31,22 @@ Topic Constants:
     derive_dlq_topic_for_event_type: Derive DLQ topic from event_type domain prefix
 """
 
-from __future__ import annotations
+import importlib
+from typing import Any
 
-from omnibase_infra.event_bus.enum_topic_validation_status import (
-    EnumTopicValidationStatus,
-)
-
-# OMN-13419: EventBusInmemory is the thin infra adapter over the single
-# canonical core transport (omnibase_core.event_bus.event_bus_inmemory). The
-# infra runtime kernel re-exports it here so consumers get the infra-shaped
-# health_check / consumer-group surface; node packages import core directly.
-from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.event_bus.model_topic_validation_result import (
-    ModelTopicValidationResult,
-)
-from omnibase_infra.event_bus.models import (
-    ModelEventHeaders,
-    ModelEventMessage,
-)
-from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
-from omnibase_infra.event_bus.service_topic_startup_validator import (
-    TopicStartupValidator,
-)
-from omnibase_infra.event_bus.topic_constants import (
-    DLQ_CATEGORY_SUFFIXES,
-    DLQ_COMMAND_TOPIC_SUFFIX,
-    DLQ_DOMAIN,
-    DLQ_EVENT_TOPIC_SUFFIX,
-    DLQ_INTENT_TOPIC_SUFFIX,
-    DLQ_TOPIC_PATTERN,
-    DLQ_TOPIC_VERSION,
-    build_dlq_topic,
-    derive_dlq_topic_for_event_type,
-    get_dlq_topic_for_original,
-    is_dlq_topic,
-    parse_dlq_topic,
+# OMN-23562: exports resolve on first read, not at import. Importing any
+# submodule of this package runs this file, and an eager import of
+# ``service_topic_manager`` here loaded the generated topic enums (about 1.4 s)
+# for CLI commands that never touch a topic. Modules are tried in this order, so
+# the cheap ones answer first. Importers see these names as ``Any``.
+_EXPORT_MODULES: tuple[str, ...] = (
+    "omnibase_infra.event_bus.enum_topic_validation_status",
+    "omnibase_infra.event_bus.model_topic_validation_result",
+    "omnibase_infra.event_bus.topic_constants",
+    "omnibase_infra.event_bus.event_bus_inmemory",
+    "omnibase_infra.event_bus.models",
+    "omnibase_infra.event_bus.service_topic_startup_validator",
+    "omnibase_infra.event_bus.service_topic_manager",
 )
 
 __all__: list[str] = [
@@ -94,3 +75,18 @@ __all__: list[str] = [
     "is_dlq_topic",
     "parse_dlq_topic",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in __all__:
+        for module_name in _EXPORT_MODULES:
+            module = importlib.import_module(module_name)
+            if hasattr(module, name):
+                value = getattr(module, name)
+                globals()[name] = value
+                return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})

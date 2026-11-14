@@ -4576,7 +4576,7 @@ async def bootstrap() -> int:
             if config.boot_subscriptions.policy == "in_use" and isinstance(
                 event_bus, EventBusKafka
             ):
-                _demand_source = HandlerKafkaTopicDemandSource(event_bus.config)
+                _demand_source = HandlerKafkaTopicDemandSource(container)
             logger.info(
                 "Boot subscription policy=%s demand_start=%s (OMN-18087, "
                 "correlation_id=%s)",
