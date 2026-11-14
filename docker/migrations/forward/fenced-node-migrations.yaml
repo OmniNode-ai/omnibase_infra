@@ -938,6 +938,11 @@ fenced_node_migrations:
   # OMN-21933: 0002 enables FORCE ROW LEVEL SECURITY on skill_executions and
   # replaces the table's tenant policy. 0001 (the create) applies on every lane.
   # Release is a separate operator-sequenced step that needs an operator ruling.
-  # No lane release is added here.
+  # RELEASED ON THE COMPOSE DEV/LAB LANE (OMN-24341). The entry below stays exactly
+  # as written -- this id remains in the BASELINE. What changed is the compose
+  # runner's own dev arm (scripts/run-forward-migrations.sh
+  # LANE_RELEASED_NODE_MIGRATION_IDS), which un-gates this id on
+  # ONEX_MIGRATION_LANE=dev and on no other lane. Authority: the OPERATOR-CONSENT row of
+  # 2026-09-14T12:11:31Z (tenant row-level security on TENANT-class migrations, lab first).
   - id: "node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql"
     ticket: "OMN-21933"
