@@ -90,6 +90,7 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_topic_provisioner import (
         ProtocolTopicProvisioner,
     )
+    from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ class BootWiringDeferral:
     async def watch(
         self,
         *,
-        dispatch_engine: object,
+        dispatch_engine: ProtocolDispatchEngine,
         event_bus: object,
         environment: str,
         provisioner: ProtocolTopicProvisioner | None,
@@ -373,7 +374,7 @@ async def _report_attach(
 def make_deferred_contract_wirer(
     *,
     manifest: ModelAutoWiringManifest,
-    dispatch_engine: object,
+    dispatch_engine: ProtocolDispatchEngine,
     event_bus: object | None,
     environment: str,
     container: object | None,
@@ -541,7 +542,7 @@ async def plan_runtime_boot_wiring_deferral(
     container: ModelONEXContainer,
     priority_contracts: Collection[str],
     result_appliers_by_contract: Mapping[str, ProtocolDispatchResultApplier] | None,
-    dispatch_engine: object,
+    dispatch_engine: ProtocolDispatchEngine,
     environment: str,
     materialized_explicit_dependencies: dict[str, dict[str, object]] | None,
     topology: ModelDeploymentTopology | None,
