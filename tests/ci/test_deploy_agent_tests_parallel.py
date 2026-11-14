@@ -5,7 +5,7 @@
 The deploy-agent suite is 2300+ tests and took about 8.5 minutes serial against
 the job's 10 minute limit. On a loaded runner the job was cancelled at its
 limit and CI Summary failed on pull requests whose own changes were fine. The
-fix is not a longer limit: the job runs on parallel workers grouped by file, and
+fix is not a longer limit: the job runs on four parallel workers grouped by file, and
 its ``timeout-minutes`` stays what it was.
 """
 
@@ -35,7 +35,8 @@ def _suite_job() -> dict[str, Any]:
 def test_suite_step_runs_on_parallel_workers_grouped_by_file() -> None:
     steps = {step.get("name"): step for step in _suite_job()["steps"]}
     run = steps[SUITE_STEP]["run"]
-    assert "-n auto" in run, "the deploy-agent suite must run on parallel workers"
+    assert "-n 4" in run, "the deploy-agent suite must run on four parallel workers"
+    assert "-n auto" not in run, "a worker per core OOM-kills a many-core host"
     assert "--dist loadfile" in run, "tests of one file must share a worker"
 
 
