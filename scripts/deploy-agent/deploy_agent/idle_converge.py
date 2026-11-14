@@ -107,17 +107,14 @@ converge per head. And the lag is loud:
 :func:`dev_lane_drift` is the ``ModelDevLaneDrift`` the agent publishes and
 serves at ``GET /dev-lane-drift``. An instance with no bound is unchanged.
 
-THE STABILITY LANE FOLLOWS THE TAG DEV RUNS (OMN-19998)
-------------------------------------------------------
-A dev agent whose fence also admits the stability lane
-(``lane_policy.follows_stability``) keeps it on dev's tag. On the same idle
-tick that follows the newest omnimarket dev tag for the dev lane, once the
-dev lane runs that tag (or a commit that contains it) and the stability lane
-does not, the agent runs one stability-lane rebuild named
-:data:`STABILITY_FOLLOW_REQUESTER` (:func:`decide_stability_follow`,
-:func:`stability_follow_command`). Stability therefore builds only a tag dev
-already runs, and trails dev by at most the one tag in flight. One attempt per
-tag; the instance's freeze flag and load gate hold it like any converge.
+THE STABILITY LANE FOLLOWS THE TAG DEV RAN (OMN-19998, OMN-21485)
+-----------------------------------------------------------------
+A dev agent whose fence admits the stability lane
+(``lane_policy.follows_stability``) keeps it on a dev tag: once the dev lane's
+newest terminal deploy record is a success and dev runs a dev tag
+(:func:`select_dev_ran_tag`) the stability lane does not, one stability rebuild
+named :data:`STABILITY_FOLLOW_REQUESTER` stages exactly that tag (``sibling_tags``),
+never a pinned sha and never the newest tag unless dev ran it. One attempt per tag.
 
 THE LAB FOLLOWS omnimarket's DEV TAGS, NOT ITS RELEASES (OMN-19998)
 ------------------------------------------------------------------
@@ -879,6 +876,7 @@ class EnumStabilityFollowVerdict(StrEnum):
     FROZEN = "frozen"
     JOB_ACTIVE = "job_active"
     NO_TAG = "no_tag"
+    DEV_RECEIPT_NOT_PASSED = "dev_receipt_not_passed"
     DEV_BEHIND = "dev_behind"
     RUNNING_UNREADABLE = "running_unreadable"
     UP_TO_DATE = "up_to_date"
@@ -886,15 +884,18 @@ class EnumStabilityFollowVerdict(StrEnum):
 
 
 class ModelStabilityFollowInputs(BaseModel):
-    """Every read the stability follow rule takes, taken before it decides."""
-
+    # Every read the stability follow rule takes, taken before it decides.
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     tags: tuple[ModelDevTag, ...] | None
-    dev_running_ref: str | None
-    dev_contains_newest: bool = False
+    #: The sha of the newest dev tag the dev lane runs or contains
+    #: (:func:`select_dev_ran_tag`), ``None`` when it runs none.
+    dev_ran_tag_sha: str | None
+    #: The dev lane's newest terminal deploy record (the receipt the post-merge
+    #: lab guard reads): ``success`` or ``failed``; ``None`` when it is unread.
+    dev_receipt: str | None
     stability_running_ref: str | None
-    stability_contains_newest: bool = False
+    stability_contains_tag: bool = False
     job_active: bool
     frozen_reason: str | None = None
     attempted: frozenset[str] = frozenset()
@@ -904,85 +905,96 @@ class ModelStabilityFollowDecision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     verdict: EnumStabilityFollowVerdict
-    newest_tag: str | None = None
-    newest_tag_sha: str | None = None
+    followed_tag: str | None = None
+    followed_tag_sha: str | None = None
     detail: str
 
 
+# The newest dev tag the dev lane runs (its sha, or a running commit that
+# contains it; ``contains`` takes the ancestor sha, then the ref), walked newest
+# first. None when the dev ref is unread or names no tag.
+def select_dev_ran_tag(
+    tags: Iterable[ModelDevTag],
+    dev_running_ref: str | None,
+    contains: Callable[[str, str], bool],
+) -> ModelDevTag | None:
+    ran = (
+        tag
+        for tag in reversed(list(tags))
+        if dev_running_ref is not None
+        and (tag.sha == dev_running_ref or contains(tag.sha, dev_running_ref))
+    )
+    return next(ran, None)
+
+
+# THE RECEIPT RULE (OMN-21485): the stability lane takes a tag only when the dev
+# lane's own newest terminal deploy record -- the one the post-merge lab guard
+# reads -- is a success AND dev runs the tag. Never a pinned sha, never the newest
+# tag merely for being newest: dev may trail it, and the follow stages the tag dev
+# ran (``sibling_tags``). Also: tags read, stability runs something else, no job
+# in flight, not frozen, tag not yet attempted. An unread input refuses.
 def decide_stability_follow(
     inputs: ModelStabilityFollowInputs,
 ) -> ModelStabilityFollowDecision:
-    """Whether the stability lane rebuilds now onto the tag dev runs (OMN-19998).
-
-    FOLLOW only when the newest dev tag is read, the dev lane runs it (or a
-    commit containing it), the stability lane reads as running something else, no
-    job is in flight, the instance is not frozen, and this tag was not already
-    attempted. Every unread input refuses: an unread lane is never rebuilt on
-    a guess.
-    """
-    if inputs.frozen_reason:
-        return ModelStabilityFollowDecision(
-            verdict=EnumStabilityFollowVerdict.FROZEN, detail=inputs.frozen_reason
-        )
-    if inputs.job_active:
-        return ModelStabilityFollowDecision(
-            verdict=EnumStabilityFollowVerdict.JOB_ACTIVE, detail="a job is in flight"
-        )
-    if not inputs.tags:
-        return ModelStabilityFollowDecision(
-            verdict=EnumStabilityFollowVerdict.NO_TAG,
-            detail="no dev tag read on omnimarket's origin",
-        )
-    newest = inputs.tags[-1]
-    named = {"newest_tag": newest.name, "newest_tag_sha": newest.sha}
-    if not (inputs.dev_running_ref == newest.sha or inputs.dev_contains_newest):
-        return ModelStabilityFollowDecision(
-            verdict=EnumStabilityFollowVerdict.DEV_BEHIND,
-            detail=(
-                f"dev runs {(inputs.dev_running_ref or 'unread')[:12]}, not "
-                f"{newest.name}; stability takes a tag only once dev runs it"
-            ),
-            **named,
-        )
-    if inputs.stability_running_ref is None:
-        return ModelStabilityFollowDecision(
-            verdict=EnumStabilityFollowVerdict.RUNNING_UNREADABLE,
-            detail="the stability lane's running omnimarket revision is unread",
-            **named,
-        )
-    if inputs.stability_running_ref == newest.sha or inputs.stability_contains_newest:
-        return ModelStabilityFollowDecision(
-            verdict=EnumStabilityFollowVerdict.UP_TO_DATE,
-            detail=f"the stability lane runs {newest.name}",
-            **named,
-        )
-    if newest.sha in inputs.attempted:
-        return ModelStabilityFollowDecision(
-            verdict=EnumStabilityFollowVerdict.ALREADY_ATTEMPTED,
-            detail=f"{newest.name} was already attempted on the stability lane",
-            **named,
-        )
-    return ModelStabilityFollowDecision(
-        verdict=EnumStabilityFollowVerdict.FOLLOW,
-        detail=(
-            f"the stability lane runs {inputs.stability_running_ref[:12]}; dev runs "
-            f"{newest.name}"
+    verdict = EnumStabilityFollowVerdict
+    followed = next(
+        (tag for tag in inputs.tags or () if tag.sha == inputs.dev_ran_tag_sha), None
+    )
+    named = (
+        {"followed_tag": followed.name, "followed_tag_sha": followed.sha}
+        if followed
+        else {}
+    )
+    receipt = {"success": "", None: "unread"}.get(inputs.dev_receipt, "failed")
+    # The first refusal that holds wins, in the order a reader would check them.
+    verdict_detail = (
+        (inputs.frozen_reason, verdict.FROZEN, inputs.frozen_reason),
+        (inputs.job_active, verdict.JOB_ACTIVE, "a job is in flight"),
+        (not inputs.tags, verdict.NO_TAG, "no dev tag read on omnimarket's origin"),
+        (
+            receipt,
+            verdict.DEV_RECEIPT_NOT_PASSED,
+            f"the dev lane's newest terminal deploy record is {receipt}",
         ),
+        (followed is None, verdict.DEV_BEHIND, "dev runs no dev tag"),
+        (
+            inputs.stability_running_ref is None,
+            verdict.RUNNING_UNREADABLE,
+            "the stability lane's running omnimarket revision is unread",
+        ),
+        (
+            inputs.stability_contains_tag
+            or (followed and inputs.stability_running_ref == followed.sha),
+            verdict.UP_TO_DATE,
+            "the stability lane runs the tag",
+        ),
+        (
+            followed and followed.sha in inputs.attempted,
+            verdict.ALREADY_ATTEMPTED,
+            "the tag was already attempted on the stability lane",
+        ),
+    )
+    for holds, refusal, detail in verdict_detail:
+        if holds:
+            return ModelStabilityFollowDecision(
+                verdict=refusal, detail=str(detail), **named
+            )
+    return ModelStabilityFollowDecision(
+        verdict=verdict.FOLLOW,
+        detail="dev ran the tag and the stability lane runs another",
         **named,
     )
 
 
-def stability_follow_command() -> ModelRebuildRequested:
-    """The one rebuild a stability follow runs: the stability lane, workspace-built.
-
-    Workspace-sourced at the tracking ref, like a dev converge, so the build
-    stages omnimarket at its newest dev tag (``DEPLOY_FOLLOW_DEV_TAG_REPOS``,
-    set by the executor for every lab build).
-    """
+# The one rebuild a stability follow runs: the stability lane, workspace-built at
+# the tracking ref, staging ``tag`` for ``repository`` in place of its newest dev
+# tag (``sibling_tags`` -> ``DEPLOY_SIBLING_REFS``); other siblings stage newest.
+def stability_follow_command(tag: str, repository: str) -> ModelRebuildRequested:
     return ModelRebuildRequested(
         correlation_id=uuid4(),
         requested_by=STABILITY_FOLLOW_REQUESTER,
         scope=Scope.RUNTIME,
         runtime_lane=EnumRuntimeLane.STABILITY_TEST,
         build_source=BuildSource.WORKSPACE,
+        sibling_tags={repository: tag},
     )
